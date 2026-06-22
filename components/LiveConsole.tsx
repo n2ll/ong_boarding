@@ -1,8 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Bot, User, Send, AlertTriangle, Sparkles, MessageSquare, Plus, X, Loader2 } from "lucide-react";
+import { Search, Bot, User, Send, AlertTriangle, Sparkles, MessageSquare, Plus, X, Loader2, Wand2, Check } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
+import { getBrowserClient } from "@/lib/supabase";
+
+interface PendingDraft {
+  id: string;
+  draft_text: string | null;
+  reasoning: string | null;
+  status: string;
+  missing_info: string | null;
+}
 
 interface Applicant {
   id: number;
@@ -76,6 +85,9 @@ export function LiveConsole() {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
   const [newMsgModalOpen, setNewMsgModalOpen] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<PendingDraft | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const [draftBusy, setDraftBusy] = useState(false);
 
   const loadChats = useCallback(async () => {
     try {
@@ -112,9 +124,32 @@ export function LiveConsole() {
     }
   }, []);
 
+  const loadDraft = useCallback(async (id: number) => {
+    try {
+      const sb = getBrowserClient();
+      const { data } = await sb
+        .from("message_drafts")
+        .select("id, draft_text, reasoning, status, missing_info, created_at")
+        .eq("applicant_id", id)
+        .in("status", ["pending", "need_info"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const d = (data?.[0] as PendingDraft | undefined) ?? null;
+      setPendingDraft(d);
+      setDraftText(d?.draft_text ?? "");
+    } catch {
+      // RLS/네트워크 문제로 못 불러와도 화면은 유지 (초안 카드만 미표시)
+      setPendingDraft(null);
+      setDraftText("");
+    }
+  }, []);
+
   useEffect(() => {
-    if (selectedChatId != null) loadMessages(selectedChatId);
-  }, [selectedChatId, loadMessages]);
+    if (selectedChatId != null) {
+      loadMessages(selectedChatId);
+      loadDraft(selectedChatId);
+    }
+  }, [selectedChatId, loadMessages, loadDraft]);
 
   const activeChat = chats.find((c) => c.id === selectedChatId) ?? null;
   const isPaused = agentStage === "paused";
@@ -185,6 +220,72 @@ export function LiveConsole() {
     }
   };
 
+  const handleSendDraft = async () => {
+    if (!pendingDraft || !activeChat || draftBusy) return;
+    if (!activeChat.phone) {
+      toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
+      return;
+    }
+    const body = draftText.trim();
+    if (!body) {
+      toast.error("초안 내용이 비어 있어요. 직접 입력 후 발송해주세요.");
+      return;
+    }
+    setDraftBusy(true);
+    try {
+      const res = await fetch("/api/admin/messages/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicant_id: activeChat.id,
+          phone: activeChat.phone,
+          body,
+          sent_by: "관리자",
+          draft_id: pendingDraft.id,
+          draft_was_edited: body !== (pendingDraft.draft_text ?? ""),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "발송에 실패했어요");
+        return;
+      }
+      toast.success("AI 초안을 검수해 발송했어요.");
+      setPendingDraft(null);
+      setDraftText("");
+      await loadMessages(activeChat.id);
+      setAgentStage("paused");
+    } catch {
+      toast.error("발송에 실패했어요");
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
+  const handleIgnoreDraft = async () => {
+    if (!pendingDraft || draftBusy) return;
+    setDraftBusy(true);
+    try {
+      const res = await fetch(`/api/admin/drafts/${pendingDraft.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "ignored" }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || "처리에 실패했어요");
+        return;
+      }
+      toast.info("AI 초안을 무시했어요.");
+      setPendingDraft(null);
+      setDraftText("");
+    } catch {
+      toast.error("처리에 실패했어요");
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
   const getByteLength = (str: string) => {
     let b = 0;
     for (let i = 0; i < str.length; i++) {
@@ -203,13 +304,13 @@ export function LiveConsole() {
 
   const summary = activeChat
     ? {
-        이동수단: activeChat.own_vehicle || "확인 필요",
-        면허증: activeChat.license_type || "확인 필요",
-        경력: activeChat.experience || "확인 필요",
-        근무희망: activeChat.work_hours || "확인 필요",
-        지역: activeChat.location || "확인 필요",
-        상태: activeChat.status,
-      }
+      이동수단: activeChat.own_vehicle || "확인 필요",
+      면허증: activeChat.license_type || "확인 필요",
+      경력: activeChat.experience || "확인 필요",
+      근무희망: activeChat.work_hours || "확인 필요",
+      지역: activeChat.location || "확인 필요",
+      상태: activeChat.status,
+    }
     : {};
 
   return (
@@ -319,6 +420,57 @@ export function LiveConsole() {
               );
             })}
           </div>
+
+          {/* AI 초안 검수 카드 */}
+          {pendingDraft && (
+            <div className="px-5 pt-4 bg-white border-t border-[#E2E8F0]">
+              <div className="border border-[#9F7AEA] bg-[#FAF5FF] rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#6B46C1]">
+                    <Wand2 size={16} /> 옹봇이 제안한 답변 초안
+                    {pendingDraft.status === "need_info" && (
+                      <span className="text-[11px] font-bold bg-[#FFFAF0] text-[#C05621] border border-[#FBD38D] px-2 py-0.5 rounded-md">정보 부족 · 매니저 확인</span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-bold text-[#805AD5]">검수 후 발송됩니다</span>
+                </div>
+                {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
+                  <div className="mb-2.5 text-[12px] text-[#7B341E] bg-white border border-[#FBD38D] rounded-lg px-3 py-2 leading-relaxed">
+                    <b>부족한 정보:</b> {pendingDraft.missing_info}
+                  </div>
+                )}
+                <textarea
+                  value={draftText}
+                  onChange={(e) => setDraftText(e.target.value)}
+                  placeholder={pendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
+                  rows={3}
+                  className="w-full bg-white border border-[#E2E8F0] rounded-xl p-3 text-[14px] leading-relaxed text-[#2D3748] focus:outline-none focus:border-[#9F7AEA] focus:ring-1 focus:ring-[#9F7AEA] resize-none"
+                />
+                {pendingDraft.reasoning && (
+                  <div className="mt-2 text-[11.5px] text-[#718096] leading-relaxed">
+                    <b className="text-[#805AD5]">판단 근거:</b> {pendingDraft.reasoning}
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-2 mt-3">
+                  <button
+                    onClick={handleIgnoreDraft}
+                    disabled={draftBusy}
+                    className="px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-white border border-[#E2E8F0] disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <X size={15} /> 무시
+                  </button>
+                  <button
+                    onClick={handleSendDraft}
+                    disabled={draftBusy}
+                    className="px-5 py-2 rounded-xl text-[13px] font-bold text-white bg-[#6B46C1] hover:bg-[#553C9A] disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                    검수 후 발송
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Input Area */}
           <div className="p-5 bg-white border-t border-[#E2E8F0]">
