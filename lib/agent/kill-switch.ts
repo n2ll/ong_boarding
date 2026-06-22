@@ -5,8 +5,8 @@
  * 또는 환경변수(AGENT_DISABLED=1) 중 하나라도 활성이면 AI 응답을 일체 건너뛴다.
  *
  * 토글:
- *  - 켜기: scripts/toggle-agent-kill-switch.mjs on
- *  - 끄기: scripts/toggle-agent-kill-switch.mjs off
+ *  - 어드민 UI: 에이전트 두뇌 > 고급 설정 > 'AI 전역 응답' 토글
+ *  - API: GET/POST /api/admin/agent/kill-switch  ({ disabled: boolean })
  *
  * 라우터는 처리 시작 전에 isAgentDisabled()를 호출해 true면 즉시 종료한다.
  * 인입·apply 라우트는 새 후보를 만들 때 stage를 'paused'로 시작해 둔다.

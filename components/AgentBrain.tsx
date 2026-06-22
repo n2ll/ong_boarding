@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout } from "lucide-react";
+import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -59,6 +59,60 @@ export function AgentBrain() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 전역 AI 응답 스위치 (kill-switch). killDisabled=true 면 AI 전역 중단.
+  const [killLoading, setKillLoading] = useState(true);
+  const [killDisabled, setKillDisabled] = useState(false);
+  const [killEnvForced, setKillEnvForced] = useState(false);
+  const [killBusy, setKillBusy] = useState(false);
+  const [killUpdatedAt, setKillUpdatedAt] = useState<string | null>(null);
+
+  const loadKillSwitch = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/agent/kill-switch");
+      const json = await res.json();
+      if (res.ok) {
+        setKillDisabled(!!json.disabled);
+        setKillEnvForced(!!json.env_forced);
+        setKillUpdatedAt(json.updated_at ?? null);
+      }
+    } catch {
+      /* 실패해도 화면 유지 */
+    } finally {
+      setKillLoading(false);
+    }
+  }, []);
+
+  const handleToggleKillSwitch = async () => {
+    if (killBusy || killEnvForced) return;
+    const next = !killDisabled; // next=true 면 AI 중단으로 전환
+    const confirmMsg = next
+      ? "AI 전역 응답을 중단할까요?\n\n이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)"
+      : "AI 전역 응답을 재개할까요?\n\n이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)";
+    if (!confirm(confirmMsg)) return;
+    setKillBusy(true);
+    try {
+      const res = await fetch("/api/admin/agent/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabled: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "변경에 실패했어요");
+        return;
+      }
+      setKillDisabled(next);
+      setKillUpdatedAt(new Date().toISOString());
+      toast.success(
+        next ? "AI 전역 응답을 중단했어요." : "AI 전역 응답을 재개했어요. (5초 이내 반영)"
+      );
+    } catch {
+      toast.error("변경에 실패했어요");
+    } finally {
+      setKillBusy(false);
+    }
+  };
+
   const loadExamples = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/prompt-examples");
@@ -73,7 +127,8 @@ export function AgentBrain() {
 
   useEffect(() => {
     loadExamples();
-  }, [loadExamples]);
+    loadKillSwitch();
+  }, [loadExamples, loadKillSwitch]);
 
   const openKbAdd = () =>
     setKbForm({ id: null, category: kbCategory, title: "", body: "" });
@@ -619,6 +674,55 @@ export function AgentBrain() {
 
           {activeTab === 'advanced' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              {/* 전역 AI 응답 스위치 (실데이터 연동) */}
+              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-[#FFF5F5] border-[#FEB2B2]' : 'bg-white border-[#E2E8F0]'}`}>
+                <div className="flex items-start justify-between gap-6">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${killDisabled ? 'bg-[#FED7D7]' : 'bg-[#F0FFF4]'}`}>
+                      <Power size={20} className={killDisabled ? 'text-[#E53E3E]' : 'text-[#38A169]'} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-[18px] font-extrabold text-[#1A202C]">AI 전역 응답</h2>
+                        {killLoading ? (
+                          <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded-full">확인 중…</span>
+                        ) : (
+                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${killDisabled ? 'text-[#C53030] bg-[#FED7D7]' : 'text-[#276749] bg-[#C6F6D5]'}`}>
+                            {killDisabled ? '중단됨' : '작동 중'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[13px] text-[#718096] mt-1 max-w-[440px]">
+                        끄면 모든 지원자 메시지에 AI가 자동 응답하지 않고 매니저가 직접 응대합니다. 켜면 이후 들어오는 메시지부터 자동 응답이 재개됩니다.
+                      </p>
+                      {!killLoading && killUpdatedAt && (
+                        <p className="text-[12px] text-[#A0AEC0] mt-2">
+                          마지막 변경: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
+                        </p>
+                      )}
+                      {killEnvForced && (
+                        <p className="text-[12px] font-bold text-[#C05621] mt-2 flex items-center gap-1.5">
+                          <AlertTriangle size={13} /> 환경변수 AGENT_DISABLED=1 이 설정돼 있어, 이 토글과 무관하게 항상 중단됩니다.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!killDisabled}
+                    onClick={handleToggleKillSwitch}
+                    disabled={killLoading || killBusy || killEnvForced}
+                    title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : (killDisabled ? "AI 전역 응답 켜기" : "AI 전역 응답 끄기")}
+                    className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${!killDisabled && !killEnvForced ? 'bg-[#38A169]' : 'bg-[#CBD5E0]'}`}
+                  >
+                    <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition-transform ${!killDisabled && !killEnvForced ? 'translate-x-6' : 'translate-x-1'}`}>
+                      {killBusy && <Loader2 size={12} className="animate-spin text-[#718096]" />}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-white border border-[#E2E8F0] rounded-2xl p-7 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl bg-[#FAF5FF] flex items-center justify-center">
