@@ -34,7 +34,7 @@ export function Sourcing() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col max-w-[1400px] mx-auto h-full overflow-y-auto scrollbar-custom bg-[#F7FAFC]">
+    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto scrollbar-custom bg-[#F7FAFC]">
       <RecruitFlowBanner active="inflow" />
       <DemoBanner note="광고·CPA·A/B 캠페인 지표는 예시 데이터입니다. 외부 채널 게시는 데모(로컬)로 동작하며 실제 광고 집행은 연동 전입니다." />
 
