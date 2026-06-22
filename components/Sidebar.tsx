@@ -5,6 +5,7 @@ import {
   Activity,
   BarChart2,
   MessageSquare,
+  Inbox,
   Brain,
   Users,
   Search,
@@ -28,6 +29,7 @@ export function Sidebar() {
     
     { label: "AI 에이전트", type: "header" },
     { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: "count", count: 2 },
+    { label: "미분류 인박스", icon: Inbox, path: "/inbox" },
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
     
     { label: "인재 관리", type: "header" },

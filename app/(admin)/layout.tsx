@@ -10,6 +10,7 @@ function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/automation")) return { pageTitle: "자동화 현황", crumb: "개요 > 자동화 현황" };
   if (pathname.startsWith("/reports")) return { pageTitle: "리포트 · 분석", crumb: "개요 > 리포트 · 분석" };
   if (pathname.startsWith("/live")) return { pageTitle: "실시간 응대", crumb: "AI 에이전트 > 실시간 응대" };
+  if (pathname.startsWith("/inbox")) return { pageTitle: "미분류 인박스", crumb: "AI 에이전트 > 미분류 인박스" };
   if (pathname.startsWith("/brain")) return { pageTitle: "에이전트 두뇌", crumb: "AI 에이전트 > 에이전트 두뇌" };
   if (pathname.startsWith("/sourcing")) return { pageTitle: "인력 소싱", crumb: "인재 관리 > 인력 소싱" };
   if (pathname.startsWith("/pipeline")) return { pageTitle: "인재풀 · 파이프라인", crumb: "인재 관리 > 인재풀 · 파이프라인" };
