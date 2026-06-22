@@ -1,0 +1,44 @@
+---
+description: 옹보딩 프로젝트 개요·스택·디렉토리 지도 (항상 적용)
+alwaysApply: true
+---
+
+# 옹보딩(Ongboarding) 프로젝트 컨텍스트
+
+## 제품 한 줄 요약
+시니어(50~70대) 배달원 등 긱워커 채용에 특화된 **B2B SaaS 채용 관리 플랫폼**.
+- **지원자(시니어)**: 앱 설치·복잡한 폼 없이 **SMS/채팅(옹봇)** 만으로 채용 절차 완료.
+- **담당자(매니저)**: 스크리닝·면접 조율·서류 안내 등 반복 업무를 **AI 에이전트가 대행** → 어드민 대시보드로 관리.
+
+## 기술 스택
+- **Next.js 14 (App Router)** + **React 18** + **TypeScript (strict)**
+- 스타일: **Tailwind CSS v4** (`@tailwindcss/postcss`), 일부 **MUI** + **Emotion**
+- UI 프리미티브: **Radix UI** 기반 **shadcn/ui** (`components/ui/`)
+- 데이터: **Supabase** (Postgres + Database Webhook)
+- AI: **Anthropic Claude** (Sonnet 4.6 응대 / Haiku 4.5 분류)
+- 외부 연동: **SOLAPI**(SMS·알림톡), **Slack**, **카카오/네이버 지오코딩**, **Google Sheets**
+- 배포: **Vercel** (Cron 포함)
+- import alias: `@/*` → 루트 기준
+
+## 디렉토리 지도
+| 경로 | 내용 |
+|---|---|
+| `app/(admin)/` | 매니저 어드민 대시보드 페이지들 (대시보드/파이프라인/공고/추천/실시간응대/두뇌 등) |
+| `app/apply/` | 지원자용 공개 지원 폼 |
+| `app/api/` | REST 라우트 핸들러. 자세히는 `app/api/README.md` |
+| `app/api/webhooks/` | 인입 SMS 메인 진입점. 자세히는 `app/api/webhooks/README.md` |
+| `components/` | 화면 단위 컴포넌트(`Pipeline.tsx` 등) + `ui/`(shadcn) + `figma/` |
+| `lib/` | 외부 서비스 어댑터·도메인 헬퍼. 자세히는 `lib/README.md` |
+| `lib/agent/` | 단계별 Claude 응대 엔진. 자세히는 `lib/agent/README.md` |
+| `docs/migrations/` | 날짜 프리픽스 SQL 마이그레이션 |
+| `styles/` | 전역 스타일 |
+
+## 작업 전 반드시 참고할 문서
+- 제품 방향: `PRODUCT_DIRECTION.md`
+- 전체 기능/도메인/환경변수: `docs/기능설명서.md`
+- 영역별 상세: `lib/README.md`, `lib/agent/README.md`, `app/api/README.md`, `app/api/webhooks/README.md`
+
+## 핵심 도메인 어휘
+- **stage(에이전트 단계)**: `exploration` → `screening` → `onboarding` → `active`, 그 외 `paused` / `abort`
+- **확정**: 매니저가 하는 행위. AI/지원자 단에서 "확정"이라는 뉘앙스를 절대 만들지 않는다 (`00-karpathy-core.mdc` 참고).
+- **체크리스트**: screening 7항목 / onboarding 3항목. `job_candidates.agent_state` JSONB에 저장.

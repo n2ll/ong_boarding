@@ -1,0 +1,33 @@
+---
+description: 프론트엔드/UI 컴포넌트 작성 규칙 (Tailwind v4 · Radix/shadcn · 디자인 토큰)
+globs: app/**/*.tsx,components/**/*.tsx,styles/**/*.css
+alwaysApply: false
+---
+
+# 프론트엔드 · UI 규칙
+
+## 스타일링
+- **Tailwind CSS v4** 유틸리티 우선. 인라인 스타일/별도 CSS 파일은 토큰·전역 스타일 외엔 지양.
+- 색/반경 등은 **CSS 변수 토큰**(`styles/theme.css`)을 통해 쓴다. 임의 hex 하드코딩 대신 `--primary`, `--muted-foreground`, `--border`, `--destructive`, `--radius` 등을 사용.
+- 절대 위치(absolute)는 꼭 필요할 때만. 기본은 flexbox/grid 반응형 레이아웃.
+- 다크 모드 변수(`.dark`)가 정의돼 있으니 색은 토큰으로 다뤄 두 테마가 깨지지 않게 한다.
+
+## 디자인 시스템
+- 폰트: **Pretendard** (`styles/fonts.css`), 본문 `font-sans`.
+- 브랜드 포인트 컬러: 따뜻한 옐로우 **#FFCB3C** — 시니어 친화 톤. 강조 포인트에만 절제해서 사용.
+- 컴포넌트 프리미티브는 **`components/ui/`(shadcn/Radix)** 를 먼저 재사용. 새 프리미티브를 직접 만들기 전에 기존 것이 있는지 확인.
+- 아이콘은 **lucide-react** 우선.
+
+## 접근성 (시니어 타깃 — 중요)
+- 모든 인터랙티브 요소에 `focus-visible` 포커스 링을 유지한다(키보드 Tab 탐색). 임의로 `outline-none`만 주고 대체 포커스 표시를 빼지 말 것.
+- 클릭 타깃은 충분히 크게, 텍스트 대비를 충분히. 시니어 사용자가 1차 대상임을 항상 고려.
+
+## 피드백 패턴
+- 파괴적 액션(삭제 등): **확인 모달**(`alert-dialog`)을 거친다.
+- 성공/실패 알림: **Sonner 토스트**(`components/ui/sonner`, `toast(...)`). `alert()` 사용 금지.
+
+## 컴포넌트 구조
+- 화면 단위 큰 컴포넌트는 `components/*.tsx`, 재사용 프리미티브는 `components/ui/`.
+- 파일이 커지면 헬퍼/하위 컴포넌트를 별도 파일로 분리해 파일 크기를 작게 유지.
+- 클라이언트 상호작용이 필요한 컴포넌트는 최상단 `"use client";`.
+- 어드민 페이지의 헤더 타이틀/브레드크럼은 `app/(admin)/layout.tsx`의 `resolveHeader`에서 경로별로 관리됨 — 새 어드민 페이지 추가 시 여기도 갱신.

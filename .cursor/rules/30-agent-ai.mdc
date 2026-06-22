@@ -1,0 +1,35 @@
+---
+description: Claude 응대 엔진(lib/agent) 작업 규칙
+globs: lib/agent/**/*.ts,lib/claude.ts,app/api/agent/**/*.ts,app/api/admin/agent/**/*.ts,app/api/webhooks/**/*.ts
+alwaysApply: false
+---
+
+# AI 응대 엔진 규칙 (`lib/agent`)
+
+작업 전 `lib/agent/README.md`를 먼저 읽는다. 핵심: **인입 1건 = 단계 모듈 1회 호출 = Claude API 1회 호출.**
+
+## 절대 규칙: "확정 뉘앙스 금지"
+전 stage 공통. 지원자가 정보를 보내거나 에이전트 질문에 긍정해도 그게 **근무 확정/배정이 아니다**. 확정은 매니저가 별도로 한다.
+- 응답 문구·프롬프트·전이 로직 어디서도 "확정됐다/배정됐다/내일부터 나오시면 된다" 류의 단정을 만들지 않는다.
+- 시작일은 매니저 확정 후 안내하므로 에이전트가 먼저 시작일을 묻거나 정하지 않는다.
+
+## 단계(stage) 흐름
+`exploration → screening → onboarding → active` (+ `paused` / `abort`).
+- 단계 모듈: `lib/agent/stages/`. 각 단계는 Claude `tool_use`로 구조화 응답.
+- 진입점: `router.ts`의 `runAgentForCandidate` (1분 응답 텀 coalesce 로직 포함).
+- 전이 부수효과(status 갱신, 자동 발송, Slack): `transitions.ts`의 `applyTransition`. 단계 전이 시 **여기에서만** 부수효과를 일으킨다.
+- 체크리스트 키/완료 판정: `checklist.ts`. screening 7항목 + onboarding 3항목. 타입은 `types.ts`.
+
+## 비용 적재 (필수)
+Claude를 호출하는 코드는 응답 `usage`를 받아 **`ai_usage_daily`에 적재**하고, outbound `messages` 행의 토큰 컬럼을 채운다. 헬퍼: `lib/agent/usage.ts`. 새 Claude 호출 경로를 추가하면 이 적재를 빠뜨리지 말 것.
+
+## 모델 선택
+- **Sonnet 4.6**: screening / onboarding / exploration / 공고 생성·추출.
+- **Haiku 4.5**: 배민 triage(미매칭 SMS 분류, 저비용). 분류·필터 같은 가벼운 작업엔 Haiku를 쓴다.
+
+## 시스템 메시지 / 톤
+- 자동 발송 멘트는 `system-messages.ts`에서 키로 조회(`getSystemMessage`), `{{이름}}` placeholder 치환. 문구를 코드에 하드코딩하지 말고 이 경로를 쓴다.
+- 대화 톤·운영 정보는 DB `prompt_examples`에서 `examples.ts`가 빌드(60초 캐시).
+
+## 작업 시 검증
+자동화 테스트가 없으므로, 발송이 일어나는 변경은 실 발송 없는 경로(`agent/test`, `agent/draft`, `playground`, `simulate` 플래그)로 먼저 확인한다.

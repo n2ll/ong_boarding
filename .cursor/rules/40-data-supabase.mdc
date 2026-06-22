@@ -1,0 +1,30 @@
+---
+description: Supabase 클라이언트 사용·API 라우트·마이그레이션 규칙
+globs: lib/**/*.ts,app/api/**/*.ts,docs/migrations/**/*.sql
+alwaysApply: false
+---
+
+# 데이터 · Supabase · API 규칙
+
+작업 전 `app/api/README.md`를 먼저 읽는다.
+
+## Supabase 클라이언트 (혼동 금지)
+- **브라우저/클라이언트 컴포넌트**: `getBrowserClient()` — anon key, RLS 적용.
+- **서버(API 라우트·서버 코드)**: `createServiceClient()` — service role, RLS 우회.
+- service role 클라이언트를 **클라이언트 번들로 노출하지 말 것**. `SUPABASE_SERVICE_ROLE_KEY`는 서버 전용.
+
+## API 라우트 공통 규칙
+- 모든 라우트는 `export const dynamic = "force-dynamic"` (캐시 X).
+- 어드민 API(`/api/admin/*`)는 서버에서 `createServiceClient()` 사용.
+- Claude 호출이 있는 라우트는 `usage`를 받아 `ai_usage_daily`에 적재.
+- 발송(SOLAPI)이 있는 라우트는 발송 후 `messages` INSERT — DB 트리거가 `sms_type`/`cost`를 자동 채움.
+- 인입 SMS 메인 진입점은 `app/api/webhooks/supabase-new-message` (Supabase Database Webhook). 인증은 `Authorization: Bearer <SUPABASE_WEBHOOK_SECRET>`. 멱등성: `classification IS NOT NULL`이면 즉시 종료. 자세히는 `app/api/webhooks/README.md`.
+
+## 마이그레이션 (`docs/migrations/`)
+- 파일명은 **날짜 프리픽스** 컨벤션을 따른다: `YYYY-MM-설명.sql` (예: `2026-06-applicants-memo.sql`).
+- 마이그레이션은 **누적/추가** 방식. 기존 적용된 SQL 파일을 사후 수정하지 말고 새 파일을 추가한다.
+- 스키마를 바꾸면 영향받는 타입(`lib/agent/types.ts` 등)과 관련 README를 함께 갱신.
+
+## 환경변수
+- 코드에서 `process.env.*`로 직접 접근. 키 목록·용도는 `docs/기능설명서.md` §9.
+- 시크릿은 `.env.local`(gitignore 대상)에만. 문서/코드/커밋에 **실제 값을 절대 적지 않는다**.
