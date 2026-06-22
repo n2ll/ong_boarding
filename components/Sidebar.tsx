@@ -13,6 +13,7 @@ import {
   Briefcase,
   Building2,
   MapPin,
+  LayoutGrid,
   Shield,
   Settings,
   ChevronRight
@@ -41,6 +42,7 @@ export function Sidebar() {
     { label: "채용공고 관리", icon: Briefcase, path: "/jobs" },
     { label: "화주사 관리", icon: Building2, path: "/clients" },
     { label: "지점 관리", icon: MapPin, path: "/branches" },
+    { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" },
     { label: "팀 · 권한", icon: Shield, path: "/team" },
     { label: "설정", icon: Settings, path: "/settings" },
   ];

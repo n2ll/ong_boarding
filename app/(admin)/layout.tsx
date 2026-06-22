@@ -18,6 +18,7 @@ function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/jobs")) return { pageTitle: "채용공고 관리", crumb: "채용 운영 > 채용공고 관리" };
   if (pathname.startsWith("/clients")) return { pageTitle: "화주사 관리", crumb: "채용 운영 > 화주사 관리" };
   if (pathname.startsWith("/branches")) return { pageTitle: "지점 관리", crumb: "채용 운영 > 지점 관리" };
+  if (pathname.startsWith("/slots")) return { pageTitle: "확정/희망 슬롯", crumb: "채용 운영 > 확정/희망 슬롯" };
   if (pathname.startsWith("/team")) return { pageTitle: "팀 · 권한", crumb: "채용 운영 > 팀 · 권한" };
   if (pathname.startsWith("/settings")) return { pageTitle: "설정", crumb: "설정 > 환경설정" };
   return { pageTitle: "대시보드", crumb: "개요 > 대시보드" };
