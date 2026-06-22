@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, CheckCircle2, MessageSquare, Save, FileText, Filter, Calendar, Users, AlertTriangle, Sparkles, Zap, Smartphone, Briefcase, Activity, Clock, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import { DemoBanner } from "./DemoBanner";
 
 const MOCK_WORKFLOWS = [
   { id: 1, name: "신규 지원자 대화형 스크리닝", status: "active", category: "지원자 파이프라인 관리", runs: "1,240", success: "98.5%", lastRun: "방금 전" },
@@ -178,6 +179,10 @@ export function Automation() {
               <Save size={16} /> 배포하기
             </button>
           </div>
+        </div>
+
+        <div className="px-6 pt-4 bg-[#EEF1F5]">
+          <DemoBanner variant="soon" note="워크플로우 빌더는 화면 미리보기입니다. 실행·성공률·배포는 예시이며 실제 자동화 엔진은 연동 전입니다." />
         </div>
 
         <div className="flex-1 flex overflow-hidden">

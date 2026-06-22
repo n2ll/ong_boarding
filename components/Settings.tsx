@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Save, Bell, Lock, User, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
+import { DemoBanner } from "./DemoBanner";
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState("profile");
@@ -11,6 +12,7 @@ export function Settings() {
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
+      <DemoBanner variant="soon" note="프로필·알림·보안 설정은 화면 미리보기입니다. 저장은 아직 서버에 반영되지 않습니다." />
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">설정 <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded align-middle">준비중</span></h1>
         <p className="text-[14px] text-[#718096]">개인 프로필과 시스템 환경설정을 관리합니다.</p>

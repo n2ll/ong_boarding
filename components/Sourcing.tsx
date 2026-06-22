@@ -1,7 +1,10 @@
-import { useState } from "react";
-import { Plus, Link2, Sparkles, Target, Users, Download, Megaphone, Map, Send, X, Smartphone, DollarSign, Lock, PieChart as PieChartIcon, TrendingUp, BarChart2, Briefcase, ChevronDown, CheckCircle2, User, Activity, PlayCircle } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Link2, Sparkles, Target, Users, Download, Megaphone, Map, Send, X, Smartphone, DollarSign, Lock, PieChart as PieChartIcon, TrendingUp, BarChart2, Briefcase, ChevronDown, CheckCircle2, User, Activity, PlayCircle, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import { RecruitFlowBanner } from "./RecruitFlowBanner";
+import { DemoBanner } from "./DemoBanner";
+import { EXTERNAL_CHANNELS, getPublishedJobs, type PublishedJob } from "@/lib/demoPublish";
 
 export function Sourcing() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "ab_test" | "crm_retarget" | "offline_heatmap">("dashboard");
@@ -15,17 +18,33 @@ export function Sourcing() {
   // Campaign Creation State
   const [targetingMode, setTargetingMode] = useState<"auto" | "manual">("auto");
 
+  // (A) 외부 채널에 게시된 공고 (Jobs 화면에서 게시 → 여기로 연동)
+  const [published, setPublished] = useState<PublishedJob[]>([]);
+  const refreshPublished = useCallback(() => setPublished(getPublishedJobs()), []);
+  useEffect(() => {
+    refreshPublished();
+    window.addEventListener("ong-published-updated", refreshPublished);
+    return () => window.removeEventListener("ong-published-updated", refreshPublished);
+  }, [refreshPublished]);
+
+  const totalInflow = published.reduce((a, j) => a + j.stats.reduce((b, s) => b + s.applicants, 0), 0);
+
   const handleAction = (msg: string) => {
     toast.success(msg, { action: { label: '실행 취소', onClick: () => toast.info('작업이 취소되었습니다.') } });
   };
 
   return (
     <div className="p-8 pb-12 flex flex-col max-w-[1400px] mx-auto h-full overflow-y-auto scrollbar-custom bg-[#F7FAFC]">
+      <RecruitFlowBanner active="inflow" />
+      <DemoBanner note="광고·CPA·A/B 캠페인 지표는 예시 데이터입니다. 외부 채널 게시는 데모(로컬)로 동작하며 실제 광고 집행은 연동 전입니다." />
+
       {/* Header */}
       <div className="mb-6 flex justify-between items-end shrink-0">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">마케팅 캠페인 및 매체 관리 <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded align-middle">준비중</span></h1>
-          <p className="text-[14px] text-[#718096]">구인 공고를 여러 매체에 캠페인으로 배포하고, 예산 대비 획득 단가(CPA)를 최적화합니다.</p>
+          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">
+            인력 소싱 · 외부 채널 <span className="text-[11px] font-extrabold text-[#DD6B20] bg-[#FFFAF0] border border-[#FBD38D] px-2 py-0.5 rounded align-middle">A · 유입</span>
+          </h1>
+          <p className="text-[14px] text-[#718096]">당근알바·알바몬·잡코리아 등 외부 채널에 공고를 게시·캠페인으로 노출해 <b className="text-[#4A5568]">신규 인력을 인력풀로 유입</b>시킵니다.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setAddChannelModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm outline-none">
@@ -57,6 +76,46 @@ export function Sourcing() {
       {/* 1. Dashboard Tab */}
       {activeTab === "dashboard" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6">
+          {/* 외부 채널 게시 현황 — 채용공고 관리에서 게시한 공고가 여기로 연동됨 */}
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#E2E8F0] flex items-center justify-between bg-[#FFFDF8]">
+              <h2 className="text-[15px] font-extrabold text-[#1A202C] flex items-center gap-2"><Globe size={17} className="text-[#DD6B20]" /> 외부 채널 게시 현황</h2>
+              {published.length > 0 && (
+                <span className="text-[12px] font-bold text-[#2F855A] bg-[#F0FFF4] border border-[#C6F6D5] px-3 py-1 rounded-lg">총 유입 {totalInflow.toLocaleString()}명 → 인력풀 수집됨</span>
+              )}
+            </div>
+            {published.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <div className="text-[13.5px] text-[#718096]">아직 외부 채널에 게시한 공고가 없어요.</div>
+                <div className="text-[12.5px] text-[#A0AEC0] mt-1"><b className="text-[#DD6B20]">채용공고 관리</b>에서 <b>[외부 채널에 게시]</b>를 누르면 게시 현황과 유입이 여기에 표시됩니다.</div>
+              </div>
+            ) : (
+              <div className="divide-y divide-[#F1F4F8]">
+                {published.map((job) => (
+                  <div key={job.id} className="px-5 py-4 flex items-center gap-4 hover:bg-[#F7FAFC] transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-bold text-[#1A202C] truncate">{job.jobTitle}</div>
+                      <div className="text-[12px] text-[#A0AEC0] flex items-center gap-1 mt-0.5"><Smartphone size={12} /> 게시 {new Date(job.publishedAt).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })} · {job.location || "지역 미지정"}</div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {job.stats.map((s) => {
+                        const meta = EXTERNAL_CHANNELS[s.channel];
+                        return (
+                          <div key={s.channel} className="flex items-center gap-1.5 bg-white border border-[#E2E8F0] rounded-lg pl-1.5 pr-2.5 py-1.5">
+                            <span className="w-5 h-5 rounded-md flex items-center justify-center text-white text-[10px] font-extrabold" style={{ backgroundColor: meta.accent }}>{meta.badge}</span>
+                            <span className="text-[11.5px] font-bold text-[#4A5568]">{meta.label}</span>
+                            <span className="text-[11.5px] font-extrabold" style={{ color: meta.accent }}>+{s.applicants}</span>
+                          </div>
+                        );
+                      })}
+                      <span className="flex items-center gap-1 text-[11px] font-bold text-[#2F855A] bg-[#F0FFF4] border border-[#C6F6D5] px-2 py-1.5 rounded-lg"><PlayCircle size={12} /> 게시중</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-4 gap-4">
             <div className="bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm flex flex-col justify-between h-[120px]">
               <div className="flex items-center justify-between text-[#718096] font-bold text-[12.5px]"><span>총 누적 소진액 (이번 달)</span></div>

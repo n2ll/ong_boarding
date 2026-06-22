@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Building2, Handshake, MoreHorizontal, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
+import { DemoBanner } from "./DemoBanner";
 
 const MOCK_CLIENTS = [
   { id: "C-01", name: "우아한형제들 (비마트)", manager: "김배달 팀장", branches: 15, activeJobs: 24, status: "계약 중", end: "2027.12.31" },
@@ -11,6 +12,7 @@ const MOCK_CLIENTS = [
 export function Clients() {
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
+      <DemoBanner variant="soon" note="화주사 → 지점 → 공고 계층은 설계 단계입니다. 아래 목록은 예시이며, clients 테이블 신설 후 실제 등록·연동이 제공됩니다." />
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">화주사 관리 <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded align-middle">준비중</span></h1>
