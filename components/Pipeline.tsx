@@ -200,11 +200,11 @@ export function Pipeline() {
     return true;
   });
 
-  const exportCsv = () => {
-    if (filteredCards.length === 0) return toast.error("내보낼 지원자가 없어요.");
+  const exportCardsCsv = (cards: CardData[], stageOf: (c: CardData) => string, fileLabel: string) => {
+    if (cards.length === 0) return toast.error("내보낼 지원자가 없어요.");
     const headers = ["ID", "이름", "나이", "진행단계", "지원채널", "지점", "희망근무", "차량", "지역", "연락처", "최근활동"];
-    const rows = filteredCards.map((c) => [
-      c.id, c.name, c.age, c.stage, c.channel, c.branch, c.slot, c.tag, c.region, c.phone ?? "", c.lastActive,
+    const rows = cards.map((c) => [
+      c.id, c.name, c.age, stageOf(c), c.channel, c.branch, c.slot, c.tag, c.region, c.phone ?? "", c.lastActive,
     ]);
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
     const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
@@ -212,10 +212,20 @@ export function Pipeline() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `지원자_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${fileLabel}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`${filteredCards.length}명을 CSV로 내보냈어요.`);
+    toast.success(`${cards.length}명을 CSV로 내보냈어요.`);
+  };
+
+  const exportCsv = () => exportCardsCsv(filteredCards, (c) => (c as CardData & { stage?: string }).stage ?? "", "지원자");
+
+  const handleColumnExport = (column: ColumnData) => exportCardsCsv(column.cards, () => column.title, column.title);
+
+  const handleColumnBulkMessage = (column: ColumnData) => {
+    if (column.cards.length === 0) return toast.error("이 단계에 지원자가 없어요.");
+    setSelectedRows(new Set(column.cards.map((c) => c.id)));
+    setBulkMsgModalOpen(true);
   };
 
   const moveCard = (cardId: string, sourceColId: string, destColId: string) => {
@@ -461,7 +471,7 @@ export function Pipeline() {
           {view === "kanban" && (
             <div className="flex gap-6 h-full overflow-x-auto p-8">
               {columns.map((column, idx) => (
-                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(card) => setSelectedCandidate(card)} columnIndex={idx} />
+                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(card) => setSelectedCandidate(card)} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
               ))}
             </div>
           )}
@@ -670,9 +680,12 @@ interface KanbanColumnProps {
   moveCard: (cardId: string, sourceColId: string, destColId: string) => void;
   onCardClick: (card: DrawerCandidate) => void;
   columnIndex: number;
+  onExport: (column: ColumnData) => void;
+  onBulkMessage: (column: ColumnData) => void;
 }
 
-function KanbanColumn({ column, moveCard, onCardClick, columnIndex }: KanbanColumnProps) {
+function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, onBulkMessage }: KanbanColumnProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ITEM_TYPE,
     drop: (item: { id: string; sourceColId: string }) => {
@@ -691,7 +704,29 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex }: KanbanColu
           <h2 className="text-[15px] font-extrabold text-[#1A202C]">{column.title}</h2>
           <span className="text-[12px] font-bold text-[#718096] bg-[#E2E8F0] px-2.5 py-0.5 rounded-full">{column.count}</span>
         </div>
-        <button onClick={() => toast.info(`${column.title} 열 설정 메뉴가 열립니다.`)} className="text-[#A0AEC0] hover:text-[#4A5568] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded-md"><MoreHorizontal size={18} /></button>
+        <div className="relative">
+          <button onClick={() => setMenuOpen((v) => !v)} className="text-[#A0AEC0] hover:text-[#4A5568] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded-md"><MoreHorizontal size={18} /></button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 top-7 z-30 w-[200px] bg-white border border-[#E2E8F0] rounded-xl shadow-lg py-1.5">
+                <button
+                  onClick={() => { setMenuOpen(false); onExport(column); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[13px] font-bold text-[#4A5568] hover:bg-[#F7FAFC] text-left"
+                >
+                  <FileDown size={15} className="text-[#718096]" /> 이 단계 CSV 내보내기
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); onBulkMessage(column); }}
+                  disabled={column.count === 0}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[13px] font-bold text-[#4A5568] hover:bg-[#F7FAFC] text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Mail size={15} className="text-[#718096]" /> 이 단계 일괄 문자
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2 scrollbar-custom">
