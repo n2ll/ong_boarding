@@ -63,7 +63,7 @@ export function Recommendations() {
         const res = await fetch("/api/admin/jobs?status=all");
         const json = await res.json();
         const list = ((json.jobs ?? []) as ApiJob[]).filter(
-          (j) => j.status !== "closed"
+          (j) => j.status !== "closed" && !j.title.startsWith("__")
         );
         setJobs(list);
         if (list.length > 0) setSelectedJobId(list[0].id);

@@ -547,7 +547,7 @@ export function Pipeline() {
                             </div>
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-[#E2E8F0] text-[#4A5568]' : c.stageId === 'screening' ? 'border-[#F6E05E] text-[#D69E2E] bg-[#FEFCBF]' : c.stageId === 'interview' ? 'border-[#9AE6B4] text-[#38A169] bg-[#F0FFF4]' : 'border-[#90CDF4] text-[#3182CE] bg-[#EBF8FF]'}`}>
+                            <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-[#E2E8F0] text-[#4A5568]' : c.stageId === 'screening' ? 'border-[#F6E05E] text-[#D69E2E] bg-[#FEFCBF]' : c.stageId === 'interview' ? 'border-[#9AE6B4] text-[#38A169] bg-[#F0FFF4]' : 'border-[#90CDF4] text-[#3182CE] bg-[#EBF8FF]'}`}>
                               <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                               {c.stage}
                             </span>

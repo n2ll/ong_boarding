@@ -33,7 +33,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         <Topbar crumb={crumb} pageTitle={pageTitle} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-custom">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-custom bg-[#F7FAFC]">
           {children}
         </main>
       </div>
