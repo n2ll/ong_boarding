@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2 } from "lucide-react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
-import { CandidateDrawer } from "./CandidateDrawer";
+import { CandidateDrawer, type DrawerCandidate } from "./CandidateDrawer";
 import { motion, AnimatePresence } from "motion/react";
-import { Applicant, calcAge } from "@/lib/admin/types";
+import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 
 // Types
 interface CardData {
@@ -13,12 +13,31 @@ interface CardData {
   name: string;
   age: number;
   gender: string;
-  score: number;
+  channel: string;
+  branch: string;
+  slot: string;
   tag: string;
   region: string;
   exp: string;
   lastActive: string;
+  phone: string | null;
 }
+
+const CHANNEL_LABEL: Record<string, string> = {
+  danggeun: "당근",
+  baemin: "배민",
+  manual: "수기 등록",
+  direct: "직접 지원",
+  danggeun_practice: "연습",
+};
+
+function channelLabel(source: string | null | undefined): string {
+  if (!source) return "기타";
+  return CHANNEL_LABEL[source] ?? source;
+}
+
+const DEFAULT_BULK_BODY =
+  "[비마트 옹보딩] #{이름}님, 안녕하세요!\n현재 거주하고 계신 인근에 야간 배달 파트너를 긴급 모집 중입니다.\n\n이번 주말(금,토,일) 근무 시 기본 단가의 1.5배를 지급합니다. 관심 있으시다면 본 문자에 답장 주세요!";
 
 interface ColumnData {
   id: string;
@@ -30,11 +49,13 @@ interface ColumnData {
 
 const ITEM_TYPE = "CANDIDATE_CARD";
 
+// 실제 운영 단계: 스크리닝 전 → 스크리닝 중 → 스크리닝 완료(온보딩·배민ID) → 확정인력.
+// 면접/캘린더 단계는 이 제품에 존재하지 않는다(SMS 스크리닝 후 매니저 확정).
 const COLUMN_DEFS: { id: string; title: string; color: string }[] = [
-  { id: "applied", title: "지원서 접수", color: "bg-[#CBD5E0]" },
-  { id: "screening", title: "AI 스크리닝", color: "bg-[#F6E05E]" },
-  { id: "interview", title: "면접 제안 (캘린더)", color: "bg-[#48BB78]" },
-  { id: "passed", title: "최종 합격", color: "bg-[#3182CE]" },
+  { id: "applied", title: "지원 접수 / 대기", color: "bg-[#CBD5E0]" },
+  { id: "screening", title: "AI 스크리닝 중", color: "bg-[#F6E05E]" },
+  { id: "interview", title: "스크리닝 완료", color: "bg-[#48BB78]" },
+  { id: "passed", title: "확정 인력", color: "bg-[#3182CE]" },
 ];
 
 // recruitment status → 칸반 컬럼. 부적합/이탈/기타는 보드에서 제외한다.
@@ -55,11 +76,11 @@ const COLUMN_TO_STATUS: Record<string, string> = {
 };
 
 const BULK_LABEL_TO_STATUS: Record<string, string> = {
-  "지원서 접수": "스크리닝 전",
-  "AI 스크리닝": "스크리닝 중",
-  "면접 제안": "스크리닝 완료",
-  "최종 합격": "확정인력",
-  "불합격/보류": "부적합",
+  "지원 접수 / 대기": "스크리닝 전",
+  "AI 스크리닝 중": "스크리닝 중",
+  "스크리닝 완료": "스크리닝 완료",
+  "확정 인력": "확정인력",
+  부적합: "부적합",
 };
 
 function relTime(iso: string | null): string {
@@ -73,17 +94,6 @@ function relTime(iso: string | null): string {
   return `${Math.floor(h / 24)}일 전`;
 }
 
-// AI 적합도 점수 산출 파이프라인이 아직 없어 status 기반 임시 표기값을 쓴다 (실제 스코어링 도입 시 교체).
-function derivedScore(status: string): number {
-  switch (status) {
-    case "확정인력": return 95;
-    case "스크리닝 완료": return 88;
-    case "스크리닝 중": return 75;
-    case "대기자": return 70;
-    default: return 62;
-  }
-}
-
 function vehicleTag(a: Applicant): string {
   if (a.vehicle_type && a.vehicle_type.trim()) return a.vehicle_type.trim();
   if (a.own_vehicle === "있음") return "차량 보유";
@@ -91,16 +101,21 @@ function vehicleTag(a: Applicant): string {
 }
 
 function toCard(a: Applicant): CardData {
+  const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
+  const slot = shortWorkHours(a.confirmed_slot || a.work_hours) || "-";
   return {
     id: String(a.id),
     name: a.name ?? "-",
     age: calcAge(a.birth_date) ?? 0,
     gender: "",
-    score: derivedScore(a.status),
+    channel: channelLabel(a.source),
+    branch,
+    slot,
     tag: vehicleTag(a),
     region: a.sigungu ?? a.location ?? "-",
     exp: a.experience?.trim() ? a.experience.trim() : "신입",
     lastActive: relTime(a.last_message_at ?? a.created_at),
+    phone: a.phone ?? null,
   };
 }
 
@@ -121,14 +136,17 @@ export function Pipeline() {
     COLUMN_DEFS.map((d) => ({ ...d, count: 0, cards: [] }))
   );
   const [loading, setLoading] = useState(true);
-  const [selectedCandidate, setSelectedCandidate] = useState<CardData | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<DrawerCandidate | null>(null);
   const [view, setView] = useState<"kanban" | "list">("list");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
-  
+  const [query, setQuery] = useState("");
+
   // Modals state
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
   const [bulkStageModalOpen, setBulkStageModalOpen] = useState(false);
+  const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
+  const [bulkSending, setBulkSending] = useState(false);
 
   const loadApplicants = async () => {
     try {
@@ -148,6 +166,32 @@ export function Pipeline() {
   }, []);
 
   const allCards = columns.flatMap(c => c.cards.map(card => ({ ...card, stage: c.title, stageColor: c.color, stageId: c.id })));
+
+  const q = query.trim().toLowerCase();
+  const filteredCards = q
+    ? allCards.filter((c) =>
+        [c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag]
+          .some((v) => v.toLowerCase().includes(q))
+      )
+    : allCards;
+
+  const exportCsv = () => {
+    if (filteredCards.length === 0) return toast.error("내보낼 지원자가 없어요.");
+    const headers = ["ID", "이름", "나이", "진행단계", "지원채널", "지점", "희망근무", "차량", "지역", "연락처", "최근활동"];
+    const rows = filteredCards.map((c) => [
+      c.id, c.name, c.age, c.stage, c.channel, c.branch, c.slot, c.tag, c.region, c.phone ?? "", c.lastActive,
+    ]);
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `지원자_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`${filteredCards.length}명을 CSV로 내보냈어요.`);
+  };
 
   const moveCard = (cardId: string, sourceColId: string, destColId: string) => {
     if (sourceColId === destColId) return;
@@ -201,8 +245,8 @@ export function Pipeline() {
   };
 
   const toggleAll = () => {
-    if (selectedRows.size === allCards.length) setSelectedRows(new Set());
-    else setSelectedRows(new Set(allCards.map(c => c.id)));
+    if (selectedRows.size === filteredCards.length) setSelectedRows(new Set());
+    else setSelectedRows(new Set(filteredCards.map(c => c.id)));
   };
 
   const handleBulkStageChange = async (stageName: string) => {
@@ -229,6 +273,54 @@ export function Pipeline() {
     setSelectedRows(new Set());
   };
 
+  const handleBulkSend = async () => {
+    if (bulkSending) return;
+    const text = bulkMsgBody.trim();
+    if (!text) return toast.error("메시지 내용을 입력해주세요.");
+
+    const selected = allCards.filter((c) => selectedRows.has(c.id) && c.phone);
+    const recipients = selected.map((c) => ({
+      phone: c.phone as string,
+      applicant_id: Number(c.id),
+    }));
+    if (recipients.length === 0) return toast.error("발송 가능한 연락처가 없어요.");
+
+    setBulkSending(true);
+    try {
+      let sent = 0;
+      let failed = 0;
+      // bulk-send 엔드포인트는 1회 최대 50명 → 50명씩 끊어서 발송
+      for (let i = 0; i < recipients.length; i += 50) {
+        const chunk = recipients.slice(i, i + 50);
+        const res = await fetch("/api/admin/messages/bulk-send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipients: chunk, body: text }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          toast.error(json.error || "발송에 실패했어요");
+          return;
+        }
+        sent += json.sent ?? 0;
+        failed += json.failed ?? 0;
+      }
+      const skipped = selectedRows.size - recipients.length;
+      toast.success(
+        `${sent}명 발송 완료` +
+          (failed ? `, ${failed}명 실패` : "") +
+          (skipped ? `, ${skipped}명 연락처 없어 제외` : "")
+      );
+      setBulkMsgModalOpen(false);
+      setSelectedRows(new Set());
+      setBulkMsgBody(DEFAULT_BULK_BODY);
+    } catch {
+      toast.error("발송에 실패했어요");
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col h-full overflow-hidden bg-[#F7FAFC]">
@@ -240,7 +332,7 @@ export function Pipeline() {
               <p className="text-[14px] text-[#718096]">수천 명의 대규모 지원자 DB를 여러 채용 단계와 조건에 따라 직관적으로 필터링하고 일괄 관리합니다.</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => toast.success("현재 필터링된 리스트가 CSV로 다운로드 되었습니다.")} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm">
+              <button onClick={exportCsv} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
                 <FileDown size={16} /> CSV로 내보내기
               </button>
             </div>
@@ -257,7 +349,7 @@ export function Pipeline() {
               <LayoutGrid size={16} /> 칸반 보드
             </button>
           </div>
-          
+
           <div className="w-px h-6 bg-[#E2E8F0] mx-2"></div>
 
           <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-bold border transition-colors ${showFilters ? 'bg-[#FFFBEC] border-[#FFCB3C] text-[#B8860B]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}>
@@ -268,7 +360,7 @@ export function Pipeline() {
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-            <input type="text" placeholder="지원자명, 연락처, 태그 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-[#E2E8F0] rounded-lg text-[13px] outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] shadow-sm" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" placeholder="이름, 연락처, 지점, 지역 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-[#E2E8F0] rounded-lg text-[13px] outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] shadow-sm" />
           </div>
         </div>
 
@@ -278,40 +370,15 @@ export function Pipeline() {
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="bg-white border-b border-[#E2E8F0] shrink-0 overflow-hidden">
               <div className="px-8 py-5 flex gap-5 items-end bg-[#F7FAFC]">
                 <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">거주 지역 반경</label>
-                  <select className="w-[160px] bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-[#FFCB3C]">
-                    <option>비마트 송파점 3km 이내</option>
-                    <option>비마트 강남점 5km 이내</option>
-                    <option>수도권 전체</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">이동 수단</label>
-                  <select className="w-[140px] bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-[#FFCB3C]">
-                    <option>전체 수단</option>
-                    <option>오토바이 (면허보유)</option>
-                    <option>자전거 / 전기자전거</option>
-                    <option>도보</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">AI 적합도 (Screening)</label>
-                  <select className="w-[140px] bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-[#FFCB3C]">
-                    <option>전체 점수</option>
-                    <option>90점 이상 (우수)</option>
-                    <option>80점 이상</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">최근 활동일</label>
-                  <select className="w-[140px] bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-[#FFCB3C]">
-                    <option>최근 7일</option>
-                    <option>최근 30일</option>
-                    <option>휴면 상태 (3개월 이상)</option>
-                  </select>
+                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5 flex items-center gap-1.5">
+                    고급 필터 <span className="text-[10px] font-bold text-[#1A202C] bg-[#FEFCBF] px-1.5 py-0.5 rounded">준비 중</span>
+                  </label>
+                  <p className="text-[12.5px] text-[#718096] max-w-[520px] leading-relaxed">
+                    거리·이동수단·희망 슬롯 기반의 정밀 필터는 준비 중입니다. 현재는 상단 검색창에서 이름·연락처·지점·지역으로 바로 찾을 수 있어요.
+                  </p>
                 </div>
                 <div className="flex-1" />
-                <button onClick={() => { setShowFilters(false); toast.info('필터가 초기화되었습니다.'); }} className="text-[13px] font-bold text-[#3182CE] hover:underline px-3 py-2.5 outline-none">필터 초기화</button>
+                <button onClick={() => setShowFilters(false)} className="text-[13px] font-bold text-[#3182CE] hover:underline px-3 py-2.5 outline-none">닫기</button>
               </div>
             </motion.div>
           )}
@@ -340,7 +407,7 @@ export function Pipeline() {
                       <span className="text-[#FFCB3C] text-[18px]">{selectedRows.size}명</span> 선택됨
                     </span>
                     <div className="w-px h-6 bg-white/20 mx-2"></div>
-                    
+
                     <button onClick={() => setBulkStageModalOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Columns size={16} /> 일괄 상태 변경
                     </button>
@@ -349,7 +416,7 @@ export function Pipeline() {
                     </button>
 
                     <div className="flex-1" />
-                    
+
                     <button className="bg-transparent hover:bg-white/10 text-white/70 hover:text-white rounded-lg p-2 transition-colors" onClick={() => setSelectedRows(new Set())}>
                       <X size={20} />
                     </button>
@@ -363,24 +430,24 @@ export function Pipeline() {
                   <thead>
                     <tr className="bg-[#F7FAFC] border-b border-[#E2E8F0]">
                       <th className="px-5 py-4 w-[50px]">
-                        <button onClick={toggleAll} className={`w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors ${selectedRows.size === allCards.length && allCards.length > 0 ? 'bg-[#FFCB3C] border-[#FFCB3C]' : 'border-[#CBD5E0] bg-white'}`}>
-                          {selectedRows.size === allCards.length && allCards.length > 0 && <Check size={14} strokeWidth={4} className="text-[#1A202C]" />}
+                        <button onClick={toggleAll} className={`w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors ${selectedRows.size === filteredCards.length && filteredCards.length > 0 ? 'bg-[#FFCB3C] border-[#FFCB3C]' : 'border-[#CBD5E0] bg-white'}`}>
+                          {selectedRows.size === filteredCards.length && filteredCards.length > 0 && <Check size={14} strokeWidth={4} className="text-[#1A202C]" />}
                         </button>
                       </th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">지원자 정보</th>
-                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">파이프라인 상태</th>
-                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">AI 적합도</th>
+                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">진행 단계</th>
+                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">지원 채널 / 지점</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">보유 차량 / 조건</th>
-                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">거주 지역</th>
+                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">거주 지역 / 희망 근무</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">최근 활동</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {allCards.map(c => {
+                    {filteredCards.map(c => {
                       const isSelected = selectedRows.has(c.id);
                       return (
-                        <tr 
-                          key={c.id} 
+                        <tr
+                          key={c.id}
                           onClick={() => setSelectedCandidate(c)}
                           className={`border-b border-[#F1F4F8] last:border-0 transition-colors hover:bg-[#F7FAFC] cursor-pointer group ${isSelected ? 'bg-[#FFFBEC] hover:bg-[#FFFBEC]' : 'bg-white'}`}
                         >
@@ -407,11 +474,9 @@ export function Pipeline() {
                             </span>
                           </td>
                           <td className="px-4 py-4">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[15px] font-extrabold tracking-tight ${c.score >= 90 ? 'text-[#38A169]' : c.score >= 80 ? 'text-[#3182CE]' : 'text-[#718096]'}`}>{c.score}</span>
-                              <div className="w-16 h-1.5 bg-[#F1F4F8] rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full ${c.score >= 90 ? 'bg-[#38A169]' : c.score >= 80 ? 'bg-[#3182CE]' : 'bg-[#A0AEC0]'}`} style={{ width: `${c.score}%` }} />
-                              </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#EDF2F7] text-[#4A5568]">{c.channel}</span>
+                              <span className="text-[12px] font-medium text-[#718096]">{c.branch}</span>
                             </div>
                           </td>
                           <td className="px-4 py-4">
@@ -420,8 +485,11 @@ export function Pipeline() {
                               <span className="text-[11.5px] text-[#718096]">{c.exp}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-[13px] font-medium text-[#4A5568]">
-                            {c.region}
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[13px] font-medium text-[#4A5568]">{c.region}</span>
+                              <span className="text-[11.5px] text-[#718096]">{c.slot}</span>
+                            </div>
                           </td>
                           <td className="px-4 py-4 text-[12.5px] text-[#A0AEC0]">
                             {c.lastActive}
@@ -429,6 +497,13 @@ export function Pipeline() {
                         </tr>
                       );
                     })}
+                    {!loading && filteredCards.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-12 text-center text-[13px] text-[#A0AEC0]">
+                          {query ? `'${query}' 검색 결과가 없어요.` : "표시할 지원자가 없어요."}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -437,7 +512,7 @@ export function Pipeline() {
         </div>
       </div>
 
-      <CandidateDrawer isOpen={!!selectedCandidate} onClose={() => setSelectedCandidate(null)} candidate={selectedCandidate} />
+      <CandidateDrawer isOpen={!!selectedCandidate} onClose={() => setSelectedCandidate(null)} candidate={selectedCandidate} onStatusChange={loadApplicants} />
 
       {/* Modals for Bulk Actions */}
       {/* 1. Bulk Stage Change Modal */}
@@ -449,15 +524,15 @@ export function Pipeline() {
                 <h2 className="text-[16px] font-bold text-[#1A202C]">일괄 상태(파이프라인) 변경</h2>
                 <div className="text-[12.5px] text-[#718096] mt-0.5">선택된 {selectedRows.size}명의 지원자를 어떤 단계로 이동시킬까요?</div>
               </div>
-              <button onClick={() => setBulkStageModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20}/></button>
+              <button onClick={() => setBulkStageModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
             </div>
             <div className="p-6 grid grid-cols-2 gap-3">
               {[
-                { id: "applied", label: "지원서 접수", desc: "초기 상태" },
-                { id: "screening", label: "AI 스크리닝", desc: "대화형 검증" },
-                { id: "interview", label: "면접 제안", desc: "캘린더 픽커 발송" },
-                { id: "passed", label: "최종 합격", desc: "입사 안내" },
-                { id: "rejected", label: "불합격/보류", desc: "DB 장기 보관" }
+                { id: "applied", label: "지원 접수 / 대기", desc: "스크리닝 전" },
+                { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },
+                { id: "interview", label: "스크리닝 완료", desc: "온보딩 · 배민ID 수집" },
+                { id: "passed", label: "확정 인력", desc: "슬롯 확정" },
+                { id: "rejected", label: "부적합", desc: "진행 중단" }
               ].map(stage => (
                 <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-[#E2E8F0] rounded-xl text-left hover:border-[#FFCB3C] hover:bg-[#FFFBEC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
                   <div className="text-[14px] font-bold text-[#1A202C] mb-1">{stage.label}</div>
@@ -475,26 +550,30 @@ export function Pipeline() {
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white w-[600px] rounded-2xl shadow-xl flex flex-col overflow-hidden">
             <div className="p-5 border-b border-[#E2E8F0] bg-[#F7FAFC] flex justify-between items-center">
               <div>
-                <h2 className="text-[16px] font-bold text-[#1A202C]">선택 인원 대상 알림톡 캠페인 발송</h2>
-                <div className="text-[12.5px] text-[#718096] mt-0.5">총 {selectedRows.size}명에게 일괄 발송됩니다.</div>
+                <h2 className="text-[16px] font-bold text-[#1A202C]">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
+                <div className="text-[12.5px] text-[#718096] mt-0.5">총 {selectedRows.size}명에게 일괄 발송됩니다. (연락처 없는 인원은 자동 제외)</div>
               </div>
-              <button onClick={() => setBulkMsgModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20}/></button>
+              <button onClick={() => setBulkMsgModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-5">
               <div>
-                <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 템플릿 선택</label>
-                <select className="w-full border border-[#E2E8F0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#FFCB3C] bg-white">
-                  <option>[긴급] 비마트 강남/송파권역 야간 파트너 충원 (단가 1.5배)</option>
-                  <option>서류 합격 및 면접 일정 선택 안내</option>
-                  <option>지원서류 보완 요청</option>
-                  <option>직접 입력하기</option>
+                <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 템플릿</label>
+                <select
+                  onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
+                  className="w-full border border-[#E2E8F0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#FFCB3C] bg-white"
+                >
+                  <option value="">직접 입력하기</option>
+                  <option value={DEFAULT_BULK_BODY}>[긴급] 야간 파트너 충원 (단가 1.5배)</option>
+                  <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
+                  <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
                 </select>
               </div>
               <div>
-                <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 본문 (자동 치환 적용)</label>
-                <textarea 
+                <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 본문</label>
+                <textarea
+                  value={bulkMsgBody}
+                  onChange={(e) => setBulkMsgBody(e.target.value)}
                   className="w-full h-[150px] border border-[#E2E8F0] rounded-xl p-4 text-[14px] outline-none focus:border-[#FFCB3C] resize-none leading-relaxed text-[#2D3748] bg-[#F7FAFC]"
-                  defaultValue={"[비마트 옹보딩] #{이름}님, 안녕하세요!\n현재 거주하고 계신 #{거주지역} 인근에 야간 배달 파트너를 긴급 모집 중입니다.\n\n이번 주말(금,토,일) 근무 시 기본 단가의 1.5배를 지급합니다. 관심 있으시다면 아래 버튼을 눌러 즉시 지원해주세요!"}
                 />
               </div>
             </div>
@@ -502,8 +581,9 @@ export function Pipeline() {
               <span className="text-[13px] font-bold text-[#718096]">예상 소요 비용: ₩ {selectedRows.size * 15}</span>
               <div className="flex gap-2">
                 <button onClick={() => setBulkMsgModalOpen(false)} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0]">취소</button>
-                <button onClick={() => { setBulkMsgModalOpen(false); toast.success(`선택한 ${selectedRows.size}명에게 캠페인 발송이 완료되었습니다.`); setSelectedRows(new Set()); }} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] flex items-center gap-2">
-                  <Mail size={16}/> 캠페인 발송
+                <button onClick={handleBulkSend} disabled={bulkSending} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                  {bulkSending ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                  {bulkSending ? "발송 중..." : "캠페인 발송"}
                 </button>
               </div>
             </div>
@@ -519,7 +599,7 @@ export function Pipeline() {
 interface KanbanColumnProps {
   column: ColumnData;
   moveCard: (cardId: string, sourceColId: string, destColId: string) => void;
-  onCardClick: (card: CardData) => void;
+  onCardClick: (card: DrawerCandidate) => void;
   columnIndex: number;
 }
 
@@ -547,7 +627,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex }: KanbanColu
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2 scrollbar-custom">
         {column.cards.map((card, idx) => (
-          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card)} cardIndex={idx} />
+          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick({ ...card, stage: column.title, stageId: column.id })} cardIndex={idx} />
         ))}
         {column.cards.length === 0 && (
           <div className="h-[120px] bg-white/40 border-2 border-dashed border-[#CBD5E0] rounded-xl flex flex-col items-center justify-center text-[#A0AEC0] gap-2">
@@ -578,11 +658,12 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: cardIndex * 0.05 + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white border border-[#E2E8F0] rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-[#FFCB3C] hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-[#FFCB3C]' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-[#1A202C]">{card.name} <span className="text-[12px] text-[#718096] font-medium ml-1">{card.age}세</span></div>
-        <div className={`text-[12px] font-extrabold px-2 py-0.5 rounded ${card.score >= 90 ? 'bg-[#F0FFF4] text-[#38A169]' : 'bg-[#EBF8FF] text-[#3182CE]'}`}>{card.score}점</div>
+        <div className="text-[11px] font-bold px-2 py-0.5 rounded bg-[#EDF2F7] text-[#4A5568]">{card.channel}</div>
       </div>
       <div className="flex flex-col gap-1.5 mb-3">
-        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">수단:</span> <b>{card.tag}</b></div>
-        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">지역:</span> {card.region}</div>
+        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">지점:</span> <b>{card.branch}</b></div>
+        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">수단:</span> {card.tag}</div>
+        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">희망:</span> {card.slot}</div>
       </div>
       <div className="border-t border-[#F1F4F8] pt-3 flex justify-between items-center">
         <span className="text-[11px] text-[#A0AEC0]">{card.exp}</span>
