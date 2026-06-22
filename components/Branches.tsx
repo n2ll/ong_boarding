@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
-import { Search, MapPin, Building2, Users, Briefcase, Plus, MoreHorizontal, ArrowUpRight, AlertTriangle } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Search, Building2, Users, Briefcase, Plus, ArrowUpRight, AlertTriangle, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { SLOTS, DEFAULT_SLOT_CAPACITY, type SlotKey } from "@/lib/admin/types";
 
 interface ApiBranch {
   id: number;
   name: string;
   active: boolean;
   slot_capacity: Record<string, number> | null;
+  ai_facts?: string | null;
 }
 
 interface ApiApplicant {
@@ -31,6 +33,9 @@ interface ApiManager {
 interface BranchRow {
   id: number;
   name: string;
+  active: boolean;
+  slotCapacity: Record<string, number>;
+  aiFacts: string;
   manager: string;
   currentStaff: number;
   targetStaff: number;
@@ -38,6 +43,24 @@ interface BranchRow {
   applications: number;
   fillRatio: number;
   status: "good" | "warning" | "critical";
+}
+
+interface BranchForm {
+  id: number | null;
+  name: string;
+  active: boolean;
+  slotCapacity: Record<string, number>;
+  aiFacts: string;
+}
+
+function emptyForm(): BranchForm {
+  return {
+    id: null,
+    name: "",
+    active: true,
+    slotCapacity: { ...DEFAULT_SLOT_CAPACITY },
+    aiFacts: "",
+  };
 }
 
 const SCREENING_STATUSES = new Set(["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
@@ -60,60 +83,134 @@ export function Branches() {
   const [rows, setRows] = useState<BranchRow[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<BranchForm | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const [bRes, aRes, jRes, mRes] = await Promise.all([
+        fetch("/api/admin/branches"),
+        fetch("/api/admin/applicants"),
+        fetch("/api/admin/jobs?status=all"),
+        fetch("/api/admin/site-managers"),
+      ]);
+      const branches = ((await bRes.json()).data ?? []) as ApiBranch[];
+      const applicants = ((await aRes.json()).data ?? []) as ApiApplicant[];
+      const jobs = ((await jRes.json()).jobs ?? []) as ApiJob[];
+      const managers = ((await mRes.json()).data ?? []) as ApiManager[];
+
+      const computed: BranchRow[] = branches.map((b) => {
+        const mine = applicants.filter((a) => belongsToBranch(a, b.name));
+        const currentStaff = mine.filter((a) => a.status === "확정인력").length;
+        const applications = mine.filter((a) => SCREENING_STATUSES.has(a.status)).length;
+        const activeJobs = jobs.filter((j) => j.branch === b.name && j.status !== "closed").length;
+        const targetStaff = sumCapacity(b.slot_capacity);
+        const fillRatio = targetStaff > 0 ? Math.round((currentStaff / targetStaff) * 100) : 100;
+        const status: BranchRow["status"] =
+          targetStaff === 0 ? "good" : fillRatio < 70 ? "critical" : fillRatio < 90 ? "warning" : "good";
+        const mgr = managers.find((m) => m.active && m.branch === b.name);
+        return {
+          id: b.id,
+          name: b.name,
+          active: b.active,
+          slotCapacity: (b.slot_capacity ?? {}) as Record<string, number>,
+          aiFacts: b.ai_facts ?? "",
+          manager: mgr?.name ? `${mgr.name} 담당` : "담당자 미지정",
+          currentStaff,
+          targetStaff,
+          activeJobs,
+          applications,
+          fillRatio,
+          status,
+        };
+      });
+      setRows(computed);
+    } catch {
+      toast.error("지점 현황을 불러오지 못했어요");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const [bRes, aRes, jRes, mRes] = await Promise.all([
-          fetch("/api/admin/branches"),
-          fetch("/api/admin/applicants"),
-          fetch("/api/admin/jobs?status=all"),
-          fetch("/api/admin/site-managers"),
-        ]);
-        const branches = ((await bRes.json()).data ?? []) as ApiBranch[];
-        const applicants = ((await aRes.json()).data ?? []) as ApiApplicant[];
-        const jobs = ((await jRes.json()).jobs ?? []) as ApiJob[];
-        const managers = ((await mRes.json()).data ?? []) as ApiManager[];
+    loadBranches();
+  }, [loadBranches]);
 
-        const computed: BranchRow[] = branches
-          .filter((b) => b.active)
-          .map((b) => {
-            const mine = applicants.filter((a) => belongsToBranch(a, b.name));
-            const currentStaff = mine.filter((a) => a.status === "확정인력").length;
-            const applications = mine.filter((a) => SCREENING_STATUSES.has(a.status)).length;
-            const activeJobs = jobs.filter((j) => j.branch === b.name && j.status !== "closed").length;
-            const targetStaff = sumCapacity(b.slot_capacity);
-            const fillRatio = targetStaff > 0 ? Math.round((currentStaff / targetStaff) * 100) : 100;
-            const status: BranchRow["status"] =
-              targetStaff === 0 ? "good" : fillRatio < 70 ? "critical" : fillRatio < 90 ? "warning" : "good";
-            const mgr = managers.find((m) => m.active && m.branch === b.name);
-            return {
-              id: b.id,
-              name: b.name,
-              manager: mgr?.name ? `${mgr.name} 담당` : "담당자 미지정",
-              currentStaff,
-              targetStaff,
-              activeJobs,
-              applications,
-              fillRatio,
-              status,
-            };
-          });
-        setRows(computed);
-      } catch {
-        toast.error("지점 현황을 불러오지 못했어요");
-      } finally {
-        setLoading(false);
+  const openCreate = () => setForm(emptyForm());
+  const openEdit = (b: BranchRow) =>
+    setForm({
+      id: b.id,
+      name: b.name,
+      active: b.active,
+      slotCapacity: SLOTS.reduce((acc, s) => {
+        acc[s] = typeof b.slotCapacity[s] === "number" ? b.slotCapacity[s] : DEFAULT_SLOT_CAPACITY[s];
+        return acc;
+      }, {} as Record<string, number>),
+      aiFacts: b.aiFacts,
+    });
+
+  const handleSave = async () => {
+    if (!form) return;
+    const name = form.name.trim();
+    if (!name) return toast.error("지점 이름을 입력해주세요.");
+    setSaving(true);
+    try {
+      const isEdit = form.id !== null;
+      const res = await fetch(
+        isEdit ? `/api/admin/branches/${form.id}` : "/api/admin/branches",
+        {
+          method: isEdit ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isEdit
+              ? { name, active: form.active, slot_capacity: form.slotCapacity, ai_facts: form.aiFacts.trim() || null }
+              : { name, active: form.active }
+          ),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "저장에 실패했어요");
+        return;
       }
-    })();
-  }, []);
+      toast.success(isEdit ? "지점 정보를 수정했어요." : "새 지점을 등록했어요.");
+      setForm(null);
+      await loadBranches();
+    } catch {
+      toast.error("저장에 실패했어요");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!form || form.id === null) return;
+    if (!confirm(`'${form.name}' 지점을 삭제할까요? 소속 지원자가 있으면 비활성 처리됩니다.`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/branches/${form.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "삭제에 실패했어요");
+        return;
+      }
+      toast.success(json.soft ? json.message || "지점을 비활성화했어요." : "지점을 삭제했어요.");
+      setForm(null);
+      await loadBranches();
+    } catch {
+      toast.error("삭제에 실패했어요");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const filteredBranches = rows.filter(
     (b) => b.name.includes(searchTerm) || b.manager.includes(searchTerm)
   );
 
-  const criticalCount = rows.filter((b) => b.status === "critical").length;
-  const totalActiveJobs = rows.reduce((a, b) => a + b.activeJobs, 0);
+  const activeRows = rows.filter((b) => b.active);
+  const criticalCount = activeRows.filter((b) => b.status === "critical").length;
+  const totalActiveJobs = activeRows.reduce((a, b) => a + b.activeJobs, 0);
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
@@ -121,7 +218,7 @@ export function Branches() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">지점 관리</h1>
-          <p className="text-[14px] text-[#718096]">총 {rows.length}개 지점의 인력 현황과 채용을 관리합니다.</p>
+          <p className="text-[14px] text-[#718096]">운영 중 {activeRows.length}개 · 전체 {rows.length}개 지점의 인력 현황과 정원을 관리합니다.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -135,8 +232,8 @@ export function Branches() {
             />
           </div>
           <button
-            onClick={() => toast.info("신규 지점 등록은 준비 중이에요")}
-            className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors"
+            onClick={openCreate}
+            className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
           >
             <Plus size={18} /> 신규 지점 등록
           </button>
@@ -151,7 +248,7 @@ export function Branches() {
           </div>
           <div>
             <div className="text-[13px] font-bold text-[#718096] mb-0.5">운영 중인 지점</div>
-            <div className="text-2xl font-extrabold text-[#1A202C]">{rows.length}<span className="text-sm font-medium text-[#718096] ml-1">개</span></div>
+            <div className="text-2xl font-extrabold text-[#1A202C]">{activeRows.length}<span className="text-sm font-medium text-[#718096] ml-1">개</span></div>
           </div>
         </div>
         <div className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex items-center gap-4">
@@ -182,18 +279,19 @@ export function Branches() {
         {filteredBranches.map((branch) => {
           const fillRatio = branch.fillRatio;
           return (
-            <div key={branch.id} className="bg-white border border-[#E2E8F0] hover:border-[#CBD5E0] hover:shadow-md rounded-2xl p-6 transition-all group">
+            <div key={branch.id} className={`bg-white border rounded-2xl p-6 transition-all group ${branch.active ? "border-[#E2E8F0] hover:border-[#CBD5E0] hover:shadow-md" : "border-dashed border-[#E2E8F0] opacity-70"}`}>
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-bold text-[#A0AEC0]">#{branch.id}</span>
-                    {branch.status === 'critical' && <span className="text-[10px] font-bold bg-[#FFF5F5] text-[#E53E3E] px-2 py-0.5 rounded border border-[#FEB2B2]">충원 시급</span>}
-                    {branch.status === 'warning' && <span className="text-[10px] font-bold bg-[#FEFCBF] text-[#D69E2E] px-2 py-0.5 rounded border border-[#F6E05E]">충원 필요</span>}
+                    {!branch.active && <span className="text-[10px] font-bold bg-[#EDF2F7] text-[#718096] px-2 py-0.5 rounded border border-[#CBD5E0]">비활성</span>}
+                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-[#FFF5F5] text-[#E53E3E] px-2 py-0.5 rounded border border-[#FEB2B2]">충원 시급</span>}
+                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-[#FEFCBF] text-[#D69E2E] px-2 py-0.5 rounded border border-[#F6E05E]">충원 필요</span>}
                   </div>
                   <h3 className="text-[18px] font-extrabold text-[#1A202C] tracking-tight group-hover:text-[#3182CE] transition-colors">{branch.name}</h3>
                 </div>
-                <button className="text-[#A0AEC0] hover:text-[#4A5568]">
-                  <MoreHorizontal size={20} />
+                <button onClick={() => openEdit(branch)} title="지점 편집" className="text-[#A0AEC0] hover:text-[#1A202C] p-1.5 rounded-lg hover:bg-[#F7FAFC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                  <Pencil size={17} />
                 </button>
               </div>
 
@@ -233,16 +331,107 @@ export function Branches() {
                   </div>
                 </div>
                 <button
-                  onClick={() => toast.info(`${branch.name} 상세는 준비 중이에요`)}
-                  className="flex items-center gap-1 text-[13px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] px-3 py-1.5 rounded-lg transition-colors"
+                  onClick={() => openEdit(branch)}
+                  className="flex items-center gap-1 text-[13px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A202C]"
                 >
-                  상세 보기 <ArrowUpRight size={14} />
+                  정원 · 편집 <ArrowUpRight size={14} />
                 </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* 생성 / 편집 모달 */}
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-[#E2E8F0] sticky top-0 bg-white">
+              <h2 className="text-[18px] font-extrabold text-[#1A202C]">{form.id === null ? "신규 지점 등록" : "지점 편집"}</h2>
+              <button onClick={() => setForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568] p-1 rounded-lg"><X size={20} /></button>
+            </div>
+            <div className="p-6 flex flex-col gap-5">
+              <div>
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점 이름 <span className="text-[#E53E3E]">*</span></label>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="예: 강북미아"
+                  className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+                <div>
+                  <div className="text-[14px] font-bold text-[#1A202C]">활성 상태</div>
+                  <div className="text-[12px] text-[#718096] mt-0.5">비활성 시 지원 폼(/apply)에서 숨겨집니다. 어드민에는 계속 표시됩니다.</div>
+                </div>
+                <button
+                  onClick={() => setForm({ ...form, active: !form.active })}
+                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                >
+                  <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+
+              {form.id !== null && (
+                <>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">슬롯별 정원</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {SLOTS.map((s: SlotKey) => (
+                        <div key={s} className="flex items-center justify-between bg-white border border-[#E2E8F0] rounded-xl px-3.5 py-2.5">
+                          <span className="text-[13px] font-bold text-[#4A5568]">{s}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={form.slotCapacity[s] ?? 0}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                slotCapacity: { ...form.slotCapacity, [s]: Math.max(0, Number(e.target.value) || 0) },
+                              })
+                            }
+                            onFocus={(e) => e.target.select()}
+                            className="w-16 px-2 py-1 border border-[#E2E8F0] rounded-lg text-sm text-right focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[11.5px] text-[#A0AEC0] mt-2">확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">AI 참고 정보 (운영 정보)</label>
+                    <textarea
+                      value={form.aiFacts}
+                      onChange={(e) => setForm({ ...form, aiFacts: e.target.value })}
+                      rows={3}
+                      placeholder="이 지점 지원자 응대 시 AI가 참고할 정보. 예: 픽업 위치, 시급, 특이사항. 비우면 공통 운영 정보만 사용합니다."
+                      className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[#E2E8F0] sticky bottom-0 bg-white">
+              <div>
+                {form.id !== null && (
+                  <button onClick={handleDelete} disabled={saving} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] border border-[#FEB2B2] disabled:opacity-50">
+                    <Trash2 size={15} /> 삭제
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setForm(null)} disabled={saving} className="px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50">취소</button>
+                <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60">
+                  {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
