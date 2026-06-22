@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Search, Filter, Briefcase, MapPin, Users, Activity, MoreHorizontal, CheckCircle2, Copy, Edit2, Play, Pause, AlertCircle, Sparkles, Loader2, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,34 +55,85 @@ export function Jobs() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedJD, setGeneratedJD] = useState("");
+  const [missing, setMissing] = useState<string[]>([]);
+  const [registering, setRegistering] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/jobs?status=all");
-        const json = await res.json();
-        if (json.jobs)
-          setJobs(
-            (json.jobs as ApiJob[])
-              .filter((j) => !j.title.startsWith("__"))
-              .map(toJobRow)
-          );
-        else toast.error("공고 목록을 불러오지 못했어요");
-      } catch {
-        toast.error("공고 목록을 불러오지 못했어요");
-      }
-    })();
+  const loadJobs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/jobs?status=all");
+      const json = await res.json();
+      if (json.jobs)
+        setJobs(
+          (json.jobs as ApiJob[])
+            .filter((j) => !j.title.startsWith("__"))
+            .map(toJobRow)
+        );
+      else toast.error("공고 목록을 불러오지 못했어요");
+    } catch {
+      toast.error("공고 목록을 불러오지 못했어요");
+    }
   }, []);
 
-  const handleGenerateJD = () => {
-    if (!aiPrompt) return toast.error("채용 조건을 입력해주세요.");
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  const handleGenerateJD = async () => {
+    if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");
     setIsGenerating(true);
     setGeneratedJD("");
-    
-    setTimeout(() => {
+    setMissing([]);
+    try {
+      const res = await fetch("/api/admin/recommend/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rough: aiPrompt.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "공고 생성에 실패했어요");
+        return;
+      }
+      setGeneratedJD(json.posting ?? "");
+      const miss = Array.isArray(json.missing) ? (json.missing as string[]) : [];
+      setMissing(miss);
+      if (miss.length > 0) toast.info("메모에 빠진 항목이 있어요. [?] 부분을 채워주세요.");
+      else toast.success("AI가 공고 초안을 완성했어요.");
+    } catch {
+      toast.error("공고 생성에 실패했어요");
+    } finally {
       setIsGenerating(false);
-      setGeneratedJD(`[모집 부문]\n- 매장 청결 관리 및 테이블 정리 (시니어 우대)\n\n[근무 조건]\n- 근무지: 스타벅스 성수점\n- 근무일: 주 3일 (월, 수, 금)\n- 근무시간: 오전 08:00 ~ 12:00 (4시간)\n- 급여: 시급 11,000원\n\n[지원 자격]\n- 60세 이상 시니어 우대\n- 서비스 마인드가 투철하시고 성실하신 분\n- 보건증 발급 가능자\n\n[업무 상세]\n- 매장 내 테이블 및 의자 소독\n- 반납된 트레이 및 컵 정리\n- 매장 바닥 및 화장실 청결 유지\n\n* AI 옹봇이 작성한 초안입니다. 필요에 따라 내용을 수정해주세요.`);
-    }, 1500);
+    }
+  };
+
+  const handleRegisterJob = async () => {
+    const posting = generatedJD.trim();
+    if (!posting || registering) return;
+    const lines = posting.split("\n").map((l) => l.trim()).filter(Boolean);
+    const title = (lines[0] ?? "새 공고").slice(0, 80);
+    setRegistering(true);
+    try {
+      const res = await fetch("/api/admin/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, body: posting }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "공고 등록에 실패했어요");
+        return;
+      }
+      toast.success("새 공고가 등록되었어요. AI 자동 스크리닝이 시작됩니다.");
+      setAiModalOpen(false);
+      setAiPrompt("");
+      setGeneratedJD("");
+      setMissing([]);
+      await loadJobs();
+    } catch {
+      toast.error("공고 등록에 실패했어요");
+    } finally {
+      setRegistering(false);
+    }
   };
 
   const filteredJobs = jobs.filter(job => {
@@ -91,7 +142,7 @@ export function Jobs() {
   });
 
   const toggleAutomation = (id: string, current: boolean) => {
-    setJobs(jobs.map(job => 
+    setJobs(jobs.map(job =>
       job.id === id ? { ...job, automation: !current } : job
     ));
     if (!current) {
@@ -131,39 +182,39 @@ export function Jobs() {
         {/* Toolbar */}
         <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between gap-4">
           <div className="flex gap-1.5">
-            <button 
+            <button
               onClick={() => setActiveTab('all')}
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'all' ? 'bg-[#1A202C] text-white' : 'bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
             >
               전체
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('active')}
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'active' ? 'bg-[#1A202C] text-white' : 'bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
             >
               진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.status === 'active').length}</span>
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('closed')}
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'closed' ? 'bg-[#1A202C] text-white' : 'bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
             >
               마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.status === 'closed').length}</span>
             </button>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <button className="flex items-center gap-2 bg-white border border-[#E2E8F0] px-4 py-2 rounded-xl text-sm font-semibold text-[#4A5568] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
               <Filter size={16} /> 상세 필터
             </button>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-              <input 
-                type="text" 
-                placeholder="공고명, 지점 검색" 
+              <input
+                type="text"
+                placeholder="공고명, 지점 검색"
                 className="pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm w-[260px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
               />
             </div>
-            <button 
+            <button
               onClick={() => setAiModalOpen(true)}
               className="flex items-center gap-1.5 bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] px-4 py-2 rounded-xl text-sm font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
             >
@@ -191,7 +242,7 @@ export function Jobs() {
                   <div className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
                   <div className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</div>
                 </div>
-                
+
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-1.5 text-[13.5px] font-semibold text-[#4A5568]">
                     <MapPin size={14} className="text-[#A0AEC0]" /> {job.branch}
@@ -214,7 +265,7 @@ export function Jobs() {
                   <div className="w-px h-8 bg-[#E2E8F0]"></div>
                   <div className="flex flex-col gap-1">
                     <div className="text-[12px] font-bold text-[#718096]">AI 자동 스크리닝</div>
-                    <button 
+                    <button
                       onClick={() => toggleAutomation(job.id, job.automation)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${job.automation ? 'bg-[#3182CE]' : 'bg-[#CBD5E0]'}`}
                     >
@@ -255,7 +306,7 @@ export function Jobs() {
               </div>
               <h3 className="text-[16px] font-bold text-[#1A202C] mb-2">공고가 없습니다</h3>
               <p className="text-[14px] text-[#718096] mb-6">현재 선택된 상태의 공고가 존재하지 않습니다.</p>
-              <button 
+              <button
                 onClick={() => setAiModalOpen(true)}
                 className="flex items-center gap-2 bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
               >
@@ -284,19 +335,19 @@ export function Jobs() {
                 <X size={24} />
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-[#F7FAFC]">
               {/* Prompt Input */}
               <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
                 <label className="block text-[13px] font-bold text-[#4A5568] mb-2">어떤 포지션을 찾고 계신가요?</label>
-                <textarea 
+                <textarea
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
                   placeholder="예: 스타벅스 성수점 매장 청소 및 테이블 관리, 주 3일 오전반, 시급 1.1만원, 60대 우대"
                   className="w-full bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3.5 text-[14px] text-[#1A202C] placeholder:text-[#A0AEC0] focus:outline-none focus:border-[#FFCB3C] min-h-[100px] resize-none"
                 />
                 <div className="flex justify-end mt-3">
-                  <button 
+                  <button
                     onClick={handleGenerateJD}
                     disabled={isGenerating || !aiPrompt}
                     className="flex items-center gap-1.5 px-5 py-2.5 bg-[#1A202C] text-white hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[13.5px] font-bold transition-colors"
@@ -323,7 +374,20 @@ export function Jobs() {
                     </label>
                     <span className="text-[11px] text-[#A0AEC0]">자유롭게 수정 가능합니다</span>
                   </div>
-                  <textarea 
+                  {missing.length > 0 && (
+                    <div className="mb-3 flex items-start gap-2 bg-[#FFF5F5] border border-[#FEB2B2] rounded-xl px-3.5 py-2.5">
+                      <AlertCircle size={15} className="text-[#E53E3E] mt-0.5 shrink-0" />
+                      <div className="text-[12.5px] text-[#C53030] leading-relaxed">
+                        <b>메모에 빠진 항목</b>이 있어 <b>[?]</b>로 표시했어요. 등록 전에 채워주세요:
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {missing.map((m) => (
+                            <span key={m} className="text-[11px] font-bold bg-white border border-[#FEB2B2] text-[#C53030] px-2 py-0.5 rounded-md">{m}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <textarea
                     value={generatedJD}
                     onChange={(e) => setGeneratedJD(e.target.value)}
                     className="w-full bg-[#FFFBEC] border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-[#2D3748] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FFCB3C] min-h-[280px] font-medium resize-none"
@@ -331,23 +395,21 @@ export function Jobs() {
                 </div>
               )}
             </div>
-            
+
             <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
-              <button 
+              <button
                 onClick={() => setAiModalOpen(false)}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
               >
                 닫기
               </button>
-              <button 
-                onClick={() => {
-                  toast.success("새로운 공고가 등록되었습니다! AI 자동 스크리닝이 시작됩니다.");
-                  setAiModalOpen(false);
-                }}
-                disabled={!generatedJD}
-                className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+              <button
+                onClick={handleRegisterJob}
+                disabled={!generatedJD || registering}
+                className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
               >
-                이 내용으로 공고 등록
+                {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </button>
             </div>
           </div>
