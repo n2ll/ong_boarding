@@ -32,6 +32,25 @@ interface SimDraft {
   missing_info?: string;
 }
 
+interface PersonaForm {
+  role: string;
+  instructions: string;
+  tone: string;
+  emoji: number;
+}
+
+const TONE_OPTIONS = ["친절하고 따뜻하게", "전문적이고 단호하게", "밝고 활기차게"];
+
+const DEFAULT_PERSONA: PersonaForm = {
+  role: "당신은 시니어 배달원 채용을 돕는 친절하고 인내심 많은 전문 채용 매니저 '옹봇'입니다.",
+  instructions: `1. 시니어(50~70대) 지원자가 이해하기 쉽도록 전문 용어(예: 파이프라인, 스크리닝 등) 사용을 피하고 쉬운 우리말을 사용하세요.
+2. 항상 존댓말을 사용하고, 지원자의 답변이 늦어지더라도 재촉하지 마세요.
+3. 지점 위치나 근무 시간에 대한 질문을 받으면 즉시 사내 지식 베이스를 검색하여 정확하게 안내하세요.
+4. 면접 일정 조율 시에는 반드시 오전/오후 중 선호하는 시간대를 먼저 물어보세요.`,
+  tone: "친절하고 따뜻하게",
+  emoji: 40,
+};
+
 const CATEGORY_LABEL: Record<string, string> = {
   conversation: "대화 예시",
   facts: "운영 정보",
@@ -58,6 +77,32 @@ export function AgentBrain() {
   const [simResult, setSimResult] = useState<SimDraft | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 운영자 페르소나 (시스템 프롬프트에 반영) — prompt_examples(agent_config/persona) 실연동
+  const [persona, setPersona] = useState<PersonaForm>(DEFAULT_PERSONA);
+  const [personaLoaded, setPersonaLoaded] = useState(false);
+
+  const loadPersona = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/agent/persona");
+      const json = await res.json();
+      if (res.ok && json.data) {
+        setPersona({
+          role: json.data.role || DEFAULT_PERSONA.role,
+          instructions: json.data.instructions || DEFAULT_PERSONA.instructions,
+          tone: json.data.tone || DEFAULT_PERSONA.tone,
+          emoji: typeof json.data.emoji === "number" ? json.data.emoji : DEFAULT_PERSONA.emoji,
+        });
+      }
+    } catch {
+      /* 실패 시 기본 페르소나 유지 */
+    } finally {
+      setPersonaLoaded(true);
+    }
+  }, []);
+
+  const setPersonaField = <K extends keyof PersonaForm>(key: K, value: PersonaForm[K]) =>
+    setPersona((prev) => ({ ...prev, [key]: value }));
 
   // 전역 AI 응답 스위치 (kill-switch). killDisabled=true 면 AI 전역 중단.
   const [killLoading, setKillLoading] = useState(true);
@@ -128,7 +173,8 @@ export function AgentBrain() {
   useEffect(() => {
     loadExamples();
     loadKillSwitch();
-  }, [loadExamples, loadKillSwitch]);
+    loadPersona();
+  }, [loadExamples, loadKillSwitch, loadPersona]);
 
   const openKbAdd = () =>
     setKbForm({ id: null, category: kbCategory, title: "", body: "" });
@@ -208,14 +254,28 @@ export function AgentBrain() {
     }
   };
 
-  const kbItems = examples.filter((e) => e.category === kbCategory);
+  // '__' 접두 제목은 내부 설정용 예약 항목(예: __persona__) — KB 목록에 노출하지 않는다.
+  const kbItems = examples.filter((e) => e.category === kbCategory && !e.title.startsWith("__"));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setIsSaving(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/admin/agent/persona", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(persona),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "저장에 실패했어요");
+        return;
+      }
+      toast.success("페르소나를 저장했어요. 60초 이내 AI 응대에 반영됩니다. (예외 처리 규칙은 별도 데모)");
+    } catch {
+      toast.error("저장에 실패했어요");
+    } finally {
       setIsSaving(false);
-      toast.info("페르소나·규칙 편집 저장은 준비 중이에요 (지식 베이스는 prompt_examples 연동됨)");
-    }, 600);
+    }
   };
 
   const handleRunSimulation = async () => {
@@ -298,12 +358,15 @@ export function AgentBrain() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">에이전트 두뇌</h1>
-            <p className="text-[14px] text-[#718096]">지식 베이스는 실데이터(prompt_examples)와 연동됩니다. 페르소나·규칙 편집은 데모입니다.</p>
+            <p className="text-[14px] text-[#718096]">페르소나·지식 베이스는 실데이터(prompt_examples)와 연동됩니다. 예외 처리 규칙 편집은 데모입니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
-            <RefreshCw size={16} /> 변경사항 초기화
+          <button
+            onClick={() => { setPersona(DEFAULT_PERSONA); toast.info("기본 페르소나로 되돌렸어요. 저장해야 반영됩니다."); }}
+            className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          >
+            <RefreshCw size={16} /> 기본값으로 초기화
           </button>
           <button
             onClick={handleSave}
@@ -364,45 +427,54 @@ export function AgentBrain() {
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">기본 역할 (Role)</label>
                   <input
                     type="text"
-                    defaultValue="당신은 시니어 배달원 채용을 돕는 친절하고 인내심 많은 전문 채용 매니저 '옹봇'입니다."
-                    className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    value={persona.role}
+                    onChange={(e) => setPersonaField("role", e.target.value)}
+                    disabled={!personaLoaded}
+                    className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] disabled:bg-[#F7FAFC]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2 flex items-center justify-between">
-                    핵심 지시사항 (Instructions)
-                    <button className="text-[#3182CE] text-xs font-bold hover:underline">자동 교정</button>
-                  </label>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">핵심 지시사항 (Instructions)</label>
                   <textarea
                     rows={6}
-                    defaultValue={`1. 시니어(50~70대) 지원자가 이해하기 쉽도록 전문 용어(예: 파이프라인, 스크리닝 등) 사용을 피하고 쉬운 우리말을 사용하세요.
-2. 항상 존댓말을 사용하고, 지원자의 답변이 늦어지더라도 재촉하지 마세요.
-3. 지점 위치나 근무 시간에 대한 질문을 받으면 즉시 사내 지식 베이스를 검색하여 정확하게 안내하세요.
-4. 면접 일정 조율 시에는 반드시 오전/오후 중 선호하는 시간대를 먼저 물어보세요.`}
-                    className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    value={persona.instructions}
+                    onChange={(e) => setPersonaField("instructions", e.target.value)}
+                    disabled={!personaLoaded}
+                    className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] disabled:bg-[#F7FAFC]"
                   />
-                  <p className="text-[12px] text-[#A0AEC0] mt-2">마크다운(Markdown) 문법을 지원합니다. 구체적일수록 AI가 더 정확하게 답변합니다.</p>
+                  <p className="text-[12px] text-[#A0AEC0] mt-2">‘설정 저장’을 누르면 60초 이내 실제 AI 응대(시뮬레이터 포함)에 반영됩니다. 안전 규칙(민감 질문 매니저 인계 등)은 항상 유지됩니다.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-6 pt-4 border-t border-[#E2E8F0]">
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-3">어조 (Tone & Manner)</label>
                     <div className="flex flex-col gap-3">
-                      {['친절하고 따뜻하게', '전문적이고 단호하게', '밝고 활기차게'].map((tone, i) => (
-                        <label key={i} className="flex items-center gap-3 cursor-pointer">
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${i === 0 ? 'border-[#FFCB3C]' : 'border-[#CBD5E0]'}`}>
-                            {i === 0 && <div className="w-2.5 h-2.5 rounded-full bg-[#FFCB3C]"></div>}
-                          </div>
-                          <span className={`text-sm font-medium ${i === 0 ? 'text-[#1A202C] font-bold' : 'text-[#718096]'}`}>{tone}</span>
-                        </label>
-                      ))}
+                      {TONE_OPTIONS.map((tone) => {
+                        const selected = persona.tone === tone;
+                        return (
+                          <label key={tone} className="flex items-center gap-3 cursor-pointer" onClick={() => personaLoaded && setPersonaField("tone", tone)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selected ? 'border-[#FFCB3C]' : 'border-[#CBD5E0]'}`}>
+                              {selected && <div className="w-2.5 h-2.5 rounded-full bg-[#FFCB3C]"></div>}
+                            </div>
+                            <span className={`text-sm font-medium ${selected ? 'text-[#1A202C] font-bold' : 'text-[#718096]'}`}>{tone}</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-3">이모지 사용 빈도</label>
                     <div className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl p-4">
-                      <input type="range" min="0" max="100" defaultValue="40" className="w-full accent-[#FFCB3C]" />
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={persona.emoji}
+                        onChange={(e) => setPersonaField("emoji", Number(e.target.value))}
+                        disabled={!personaLoaded}
+                        className="w-full accent-[#FFCB3C]"
+                      />
                       <div className="flex justify-between text-[11px] font-bold text-[#A0AEC0] mt-2">
                         <span>사용 안 함</span>
                         <span>적당히</span>

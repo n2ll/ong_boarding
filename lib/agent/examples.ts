@@ -51,6 +51,55 @@ export async function loadConversationExamples(): Promise<string> {
   return fetchCategory("conversation");
 }
 
+// 운영자 페르소나 — prompt_examples(category='agent_config', title='persona') 1행.
+// body에는 구조화 JSON({role, instructions, tone, emoji})을 저장하고, 여기서 가독 텍스트로 조립한다.
+let personaCache: CachedCategory | null = null;
+
+function composePersona(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    const o = JSON.parse(trimmed) as { role?: string; instructions?: string; tone?: string; emoji?: number };
+    const lines: string[] = [];
+    if (o.role?.trim()) lines.push(`역할: ${o.role.trim()}`);
+    if (o.instructions?.trim()) lines.push(`핵심 지시사항:\n${o.instructions.trim()}`);
+    if (o.tone?.trim()) lines.push(`어조: ${o.tone.trim()}`);
+    if (typeof o.emoji === "number") {
+      const level = o.emoji <= 20 ? "거의 사용 안 함" : o.emoji >= 70 ? "자주 사용" : "적당히 사용";
+      lines.push(`이모지 사용 빈도: ${level}`);
+    }
+    return lines.join("\n\n");
+  } catch {
+    // 구버전/자유 텍스트 호환 — 그대로 가이드로 사용
+    return trimmed;
+  }
+}
+
+export async function loadPersonaGuidance(): Promise<string> {
+  if (personaCache && personaCache.expiresAt > Date.now()) return personaCache.text;
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from("prompt_examples")
+      .select("body")
+      .eq("category", "system_message")
+      .eq("title", "__persona__")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error("[agent/examples] persona fetch error", error);
+      return personaCache?.text ?? "";
+    }
+    const text = composePersona((data?.body as string | null) ?? "");
+    personaCache = { text, expiresAt: Date.now() + CACHE_TTL_MS };
+    return text;
+  } catch (e) {
+    console.error("[agent/examples] persona exception", e);
+    return personaCache?.text ?? "";
+  }
+}
+
 export async function loadFacts(): Promise<string> {
   return fetchCategory("facts");
 }
@@ -144,4 +193,5 @@ export async function buildToneGuide(branchName?: string | null): Promise<string
 export function invalidateExamplesCache(): void {
   cache.clear();
   branchFactsCache.clear();
+  personaCache = null;
 }

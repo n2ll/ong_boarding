@@ -8,7 +8,7 @@
  *   매니저가 직접 .txt 파일을 수정하면 다음 배포부터 반영됨.
  */
 
-import { loadConversationExamples } from "./agent/examples";
+import { loadConversationExamples, loadPersonaGuidance } from "./agent/examples";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -46,11 +46,18 @@ const KAKAO_CHANNEL_URL =
 const APPLY_URL = process.env.AGENT_APPLY_URL || "";
 
 async function buildSystemPrompt(): Promise<string> {
-  const examples = await loadConversationExamples();
+  const [examples, persona] = await Promise.all([
+    loadConversationExamples(),
+    loadPersonaGuidance(),
+  ]);
   const examplesSection = examples
     ? `\n## 실제 대화 예시 (톤·길이·스타일 참고용 — 무조건 이 톤 따라가)\n\n${examples}`
     : "";
-  return SYSTEM_PROMPT_BODY + examplesSection;
+  // 운영자 추가 지침 — 위의 안전 규칙(need_info 등)은 그대로 두고 톤·세부만 우선 반영.
+  const personaSection = persona
+    ? `\n\n## 운영자 추가 지침 (관리자 설정 — 안전 규칙은 유지하되 아래 톤·세부 지침을 우선 반영)\n${persona}`
+    : "";
+  return SYSTEM_PROMPT_BODY + examplesSection + personaSection;
 }
 
 const SYSTEM_PROMPT_BODY = `너는 옹고잉(내이루리) 비마트 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대를 돕는 에이전트다.
