@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Filter, Briefcase, MapPin, Users, Activity, MoreHorizontal, CheckCircle2, Copy, Edit2, Play, Pause, AlertCircle, Sparkles, Loader2, Wand2, X } from "lucide-react";
+import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, AlertCircle, Sparkles, Loader2, Wand2, X, Save } from "lucide-react";
 import { toast } from "sonner";
 
 interface JobRow {
@@ -72,6 +72,10 @@ export function Jobs() {
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [branches, setBranches] = useState<BranchOpt[]>([]);
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean } | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -183,6 +187,93 @@ export function Jobs() {
   });
 
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
+
+  const openEdit = async (id: string) => {
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true });
+    setEditLoading(true);
+    try {
+      const res = await fetch(`/api/admin/jobs/${id}`);
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "공고를 불러오지 못했어요");
+        setEditForm(null);
+        return;
+      }
+      const j = json.job;
+      setEditForm({
+        id,
+        title: j.title ?? "",
+        body: j.body ?? "",
+        branchId: j.branch_id ?? "",
+        capacity: j.capacity ?? 1,
+        vehicleRequired: !!j.vehicle_required,
+      });
+    } catch {
+      toast.error("공고를 불러오지 못했어요");
+      setEditForm(null);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editForm) return;
+    const title = editForm.title.trim();
+    if (!title) return toast.error("공고 제목을 입력해주세요.");
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/admin/jobs/${editForm.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          body: editForm.body,
+          branch_id: editForm.branchId === "" ? null : editForm.branchId,
+          capacity: editForm.capacity,
+          vehicle_required: editForm.vehicleRequired,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "수정에 실패했어요");
+        return;
+      }
+      toast.success("공고를 수정했어요.");
+      setEditForm(null);
+      await loadJobs();
+    } catch {
+      toast.error("수정에 실패했어요");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleToggleClose = async (job: JobRow) => {
+    const next = job.status === "active" ? "closed" : "active";
+    const msg = next === "closed"
+      ? `'${job.title}' 공고를 마감할까요? 마감 후에도 언제든 재개할 수 있어요.`
+      : `'${job.title}' 공고를 다시 진행할까요?`;
+    if (!confirm(msg)) return;
+    setStatusBusyId(job.id);
+    try {
+      const res = await fetch(`/api/admin/jobs/${job.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "변경에 실패했어요");
+        return;
+      }
+      toast.success(next === "closed" ? "공고를 마감했어요." : "공고를 다시 진행합니다.");
+      await loadJobs();
+    } catch {
+      toast.error("변경에 실패했어요");
+    } finally {
+      setStatusBusyId(null);
+    }
+  };
 
   const toggleAutomation = (id: string, current: boolean) => {
     setJobs(jobs.map(job =>
@@ -358,11 +449,16 @@ export function Jobs() {
                   <button onClick={() => copyJobLink(job.title)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 링크 복사">
                     <Copy size={16} />
                   </button>
-                  <button className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 수정">
+                  <button onClick={() => openEdit(job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 수정">
                     <Edit2 size={16} />
                   </button>
-                  <button className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors">
-                    <MoreHorizontal size={16} />
+                  <button
+                    onClick={() => handleToggleClose(job)}
+                    disabled={statusBusyId === job.id}
+                    className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50"
+                    title={job.status === "active" ? "공고 마감" : "공고 재개"}
+                  >
+                    {statusBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : job.status === "active" ? <Pause size={16} /> : <Play size={16} />}
                   </button>
                 </div>
               </div>
@@ -493,6 +589,57 @@ export function Jobs() {
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 공고 수정 모달 */}
+      {editForm && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !editSaving && setEditForm(null)}>
+          <div className="bg-white w-full max-w-[640px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-7 py-5 border-b border-[#E2E8F0]">
+              <h2 className="text-[18px] font-extrabold text-[#1A202C]">공고 수정</h2>
+              <button onClick={() => setEditForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={22} /></button>
+            </div>
+            {editLoading ? (
+              <div className="flex items-center justify-center py-16 text-[#A0AEC0]"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-5">
+                <div>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#E53E3E]">*</span></label>
+                  <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점</label>
+                    <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                      <option value="">미지정</option>
+                      {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 인원</label>
+                    <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+                  <div className="text-[14px] font-bold text-[#1A202C]">차량(이륜/사륜) 필요</div>
+                  <button onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`w-12 h-7 rounded-full relative transition-colors ${editForm.vehicleRequired ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}>
+                    <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>
+                  <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
+              <button onClick={() => setEditForm(null)} disabled={editSaving} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button onClick={handleEditSave} disabled={editSaving || editLoading} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 flex items-center gap-2">
+                {editSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} 저장
+              </button>
             </div>
           </div>
         </div>

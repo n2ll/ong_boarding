@@ -10,6 +10,7 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "title",
   "body",
   "branch",
+  "branch_id",
   "slot",
   "start_date",
   "vehicle_required",
@@ -85,12 +86,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
   }
 
-  // 마감 처리 — closed로 바뀌면 closed_at 자동 기록
+  // 마감 처리 — closed로 바뀌면 closed_at 자동 기록, 재개 시 해제
   if (update.status === "closed") {
     update.closed_at = new Date().toISOString();
+  } else if (update.status === "active" || update.status === "paused") {
+    update.closed_at = null;
   }
 
   const supabase = createServiceClient();
+
+  // 지점(branch_id) 변경 시 지점 이름·소속 화주사를 함께 맞춰 계층 정합성 유지
+  if (typeof update.branch_id === "number") {
+    const { data: b } = await supabase
+      .from("branches")
+      .select("name, client_id")
+      .eq("id", update.branch_id)
+      .maybeSingle();
+    if (b) {
+      update.branch = (b.name as string) ?? update.branch ?? null;
+      update.client_id = (b.client_id as number | null) ?? null;
+    }
+  } else if (update.branch_id === null) {
+    update.client_id = null;
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .update(update)
