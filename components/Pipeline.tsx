@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2 } from "lucide-react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -6,6 +7,7 @@ import { toast } from "sonner";
 import { CandidateDrawer, type DrawerCandidate } from "./CandidateDrawer";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
+import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 
 // Types
 interface CardData {
@@ -135,12 +137,20 @@ export function Pipeline() {
   const [columns, setColumns] = useState<ColumnData[]>(() =>
     COLUMN_DEFS.map((d) => ({ ...d, count: 0, cards: [] }))
   );
+  const searchParams = useSearchParams();
+  const { branch: scopeBranch } = useBranchScope();
   const [loading, setLoading] = useState(true);
   const [selectedCandidate, setSelectedCandidate] = useState<DrawerCandidate | null>(null);
   const [view, setView] = useState<"kanban" | "list">("list");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
+
+  // 헤더 글로벌 검색에서 ?q= 로 진입하면 검색어 프리필
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q) setQuery(q);
+  }, [searchParams]);
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
   const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");
   const [slotFilter, setSlotFilter] = useState<Set<string>>(new Set());
@@ -192,6 +202,7 @@ export function Pipeline() {
 
   const q = query.trim().toLowerCase();
   const filteredCards = allCards.filter((c) => {
+    if (!matchesBranchScope(c.branch, scopeBranch)) return false;
     if (q && ![c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag].some((v) => v.toLowerCase().includes(q))) return false;
     if (channelFilter.size && !channelFilter.has(c.channel)) return false;
     if (vehicleFilter === "walk" && c.tag !== "도보") return false;

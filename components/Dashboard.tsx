@@ -1,8 +1,9 @@
 import { ArrowRight, TrendingUp, Users, Zap, MapPin, MousePointerClick, MessageSquare, Calendar, PlayCircle, BarChart2, CheckCircle2, Activity, PhoneCall } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } from "recharts";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "motion/react";
+import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 
 interface UrgentItem {
   id: string;
@@ -13,10 +14,20 @@ interface UrgentItem {
   path: string;
 }
 
+interface AppRow {
+  status: string;
+  created_at: string;
+  unread_count?: number | null;
+  branch?: string | null;
+  branch1?: string | null;
+  confirmed_branch?: string | null;
+}
+
 export function Dashboard() {
   const router = useRouter();
-  const [stats, setStats] = useState({ today: 0, screening: 0, interview: 0, passed: 0, total: 0 });
-  const [urgent, setUrgent] = useState<UrgentItem[]>([]);
+  const { branch: scopeBranch } = useBranchScope();
+  const [rawApps, setRawApps] = useState<AppRow[]>([]);
+  const [inboxCount, setInboxCount] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -25,33 +36,43 @@ export function Dashboard() {
           fetch("/api/admin/applicants"),
           fetch("/api/admin/inbox/pending"),
         ]);
-        const apps = ((await aRes.json()).data ?? []) as { status: string; created_at: string; unread_count?: number | null }[];
-        const inbox = ((await iRes.json()).data ?? []) as unknown[];
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const by = (s: string) => apps.filter((a) => a.status === s).length;
-        setStats({
-          today: apps.filter((a) => (a.created_at ?? "").slice(0, 10) === todayStr).length,
-          screening: by("스크리닝 중"),
-          interview: by("스크리닝 완료"),
-          passed: by("확정인력"),
-          total: apps.length,
-        });
-
-        // 실무자 긴급 확인 사항 — 실데이터 기반
-        const interventions = apps.filter((a) => (a.unread_count ?? 0) > 0).length;
-        const u: UrgentItem[] = [];
-        if (inbox.length > 0) {
-          u.push({ id: "inbox", tone: "red", title: `미분류 인박스 ${inbox.length}건`, desc: "배민 지원자/기타 분류가 필요한 인입 메시지가 있어요.", cta: "분류하러 가기", path: "/inbox" });
-        }
-        if (interventions > 0) {
-          u.push({ id: "live", tone: "amber", title: `수동 개입 필요 ${interventions}건`, desc: "미답장 상태인 지원자 대화가 있어요. 직접 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
-        }
-        setUrgent(u);
+        setRawApps(((await aRes.json()).data ?? []) as AppRow[]);
+        setInboxCount((((await iRes.json()).data ?? []) as unknown[]).length);
       } catch {
         /* 대시보드 통계는 실패해도 화면은 유지 */
       }
     })();
   }, []);
+
+  const branchOf = (a: AppRow) => a.confirmed_branch || a.branch1 || a.branch || null;
+  const apps = useMemo(
+    () => rawApps.filter((a) => matchesBranchScope(branchOf(a), scopeBranch)),
+    [rawApps, scopeBranch]
+  );
+
+  const stats = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const by = (s: string) => apps.filter((a) => a.status === s).length;
+    return {
+      today: apps.filter((a) => (a.created_at ?? "").slice(0, 10) === todayStr).length,
+      screening: by("스크리닝 중"),
+      interview: by("스크리닝 완료"),
+      passed: by("확정인력"),
+      total: apps.length,
+    };
+  }, [apps]);
+
+  const urgent = useMemo(() => {
+    const interventions = apps.filter((a) => (a.unread_count ?? 0) > 0).length;
+    const u: UrgentItem[] = [];
+    if (inboxCount > 0) {
+      u.push({ id: "inbox", tone: "red", title: `미분류 인박스 ${inboxCount}건`, desc: "배민 지원자/기타 분류가 필요한 인입 메시지가 있어요.", cta: "분류하러 가기", path: "/inbox" });
+    }
+    if (interventions > 0) {
+      u.push({ id: "live", tone: "amber", title: `수동 개입 필요 ${interventions}건`, desc: "미답장 상태인 지원자 대화가 있어요. 직접 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
+    }
+    return u;
+  }, [apps, inboxCount]);
 
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
@@ -62,7 +83,9 @@ export function Dashboard() {
           
           <div className="relative z-10 flex items-center justify-between mb-8">
             <div>
-              <h1 className="text-[20px] font-extrabold tracking-tight mb-1">전사 채용 파이프라인 오버뷰</h1>
+              <h1 className="text-[20px] font-extrabold tracking-tight mb-1">
+                {scopeBranch ? `${scopeBranch} 파이프라인 오버뷰` : "전사 채용 파이프라인 오버뷰"}
+              </h1>
               <div className="flex items-center gap-2 text-[13px] text-white/70">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#48BB78] animate-pulse"></span> 통합 시스템 정상 가동 중</span>
                 <span className="text-white/30">|</span>

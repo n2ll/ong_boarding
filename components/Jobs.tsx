@@ -81,9 +81,15 @@ export function Jobs() {
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
+  // 헤더 글로벌 검색 → /jobs?q=제목 으로 진입하면 검색어 프리필
   useEffect(() => {
-    if (searchParams.get("new") === "1") {
+    const newParam = searchParams.get("new");
+    const qParam = searchParams.get("q");
+    if (newParam === "1") {
       setAiModalOpen(true);
+      router.replace("/jobs");
+    } else if (qParam) {
+      setQuery(qParam);
       router.replace("/jobs");
     }
   }, [searchParams, router]);

@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { Toaster } from "@/components/ui/sonner";
 import { ChatWidget } from "@/components/ChatWidget";
+import { BranchScopeProvider } from "@/lib/branch-scope";
 
 function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/automation")) return { pageTitle: "자동화 현황", crumb: "개요 > 자동화 현황" };
@@ -29,16 +30,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { pageTitle, crumb } = resolveHeader(pathname);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#EEF1F5] font-sans">
-      <Sidebar />
-      <div className="flex flex-col flex-1 min-w-0">
-        <Topbar crumb={crumb} pageTitle={pageTitle} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-custom bg-[#F7FAFC]">
-          {children}
-        </main>
+    <BranchScopeProvider>
+      <div className="flex h-screen w-full overflow-hidden bg-[#EEF1F5] font-sans">
+        <Sidebar />
+        <div className="flex flex-col flex-1 min-w-0">
+          <Topbar crumb={crumb} pageTitle={pageTitle} />
+          <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-custom bg-[#F7FAFC]">
+            {children}
+          </main>
+        </div>
+        <Toaster position="bottom-right" richColors />
+        <ChatWidget />
       </div>
-      <Toaster position="bottom-right" richColors />
-      <ChatWidget />
-    </div>
+    </BranchScopeProvider>
   );
 }
