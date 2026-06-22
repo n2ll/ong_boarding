@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from "recharts";
 import { Download, TrendingUp, Users, Brain, CheckCircle, Coins } from "lucide-react";
 import { toast } from "sonner";
@@ -22,11 +22,26 @@ function lastSixMonths(): { key: string; name: string }[] {
   return out;
 }
 
+function inRange(created_at: string | null, range: string): boolean {
+  if (!created_at) return false;
+  const d = new Date(created_at);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  if (range === "올해") return d.getFullYear() === now.getFullYear();
+  if (range === "이번 달") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  if (range === "이번 주") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // 월요일 시작
+    return d >= start;
+  }
+  return true;
+}
+
 export function Reports() {
   const [dateRange, setDateRange] = useState("올해");
-  const [stats, setStats] = useState({ total: 0, passed: 0, screening: 0, cost: 0 });
-  const [trend, setTrend] = useState<{ name: string; 지원자: number; 합격자: number }[]>([]);
-  const [funnel, setFunnel] = useState<{ step: string; count: number }[]>([]);
+  const [apps, setApps] = useState<ApplicantRow[]>([]);
+  const [usage, setUsage] = useState<UsageRow[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -35,41 +50,66 @@ export function Reports() {
           fetch("/api/admin/applicants"),
           fetch("/api/admin/usage"),
         ]);
-        const apps = ((await aRes.json()).data ?? []) as ApplicantRow[];
-        const usage = ((await uRes.json()).data ?? []) as UsageRow[];
-
-        const by = (s: string) => apps.filter((a) => a.status === s).length;
-        const passed = by("확정인력");
-        const screening = by("스크리닝 중") + by("스크리닝 완료");
-        const cost = usage.reduce((acc, u) => acc + (u.total_cost_krw ?? 0), 0);
-        setStats({ total: apps.length, passed, screening, cost });
-
-        setFunnel([
-          { step: "지원서 접수", count: apps.length },
-          { step: "AI 스크리닝", count: screening + passed },
-          { step: "스크리닝 완료", count: by("스크리닝 완료") + passed },
-          { step: "최종 합격", count: passed },
-        ]);
-
-        const months = lastSixMonths();
-        setTrend(
-          months.map((m) => {
-            const inMonth = apps.filter((a) => (a.created_at ?? "").slice(0, 7) === m.key);
-            return {
-              name: m.name,
-              지원자: inMonth.length,
-              합격자: inMonth.filter((a) => a.status === "확정인력").length,
-            };
-          })
-        );
+        setApps(((await aRes.json()).data ?? []) as ApplicantRow[]);
+        setUsage(((await uRes.json()).data ?? []) as UsageRow[]);
       } catch {
         toast.error("리포트 데이터를 불러오지 못했어요");
       }
     })();
   }, []);
 
+  const rangedApps = useMemo(() => apps.filter((a) => inRange(a.created_at, dateRange)), [apps, dateRange]);
+
+  const stats = useMemo(() => {
+    const by = (s: string) => rangedApps.filter((a) => a.status === s).length;
+    const cost = usage.reduce((acc, u) => acc + (u.total_cost_krw ?? 0), 0);
+    return { total: rangedApps.length, passed: by("확정인력"), screening: by("스크리닝 중") + by("스크리닝 완료"), cost };
+  }, [rangedApps, usage]);
+
+  const funnel = useMemo(() => {
+    const by = (s: string) => rangedApps.filter((a) => a.status === s).length;
+    const passed = by("확정인력");
+    const screening = by("스크리닝 중") + by("스크리닝 완료");
+    return [
+      { step: "지원서 접수", count: rangedApps.length },
+      { step: "AI 스크리닝", count: screening + passed },
+      { step: "스크리닝 완료", count: by("스크리닝 완료") + passed },
+      { step: "최종 합격", count: passed },
+    ];
+  }, [rangedApps]);
+
+  // 추이 차트는 범위와 무관하게 항상 최근 6개월(전체 기준)로 표시
+  const trend = useMemo(() => {
+    const months = lastSixMonths();
+    return months.map((m) => {
+      const inMonth = apps.filter((a) => (a.created_at ?? "").slice(0, 7) === m.key);
+      return { name: m.name, 지원자: inMonth.length, 합격자: inMonth.filter((a) => a.status === "확정인력").length };
+    });
+  }, [apps]);
+
   const handleDownload = () => {
-    toast.info("리포트 다운로드는 준비 중이에요");
+    const rows: (string | number)[][] = [
+      ["리포트 기간", dateRange],
+      [],
+      ["항목", "값"],
+      ["총 지원자(명)", stats.total],
+      ["확정 인력(명)", stats.passed],
+      ["스크리닝 진행 중(명)", stats.screening],
+      ["최근 30일 누적 비용(원)", Math.round(stats.cost)],
+      [],
+      ["퍼널 단계", "인원"],
+      ...funnel.map((f) => [f.step, f.count] as (string | number)[]),
+    ];
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `리포트_${dateRange}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("리포트를 CSV로 내보냈어요.");
   };
 
   return (

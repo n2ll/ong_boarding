@@ -3,18 +3,30 @@ import { Area, AreaChart, ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } f
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { toast } from "sonner";
+
+interface UrgentItem {
+  id: string;
+  tone: "red" | "amber";
+  title: string;
+  desc: string;
+  cta: string;
+  path: string;
+}
 
 export function Dashboard() {
   const router = useRouter();
   const [stats, setStats] = useState({ today: 0, screening: 0, interview: 0, passed: 0, total: 0 });
+  const [urgent, setUrgent] = useState<UrgentItem[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/admin/applicants");
-        const json = await res.json();
-        const apps = (json.data ?? []) as { status: string; created_at: string }[];
+        const [aRes, iRes] = await Promise.all([
+          fetch("/api/admin/applicants"),
+          fetch("/api/admin/inbox/pending"),
+        ]);
+        const apps = ((await aRes.json()).data ?? []) as { status: string; created_at: string; unread_count?: number | null }[];
+        const inbox = ((await iRes.json()).data ?? []) as unknown[];
         const todayStr = new Date().toISOString().slice(0, 10);
         const by = (s: string) => apps.filter((a) => a.status === s).length;
         setStats({
@@ -24,16 +36,22 @@ export function Dashboard() {
           passed: by("확정인력"),
           total: apps.length,
         });
+
+        // 실무자 긴급 확인 사항 — 실데이터 기반
+        const interventions = apps.filter((a) => (a.unread_count ?? 0) > 0).length;
+        const u: UrgentItem[] = [];
+        if (inbox.length > 0) {
+          u.push({ id: "inbox", tone: "red", title: `미분류 인박스 ${inbox.length}건`, desc: "배민 지원자/기타 분류가 필요한 인입 메시지가 있어요.", cta: "분류하러 가기", path: "/inbox" });
+        }
+        if (interventions > 0) {
+          u.push({ id: "live", tone: "amber", title: `수동 개입 필요 ${interventions}건`, desc: "미답장 상태인 지원자 대화가 있어요. 직접 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
+        }
+        setUrgent(u);
       } catch {
         /* 대시보드 통계는 실패해도 화면은 유지 */
       }
     })();
   }, []);
-
-  const handleAction = (msg: string, path?: string) => {
-    toast.success(msg);
-    if (path) router.push(path);
-  };
 
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
@@ -60,8 +78,8 @@ export function Dashboard() {
             {[
               { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-[#63B3ED]" },
               { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-[#F6E05E]" },
-              { label: "면접 제안 발송", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-[#9F7AEA]" },
-              { label: "최종 합격 처리", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-[#68D391]" },
+              { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-[#9F7AEA]" },
+              { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-[#68D391]" },
             ].map((k, i) => (
                <div key={i} className="bg-white/5 border border-white/10 rounded-[12px] p-4 hover:bg-white/10 transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
                 <div className="flex items-center gap-2 mb-2">
@@ -81,36 +99,37 @@ export function Dashboard() {
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-[#E2E8F0] rounded-[20px] p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-2">
-              실무자 긴급 확인 사항 <span className="bg-[#E53E3E] text-white text-[11px] px-2 py-0.5 rounded-full font-bold">2</span>
+              실무자 긴급 확인 사항
+              {urgent.length > 0 && <span className="bg-[#E53E3E] text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
             </h2>
           </div>
-          
-          <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
-            <div className="p-4 border border-[#FEB2B2] bg-[#FFF5F5] rounded-xl flex items-start gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-[#E53E3E] shrink-0 border border-[#FEB2B2] shadow-sm">
-                <Activity size={16} />
-              </div>
-              <div className="flex-1">
-                <div className="text-[13px] font-bold text-[#C53030]">비마트 송파점 결원 발생 알림</div>
-                <div className="text-[12px] text-[#9B2C2C] mt-0.5 mb-2.5">출근율 미달 감지. 자동 소싱 워크플로우를 즉시 가동할까요?</div>
-                <button onClick={() => handleAction('당근알바/알바몬 긴급 공고가 자동 포스팅되었습니다.', '/automation')} className="text-[11.5px] font-bold bg-[#E53E3E] text-white px-3 py-1.5 rounded-lg hover:bg-[#C53030] transition-colors outline-none shadow-sm">
-                  긴급 소싱 가동
-                </button>
-              </div>
-            </div>
 
-            <div className="p-4 border border-[#E2E8F0] bg-white rounded-xl flex items-start gap-3 hover:border-[#CBD5E0] transition-colors cursor-pointer" onClick={() => handleAction('실시간 콘솔로 이동합니다.', '/live')}>
-              <div className="w-8 h-8 rounded-lg bg-[#F7FAFC] flex items-center justify-center text-[#4A5568] shrink-0 border border-[#E2E8F0]">
-                <PhoneCall size={16} />
+          <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
+            {urgent.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center py-8 text-[#A0AEC0]">
+                <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
+                <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
+                <div className="text-[12px] mt-0.5">미분류 인박스·미답장 개입이 발생하면 여기 표시됩니다.</div>
               </div>
-              <div className="flex-1">
-                <div className="text-[13px] font-bold text-[#1A202C]">AI 답변 불가 - 수동 개입 필요</div>
-                <div className="text-[12px] text-[#718096] mt-0.5 mb-2.5">박동훈 지원자의 [우천 할증 단가] 상세 문의 대기 중</div>
-                <span className="text-[11.5px] font-bold text-[#4A5568] bg-[#F1F4F8] px-3 py-1.5 rounded-lg transition-colors outline-none">
-                  직접 답변하기
-                </span>
+            )}
+            {urgent.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => router.push(item.path)}
+                className={`p-4 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-[#FEB2B2] bg-[#FFF5F5] hover:border-[#FC8181]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${item.tone === "red" ? "bg-white text-[#E53E3E] border-[#FEB2B2]" : "bg-[#F7FAFC] text-[#4A5568] border-[#E2E8F0]"}`}>
+                  {item.tone === "red" ? <Activity size={16} /> : <PhoneCall size={16} />}
+                </div>
+                <div className="flex-1">
+                  <div className={`text-[13px] font-bold ${item.tone === "red" ? "text-[#C53030]" : "text-[#1A202C]"}`}>{item.title}</div>
+                  <div className={`text-[12px] mt-0.5 mb-2.5 ${item.tone === "red" ? "text-[#9B2C2C]" : "text-[#718096]"}`}>{item.desc}</div>
+                  <span className={`text-[11.5px] font-bold px-3 py-1.5 rounded-lg ${item.tone === "red" ? "bg-[#E53E3E] text-white" : "bg-[#F1F4F8] text-[#4A5568]"}`}>
+                    {item.cta}
+                  </span>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </motion.div>
       </div>
