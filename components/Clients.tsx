@@ -28,6 +28,16 @@ interface ClientForm {
   active: boolean;
 }
 
+interface IntegrityReport {
+  jobs_total: number;
+  jobs_linked: number;
+  jobs_backfillable: number;
+  jobs_unmatched: number;
+  jobs_missing_client: number;
+  branches_total: number;
+  branches_missing_client: number;
+}
+
 const TYPE_OPTIONS: ClientType[] = ["baemin_bmart", "danggeun", "general"];
 
 function emptyForm(): ClientForm {
@@ -50,6 +60,41 @@ export function Clients() {
   const [form, setForm] = useState<ClientForm | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // 데이터 정합성 점검 (5-a)
+  const [integ, setInteg] = useState<IntegrityReport | null>(null);
+  const [integRunning, setIntegRunning] = useState(false);
+
+  const loadInteg = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/data-integrity");
+      const json = await res.json();
+      if (res.ok) setInteg(json.report as IntegrityReport);
+    } catch {
+      /* 점검 실패해도 화면 유지 */
+    }
+  }, []);
+
+  const runBackfill = async () => {
+    if (integRunning) return;
+    setIntegRunning(true);
+    try {
+      const res = await fetch("/api/admin/data-integrity", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "재백필에 실패했어요");
+        return;
+      }
+      setInteg(json.report as IntegrityReport);
+      const f = json.fixed ?? {};
+      const total = (f.jobs_branch ?? 0) + (f.jobs_client ?? 0) + (f.branches_client ?? 0);
+      toast.success(total > 0 ? `정합성 ${total}건을 자동 연결했어요.` : "이미 모두 정합 상태예요.");
+    } catch {
+      toast.error("재백필에 실패했어요");
+    } finally {
+      setIntegRunning(false);
+    }
+  };
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/clients");
@@ -68,7 +113,8 @@ export function Clients() {
 
   useEffect(() => {
     load();
-  }, [load]);
+    loadInteg();
+  }, [load, loadInteg]);
 
   const openCreate = () => setForm(emptyForm());
   const openEdit = (c: ApiClient) =>
@@ -160,6 +206,43 @@ export function Clients() {
           <Plus size={18} /> 신규 화주사 등록
         </button>
       </div>
+
+      {integ && (
+        <div className="mb-6 bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[14px] font-bold text-[#1A202C]">데이터 정합성 점검</span>
+              {integ.jobs_backfillable + integ.jobs_missing_client + integ.branches_missing_client > 0 ? (
+                <span className="text-[11px] font-bold text-[#DD6B20] bg-[#FFFAF0] border border-[#FBD38D] px-2 py-0.5 rounded-full">자동 연결 가능 항목 있음</span>
+              ) : (
+                <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-2 py-0.5 rounded-full">정합 상태</span>
+              )}
+            </div>
+            <button
+              onClick={runBackfill}
+              disabled={integRunning}
+              className="flex items-center gap-1.5 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors disabled:opacity-60"
+            >
+              {integRunning ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 재백필 실행
+            </button>
+          </div>
+          <div className="grid grid-cols-5 gap-3 text-center">
+            {[
+              { label: "공고 연결됨", value: `${integ.jobs_linked}/${integ.jobs_total}`, warn: false },
+              { label: "자동 연결 가능", value: integ.jobs_backfillable, warn: integ.jobs_backfillable > 0 },
+              { label: "미매칭 공고", value: integ.jobs_unmatched, warn: integ.jobs_unmatched > 0 },
+              { label: "화주사 누락 공고", value: integ.jobs_missing_client, warn: integ.jobs_missing_client > 0 },
+              { label: "화주사 누락 지점", value: integ.branches_missing_client, warn: integ.branches_missing_client > 0 },
+            ].map((m) => (
+              <div key={m.label} className={`rounded-xl border px-2 py-2.5 ${m.warn ? "border-[#FBD38D] bg-[#FFFAF0]" : "border-[#E2E8F0] bg-[#FCFDFE]"}`}>
+                <div className={`text-[18px] font-extrabold ${m.warn ? "text-[#DD6B20]" : "text-[#1A202C]"}`}>{m.value}</div>
+                <div className="text-[11px] font-bold text-[#718096] mt-0.5">{m.label}</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11.5px] text-[#A0AEC0] mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
+        </div>
+      )}
 
       <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden flex flex-col">
         <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between">
