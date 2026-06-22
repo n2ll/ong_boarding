@@ -141,6 +141,9 @@ export function Pipeline() {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
+  const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
+  const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");
+  const [slotFilter, setSlotFilter] = useState<Set<string>>(new Set());
 
   // Modals state
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
@@ -167,13 +170,35 @@ export function Pipeline() {
 
   const allCards = columns.flatMap(c => c.cards.map(card => ({ ...card, stage: c.title, stageColor: c.color, stageId: c.id })));
 
+  const availableChannels = Array.from(new Set(allCards.map((c) => c.channel))).sort();
+  const SLOT_TOKENS = ["평일 오전", "평일 오후", "주말 오전", "주말 오후"];
+
+  const toggleSetValue = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+
+  const activeFilterCount =
+    channelFilter.size + slotFilter.size + (vehicleFilter !== "all" ? 1 : 0);
+
+  const resetFilters = () => {
+    setChannelFilter(new Set());
+    setVehicleFilter("all");
+    setSlotFilter(new Set());
+  };
+
   const q = query.trim().toLowerCase();
-  const filteredCards = q
-    ? allCards.filter((c) =>
-        [c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag]
-          .some((v) => v.toLowerCase().includes(q))
-      )
-    : allCards;
+  const filteredCards = allCards.filter((c) => {
+    if (q && ![c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag].some((v) => v.toLowerCase().includes(q))) return false;
+    if (channelFilter.size && !channelFilter.has(c.channel)) return false;
+    if (vehicleFilter === "walk" && c.tag !== "도보") return false;
+    if (vehicleFilter === "vehicle" && c.tag === "도보") return false;
+    if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
+    return true;
+  });
 
   const exportCsv = () => {
     if (filteredCards.length === 0) return toast.error("내보낼 지원자가 없어요.");
@@ -352,8 +377,9 @@ export function Pipeline() {
 
           <div className="w-px h-6 bg-[#E2E8F0] mx-2"></div>
 
-          <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-bold border transition-colors ${showFilters ? 'bg-[#FFFBEC] border-[#FFCB3C] text-[#B8860B]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}>
+          <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-bold border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-[#FFFBEC] border-[#FFCB3C] text-[#B8860B]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}>
             <Filter size={16} /> 고급 필터
+            {activeFilterCount > 0 && <span className="bg-[#FFCB3C] text-[#1A202C] text-[11px] font-extrabold px-1.5 py-0.5 rounded-full leading-none">{activeFilterCount}</span>}
           </button>
 
           <div className="flex-1" />
@@ -368,17 +394,60 @@ export function Pipeline() {
         <AnimatePresence>
           {showFilters && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="bg-white border-b border-[#E2E8F0] shrink-0 overflow-hidden">
-              <div className="px-8 py-5 flex gap-5 items-end bg-[#F7FAFC]">
-                <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5 flex items-center gap-1.5">
-                    고급 필터 <span className="text-[10px] font-bold text-[#1A202C] bg-[#FEFCBF] px-1.5 py-0.5 rounded">준비 중</span>
-                  </label>
-                  <p className="text-[12.5px] text-[#718096] max-w-[520px] leading-relaxed">
-                    거리·이동수단·희망 슬롯 기반의 정밀 필터는 준비 중입니다. 현재는 상단 검색창에서 이름·연락처·지점·지역으로 바로 찾을 수 있어요.
-                  </p>
+              <div className="px-8 py-5 bg-[#F7FAFC] flex flex-col gap-4">
+                <div className="flex flex-wrap gap-8">
+                  {/* 지원 채널 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">지원 채널</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableChannels.length === 0 && <span className="text-[12px] text-[#A0AEC0]">채널 없음</span>}
+                      {availableChannels.map((ch) => {
+                        const on = channelFilter.has(ch);
+                        return (
+                          <button key={ch} onClick={() => toggleSetValue(setChannelFilter, ch)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {ch}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 이동수단 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">이동수단</label>
+                    <div className="flex bg-white border border-[#E2E8F0] rounded-lg p-1">
+                      {([["all", "전체"], ["vehicle", "차량 보유"], ["walk", "도보"]] as const).map(([val, label]) => (
+                        <button key={val} onClick={() => setVehicleFilter(val)} className={`px-3 py-1.5 rounded-md text-[12.5px] font-bold transition-colors ${vehicleFilter === val ? 'bg-[#1A202C] text-white' : 'text-[#718096] hover:text-[#4A5568]'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 희망 슬롯 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">희망 근무(슬롯)</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SLOT_TOKENS.map((s) => {
+                        const on = slotFilter.has(s);
+                        return (
+                          <button key={s} onClick={() => toggleSetValue(setSlotFilter, s)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#FFCB3C] border-[#FFCB3C] text-[#1A202C]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex-1" />
-                <button onClick={() => setShowFilters(false)} className="text-[13px] font-bold text-[#3182CE] hover:underline px-3 py-2.5 outline-none">닫기</button>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <span className="text-[12.5px] font-bold text-[#4A5568]">{filteredCards.length}명 표시 중</span>
+                  {activeFilterCount > 0 && (
+                    <button onClick={resetFilters} className="text-[12.5px] font-bold text-[#E53E3E] hover:underline">필터 초기화</button>
+                  )}
+                  <div className="flex-1" />
+                  <button onClick={() => setShowFilters(false)} className="text-[13px] font-bold text-[#3182CE] hover:underline px-3 py-1.5 outline-none">닫기</button>
+                </div>
               </div>
             </motion.div>
           )}
