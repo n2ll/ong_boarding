@@ -8,6 +8,26 @@
 const SLACK_ENABLED = process.env.SLACK_NOTIFICATIONS_ENABLED === "1";
 
 /**
+ * 범용 Slack 텍스트 발송. webhook 미설정 시 false 반환(전송 안 됨).
+ * 자동 점검 규칙 등에서 사용.
+ */
+export async function sendSlackText(text: string): Promise<boolean> {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  if (!webhookUrl) return false;
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.error("[slack text]", e);
+    return false;
+  }
+}
+
+/**
  * 지원자 확정(screening → onboarding 전이) 시 슬랙 알림.
  * 라인명(공고 제목) + 지원자 이름 + 전화번호 + 매니저 정보.
  */
