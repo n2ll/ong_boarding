@@ -3,7 +3,6 @@ import { Search, Bot, User, Send, AlertTriangle, Sparkles, MessageSquare, Plus, 
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
-import { getBrowserClient } from "@/lib/supabase";
 
 interface PendingDraft {
   id: string;
@@ -126,19 +125,13 @@ export function LiveConsole() {
 
   const loadDraft = useCallback(async (id: number) => {
     try {
-      const sb = getBrowserClient();
-      const { data } = await sb
-        .from("message_drafts")
-        .select("id, draft_text, reasoning, status, missing_info, created_at")
-        .eq("applicant_id", id)
-        .in("status", ["pending", "need_info"])
-        .order("created_at", { ascending: false })
-        .limit(1);
-      const d = (data?.[0] as PendingDraft | undefined) ?? null;
+      const res = await fetch(`/api/admin/drafts/pending?applicant_id=${id}`);
+      const json = await res.json();
+      const d = (json.data as PendingDraft | null) ?? null;
       setPendingDraft(d);
       setDraftText(d?.draft_text ?? "");
     } catch {
-      // RLS/네트워크 문제로 못 불러와도 화면은 유지 (초안 카드만 미표시)
+      // 네트워크 문제로 못 불러와도 화면은 유지 (초안 카드만 미표시)
       setPendingDraft(null);
       setDraftText("");
     }
