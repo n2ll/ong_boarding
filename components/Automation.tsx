@@ -1,8 +1,18 @@
-import { useState } from "react";
-import { Plus, CheckCircle2, MessageSquare, Save, FileText, Filter, Calendar, Users, AlertTriangle, Sparkles, Zap, Smartphone, Briefcase, Activity, Clock, Play, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, CheckCircle2, MessageSquare, Save, FileText, Filter, Calendar, Users, AlertTriangle, Sparkles, Zap, Smartphone, Briefcase, Activity, Clock, Play, X, Power, Inbox } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { DemoBanner } from "./DemoBanner";
+
+interface AutoStats {
+  aiDisabled: boolean;
+  screening: number;
+  confirmed: number;
+  waiting: number;
+  inbox: number;
+  activeJobs: number;
+  loading: boolean;
+}
 
 const MOCK_WORKFLOWS = [
   { id: 1, name: "신규 지원자 대화형 스크리닝", status: "active", category: "지원자 파이프라인 관리", runs: "1,240", success: "98.5%", lastRun: "방금 전" },
@@ -14,7 +24,37 @@ const MOCK_WORKFLOWS = [
 export function Automation() {
   const [selectedWf, setSelectedWf] = useState(1);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  
+  const [stats, setStats] = useState<AutoStats>({ aiDisabled: false, screening: 0, confirmed: 0, waiting: 0, inbox: 0, activeJobs: 0, loading: true });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [aRes, kRes, iRes, jRes] = await Promise.all([
+          fetch("/api/admin/applicants"),
+          fetch("/api/admin/agent/kill-switch"),
+          fetch("/api/admin/inbox/pending"),
+          fetch("/api/admin/jobs?status=active"),
+        ]);
+        const apps = ((await aRes.json()).data ?? []) as { status: string }[];
+        const k = await kRes.json();
+        const inbox = ((await iRes.json()).data ?? []) as unknown[];
+        const jobs = ((await jRes.json()).jobs ?? []) as { title: string }[];
+        const by = (s: string) => apps.filter((a) => a.status === s).length;
+        setStats({
+          aiDisabled: !!k.disabled || !!k.env_forced,
+          screening: by("스크리닝 중"),
+          confirmed: by("확정인력"),
+          waiting: by("대기자"),
+          inbox: inbox.length,
+          activeJobs: jobs.filter((j) => !String(j.title).startsWith("__")).length,
+          loading: false,
+        });
+      } catch {
+        setStats((s) => ({ ...s, loading: false }));
+      }
+    })();
+  }, []);
+
   const selectedWorkflow = MOCK_WORKFLOWS.find(w => w.id === selectedWf) || MOCK_WORKFLOWS[0];
   
   // Render different trees based on selected workflow
@@ -122,8 +162,45 @@ export function Automation() {
     );
   };
 
+  const kpis = [
+    {
+      label: "AI 자동응답",
+      value: stats.loading ? "…" : stats.aiDisabled ? "중단됨" : "작동 중",
+      icon: Power,
+      tone: stats.aiDisabled ? "text-[#E53E3E]" : "text-[#38A169]",
+      live: !stats.aiDisabled,
+    },
+    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-[#D69E2E]" },
+    { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-[#3182CE]" },
+    { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-[#718096]" },
+    { label: "미분류 인박스", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
+    { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-[#1A202C]" },
+  ];
+
   return (
-    <div className="flex h-full overflow-hidden bg-[#F7FAFC]">
+    <div className="flex flex-col h-full overflow-hidden bg-[#F7FAFC]">
+      {/* 실시간 자동화 현황 (실데이터) */}
+      <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-3.5">
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="text-[12px] font-extrabold tracking-wide text-[#1A202C]">실시간 자동화 현황</span>
+          <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">LIVE · 실데이터</span>
+        </div>
+        <div className="grid grid-cols-6 gap-3">
+          {kpis.map((k, i) => (
+            <div key={i} className="border border-[#E2E8F0] rounded-xl px-3.5 py-2.5 bg-[#FCFDFE]">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#718096] mb-1">
+                <k.icon size={13} className={k.tone} /> {k.label}
+              </div>
+              <div className={`text-[18px] font-extrabold tracking-tight flex items-center gap-1.5 ${k.tone}`}>
+                {k.value}
+                {k.live && <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] animate-pulse" />}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
       {/* Left Sidebar */}
       <div className="w-[340px] shrink-0 border-r border-[#E2E8F0] flex flex-col bg-white z-20">
         <div className="p-5 border-b border-[#E2E8F0] flex justify-between items-center bg-white">
@@ -233,6 +310,7 @@ export function Automation() {
         </div>
 
         <style>{`.background-dots { background-image: radial-gradient(#CBD5E0 1px, transparent 1px); background-size: 20px 20px; }`}</style>
+      </div>
       </div>
     </div>
   );
