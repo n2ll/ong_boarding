@@ -286,8 +286,17 @@ export function Jobs() {
     }
   };
 
-  const copyJobLink = (title: string) => {
-    toast.success(`'${title}' 공고 링크가 복사되었습니다.`);
+  const copyJobLink = async (job: JobRow) => {
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    const params = new URLSearchParams({ source: "direct" });
+    if (job.branch && job.branch !== "-") params.set("branch", job.branch);
+    const url = `${base}/apply?${params.toString()}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("공고 지원 링크를 복사했어요.");
+    } catch {
+      toast.error(`링크 복사 실패 — 직접 복사: ${url}`);
+    }
   };
 
   return (
@@ -446,7 +455,7 @@ export function Jobs() {
                 </div>
 
                 <div className="flex justify-end gap-1">
-                  <button onClick={() => copyJobLink(job.title)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 링크 복사">
+                  <button onClick={() => copyJobLink(job)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 지원 링크 복사">
                     <Copy size={16} />
                   </button>
                   <button onClick={() => openEdit(job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 수정">

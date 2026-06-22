@@ -66,6 +66,7 @@ const requiredMark = <span className="text-[#E53E3E] ml-0.5">*</span>;
 function ApplyForm() {
   const searchParams = useSearchParams();
   const source = normalizeSource(searchParams.get("source"));
+  const prefillBranch = searchParams.get("branch");
 
   const [form, setForm] = useState<FormState>(INITIAL);
   const [branches, setBranches] = useState<string[]>([]);
@@ -87,6 +88,13 @@ function ApplyForm() {
       }
     })();
   }, []);
+
+  // 공고별 지원 링크(?branch=지점명)로 들어오면 희망 지점 1순위를 미리 채운다.
+  useEffect(() => {
+    if (prefillBranch) {
+      setForm((prev) => (prev.branch1 ? prev : { ...prev, branch1: prefillBranch }));
+    }
+  }, [prefillBranch]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
