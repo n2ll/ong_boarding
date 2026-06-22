@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, AlertCircle, Sparkles, Loader2, Wand2, X, Save } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,6 +59,8 @@ function toJobRow(j: ApiJob): JobRow {
 }
 
 export function Jobs() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('active');
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -76,6 +79,14 @@ export function Jobs() {
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+
+  // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setAiModalOpen(true);
+      router.replace("/jobs");
+    }
+  }, [searchParams, router]);
 
   const loadJobs = useCallback(async () => {
     try {
