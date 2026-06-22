@@ -7,8 +7,14 @@ interface ApiBranch {
   id: number;
   name: string;
   active: boolean;
+  client_id: number | null;
   slot_capacity: Record<string, number> | null;
   ai_facts?: string | null;
+}
+
+interface ClientOption {
+  id: number;
+  name: string;
 }
 
 interface ApiApplicant {
@@ -34,6 +40,7 @@ interface BranchRow {
   id: number;
   name: string;
   active: boolean;
+  clientId: number | null;
   slotCapacity: Record<string, number>;
   aiFacts: string;
   manager: string;
@@ -49,15 +56,17 @@ interface BranchForm {
   id: number | null;
   name: string;
   active: boolean;
+  clientId: number | null;
   slotCapacity: Record<string, number>;
   aiFacts: string;
 }
 
-function emptyForm(): BranchForm {
+function emptyForm(clientId: number | null): BranchForm {
   return {
     id: null,
     name: "",
     active: true,
+    clientId,
     slotCapacity: { ...DEFAULT_SLOT_CAPACITY },
     aiFacts: "",
   };
@@ -85,19 +94,23 @@ export function Branches() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<BranchForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [clients, setClients] = useState<ClientOption[]>([]);
 
   const loadBranches = useCallback(async () => {
     try {
-      const [bRes, aRes, jRes, mRes] = await Promise.all([
+      const [bRes, aRes, jRes, mRes, cRes] = await Promise.all([
         fetch("/api/admin/branches"),
         fetch("/api/admin/applicants"),
         fetch("/api/admin/jobs?status=all"),
         fetch("/api/admin/site-managers"),
+        fetch("/api/admin/clients"),
       ]);
       const branches = ((await bRes.json()).data ?? []) as ApiBranch[];
       const applicants = ((await aRes.json()).data ?? []) as ApiApplicant[];
       const jobs = ((await jRes.json()).jobs ?? []) as ApiJob[];
       const managers = ((await mRes.json()).data ?? []) as ApiManager[];
+      const clientList = ((await cRes.json()).data ?? []) as ClientOption[];
+      setClients(clientList.map((c) => ({ id: c.id, name: c.name })));
 
       const computed: BranchRow[] = branches.map((b) => {
         const mine = applicants.filter((a) => belongsToBranch(a, b.name));
@@ -113,6 +126,7 @@ export function Branches() {
           id: b.id,
           name: b.name,
           active: b.active,
+          clientId: b.client_id ?? null,
           slotCapacity: (b.slot_capacity ?? {}) as Record<string, number>,
           aiFacts: b.ai_facts ?? "",
           manager: mgr?.name ? `${mgr.name} 담당` : "담당자 미지정",
@@ -136,12 +150,13 @@ export function Branches() {
     loadBranches();
   }, [loadBranches]);
 
-  const openCreate = () => setForm(emptyForm());
+  const openCreate = () => setForm(emptyForm(clients[0]?.id ?? null));
   const openEdit = (b: BranchRow) =>
     setForm({
       id: b.id,
       name: b.name,
       active: b.active,
+      clientId: b.clientId,
       slotCapacity: SLOTS.reduce((acc, s) => {
         acc[s] = typeof b.slotCapacity[s] === "number" ? b.slotCapacity[s] : DEFAULT_SLOT_CAPACITY[s];
         return acc;
@@ -163,8 +178,8 @@ export function Branches() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             isEdit
-              ? { name, active: form.active, slot_capacity: form.slotCapacity, ai_facts: form.aiFacts.trim() || null }
-              : { name, active: form.active }
+              ? { name, active: form.active, client_id: form.clientId, slot_capacity: form.slotCapacity, ai_facts: form.aiFacts.trim() || null }
+              : { name, active: form.active, client_id: form.clientId }
           ),
         }
       );
@@ -359,6 +374,21 @@ export function Branches() {
                   placeholder="예: 강북미아"
                   className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">소속 화주사</label>
+                <select
+                  value={form.clientId ?? ""}
+                  onChange={(e) => setForm({ ...form, clientId: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                >
+                  <option value="">미지정</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {clients.length === 0 && (
+                  <p className="text-[11.5px] text-[#A0AEC0] mt-1.5">먼저 화주사 관리에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
+                )}
               </div>
 
               <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">

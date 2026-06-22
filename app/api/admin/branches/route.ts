@@ -7,7 +7,7 @@ export async function GET() {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("branches")
-    .select("id, name, sort_order, active, slot_capacity, ai_facts, created_at, updated_at")
+    .select("id, name, sort_order, active, client_id, slot_capacity, ai_facts, created_at, updated_at")
     .order("sort_order", { ascending: true });
 
   if (error) {
@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
       name?: string;
       sort_order?: number;
       active?: boolean;
+      client_id?: number | null;
     };
     const name = (body.name || "").trim();
     if (!name) {
@@ -57,8 +58,9 @@ export async function POST(req: NextRequest) {
         name,
         sort_order,
         active: body.active ?? true,
+        client_id: typeof body.client_id === "number" ? body.client_id : null,
       })
-      .select("id, name, sort_order, active")
+      .select("id, name, sort_order, active, client_id")
       .single();
 
     if (error) {

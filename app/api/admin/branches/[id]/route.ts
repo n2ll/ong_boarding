@@ -7,6 +7,7 @@ interface PatchBody {
   name?: string;
   sort_order?: number;
   active?: boolean;
+  client_id?: number | null;
   slot_capacity?: Record<string, number>;
   ai_facts?: string | null;
 }
@@ -41,6 +42,9 @@ export async function PATCH(
     }
     if (typeof body.sort_order === "number") update.sort_order = body.sort_order;
     if (typeof body.active === "boolean") update.active = body.active;
+    if ("client_id" in body) {
+      update.client_id = typeof body.client_id === "number" ? body.client_id : null;
+    }
     if ("ai_facts" in body) {
       // null 또는 string. 빈 문자열은 null로 정규화 (저장 일관성).
       const v = body.ai_facts;
@@ -68,7 +72,7 @@ export async function PATCH(
       .from("branches")
       .update(update)
       .eq("id", id)
-      .select("id, name, sort_order, active, slot_capacity, ai_facts")
+      .select("id, name, sort_order, active, client_id, slot_capacity, ai_facts")
       .single();
 
     if (error) {

@@ -66,9 +66,30 @@ export interface Branch {
   name: string;
   sort_order: number;
   active: boolean;
+  client_id?: number | null;
   slot_capacity?: Record<string, number>;
   ai_facts?: string | null;
 }
+
+export type ClientType = "baemin_bmart" | "danggeun" | "general";
+
+export interface Client {
+  id: number;
+  name: string;
+  client_type: ClientType;
+  uses_slots: boolean;
+  contact_name: string | null;
+  contact_phone: string | null;
+  memo: string | null;
+  active: boolean;
+  sort_order: number;
+}
+
+export const CLIENT_TYPE_LABEL: Record<ClientType, string> = {
+  baemin_bmart: "배민 비마트",
+  danggeun: "당근",
+  general: "일반",
+};
 
 export type Tab =
   | "dashboard"

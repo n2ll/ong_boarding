@@ -1,26 +1,161 @@
-import { useState } from "react";
-import { Building2, Handshake, MoreHorizontal, Plus, Search } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Building2, Handshake, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4 } from "lucide-react";
 import { toast } from "sonner";
-import { DemoBanner } from "./DemoBanner";
+import { CLIENT_TYPE_LABEL, type ClientType } from "@/lib/admin/types";
 
-const MOCK_CLIENTS = [
-  { id: "C-01", name: "우아한형제들 (비마트)", manager: "김배달 팀장", branches: 15, activeJobs: 24, status: "계약 중", end: "2027.12.31" },
-  { id: "C-02", name: "스타벅스코리아", manager: "이별다방 파트장", branches: 8, activeJobs: 5, status: "계약 중", end: "2026.10.15" },
-  { id: "C-03", name: "올리브영", manager: "박올리브 매니저", branches: 12, activeJobs: 0, status: "계약 만료", end: "2026.01.30" },
-];
+interface ApiClient {
+  id: number;
+  name: string;
+  client_type: ClientType;
+  uses_slots: boolean;
+  contact_name: string | null;
+  contact_phone: string | null;
+  memo: string | null;
+  active: boolean;
+  sort_order: number;
+  branches_count: number;
+  active_jobs: number;
+}
+
+interface ClientForm {
+  id: number | null;
+  name: string;
+  client_type: ClientType;
+  uses_slots: boolean;
+  contact_name: string;
+  contact_phone: string;
+  memo: string;
+  active: boolean;
+}
+
+const TYPE_OPTIONS: ClientType[] = ["baemin_bmart", "danggeun", "general"];
+
+function emptyForm(): ClientForm {
+  return {
+    id: null,
+    name: "",
+    client_type: "general",
+    uses_slots: false,
+    contact_name: "",
+    contact_phone: "",
+    memo: "",
+    active: true,
+  };
+}
 
 export function Clients() {
+  const [clients, setClients] = useState<ApiClient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [form, setForm] = useState<ClientForm | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/clients");
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "화주사 목록을 불러오지 못했어요");
+        return;
+      }
+      setClients((json.data ?? []) as ApiClient[]);
+    } catch {
+      toast.error("화주사 목록을 불러오지 못했어요");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const openCreate = () => setForm(emptyForm());
+  const openEdit = (c: ApiClient) =>
+    setForm({
+      id: c.id,
+      name: c.name,
+      client_type: c.client_type,
+      uses_slots: c.uses_slots,
+      contact_name: c.contact_name ?? "",
+      contact_phone: c.contact_phone ?? "",
+      memo: c.memo ?? "",
+      active: c.active,
+    });
+
+  const handleSave = async () => {
+    if (!form) return;
+    const name = form.name.trim();
+    if (!name) return toast.error("화주사 이름을 입력해주세요.");
+    setSaving(true);
+    try {
+      const isEdit = form.id !== null;
+      const payload = {
+        name,
+        client_type: form.client_type,
+        uses_slots: form.uses_slots,
+        contact_name: form.contact_name.trim() || null,
+        contact_phone: form.contact_phone.trim() || null,
+        memo: form.memo.trim() || null,
+        active: form.active,
+      };
+      const res = await fetch(
+        isEdit ? `/api/admin/clients/${form.id}` : "/api/admin/clients",
+        {
+          method: isEdit ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "저장에 실패했어요");
+        return;
+      }
+      toast.success(isEdit ? "화주사 정보를 수정했어요." : "새 화주사를 등록했어요.");
+      setForm(null);
+      await load();
+    } catch {
+      toast.error("저장에 실패했어요");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!form || form.id === null) return;
+    if (!confirm(`'${form.name}' 화주사를 삭제할까요? 소속 지점이 있으면 비활성 처리됩니다.`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/clients/${form.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "삭제에 실패했어요");
+        return;
+      }
+      toast.success(json.soft ? json.message || "비활성화했어요." : "삭제했어요.");
+      setForm(null);
+      await load();
+    } catch {
+      toast.error("삭제에 실패했어요");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = clients.filter((c) => c.name.includes(search) || (c.contact_name ?? "").includes(search));
+  const activeCount = clients.filter((c) => c.active).length;
+
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <DemoBanner variant="soon" note="화주사 → 지점 → 공고 계층은 설계 단계입니다. 아래 목록은 예시이며, clients 테이블 신설 후 실제 등록·연동이 제공됩니다." />
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">화주사 관리 <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded align-middle">준비중</span></h1>
-          <p className="text-[14px] text-[#718096]">플랫폼과 계약된 기업(B2B) 고객사를 관리합니다.</p>
+          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">화주사 관리</h1>
+          <p className="text-[14px] text-[#718096]">고객사(화주사) → 지점 → 공고 계층의 최상위 단위입니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
         </div>
-        <button 
-          onClick={() => toast.success("신규 화주사 등록 모달이 열립니다.")}
-          className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors"
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
         >
           <Plus size={18} /> 신규 화주사 등록
         </button>
@@ -30,9 +165,11 @@ export function Clients() {
         <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-            <input 
-              type="text" 
-              placeholder="기업명 검색" 
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="기업명·담당자 검색"
               className="pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm w-[260px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
             />
           </div>
@@ -40,40 +177,128 @@ export function Clients() {
 
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-[#E2E8F0] bg-[#F7FAFC] text-[13px] font-bold text-[#718096]">
           <div>화주사 명</div>
-          <div>담당자</div>
+          <div>유형 / 슬롯</div>
           <div>등록 지점 수</div>
           <div>진행 공고 수</div>
-          <div>계약 상태</div>
+          <div>담당자</div>
           <div className="text-right">관리</div>
         </div>
 
+        {loading && <div className="px-6 py-10 text-[13px] text-[#A0AEC0]">불러오는 중…</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="px-6 py-10 text-center text-[13px] text-[#A0AEC0]">
+            {search ? `'${search}' 검색 결과가 없어요.` : (
+              <>등록된 화주사가 없어요. <button onClick={openCreate} className="text-[#3182CE] font-bold hover:underline">신규 등록</button>으로 시작하세요.</>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col">
-          {MOCK_CLIENTS.map(client => (
-            <div key={client.id} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
+          {filtered.map((client) => (
+            <div key={client.id} className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors ${client.active ? "" : "opacity-60"}`}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-[#EDF2F7] rounded-lg flex items-center justify-center">
+                <div className="w-10 h-10 bg-[#EDF2F7] rounded-lg flex items-center justify-center shrink-0">
                   <Building2 size={18} className="text-[#A0AEC0]" />
                 </div>
-                <div className="font-extrabold text-[#1A202C]">{client.name}</div>
+                <div>
+                  <div className="font-extrabold text-[#1A202C] flex items-center gap-2">
+                    {client.name}
+                    {!client.active && <span className="text-[10px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded border border-[#CBD5E0]">비활성</span>}
+                  </div>
+                  {client.memo && <div className="text-[12px] text-[#A0AEC0] mt-0.5 line-clamp-1">{client.memo}</div>}
+                </div>
               </div>
-              <div className="text-[14px] text-[#4A5568]">{client.manager}</div>
-              <div className="text-[14px] font-bold text-[#1A202C]">{client.branches}개</div>
-              <div className="text-[14px] font-bold text-[#3182CE]">{client.activeJobs}건</div>
-              <div>
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold ${client.status === '계약 중' ? 'bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]' : 'bg-[#F1F4F8] text-[#718096] border border-[#E2E8F0]'}`}>
-                  <Handshake size={12} /> {client.status}
-                </span>
-                <div className="text-[11px] text-[#A0AEC0] mt-1 ml-1">~{client.end}</div>
+              <div className="flex flex-col gap-1">
+                <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#EDF2F7] text-[#4A5568]">{CLIENT_TYPE_LABEL[client.client_type]}</span>
+                {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-[#B7791F]"><Clock4 size={11} /> 확정슬롯</span>}
+              </div>
+              <div className="text-[14px] font-bold text-[#1A202C]">{client.branches_count}개</div>
+              <div className="text-[14px] font-bold text-[#3182CE]">{client.active_jobs}건</div>
+              <div className="text-[13px] text-[#4A5568]">
+                {client.contact_name || "-"}
+                {client.contact_phone && <div className="text-[11px] text-[#A0AEC0]">{client.contact_phone}</div>}
               </div>
               <div className="flex justify-end">
-                <button className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors">
-                  <MoreHorizontal size={16} />
+                <button onClick={() => openEdit(client)} title="편집" className="p-2 text-[#718096] hover:bg-[#E2E8F0] hover:text-[#1A202C] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                  <Pencil size={16} />
                 </button>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {/* 생성 / 편집 모달 */}
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-[#E2E8F0] sticky top-0 bg-white">
+              <h2 className="text-[18px] font-extrabold text-[#1A202C]">{form.id === null ? "신규 화주사 등록" : "화주사 편집"}</h2>
+              <button onClick={() => setForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568] p-1 rounded-lg"><X size={20} /></button>
+            </div>
+            <div className="p-6 grid grid-cols-2 gap-5">
+              <div className="col-span-2">
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">화주사 이름 <span className="text-[#E53E3E]">*</span></label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: 우아한형제들 (비마트)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">유형</label>
+                <select value={form.client_type} onChange={(e) => setForm({ ...form, client_type: e.target.value as ClientType })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                  {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CLIENT_TYPE_LABEL[t]}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+                <div>
+                  <div className="text-[13px] font-bold text-[#1A202C]">확정슬롯 사용</div>
+                  <div className="text-[11px] text-[#718096] mt-0.5">지점×타임×요일 구인</div>
+                </div>
+                <button
+                  onClick={() => setForm({ ...form, uses_slots: !form.uses_slots })}
+                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.uses_slots ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                >
+                  <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.uses_slots ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+              <div>
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">담당자</label>
+                <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} placeholder="김배달 팀장" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">담당자 연락처</label>
+                <input value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">메모</label>
+                <textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} rows={2} placeholder="계약 조건, 특이사항 등" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+              </div>
+              <div className="col-span-2 flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+                <div className="text-[14px] font-bold text-[#1A202C]">활성 상태</div>
+                <button
+                  onClick={() => setForm({ ...form, active: !form.active })}
+                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                >
+                  <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[#E2E8F0] sticky bottom-0 bg-white">
+              <div>
+                {form.id !== null && (
+                  <button onClick={handleDelete} disabled={saving} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] border border-[#FEB2B2] disabled:opacity-50">
+                    <Trash2 size={15} /> 삭제
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setForm(null)} disabled={saving} className="px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50">취소</button>
+                <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60">
+                  {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
