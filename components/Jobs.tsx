@@ -6,6 +6,8 @@ interface JobRow {
   id: string;
   title: string;
   branch: string;
+  branchId: number | null;
+  clientId: number | null;
   role: string;
   status: "active" | "closed";
   candidates: number;
@@ -19,12 +21,17 @@ interface ApiJob {
   id: number;
   title: string;
   branch: string | null;
+  branch_id: number | null;
+  client_id: number | null;
   status: string;
   vehicle_required: boolean;
   created_at: string;
   closed_at: string | null;
   counts: Record<string, number>;
 }
+
+interface ClientOpt { id: number; name: string }
+interface BranchOpt { id: number; name: string; client_id: number | null }
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
@@ -38,6 +45,8 @@ function toJobRow(j: ApiJob): JobRow {
     id: String(j.id),
     title: j.title,
     branch: j.branch ?? "-",
+    branchId: j.branch_id ?? null,
+    clientId: j.client_id ?? null,
     role: j.vehicle_required ? "배송원" : "도보 배달",
     status: j.status === "active" ? "active" : "closed",
     candidates: total,
@@ -57,6 +66,12 @@ export function Jobs() {
   const [generatedJD, setGeneratedJD] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
+  const [query, setQuery] = useState("");
+  const [clientFilter, setClientFilter] = useState<number | "">("");
+  const [branchFilter, setBranchFilter] = useState<number | "">("");
+  const [clients, setClients] = useState<ClientOpt[]>([]);
+  const [branches, setBranches] = useState<BranchOpt[]>([]);
+  const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
 
   const loadJobs = useCallback(async () => {
     try {
@@ -77,6 +92,23 @@ export function Jobs() {
   useEffect(() => {
     loadJobs();
   }, [loadJobs]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cRes, bRes] = await Promise.all([
+          fetch("/api/admin/clients"),
+          fetch("/api/admin/branches"),
+        ]);
+        const cList = ((await cRes.json()).data ?? []) as ClientOpt[];
+        const bList = ((await bRes.json()).data ?? []) as BranchOpt[];
+        setClients(cList.map((c) => ({ id: c.id, name: c.name })));
+        setBranches(bList.map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })));
+      } catch {
+        /* 필터용 메타데이터 로드 실패는 조용히 무시 */
+      }
+    })();
+  }, []);
 
   const handleGenerateJD = async () => {
     if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");
@@ -116,7 +148,11 @@ export function Jobs() {
       const res = await fetch("/api/admin/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body: posting }),
+        body: JSON.stringify({
+          title,
+          body: posting,
+          branch_id: newJobBranchId === "" ? null : newJobBranchId,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -128,6 +164,7 @@ export function Jobs() {
       setAiPrompt("");
       setGeneratedJD("");
       setMissing([]);
+      setNewJobBranchId("");
       await loadJobs();
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -136,10 +173,16 @@ export function Jobs() {
     }
   };
 
+  const q = query.trim();
   const filteredJobs = jobs.filter(job => {
-    if (activeTab === 'all') return true;
-    return job.status === activeTab;
+    if (activeTab !== 'all' && job.status !== activeTab) return false;
+    if (clientFilter !== "" && job.clientId !== clientFilter) return false;
+    if (branchFilter !== "" && job.branchId !== branchFilter) return false;
+    if (q && !(job.title.includes(q) || job.branch.includes(q))) return false;
+    return true;
   });
+
+  const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const toggleAutomation = (id: string, current: boolean) => {
     setJobs(jobs.map(job =>
@@ -203,15 +246,40 @@ export function Jobs() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 bg-white border border-[#E2E8F0] px-4 py-2 rounded-xl text-sm font-semibold text-[#4A5568] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
-              <Filter size={16} /> 상세 필터
-            </button>
+            <div className="flex items-center gap-1.5 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-2 py-1">
+              <Filter size={15} className="text-[#A0AEC0] ml-1" />
+              <select
+                value={clientFilter}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? "" : Number(e.target.value);
+                  setClientFilter(v);
+                  setBranchFilter("");
+                }}
+                className="bg-transparent text-sm font-semibold text-[#4A5568] py-1.5 pr-1 focus:outline-none cursor-pointer"
+                title="화주사로 필터"
+              >
+                <option value="">전체 화주사</option>
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <span className="text-[#CBD5E0]">›</span>
+              <select
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value === "" ? "" : Number(e.target.value))}
+                className="bg-transparent text-sm font-semibold text-[#4A5568] py-1.5 pr-1 focus:outline-none cursor-pointer"
+                title="지점으로 필터"
+              >
+                <option value="">전체 지점</option>
+                {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
               <input
                 type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 placeholder="공고명, 지점 검색"
-                className="pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm w-[260px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                className="pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm w-[220px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
               />
             </div>
             <button
@@ -396,7 +464,20 @@ export function Jobs() {
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
+            <div className="flex items-center justify-between gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
+              <div className="flex items-center gap-2">
+                <MapPin size={15} className="text-[#A0AEC0]" />
+                <select
+                  value={newJobBranchId}
+                  onChange={(e) => setNewJobBranchId(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
+                  title="공고를 등록할 지점"
+                >
+                  <option value="">지점 선택(선택)</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-3">
               <button
                 onClick={() => setAiModalOpen(false)}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
@@ -411,6 +492,7 @@ export function Jobs() {
                 {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </button>
+              </div>
             </div>
           </div>
         </div>

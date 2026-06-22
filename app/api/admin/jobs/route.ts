@@ -13,15 +13,23 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get("status"); // active/closed/paused/all
+  const clientFilter = url.searchParams.get("client_id");
+  const branchFilter = url.searchParams.get("branch_id");
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, capacity, status, site_manager_id, created_at, updated_at, closed_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, capacity, status, site_manager_id, created_at, updated_at, closed_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
   if (statusFilter && statusFilter !== "all") {
     query = query.eq("status", statusFilter);
+  }
+  if (clientFilter && /^\d+$/.test(clientFilter)) {
+    query = query.eq("client_id", Number(clientFilter));
+  }
+  if (branchFilter && /^\d+$/.test(branchFilter)) {
+    query = query.eq("branch_id", Number(branchFilter));
   }
 
   const { data: jobs, error } = await query;
@@ -66,6 +74,7 @@ export async function POST(req: NextRequest) {
     title,
     body: jobBody,
     branch,
+    branch_id,
     slot,
     start_date,
     vehicle_required,
@@ -79,6 +88,7 @@ export async function POST(req: NextRequest) {
     title?: string;
     body?: string;
     branch?: string | null;
+    branch_id?: number | null;
     slot?: string | null;
     start_date?: string | null;
     vehicle_required?: boolean;
@@ -101,12 +111,30 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+
+  // branch_id가 오면 지점 이름·소속 화주사를 함께 채워 계층을 일관되게 유지한다.
+  let resolvedBranchName: string | null = branch ?? null;
+  let resolvedClientId: number | null = null;
+  if (typeof branch_id === "number") {
+    const { data: b } = await supabase
+      .from("branches")
+      .select("name, client_id")
+      .eq("id", branch_id)
+      .maybeSingle();
+    if (b) {
+      resolvedBranchName = (b.name as string) ?? resolvedBranchName;
+      resolvedClientId = (b.client_id as number | null) ?? null;
+    }
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
       title: title.trim(),
       body: jobBody.trim(),
-      branch: branch ?? null,
+      branch: resolvedBranchName,
+      branch_id: typeof branch_id === "number" ? branch_id : null,
+      client_id: resolvedClientId,
       slot: slot ?? null,
       start_date: start_date ?? null,
       vehicle_required: vehicle_required ?? true,
