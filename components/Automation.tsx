@@ -270,7 +270,7 @@ export function Automation() {
   ];
 
   return (
-    <div className="flex flex-col min-h-full bg-[#F7FAFC]">
+    <div className="flex flex-col h-full min-h-0 bg-[#F7FAFC]">
       {/* 실시간 자동화 현황 (실데이터) */}
       <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-3.5">
         <div className="flex items-center gap-2 mb-2.5">
@@ -360,7 +360,7 @@ export function Automation() {
         </div>
       </div>
 
-      <div className="flex h-[660px] overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left Sidebar */}
       <div className="w-[340px] shrink-0 border-r border-[#E2E8F0] flex flex-col bg-white z-20">
         <div className="p-5 border-b border-[#E2E8F0] flex justify-between items-center bg-white">

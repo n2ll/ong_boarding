@@ -1,5 +1,4 @@
-import { ArrowRight, TrendingUp, Users, Zap, MapPin, MousePointerClick, MessageSquare, Calendar, PlayCircle, BarChart2, CheckCircle2, Activity, PhoneCall } from "lucide-react";
-import { Area, AreaChart, ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } from "recharts";
+import { ArrowRight, TrendingUp, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "motion/react";
@@ -21,6 +20,10 @@ interface AppRow {
   branch?: string | null;
   branch1?: string | null;
   confirmed_branch?: string | null;
+  agent_stage?: string | null;
+  guide_sent?: boolean | null;
+  baemin_id?: string | null;
+  onboarding_call_status?: string | null;
 }
 
 export function Dashboard() {
@@ -59,6 +62,27 @@ export function Dashboard() {
       interview: by("스크리닝 완료"),
       passed: by("확정인력"),
       total: apps.length,
+    };
+  }, [apps]);
+
+  // 스크리닝·온보딩 현황 요약
+  const flow = useMemo(() => {
+    const stage = (s: string) => apps.filter((a) => a.agent_stage === s).length;
+    // 온보딩 대상 = 온보딩/활성 단계이거나 확정인력
+    const onboardingTargets = apps.filter(
+      (a) => a.agent_stage === "onboarding" || a.agent_stage === "active" || a.status === "확정인력"
+    );
+    const t = onboardingTargets.length || 1;
+    return {
+      exploration: stage("exploration"),
+      screening: stage("screening"),
+      onboarding: stage("onboarding"),
+      active: stage("active"),
+      targets: onboardingTargets.length,
+      guideSent: onboardingTargets.filter((a) => a.guide_sent).length,
+      baeminId: onboardingTargets.filter((a) => (a.baemin_id ?? "").trim()).length,
+      called: onboardingTargets.filter((a) => (a.onboarding_call_status ?? "").includes("완료")).length,
+      pct: (n: number) => Math.round((n / t) * 100),
     };
   }, [apps]);
 
@@ -211,22 +235,46 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Heatmap Teaser */}
-        <div className="bg-white border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm relative overflow-hidden flex flex-col cursor-pointer hover:border-[#FFCB3C] transition-colors group" onClick={() => router.push('/sourcing')}>
-          <div className="flex items-center justify-between mb-3 relative z-10">
-            <div>
-              <h2 className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5"><MapPin size={14} className="text-[#E53E3E]"/> QR 오프라인 히트맵 <span className="bg-[#EDF2F7] text-[#718096] text-[9px] px-1.5 py-0.5 rounded font-bold ml-0.5">준비중</span></h2>
-              <div className="text-[11.5px] text-[#718096] mt-0.5">강남/송파 지역 스캔 활성도</div>
-            </div>
-            <PlayCircle size={18} className="text-[#A0AEC0] group-hover:text-[#1A202C] transition-colors" />
+        {/* 스크리닝 · 온보딩 현황 (실데이터) */}
+        <div className="bg-white border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5"><ClipboardCheck size={15} className="text-[#3182CE]" /> 스크리닝 · 온보딩 현황</h2>
+            <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-[#3182CE] hover:underline outline-none">응대로</button>
           </div>
-          <div className="flex-1 rounded-xl relative overflow-hidden flex items-center justify-center border border-[#E2E8F0] blur-[2px]">
-            <div className="absolute inset-0 opacity-40 mix-blend-multiply" style={{
-              backgroundImage: `url('https://images.unsplash.com/photo-1524661135-423995f22d0b?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80')`,
-              backgroundSize: 'cover', backgroundPosition: 'center', filter: 'grayscale(100%)'
-            }}></div>
-            <div className="absolute w-20 h-20 bg-[#E53E3E] rounded-full blur-xl top-4 left-6 opacity-70 mix-blend-multiply animate-pulse"></div>
-            <div className="absolute w-12 h-12 bg-[#FFCB3C] rounded-full blur-lg bottom-4 right-6 opacity-80 mix-blend-multiply"></div>
+
+          {/* 단계별 */}
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            {[
+              { label: "탐색", value: flow.exploration, color: "text-[#718096]", bg: "bg-[#F7FAFC]" },
+              { label: "스크리닝", value: flow.screening, color: "text-[#D69E2E]", bg: "bg-[#FFFBEB]" },
+              { label: "온보딩", value: flow.onboarding, color: "text-[#805AD5]", bg: "bg-[#FAF5FF]" },
+              { label: "활성", value: flow.active, color: "text-[#38A169]", bg: "bg-[#F0FFF4]" },
+            ].map((s) => (
+              <div key={s.label} className={`rounded-xl px-3 py-2 ${s.bg}`}>
+                <div className="text-[11px] font-bold text-[#718096]">{s.label}</div>
+                <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-[#A0AEC0] ml-0.5">건</span></div>
+              </div>
+            ))}
+          </div>
+
+          {/* 온보딩 체크 진행도 */}
+          <div className="border-t border-[#F1F4F8] pt-3 space-y-2.5">
+            <div className="text-[11.5px] font-bold text-[#718096] flex items-center justify-between">온보딩 진행 <span className="text-[#A0AEC0] font-medium">대상 {flow.targets}명</span></div>
+            {[
+              { label: "가이드 전달", value: flow.guideSent, icon: ClipboardCheck, color: "#38A169" },
+              { label: "배민 ID 수신", value: flow.baeminId, icon: Smartphone, color: "#3182CE" },
+              { label: "온보딩 통화", value: flow.called, icon: PhoneCall, color: "#805AD5" },
+            ].map((m) => (
+              <div key={m.label}>
+                <div className="flex items-center justify-between text-[11.5px] mb-1">
+                  <span className="flex items-center gap-1.5 font-semibold text-[#4A5568]"><m.icon size={12} style={{ color: m.color }} /> {m.label}</span>
+                  <span className="font-bold text-[#1A202C]">{m.value}/{flow.targets}</span>
+                </div>
+                <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${flow.pct(m.value)}%`, backgroundColor: m.color }} />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, AlertCircle, Sparkles, Loader2, Wand2, X, Save } from "lucide-react";
+import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 interface JobRow {
   id: string;
@@ -33,6 +35,36 @@ interface ApiJob {
 
 interface ClientOpt { id: number; name: string }
 interface BranchOpt { id: number; name: string; client_id: number | null }
+
+interface JobCand {
+  id: number;
+  applicant_id: number;
+  agent_stage: string | null;
+  applicants: {
+    id: number;
+    name: string;
+    phone: string | null;
+    branch1: string | null;
+    work_hours: string | null;
+    own_vehicle: string | null;
+    status: string;
+    last_message_at: string | null;
+    unread_count: number | null;
+  } | null;
+}
+
+const STAGE_KO: Record<string, string> = {
+  exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
+  active: "활성", paused: "수동", abort: "중단",
+};
+const STAGE_COLOR: Record<string, string> = {
+  exploration: "bg-[#EDF2F7] text-[#4A5568]",
+  screening: "bg-[#FEFCBF] text-[#D69E2E]",
+  onboarding: "bg-[#FAF5FF] text-[#805AD5]",
+  active: "bg-[#F0FFF4] text-[#38A169]",
+  paused: "bg-[#EDF2F7] text-[#718096]",
+  abort: "bg-[#FFF5F5] text-[#E53E3E]",
+};
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
@@ -66,8 +98,10 @@ export function Jobs() {
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedJD, setGeneratedJD] = useState("");
-  const [missing, setMissing] = useState<string[]>([]);
+  const [postingTitle, setPostingTitle] = useState("");
+  const [channelDrafts, setChannelDrafts] = useState<{ danggeun: string; albamon: string; sms: string } | null>(null);
+  const [activeChannel, setActiveChannel] = useState<"danggeun" | "albamon" | "sms">("danggeun");
+  const [aiSource, setAiSource] = useState<"ai" | "mock" | null>(null);
   const [registering, setRegistering] = useState(false);
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState<number | "">("");
@@ -79,6 +113,31 @@ export function Jobs() {
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+
+  // 공고별 지원자 보드
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string } | null>(null);
+  const [candidates, setCandidates] = useState<JobCand[]>([]);
+  const [candLoading, setCandLoading] = useState(false);
+  const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
+
+  const loadCandidates = useCallback(async (jobId: number) => {
+    setCandLoading(true);
+    try {
+      const res = await fetch(`/api/admin/jobs/${jobId}/candidates`);
+      const json = await res.json();
+      setCandidates((json.candidates ?? []) as JobCand[]);
+    } catch {
+      toast.error("지원자 목록을 불러오지 못했어요");
+    } finally {
+      setCandLoading(false);
+    }
+  }, []);
+
+  const openCandidates = (job: JobRow) => {
+    setCandPanel({ jobId: Number(job.id), title: job.title });
+    setCandidates([]);
+    loadCandidates(Number(job.id));
+  };
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
   // 헤더 글로벌 검색 → /jobs?q=제목 으로 진입하면 검색어 프리필
@@ -134,24 +193,34 @@ export function Jobs() {
   const handleGenerateJD = async () => {
     if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");
     setIsGenerating(true);
-    setGeneratedJD("");
-    setMissing([]);
+    setChannelDrafts(null);
+    setAiSource(null);
     try {
-      const res = await fetch("/api/admin/recommend/generate", {
+      const res = await fetch("/api/admin/jobs/generate-posting", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rough: aiPrompt.trim() }),
+        body: JSON.stringify({ prompt: aiPrompt.trim() }),
       });
       const json = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !json.posting) {
         toast.error(json.error || "공고 생성에 실패했어요");
         return;
       }
-      setGeneratedJD(json.posting ?? "");
-      const miss = Array.isArray(json.missing) ? (json.missing as string[]) : [];
-      setMissing(miss);
-      if (miss.length > 0) toast.info("메모에 빠진 항목이 있어요. [?] 부분을 채워주세요.");
-      else toast.success("AI가 공고 초안을 완성했어요.");
+      const p = json.posting as {
+        title: string;
+        danggeun: { body: string };
+        albamon: { body: string };
+        sms: { body: string };
+      };
+      setPostingTitle(p.title ?? "");
+      setChannelDrafts({
+        danggeun: p.danggeun?.body ?? "",
+        albamon: p.albamon?.body ?? "",
+        sms: p.sms?.body ?? "",
+      });
+      setActiveChannel("danggeun");
+      setAiSource(json.source === "mock" ? "mock" : "ai");
+      toast.success(json.source === "mock" ? "초안을 생성했어요 (오프라인 템플릿)." : "AI가 채널별 공고 초안을 완성했어요.");
     } catch {
       toast.error("공고 생성에 실패했어요");
     } finally {
@@ -159,11 +228,21 @@ export function Jobs() {
     }
   };
 
+  const copyChannel = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} 공고를 복사했어요.`);
+    } catch {
+      toast.error("복사에 실패했어요");
+    }
+  };
+
   const handleRegisterJob = async () => {
-    const posting = generatedJD.trim();
-    if (!posting || registering) return;
-    const lines = posting.split("\n").map((l) => l.trim()).filter(Boolean);
-    const title = (lines[0] ?? "새 공고").slice(0, 80);
+    if (!channelDrafts || registering) return;
+    // 등록 시 알바몬(정형) 본문을 공고 원문으로 저장 — AI 스크리닝이 참조하는 캐논 본문.
+    const body = (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim();
+    const title = (postingTitle || channelDrafts.albamon.split("\n")[0] || "새 공고").slice(0, 80);
+    if (!body) return;
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
@@ -171,7 +250,7 @@ export function Jobs() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
-          body: posting,
+          body,
           branch_id: newJobBranchId === "" ? null : newJobBranchId,
         }),
       });
@@ -183,8 +262,8 @@ export function Jobs() {
       toast.success("새 공고가 등록되었어요. AI 자동 스크리닝이 시작됩니다.");
       setAiModalOpen(false);
       setAiPrompt("");
-      setGeneratedJD("");
-      setMissing([]);
+      setChannelDrafts(null);
+      setAiSource(null);
       setNewJobBranchId("");
       await loadJobs();
     } catch {
@@ -424,7 +503,7 @@ export function Jobs() {
             filteredJobs.map(job => (
               <div key={job.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
-                  <div className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
+                  <div onClick={() => openCandidates(job)} className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
                   <div className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</div>
                 </div>
 
@@ -443,10 +522,10 @@ export function Jobs() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex flex-col">
-                    <div className="text-[13px] text-[#718096]">총 지원자</div>
-                    <div className="text-[15px] font-extrabold text-[#1A202C]">{job.candidates}명 {job.newCandidates > 0 && <span className="text-[12px] font-bold text-[#D69E2E] ml-1">+{job.newCandidates}</span>}</div>
-                  </div>
+                  <button onClick={() => openCandidates(job)} className="flex flex-col items-start group/cand">
+                    <div className="text-[13px] text-[#718096] flex items-center gap-1 group-hover/cand:text-[#3182CE]">총 지원자 <ChevronRight size={13} className="opacity-0 group-hover/cand:opacity-100 transition-opacity" /></div>
+                    <div className="text-[15px] font-extrabold text-[#1A202C] group-hover/cand:text-[#3182CE]">{job.candidates}명 {job.newCandidates > 0 && <span className="text-[12px] font-bold text-[#D69E2E] ml-1">+{job.newCandidates}</span>}</div>
+                  </button>
                   <div className="w-px h-8 bg-[#E2E8F0]"></div>
                   <div className="flex flex-col gap-1">
                     <div className="text-[12px] font-bold text-[#718096]">AI 자동 스크리닝</div>
@@ -548,40 +627,48 @@ export function Jobs() {
                 </div>
               </div>
 
-              {/* Generated Result */}
-              {(isGenerating || generatedJD) && (
+              {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
+              {(isGenerating || channelDrafts) && (
                 <div className="bg-white border border-[#FFCB3C] rounded-2xl p-5 shadow-sm relative overflow-hidden">
                   {isGenerating && (
                     <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
                       <Wand2 size={28} className="text-[#D69E2E] animate-bounce mb-3" />
-                      <div className="text-[14px] font-bold text-[#1A202C]">AI 옹봇이 공고를 작성하고 있습니다...</div>
-                      <div className="text-[12px] text-[#718096] mt-1">시니어 지원자가 이해하기 쉬운 톤앤매너로 다듬는 중</div>
+                      <div className="text-[14px] font-bold text-[#1A202C]">AI 옹봇이 채널별 공고를 작성하고 있습니다...</div>
+                      <div className="text-[12px] text-[#718096] mt-1">당근 · 알바몬 · 문자 형식으로 각각 최적화하는 중</div>
                     </div>
                   )}
                   <div className="flex items-center justify-between mb-3">
-                    <label className="block text-[13px] font-bold text-[#D69E2E] flex items-center gap-1.5">
-                      <Sparkles size={14} /> AI가 작성한 공고 초안
+                    <label className="text-[13px] font-bold text-[#D69E2E] flex items-center gap-1.5">
+                      <Sparkles size={14} /> 채널별 공고 초안
+                      {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded">오프라인 템플릿</span>}
                     </label>
-                    <span className="text-[11px] text-[#A0AEC0]">자유롭게 수정 가능합니다</span>
+                    <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
                   </div>
-                  {missing.length > 0 && (
-                    <div className="mb-3 flex items-start gap-2 bg-[#FFF5F5] border border-[#FEB2B2] rounded-xl px-3.5 py-2.5">
-                      <AlertCircle size={15} className="text-[#E53E3E] mt-0.5 shrink-0" />
-                      <div className="text-[12.5px] text-[#C53030] leading-relaxed">
-                        <b>메모에 빠진 항목</b>이 있어 <b>[?]</b>로 표시했어요. 등록 전에 채워주세요:
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {missing.map((m) => (
-                            <span key={m} className="text-[11px] font-bold bg-white border border-[#FEB2B2] text-[#C53030] px-2 py-0.5 rounded-md">{m}</span>
-                          ))}
-                        </div>
+
+                  {channelDrafts && (
+                    <>
+                      {/* 채널 탭 */}
+                      <div className="flex gap-1.5 mb-3">
+                        {([
+                          { id: "danggeun", label: "당근알바" },
+                          { id: "albamon", label: "알바몬" },
+                          { id: "sms", label: "문자(SMS)" },
+                        ] as const).map((ch) => (
+                          <button key={ch.id} onClick={() => setActiveChannel(ch.id)} className={`px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors ${activeChannel === ch.id ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}>{ch.label}</button>
+                        ))}
+                        <div className="flex-1" />
+                        <button onClick={() => copyChannel(channelDrafts[activeChannel], activeChannel === "danggeun" ? "당근알바" : activeChannel === "albamon" ? "알바몬" : "문자")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold bg-[#FFFBEC] border border-[#FFCB3C] text-[#B8860B] hover:bg-[#FFF3C4]">
+                          <Copy size={14} /> 복사
+                        </button>
                       </div>
-                    </div>
+                      <textarea
+                        value={channelDrafts[activeChannel]}
+                        onChange={(e) => setChannelDrafts({ ...channelDrafts, [activeChannel]: e.target.value })}
+                        className="w-full bg-[#FFFBEC] border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-[#2D3748] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FFCB3C] min-h-[260px] font-medium resize-none whitespace-pre-wrap"
+                      />
+                      <div className="mt-2 text-[11.5px] text-[#A0AEC0]">등록 시 <b className="text-[#718096]">알바몬 형식</b> 본문이 공고 원문으로 저장되어 AI 스크리닝이 참조합니다.</div>
+                    </>
                   )}
-                  <textarea
-                    value={generatedJD}
-                    onChange={(e) => setGeneratedJD(e.target.value)}
-                    className="w-full bg-[#FFFBEC] border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-[#2D3748] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FFCB3C] min-h-[280px] font-medium resize-none"
-                  />
                 </div>
               )}
             </div>
@@ -608,7 +695,7 @@ export function Jobs() {
               </button>
               <button
                 onClick={handleRegisterJob}
-                disabled={!generatedJD || registering}
+                disabled={!channelDrafts || registering}
                 className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
               >
                 {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
@@ -670,6 +757,60 @@ export function Jobs() {
           </div>
         </div>
       )}
+
+      {/* 공고별 지원자 보드 (슬라이드) */}
+      <AnimatePresence>
+        {candPanel && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setCandPanel(null)} className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[2px]" />
+            <motion.div
+              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 26, stiffness: 220 }}
+              className="fixed top-0 right-0 w-[480px] max-w-[92vw] h-full bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-40 flex flex-col border-l border-[#E2E8F0]"
+            >
+              <div className="px-6 py-4 border-b border-[#E2E8F0] bg-[#F7FAFC] flex items-start justify-between shrink-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-[#718096] mb-1"><Users size={13} /> 공고별 지원자</div>
+                  <h2 className="text-[17px] font-extrabold text-[#1A202C] truncate">{candPanel.title}</h2>
+                  <div className="text-[12px] text-[#A0AEC0] mt-0.5">{candidates.length}명 지원</div>
+                </div>
+                <button onClick={() => setCandPanel(null)} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {candLoading && <div className="text-[13px] text-[#A0AEC0] text-center py-8">불러오는 중…</div>}
+                {!candLoading && candidates.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 지원자가 없어요</div>}
+                {candidates.map((c) => {
+                  const a = c.applicants;
+                  const stage = c.agent_stage ?? "";
+                  const unread = a?.unread_count ?? 0;
+                  return (
+                    <button key={c.id} onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#FFCB3C] hover:shadow-sm transition-all">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
+                          <div className="min-w-0">
+                            <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
+                            <div className="text-[11.5px] text-[#718096] truncate">{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}</div>
+                          </div>
+                        </div>
+                        {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <ApplicantDetailPanel
+        isOpen={selectedApplicantId != null}
+        onClose={() => setSelectedApplicantId(null)}
+        applicantId={selectedApplicantId}
+        jobId={candPanel?.jobId ?? null}
+        onChanged={() => { if (candPanel) loadCandidates(candPanel.jobId); loadJobs(); }}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Search, Building2, Users, Briefcase, Plus, ArrowUpRight, AlertTriangle, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { SLOTS, DEFAULT_SLOT_CAPACITY, type SlotKey } from "@/lib/admin/types";
@@ -151,6 +152,18 @@ export function Branches() {
   }, [loadBranches]);
 
   const openCreate = () => setForm(emptyForm(clients[0]?.id ?? null));
+  const openCreateForClient = (clientId: number | null) => setForm(emptyForm(clientId));
+
+  // 화주사 관리에서 '이 화주사에 지점 추가'로 진입(?client=ID)하면 생성 폼 자동 오픈
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  useEffect(() => {
+    const cid = searchParams.get("client");
+    if (cid && /^\d+$/.test(cid)) {
+      setForm(emptyForm(Number(cid)));
+      router.replace("/branches");
+    }
+  }, [searchParams, router]);
   const openEdit = (b: BranchRow) =>
     setForm({
       id: b.id,
@@ -227,6 +240,20 @@ export function Branches() {
   const criticalCount = activeRows.filter((b) => b.status === "critical").length;
   const totalActiveJobs = activeRows.reduce((a, b) => a + b.activeJobs, 0);
 
+  // 화주사 단위 그룹핑 — 각 화주사 + 미지정 섹션
+  const groups: { clientId: number | null; name: string; branches: BranchRow[] }[] = [
+    ...clients.map((c) => ({
+      clientId: c.id,
+      name: c.name,
+      branches: filteredBranches.filter((b) => b.clientId === c.id),
+    })),
+    {
+      clientId: null,
+      name: "화주사 미지정",
+      branches: filteredBranches.filter((b) => b.clientId == null),
+    },
+  ].filter((g) => g.branches.length > 0 || g.clientId !== null);
+
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
       {/* Header & Tools */}
@@ -289,9 +316,29 @@ export function Branches() {
       {loading && <div className="text-[13px] text-[#A0AEC0] py-8">지점 현황 불러오는 중…</div>}
       {!loading && rows.length === 0 && <div className="text-[13px] text-[#A0AEC0] py-8">등록된 지점이 없어요</div>}
 
-      {/* Grid of Branches */}
-      <div className="grid grid-cols-3 gap-6">
-        {filteredBranches.map((branch) => {
+      {/* 화주사별 지점 그룹 */}
+      <div className="flex flex-col gap-8">
+        {groups.map((group) => (
+          <section key={group.clientId ?? "none"}>
+            <div className="flex items-center justify-between mb-3.5">
+              <div className="flex items-center gap-2.5">
+                <Building2 size={18} className={group.clientId == null ? "text-[#A0AEC0]" : "text-[#3182CE]"} />
+                <h2 className="text-[16px] font-extrabold text-[#1A202C]">{group.name}</h2>
+                <span className="text-[12px] font-bold text-[#718096] bg-[#EDF2F7] px-2.5 py-0.5 rounded-full">{group.branches.length}개 지점</span>
+              </div>
+              {group.clientId != null && (
+                <button onClick={() => openCreateForClient(group.clientId)} className="flex items-center gap-1.5 text-[12.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-3 py-1.5 rounded-lg transition-colors">
+                  <Plus size={15} /> 이 화주사에 지점 추가
+                </button>
+              )}
+            </div>
+            {group.branches.length === 0 ? (
+              <div className="bg-[#F7FAFC] border border-dashed border-[#E2E8F0] rounded-2xl py-8 text-center text-[13px] text-[#A0AEC0]">
+                아직 등록된 지점이 없어요.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-6">
+                {group.branches.map((branch) => {
           const fillRatio = branch.fillRatio;
           return (
             <div key={branch.id} className={`bg-white border rounded-2xl p-6 transition-all group ${branch.active ? "border-[#E2E8F0] hover:border-[#CBD5E0] hover:shadow-md" : "border-dashed border-[#E2E8F0] opacity-70"}`}>
@@ -354,7 +401,11 @@ export function Branches() {
               </div>
             </div>
           );
-        })}
+                })}
+              </div>
+            )}
+          </section>
+        ))}
       </div>
 
       {/* 생성 / 편집 모달 */}

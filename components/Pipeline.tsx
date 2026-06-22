@@ -4,7 +4,7 @@ import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, User
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
-import { CandidateDrawer, type DrawerCandidate } from "./CandidateDrawer";
+import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
@@ -23,7 +23,13 @@ interface CardData {
   exp: string;
   lastActive: string;
   phone: string | null;
+  agentStage: string | null;
 }
+
+const STAGE_KO: Record<string, string> = {
+  exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
+  active: "활성", paused: "수동", abort: "중단",
+};
 
 const CHANNEL_LABEL: Record<string, string> = {
   danggeun: "당근",
@@ -118,6 +124,7 @@ function toCard(a: Applicant): CardData {
     exp: a.experience?.trim() ? a.experience.trim() : "신입",
     lastActive: relTime(a.last_message_at ?? a.created_at),
     phone: a.phone ?? null,
+    agentStage: a.agent_stage ?? null,
   };
 }
 
@@ -140,7 +147,7 @@ export function Pipeline() {
   const searchParams = useSearchParams();
   const { branch: scopeBranch } = useBranchScope();
   const [loading, setLoading] = useState(true);
-  const [selectedCandidate, setSelectedCandidate] = useState<DrawerCandidate | null>(null);
+  const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
   const [view, setView] = useState<"kanban" | "list">("list");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
@@ -482,7 +489,7 @@ export function Pipeline() {
           {view === "kanban" && (
             <div className="flex gap-6 h-full overflow-x-auto p-8">
               {columns.map((column, idx) => (
-                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(card) => setSelectedCandidate(card)} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
+                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => setSelectedApplicantId(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
               ))}
             </div>
           )}
@@ -538,7 +545,7 @@ export function Pipeline() {
                       return (
                         <tr
                           key={c.id}
-                          onClick={() => setSelectedCandidate(c)}
+                          onClick={() => setSelectedApplicantId(Number(c.id))}
                           className={`border-b border-[#F1F4F8] last:border-0 transition-colors hover:bg-[#F7FAFC] cursor-pointer group ${isSelected ? 'bg-[#FFFBEC] hover:bg-[#FFFBEC]' : 'bg-white'}`}
                         >
                           <td className="px-5 py-4">
@@ -553,7 +560,13 @@ export function Pipeline() {
                               </div>
                               <div>
                                 <div className="text-[14px] font-bold text-[#1A202C]">{c.name} <span className="text-[13px] font-medium text-[#718096] ml-1">{c.age}세 · {c.gender}</span></div>
-                                <div className="text-[11.5px] text-[#A0AEC0] font-mono tracking-tighter mt-0.5">{c.id}</div>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  {c.agentStage ? (
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">공고지원 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
+                                  ) : (
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">순수 인재풀</span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -602,7 +615,7 @@ export function Pipeline() {
         </div>
       </div>
 
-      <CandidateDrawer isOpen={!!selectedCandidate} onClose={() => setSelectedCandidate(null)} candidate={selectedCandidate} onStatusChange={loadApplicants} />
+      <ApplicantDetailPanel isOpen={selectedApplicantId != null} onClose={() => setSelectedApplicantId(null)} applicantId={selectedApplicantId} onChanged={loadApplicants} />
 
       {/* Modals for Bulk Actions */}
       {/* 1. Bulk Stage Change Modal */}
@@ -689,7 +702,7 @@ export function Pipeline() {
 interface KanbanColumnProps {
   column: ColumnData;
   moveCard: (cardId: string, sourceColId: string, destColId: string) => void;
-  onCardClick: (card: DrawerCandidate) => void;
+  onCardClick: (id: string) => void;
   columnIndex: number;
   onExport: (column: ColumnData) => void;
   onBulkMessage: (column: ColumnData) => void;
@@ -742,7 +755,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2 scrollbar-custom">
         {column.cards.map((card, idx) => (
-          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick({ ...card, stage: column.title, stageId: column.id })} cardIndex={idx} />
+          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card.id)} cardIndex={idx} />
         ))}
         {column.cards.length === 0 && (
           <div className="h-[120px] bg-white/40 border-2 border-dashed border-[#CBD5E0] rounded-xl flex flex-col items-center justify-center text-[#A0AEC0] gap-2">

@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Building2, Handshake, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Building2, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4, ChevronRight, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { CLIENT_TYPE_LABEL, type ClientType } from "@/lib/admin/types";
+
+interface BranchLite { id: number; name: string; active: boolean; client_id: number | null }
 
 interface ApiClient {
   id: number;
@@ -54,11 +57,24 @@ function emptyForm(): ClientForm {
 }
 
 export function Clients() {
+  const router = useRouter();
   const [clients, setClients] = useState<ApiClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ClientForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [branches, setBranches] = useState<BranchLite[]>([]);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/branches");
+      const json = await res.json();
+      setBranches((json.data ?? []) as BranchLite[]);
+    } catch {
+      /* 지점 목록 실패는 조용히 무시 */
+    }
+  }, []);
 
   // 데이터 정합성 점검 (5-a)
   const [integ, setInteg] = useState<IntegrityReport | null>(null);
@@ -114,7 +130,10 @@ export function Clients() {
   useEffect(() => {
     load();
     loadInteg();
-  }, [load, loadInteg]);
+    loadBranches();
+  }, [load, loadInteg, loadBranches]);
+
+  const addBranchForClient = (clientId: number) => router.push(`/branches?client=${clientId}`);
 
   const openCreate = () => setForm(emptyForm());
   const openEdit = (c: ApiClient) =>
@@ -277,9 +296,14 @@ export function Clients() {
         )}
 
         <div className="flex flex-col">
-          {filtered.map((client) => (
-            <div key={client.id} className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors ${client.active ? "" : "opacity-60"}`}>
+          {filtered.map((client) => {
+            const myBranches = branches.filter((b) => b.client_id === client.id);
+            const expanded = expandedId === client.id;
+            return (
+            <div key={client.id} className={`border-b border-[#F1F4F8] ${client.active ? "" : "opacity-60"}`}>
+              <div className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-[#F7FAFC] transition-colors cursor-pointer ${expanded ? "bg-[#F7FAFC]" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
               <div className="flex items-center gap-3">
+                <ChevronRight size={16} className={`text-[#A0AEC0] transition-transform ${expanded ? "rotate-90" : ""}`} />
                 <div className="w-10 h-10 bg-[#EDF2F7] rounded-lg flex items-center justify-center shrink-0">
                   <Building2 size={18} className="text-[#A0AEC0]" />
                 </div>
@@ -302,12 +326,38 @@ export function Clients() {
                 {client.contact_phone && <div className="text-[11px] text-[#A0AEC0]">{client.contact_phone}</div>}
               </div>
               <div className="flex justify-end">
-                <button onClick={() => openEdit(client)} title="편집" className="p-2 text-[#718096] hover:bg-[#E2E8F0] hover:text-[#1A202C] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="p-2 text-[#718096] hover:bg-[#E2E8F0] hover:text-[#1A202C] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
                   <Pencil size={16} />
                 </button>
               </div>
+              </div>
+
+              {/* 소속 지점 목록 */}
+              {expanded && (
+                <div className="px-6 pb-5 pt-1 bg-[#FBFCFE]">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-[12px] font-bold text-[#718096]">소속 지점 {myBranches.length}개</span>
+                    <button onClick={() => addBranchForClient(client.id)} className="flex items-center gap-1.5 text-[12px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-3 py-1.5 rounded-lg transition-colors">
+                      <Plus size={14} /> 이 화주사에 지점 추가
+                    </button>
+                  </div>
+                  {myBranches.length === 0 ? (
+                    <div className="text-[12.5px] text-[#A0AEC0] bg-white border border-dashed border-[#E2E8F0] rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {myBranches.map((b) => (
+                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-[#E2E8F0] text-[#4A5568]" : "bg-[#F7FAFC] border-dashed border-[#E2E8F0] text-[#A0AEC0]"}`}>
+                          <MapPin size={12} className="text-[#A0AEC0]" /> {b.name}
+                          {!b.active && <span className="text-[10px] text-[#A0AEC0]">(비활성)</span>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

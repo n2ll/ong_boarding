@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Link2, Sparkles, Target, Users, Download, Megaphone, Map, Send, X, Smartphone, DollarSign, Lock, PieChart as PieChartIcon, TrendingUp, BarChart2, Briefcase, ChevronDown, CheckCircle2, User, Activity, PlayCircle, Globe } from "lucide-react";
+import { Plus, Link2, Sparkles, Target, Users, Megaphone, Map, Send, X, Smartphone, DollarSign, Lock, PieChart as PieChartIcon, TrendingUp, BarChart2, PlayCircle, Globe, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { RecruitFlowBanner } from "./RecruitFlowBanner";
 import { DemoBanner } from "./DemoBanner";
-import { EXTERNAL_CHANNELS, getPublishedJobs, type PublishedJob } from "@/lib/demoPublish";
+import { EXTERNAL_CHANNELS, getPublishedJobs, savePublishedJob, buildPublishStats, type PublishedJob, type ExternalChannel } from "@/lib/demoPublish";
+
+interface JobOpt { id: number; title: string; branch: string | null }
 
 export function Sourcing() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "ab_test" | "crm_retarget" | "offline_heatmap">("dashboard");
@@ -18,7 +20,7 @@ export function Sourcing() {
   // Campaign Creation State
   const [targetingMode, setTargetingMode] = useState<"auto" | "manual">("auto");
 
-  // (A) 외부 채널에 게시된 공고 (Jobs 화면에서 게시 → 여기로 연동)
+  // (A) 외부 채널에 게시된 공고 (게시 모달 → 여기로 연동)
   const [published, setPublished] = useState<PublishedJob[]>([]);
   const refreshPublished = useCallback(() => setPublished(getPublishedJobs()), []);
   useEffect(() => {
@@ -28,6 +30,95 @@ export function Sourcing() {
   }, [refreshPublished]);
 
   const totalInflow = published.reduce((a, j) => a + j.stats.reduce((b, s) => b + s.applicants, 0), 0);
+
+  // 외부 채널 게시 모달 — 공고 선택 → 채널 형식 본문 자동 생성 → 미리보기 → 게시
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [jobOpts, setJobOpts] = useState<JobOpt[]>([]);
+  const [pubJobId, setPubJobId] = useState<number | "">("");
+  const [genLoading, setGenLoading] = useState(false);
+  const [drafts, setDrafts] = useState<{ danggeun: string; albamon: string; sms: string } | null>(null);
+  const [previewCh, setPreviewCh] = useState<ExternalChannel>("danggeun");
+  const [pubChannels, setPubChannels] = useState<Set<ExternalChannel>>(new Set(["danggeun", "albamon"]));
+  const [publishing, setPublishing] = useState(false);
+
+  // 채널 → 미리보기에 쓸 draft 키 (잡코리아는 정형 본문=알바몬 형식 재사용)
+  const draftKeyFor = (c: ExternalChannel): "danggeun" | "albamon" | "sms" =>
+    c === "danggeun" ? "danggeun" : "albamon";
+
+  const openPublish = async () => {
+    setPublishOpen(true);
+    setPubJobId("");
+    setDrafts(null);
+    try {
+      const res = await fetch("/api/admin/jobs?status=active");
+      const json = await res.json();
+      const list = ((json.jobs ?? []) as { id: number; title: string; branch: string | null }[])
+        .filter((j) => !j.title.startsWith("__"))
+        .map((j) => ({ id: j.id, title: j.title, branch: j.branch }));
+      setJobOpts(list);
+    } catch {
+      toast.error("공고 목록을 불러오지 못했어요");
+    }
+  };
+
+  const generatePreview = async (jobId: number) => {
+    const job = jobOpts.find((j) => j.id === jobId);
+    setGenLoading(true);
+    setDrafts(null);
+    try {
+      // 공고 원문을 불러와 채널 형식으로 재작성
+      const jobRes = await fetch(`/api/admin/jobs/${jobId}`);
+      const jobJson = await jobRes.json();
+      const prompt = `${jobJson.job?.title ?? job?.title ?? ""}\n${jobJson.job?.body ?? ""}`.trim();
+      const res = await fetch("/api/admin/jobs/generate-posting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.posting) {
+        toast.error(json.error || "본문 생성에 실패했어요");
+        return;
+      }
+      const p = json.posting as { danggeun: { body: string }; albamon: { body: string }; sms: { body: string } };
+      setDrafts({ danggeun: p.danggeun?.body ?? "", albamon: p.albamon?.body ?? "", sms: p.sms?.body ?? "" });
+    } catch {
+      toast.error("본문 생성에 실패했어요");
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
+  const togglePubChannel = (c: ExternalChannel) =>
+    setPubChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+
+  const doPublish = () => {
+    if (pubJobId === "" || !drafts) return;
+    if (pubChannels.size === 0) return toast.error("게시할 채널을 1개 이상 선택해주세요.");
+    const job = jobOpts.find((j) => j.id === pubJobId);
+    if (!job) return;
+    setPublishing(true);
+    try {
+      const channels = Array.from(pubChannels);
+      savePublishedJob({
+        id: String(job.id),
+        jobTitle: job.title,
+        location: job.branch ?? "",
+        channels,
+        stats: buildPublishStats(channels),
+        publishedAt: new Date().toISOString(),
+      });
+      toast.success(`${channels.length}개 채널에 게시했어요. 유입이 인력풀로 수집됩니다.`);
+      setPublishOpen(false);
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const handleAction = (msg: string) => {
     toast.success(msg, { action: { label: '실행 취소', onClick: () => toast.info('작업이 취소되었습니다.') } });
@@ -52,6 +143,9 @@ export function Sourcing() {
           </button>
           <button onClick={() => setBudgetModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm outline-none">
             <DollarSign size={16} /> 총괄 예산 관리
+          </button>
+          <button onClick={openPublish} className="flex items-center gap-1.5 px-4 py-2 bg-[#DD6B20] hover:bg-[#C05621] rounded-lg text-[13px] font-bold text-white transition-colors shadow-sm outline-none">
+            <Globe size={16} /> 외부 채널에 게시
           </button>
           <button onClick={() => setNewCampaignModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-[#1A202C] hover:bg-[#2D3748] rounded-lg text-[13px] font-bold text-white transition-colors shadow-sm outline-none">
             <Megaphone size={16} /> 새 마케팅 캠페인 생성
@@ -333,6 +427,92 @@ export function Sourcing() {
           </motion.div>
         </div>
       )}
+
+      {/* 외부 채널 게시 모달 */}
+      <AnimatePresence>
+        {publishOpen && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white w-full max-w-[780px] rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col">
+              <div className="p-5 border-b border-[#E2E8F0] flex justify-between items-center bg-[#FFFDF8]">
+                <h2 className="text-[16px] font-extrabold text-[#1A202C] flex items-center gap-2"><Globe size={18} className="text-[#DD6B20]" /> 외부 채널에 게시</h2>
+                <button onClick={() => setPublishOpen(false)}><X size={20} className="text-[#A0AEC0]" /></button>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1 space-y-5 bg-[#F7FAFC]">
+                {/* 공고 선택 */}
+                <div className="bg-white border border-[#E2E8F0] rounded-xl p-4">
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">게시할 공고</label>
+                  <select
+                    value={pubJobId}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? "" : Number(e.target.value);
+                      setPubJobId(v);
+                      if (v !== "") generatePreview(v);
+                    }}
+                    className="w-full border border-[#E2E8F0] rounded-xl px-4 py-3 text-[14px] bg-white outline-none focus:border-[#FFCB3C]"
+                  >
+                    <option value="">진행 중인 공고 선택…</option>
+                    {jobOpts.map((j) => <option key={j.id} value={j.id}>{j.title}{j.branch ? ` · ${j.branch}` : ""}</option>)}
+                  </select>
+                </div>
+
+                {/* 채널별 본문 미리보기 */}
+                {(genLoading || drafts) && (
+                  <div className="bg-white border border-[#FFCB3C] rounded-xl p-4">
+                    {genLoading ? (
+                      <div className="flex items-center gap-2 text-[13px] text-[#718096] py-8 justify-center"><Loader2 size={16} className="animate-spin" /> 채널 형식 본문 생성 중…</div>
+                    ) : drafts ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-3">
+                          {([
+                            { id: "danggeun", label: "당근알바" },
+                            { id: "albamon", label: "알바몬" },
+                            { id: "jobkorea", label: "잡코리아" },
+                          ] as const).map((ch) => (
+                            <button key={ch.id} onClick={() => setPreviewCh(ch.id)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors ${previewCh === ch.id ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}>{ch.label}</button>
+                          ))}
+                          <div className="flex-1" />
+                          <button onClick={() => { navigator.clipboard.writeText(drafts[draftKeyFor(previewCh)]).then(() => toast.success("본문을 복사했어요.")).catch(() => toast.error("복사 실패")); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold bg-[#FFFBEC] border border-[#FFCB3C] text-[#B8860B] hover:bg-[#FFF3C4]"><Copy size={14} /> 복사</button>
+                        </div>
+                        <pre className="bg-[#FFFBEC] rounded-xl px-4 py-3.5 text-[13px] text-[#2D3748] leading-relaxed whitespace-pre-wrap font-sans max-h-[240px] overflow-y-auto">{drafts[draftKeyFor(previewCh)]}</pre>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* 게시 채널 선택 */}
+                {drafts && (
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-4">
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2.5">게시할 채널</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {(Object.values(EXTERNAL_CHANNELS)).map((meta) => {
+                        const on = pubChannels.has(meta.key);
+                        return (
+                          <button key={meta.key} onClick={() => togglePubChannel(meta.key)} className={`flex items-center gap-2.5 p-3 rounded-xl border-2 transition-colors text-left ${on ? "border-[#FFCB3C] bg-[#FFFBEC]" : "border-[#E2E8F0] bg-white hover:bg-[#F7FAFC]"}`}>
+                            <span className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-extrabold shrink-0" style={{ backgroundColor: meta.accent }}>{meta.badge}</span>
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-bold text-[#1A202C]">{meta.label}</div>
+                              <div className="text-[11px] text-[#A0AEC0]">도달 {meta.reach}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">
+                <span className="text-[12.5px] text-[#A0AEC0]">게시는 데모(로컬)로 동작하며 유입이 인력풀로 시뮬레이션됩니다.</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setPublishOpen(false)} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC]">취소</button>
+                  <button onClick={doPublish} disabled={!drafts || publishing || pubJobId === ""} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#DD6B20] hover:bg-[#C05621] disabled:opacity-50 flex items-center gap-2">
+                    {publishing ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />} 게시하기
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
