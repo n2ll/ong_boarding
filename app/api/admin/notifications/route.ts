@@ -67,5 +67,9 @@ export async function GET() {
     });
   }
 
-  return NextResponse.json({ items, count: items.length });
+  return NextResponse.json({
+    items,
+    count: items.length,
+    counts: { inbox: inboxCount, interventions, aiDisabled },
+  });
 }

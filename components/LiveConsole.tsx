@@ -17,7 +17,17 @@ interface Applicant {
   branch?: string | null;
   branch1?: string | null;
   created_at?: string | null;
+  last_message_at?: string | null;
 }
+
+const STAGE_KO: Record<string, string> = {
+  exploration: "탐색",
+  screening: "스크리닝",
+  onboarding: "온보딩",
+  active: "활동 중",
+  paused: "수동 전환",
+  abort: "중단",
+};
 
 const AVATAR_PALETTE = [
   { bg: "#EBF8FF", fg: "#3182CE" },
@@ -145,9 +155,9 @@ export function LiveConsole() {
                       <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{chat.name} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
                     </div>
                   </div>
-                  <div className="text-[11px] font-semibold text-[#A0AEC0]">{relTime(chat.created_at)}</div>
+                  <div className="text-[11px] font-semibold text-[#A0AEC0]">{relTime(chat.last_message_at ?? chat.created_at)}</div>
                 </div>
-                <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status} {chat.agent_stage ? `· ${chat.agent_stage}` : ""}</div>
+                <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {src && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{src}</span>}
                   {(chat.branch || chat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{chat.branch || chat.branch1}</span>}

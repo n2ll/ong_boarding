@@ -1,4 +1,4 @@
-import { ArrowRight, TrendingUp, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "motion/react";
@@ -185,11 +185,13 @@ export function Dashboard() {
         {/* KPI List */}
         <div className="flex flex-col gap-4">
           {[
-            { label: "총 누적 인재풀 DB", value: stats.total.toLocaleString(), unit: "명", up: true, bg: "bg-white" },
-            { label: "확정 인력", value: stats.passed.toLocaleString(), unit: "명", up: true, bg: "bg-white" },
-            { label: "스크리닝 진행 중", value: stats.screening.toLocaleString(), unit: "명", up: true, bg: "bg-white" },
-          ].map((k, i) => (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.05 }} key={i} className={`border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex items-center justify-between flex-1 ${k.bg}`}>
+            { label: "총 누적 인재풀 DB", value: stats.total.toLocaleString(), unit: "명", icon: Users, iconBg: "bg-[#EBF8FF]", iconColor: "text-[#3182CE]" },
+            { label: "확정 인력", value: stats.passed.toLocaleString(), unit: "명", icon: CheckCircle2, iconBg: "bg-[#F0FFF4]", iconColor: "text-[#38A169]" },
+            { label: "스크리닝 진행 중", value: stats.screening.toLocaleString(), unit: "명", icon: MessageSquare, iconBg: "bg-[#FAF5FF]", iconColor: "text-[#805AD5]" },
+          ].map((k, i) => {
+            const Icon = k.icon;
+            return (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.05 }} key={i} className="border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex items-center justify-between flex-1 bg-white">
               <div>
                 <div className="text-[12px] font-bold text-[#718096] mb-1">{k.label}</div>
                 <div className="flex items-baseline gap-1">
@@ -197,11 +199,12 @@ export function Dashboard() {
                   <span className="text-[13px] font-bold text-[#A0AEC0]">{k.unit}</span>
                 </div>
               </div>
-              <div className="w-10 h-10 rounded-full bg-[#F0FFF4] flex items-center justify-center text-[#38A169]">
-                <TrendingUp size={18} />
+              <div className={`w-10 h-10 rounded-full ${k.iconBg} flex items-center justify-center ${k.iconColor}`}>
+                <Icon size={18} />
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Funnel Visualizer */}
@@ -209,7 +212,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-[15px] font-bold text-[#1A202C]">파이프라인 전환 퍼널</h2>
-              <div className="text-[12px] text-[#718096] mt-0.5">다채널 소싱부터 캘린더 면접 예약까지의 전환율</div>
+              <div className="text-[12px] text-[#718096] mt-0.5">유입부터 확정 인력까지의 단계별 전환율</div>
             </div>
             <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors outline-none">
               상세 보기
@@ -225,8 +228,8 @@ export function Dashboard() {
             ].map((f, i) => (
               <div key={i} className="flex flex-col items-center flex-1 group relative">
                 <div className="text-[13px] font-extrabold text-[#1A202C] mb-1.5">{f.val}</div>
-                <div className="w-full px-2">
-                  <div className="w-full rounded-t-md transition-all duration-300 group-hover:opacity-80" style={{ height: `${parseInt(f.pct)}px`, backgroundColor: f.color, minHeight: '20px' }}></div>
+                <div className="w-full px-2 h-40 flex items-end">
+                  <div className="w-full rounded-t-md transition-all duration-300 group-hover:opacity-80" style={{ height: f.pct, backgroundColor: f.color, minHeight: '6px' }}></div>
                 </div>
                 <div className="text-[11.5px] font-bold text-[#4A5568] mt-2.5 text-center">{f.step}</div>
                 <div className="text-[10px] font-bold text-[#A0AEC0]">{f.pct}</div>

@@ -14,7 +14,6 @@ interface CardData {
   id: string;
   name: string;
   age: number;
-  gender: string;
   channel: string;
   branch: string;
   slot: string;
@@ -115,7 +114,6 @@ function toCard(a: Applicant): CardData {
     id: String(a.id),
     name: a.name ?? "-",
     age: calcAge(a.birth_date) ?? 0,
-    gender: "",
     channel: channelLabel(a.source),
     branch,
     slot,
@@ -559,7 +557,7 @@ export function Pipeline() {
                                 {c.name.charAt(0)}
                               </div>
                               <div>
-                                <div className="text-[14px] font-bold text-[#1A202C]">{c.name} <span className="text-[13px] font-medium text-[#718096] ml-1">{c.age}세 · {c.gender}</span></div>
+                                <div className="text-[14px] font-bold text-[#1A202C]">{c.name}{c.age > 0 && <span className="text-[13px] font-medium text-[#718096] ml-1">{c.age}세</span>}</div>
                                 <div className="flex items-center gap-1.5 mt-1">
                                   {c.agentStage ? (
                                     <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">공고지원 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
@@ -602,7 +600,7 @@ export function Pipeline() {
                     })}
                     {!loading && filteredCards.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-12 text-center text-[13px] text-[#A0AEC0]">
+                        <td colSpan={7} className="px-4 py-12 text-center text-[13px] text-[#A0AEC0]">
                           {query ? `'${query}' 검색 결과가 없어요.` : "표시할 지원자가 없어요."}
                         </td>
                       </tr>

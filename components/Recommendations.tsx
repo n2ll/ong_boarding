@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Sparkles, Briefcase, User, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 interface ApiJob {
   id: number;
@@ -56,6 +57,9 @@ export function Recommendations() {
   const [poolSize, setPoolSize] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [profileId, setProfileId] = useState<number | null>(null);
+  const [addingId, setAddingId] = useState<number | null>(null);
+  const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -112,8 +116,29 @@ export function Recommendations() {
     }
   };
 
-  const handleOffer = (name: string) => {
-    toast.success(`${name}님 프로필을 면접 제안 대상으로 표시했어요.`);
+  // 추천 후보를 선택한 공고의 후보 풀에 실제로 추가한다 (job_candidates upsert).
+  // 레거시 인재풀(source==='legacy')은 applicants 테이블에 없어 추가가 불가하다.
+  const handleAddCandidate = async (rec: ScoredCand) => {
+    if (!selectedJobId) return;
+    setAddingId(rec.id);
+    try {
+      const res = await fetch(`/api/admin/jobs/${selectedJobId}/candidates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_ids: [rec.id] }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "후보 추가에 실패했어요");
+        return;
+      }
+      setAddedIds((prev) => new Set(prev).add(rec.id));
+      toast.success(`${rec.name}님을 공고 후보로 추가했어요.`);
+    } catch {
+      toast.error("후보 추가에 실패했어요");
+    } finally {
+      setAddingId(null);
+    }
   };
 
   return (
@@ -208,21 +233,41 @@ export function Recommendations() {
                 </div>
 
                 <div className="shrink-0 flex flex-col justify-center gap-2">
-                  <button
-                    onClick={() => handleOffer(rec.name)}
-                    className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-                  >
-                    면접 제안하기
-                  </button>
-                  <button className="w-full bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
-                    프로필 보기
-                  </button>
+                  {rec.source === "applicant" ? (
+                    <>
+                      <button
+                        onClick={() => handleAddCandidate(rec)}
+                        disabled={addingId === rec.id || addedIds.has(rec.id)}
+                        className="w-full bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] flex items-center justify-center gap-1.5"
+                      >
+                        {addingId === rec.id ? <Loader2 size={15} className="animate-spin" /> : addedIds.has(rec.id) ? <Check size={15} /> : null}
+                        {addedIds.has(rec.id) ? "추가됨" : "공고 후보로 추가"}
+                      </button>
+                      <button
+                        onClick={() => setProfileId(rec.id)}
+                        className="w-full bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                      >
+                        프로필 보기
+                      </button>
+                    </>
+                  ) : (
+                    <div className="w-[160px] text-center text-[11.5px] text-[#A0AEC0] bg-[#F7FAFC] border border-dashed border-[#E2E8F0] rounded-xl px-3 py-2.5 leading-relaxed">
+                      레거시 인재풀 후보예요.<br />연락처로 직접 컨택하세요.
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      <ApplicantDetailPanel
+        isOpen={profileId !== null}
+        onClose={() => setProfileId(null)}
+        applicantId={profileId}
+        jobId={selectedJobId}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -113,6 +114,8 @@ export function Jobs() {
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
+  const [aiGlobalOn, setAiGlobalOn] = useState(true);
 
   // 공고별 지원자 보드
   const [candPanel, setCandPanel] = useState<{ jobId: number; title: string } | null>(null);
@@ -371,16 +374,19 @@ export function Jobs() {
     }
   };
 
-  const toggleAutomation = (id: string, current: boolean) => {
-    setJobs(jobs.map(job =>
-      job.id === id ? { ...job, automation: !current } : job
-    ));
-    if (!current) {
-      toast.success("AI 에이전트 자동 스크리닝이 활성화되었습니다.");
-    } else {
-      toast.info("AI 에이전트 자동 스크리닝이 일시 중지되었습니다.");
-    }
-  };
+  // AI 자동 스크리닝은 공고 단위 토글이 아니라 전역 AI 스위치(에이전트 두뇌) + 공고 진행 상태로 결정된다.
+  // 진행 중 공고의 후보에게만 AI가 응대하며, 전역 중지 시 모든 공고가 멈춘다.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/agent/kill-switch");
+        const json = await res.json();
+        setAiGlobalOn(!json.disabled && !json.env_forced);
+      } catch {
+        /* 표시용이므로 실패 시 기본 on 유지 */
+      }
+    })();
+  }, []);
 
   const copyJobLink = async (job: JobRow) => {
     const base = typeof window !== "undefined" ? window.location.origin : "";
@@ -402,7 +408,7 @@ export function Jobs() {
         {[
           { label: "전체 공고", value: jobs.length, unit: "건" },
           { label: "진행 중인 공고", value: jobs.filter(j => j.status === 'active').length, unit: "건", highlight: true },
-          { label: "AI 자동화 켜짐", value: jobs.filter(j => j.automation).length, unit: "건", color: "text-[#3182CE]" },
+          { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => j.status === 'active').length : 0, unit: "건", color: "text-[#3182CE]" },
           { label: "신규 지원자(미시작)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-[#38A169]" }
         ].map((stat, i) => (
           <div key={i} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex flex-col justify-between">
@@ -529,12 +535,19 @@ export function Jobs() {
                   <div className="w-px h-8 bg-[#E2E8F0]"></div>
                   <div className="flex flex-col gap-1">
                     <div className="text-[12px] font-bold text-[#718096]">AI 자동 스크리닝</div>
-                    <button
-                      onClick={() => toggleAutomation(job.id, job.automation)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${job.automation ? 'bg-[#3182CE]' : 'bg-[#CBD5E0]'}`}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${job.automation ? 'translate-x-6' : 'translate-x-1'}`} />
-                    </button>
+                    {!aiGlobalOn ? (
+                      <Link href="/brain" title="에이전트 두뇌에서 전역 AI 상태를 관리하세요" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-[#FFF5F5] text-[#E53E3E] border border-[#FED7D7] w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E]"></span> 전역 중지됨
+                      </Link>
+                    ) : job.status === 'active' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-[#EBF8FF] text-[#3182CE] border border-[#BEE3F8] w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#3182CE]"></span> 자동 응대 중
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-[#F1F4F8] text-[#718096] border border-[#E2E8F0] w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#A0AEC0]"></span> 중지
+                      </span>
+                    )}
                   </div>
                 </div>
 

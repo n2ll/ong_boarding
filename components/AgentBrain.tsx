@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import { DemoBanner } from "./DemoBanner";
 
 interface PromptExample {
   id: number;
@@ -801,24 +802,29 @@ export function AgentBrain() {
                     <Database size={20} className="text-[#805AD5]" />
                   </div>
                   <div>
-                    <h2 className="text-[18px] font-extrabold text-[#1A202C]">고급 설정</h2>
+                    <h2 className="text-[18px] font-extrabold text-[#1A202C] flex items-center gap-2">
+                      고급 설정
+                      <span className="text-[10px] font-bold text-[#975A16] bg-[#FEFCBF] px-1.5 py-0.5 rounded">준비중</span>
+                    </h2>
                     <p className="text-[13px] text-[#718096]">LLM 모델 교체 및 데이터 보존 정책을 관리합니다.</p>
                   </div>
                 </div>
 
-                <div className="space-y-6">
+                <DemoBanner variant="soon" note="LLM 모델 선택과 PII 마스킹 토글은 아직 백엔드에 연동되지 않은 미리보기입니다. 현재 응대는 기본 모델로 동작하며, 이 화면에서 바꿔도 실제 설정은 변경되지 않습니다." />
+
+                <div className="space-y-6 opacity-60 pointer-events-none select-none" aria-disabled="true">
                   <div>
                     <h3 className="text-[14px] font-bold text-[#1A202C] mb-3">기본 LLM 모델 엔진</h3>
                     <div className="grid grid-cols-2 gap-3">
-                      <label className="flex items-start gap-3 p-4 border border-[#FFCB3C] bg-[#FFFBEB] rounded-xl cursor-pointer">
-                        <input type="radio" name="llm" defaultChecked className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
+                      <label className="flex items-start gap-3 p-4 border border-[#FFCB3C] bg-[#FFFBEB] rounded-xl cursor-not-allowed">
+                        <input type="radio" name="llm" defaultChecked disabled className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
                         <div>
                           <div className="text-[14px] font-bold text-[#1A202C]">Ongbot-Core (권장)</div>
                           <div className="text-[12px] text-[#718096] mt-1">시니어 채용에 특화 파인튜닝된 자체 모델. 속도가 가장 빠릅니다.</div>
                         </div>
                       </label>
-                      <label className="flex items-start gap-3 p-4 border border-[#E2E8F0] hover:border-[#CBD5E0] bg-white rounded-xl cursor-pointer transition-colors">
-                        <input type="radio" name="llm" className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
+                      <label className="flex items-start gap-3 p-4 border border-[#E2E8F0] bg-white rounded-xl cursor-not-allowed">
+                        <input type="radio" name="llm" disabled className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
                         <div>
                           <div className="text-[14px] font-bold text-[#1A202C]">GPT-4o (OpenAI)</div>
                           <div className="text-[12px] text-[#718096] mt-1">범용성이 뛰어나고 복잡한 문맥 추론에 강합니다. (비용 증가)</div>
@@ -830,7 +836,7 @@ export function AgentBrain() {
                   <div className="pt-2">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-[14px] font-bold text-[#1A202C]">개인정보 마스킹 (PII 필터링)</h3>
-                      <div className="w-11 h-6 bg-[#38A169] rounded-full relative cursor-pointer flex items-center px-1">
+                      <div className="w-11 h-6 bg-[#CBD5E0] rounded-full relative flex items-center px-1">
                         <div className="w-4 h-4 bg-white rounded-full translate-x-5 transition-transform" />
                       </div>
                     </div>

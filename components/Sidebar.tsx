@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Activity,
@@ -21,21 +24,47 @@ import {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [inbox, setInbox] = useState(0);
+  const [interventions, setInterventions] = useState(0);
+  const [aiDisabled, setAiDisabled] = useState(false);
+
+  // 헤더 알림과 동일 소스(/notifications)에서 실시간 카운트를 가져와 배지에 반영한다.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/admin/notifications");
+        const json = await res.json();
+        if (!alive) return;
+        setInbox(json.counts?.inbox ?? 0);
+        setInterventions(json.counts?.interventions ?? 0);
+        setAiDisabled(Boolean(json.counts?.aiDisabled));
+      } catch {
+        /* 배지 표시용이라 실패 시 0 유지 */
+      }
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
 
   const navItems = [
     { label: "개요", type: "header" },
     { label: "대시보드", icon: LayoutDashboard, path: "/" },
-    { label: "자동화 현황", icon: Activity, path: "/automation", badge: "dot-green" },
+    { label: "자동화 현황", icon: Activity, path: "/automation", badge: aiDisabled ? "dot-red" : "dot-green" },
     { label: "리포트 · 분석", icon: BarChart2, path: "/reports" },
     
     { label: "AI 에이전트", type: "header" },
-    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: "count", count: 2 },
-    { label: "미분류 인박스", icon: Inbox, path: "/inbox" },
+    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
+    { label: "미분류 인박스", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
     
     { label: "인재 관리", type: "header" },
-    { label: "인력 소싱", icon: Search, path: "/sourcing", badge: "dot-green" },
-    { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline", badge: "count-yellow", count: 14 },
+    { label: "인력 소싱", icon: Search, path: "/sourcing" },
+    { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
     { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" },
     
     { label: "채용 운영", type: "header" },
@@ -86,13 +115,9 @@ export function Sidebar() {
               <span className="flex-1">{item.label}</span>
               
               {item.badge === "dot-green" && <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] shrink-0"></span>}
-              {item.badge === "count" && (
+              {item.badge === "dot-red" && <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E] shrink-0 animate-pulse" title="AI 전역 응답 중지됨"></span>}
+              {item.badge === "count" && (item.count ?? 0) > 0 && (
                 <span className="bg-[#E53E3E] text-white text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight">
-                  {item.count}
-                </span>
-              )}
-              {item.badge === "count-yellow" && (
-                <span className="bg-[#FFCB3C] text-[#1A202C] text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight">
                   {item.count}
                 </span>
               )}
