@@ -1,7 +1,8 @@
-import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "motion/react";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 
 interface UrgentItem {
@@ -65,6 +66,46 @@ export function Dashboard() {
     };
   }, [apps]);
 
+  // 최근 14일 일별 신규 유입 추이 (created_at 기준, stats.today와 동일하게 UTC 일자 슬라이스)
+  const trend = useMemo(() => {
+    const days: { key: string; label: string; 유입: number }[] = [];
+    const now = new Date();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ key, label: `${d.getMonth() + 1}/${d.getDate()}`, 유입: 0 });
+    }
+    const idx = new Map(days.map((d, i) => [d.key, i]));
+    for (const a of apps) {
+      const i = idx.get((a.created_at ?? "").slice(0, 10));
+      if (i !== undefined) days[i].유입 += 1;
+    }
+    return days;
+  }, [apps]);
+
+  const trend7Sum = useMemo(() => trend.slice(7).reduce((s, d) => s + d.유입, 0), [trend]);
+
+  // 단계 간 전환율을 강조한 가로형 퍼널
+  const funnel = useMemo(() => {
+    const screened = stats.screening + stats.interview + stats.passed;
+    const passed1 = stats.interview + stats.passed;
+    const rows = [
+      { step: "다채널 유입", val: stats.total, color: "#CBD5E0" },
+      { step: "AI 스크리닝", val: screened, color: "#90CDF4" },
+      { step: "1차 요건 통과", val: passed1, color: "#63B3ED" },
+      { step: "확정 인력", val: stats.passed, color: "#3182CE" },
+    ];
+    return rows.map((r, i) => {
+      const prev = i === 0 ? r.val : rows[i - 1].val;
+      return {
+        ...r,
+        pctTotal: stats.total ? Math.round((r.val / stats.total) * 100) : 0,
+        conv: i === 0 ? null : prev ? Math.round((r.val / prev) * 100) : 0,
+      };
+    });
+  }, [stats]);
+
   // 스크리닝·온보딩 현황 요약
   const flow = useMemo(() => {
     const stage = (s: string) => apps.filter((a) => a.agent_stage === s).length;
@@ -100,63 +141,114 @@ export function Dashboard() {
 
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
-      {/* Top Section: Overview */}
-      <div className="grid grid-cols-[1.8fr_1fr] gap-6">
-        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#1A202C] rounded-[20px] p-8 relative overflow-hidden shadow-md text-white flex flex-col justify-between">
-          <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-[#3182CE] rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
-          
-          <div className="relative z-10 flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-[20px] font-extrabold tracking-tight mb-1">
-                {scopeBranch ? `${scopeBranch} 파이프라인 오버뷰` : "전사 채용 파이프라인 오버뷰"}
-              </h1>
-              <div className="flex items-center gap-2 text-[13px] text-white/70">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#48BB78] animate-pulse"></span> 통합 시스템 정상 가동 중</span>
-                <span className="text-white/30">|</span>
-                <span>최근 동기화: 방금 전</span>
+      {/* Hero: 헤드라인 KPI를 한 곳에 모은 전폭 다크 카드 */}
+      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#1A202C] rounded-[20px] p-8 relative overflow-hidden shadow-md text-white">
+        <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-[#3182CE] rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
+
+        <div className="relative z-10 flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-[20px] font-extrabold tracking-tight mb-1">
+              {scopeBranch ? `${scopeBranch} 파이프라인 오버뷰` : "전사 채용 파이프라인 오버뷰"}
+            </h1>
+            <div className="flex items-center gap-2 text-[13px] text-white/70">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#48BB78] animate-pulse"></span> 통합 시스템 정상 가동 중</span>
+              <span className="text-white/30">|</span>
+              <span>최근 동기화: 방금 전</span>
+            </div>
+          </div>
+          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
+            파이프라인 상세 보기 <ArrowRight size={14} />
+          </button>
+        </div>
+
+        <div className="relative z-10 grid grid-cols-5 gap-4">
+          {[
+            { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-[#63B3ED]" },
+            { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-[#76E4F7]" },
+            { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-[#F6E05E]" },
+            { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-[#9F7AEA]" },
+            { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-[#68D391]" },
+          ].map((k, i) => (
+            <div key={i} className="bg-white/5 border border-white/10 rounded-[12px] p-4 hover:bg-white/10 transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
+              <div className="flex items-center gap-2 mb-2">
+                <k.icon size={16} className={`${k.color}`} />
+                <span className="text-[12px] text-white/70 font-medium">{k.label}</span>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-[26px] font-extrabold leading-none tracking-tight">{k.value}</span>
+                <span className="text-[12px] text-white/50 font-medium">{k.sub}</span>
               </div>
             </div>
-            <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm outline-none">
-              파이프라인 상세 보기 <ArrowRight size={14} />
-            </button>
-          </div>
+          ))}
+        </div>
+      </motion.div>
 
-          <div className="relative z-10 grid grid-cols-4 gap-4">
-            {[
-              { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-[#63B3ED]" },
-              { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-[#F6E05E]" },
-              { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-[#9F7AEA]" },
-              { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-[#68D391]" },
-            ].map((k, i) => (
-               <div key={i} className="bg-white/5 border border-white/10 rounded-[12px] p-4 hover:bg-white/10 transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
-                <div className="flex items-center gap-2 mb-2">
-                  <k.icon size={16} className={`${k.color}`} />
-                  <span className="text-[12px] text-white/70 font-medium">{k.label}</span>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[26px] font-extrabold leading-none tracking-tight">{k.value}</span>
-                  <span className="text-[12px] text-white/50 font-medium">{k.sub}</span>
-                </div>
-              </div>
-            ))}
+      {/* 2행: 유입 추이(2/3) + 오늘의 할 일(1/3) */}
+      <div className="grid grid-cols-3 gap-6 items-stretch">
+        {/* 최근 14일 신규 유입 추이 */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="col-span-2 bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><TrendingUp size={15} className="text-[#3182CE]" /> 최근 14일 신규 유입 추이</h2>
+              <div className="text-[12px] text-[#718096] mt-0.5">다채널 인입 지원자의 일별 흐름</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] font-bold text-[#A0AEC0]">최근 7일 합계</div>
+              <div className="text-[20px] font-extrabold text-[#1A202C] leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-[#A0AEC0] font-bold ml-0.5">명</span></div>
+            </div>
+          </div>
+          <div className="flex-1 min-h-[200px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={180} minWidth={1}>
+              <AreaChart data={trend} margin={{ top: 10, right: 8, left: -22, bottom: 0 }}>
+                <defs key="defs-dashboard">
+                  <linearGradient key="grad-inflow" id="dashInflow" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3182CE" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#3182CE" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="#EDF2F7" />
+                <XAxis key="xaxis" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#A0AEC0' }} interval={1} dy={8} />
+                <YAxis key="yaxis" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#A0AEC0' }} width={36} />
+                <RechartsTooltip
+                  key="tooltip"
+                  contentStyle={{ borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                  labelStyle={{ fontWeight: 'bold', color: '#1A202C', marginBottom: '2px' }}
+                />
+                <Area key="area-inflow" type="monotone" dataKey="유입" stroke="#3182CE" strokeWidth={2.5} fillOpacity={1} fill="url(#dashInflow)" />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </motion.div>
 
-        {/* Actionable To-Do List (Urgent) */}
-        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-[#E2E8F0] rounded-[20px] p-6 shadow-sm flex flex-col">
+        {/* 오늘의 할 일 (긴급 + 빈 상태 바로가기) */}
+        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-2">
-              실무자 긴급 확인 사항
+              오늘의 할 일
               {urgent.length > 0 && <span className="bg-[#E53E3E] text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
             </h2>
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
             {urgent.length === 0 && (
-              <div className="flex-1 flex flex-col items-center justify-center text-center py-8 text-[#A0AEC0]">
+              <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
                 <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5">미분류 인박스·미답장 개입이 발생하면 여기 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">미분류 인박스·미답장 개입이 발생하면 여기 표시됩니다.</div>
+                <div className="w-full mt-5 flex flex-col gap-2">
+                  {[
+                    { label: "파이프라인 점검", path: "/pipeline" },
+                    { label: "실시간 응대 보기", path: "/live" },
+                  ].map((s) => (
+                    <button
+                      key={s.path}
+                      onClick={() => router.push(s.path)}
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] hover:bg-[#EDF2F7] text-[12.5px] font-bold text-[#4A5568] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                    >
+                      {s.label} <ChevronRight size={15} className="text-[#A0AEC0]" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {urgent.map((item) => (
@@ -181,68 +273,48 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      <div className="grid grid-cols-[1fr_1.8fr_1fr] gap-6">
-        {/* KPI List */}
-        <div className="flex flex-col gap-4">
-          {[
-            { label: "총 누적 인재풀 DB", value: stats.total.toLocaleString(), unit: "명", icon: Users, iconBg: "bg-[#EBF8FF]", iconColor: "text-[#3182CE]" },
-            { label: "확정 인력", value: stats.passed.toLocaleString(), unit: "명", icon: CheckCircle2, iconBg: "bg-[#F0FFF4]", iconColor: "text-[#38A169]" },
-            { label: "스크리닝 진행 중", value: stats.screening.toLocaleString(), unit: "명", icon: MessageSquare, iconBg: "bg-[#FAF5FF]", iconColor: "text-[#805AD5]" },
-          ].map((k, i) => {
-            const Icon = k.icon;
-            return (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.05 }} key={i} className="border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex items-center justify-between flex-1 bg-white">
-              <div>
-                <div className="text-[12px] font-bold text-[#718096] mb-1">{k.label}</div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[22px] font-extrabold text-[#1A202C] leading-none tracking-tight">{k.value}</span>
-                  <span className="text-[13px] font-bold text-[#A0AEC0]">{k.unit}</span>
-                </div>
-              </div>
-              <div className={`w-10 h-10 rounded-full ${k.iconBg} flex items-center justify-center ${k.iconColor}`}>
-                <Icon size={18} />
-              </div>
-            </motion.div>
-            );
-          })}
-        </div>
-
-        {/* Funnel Visualizer */}
-        <div className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
+      {/* 3행: 전환 퍼널(2/3) + 스크리닝·온보딩 현황(1/3) — 2행과 동일 grid로 컬럼 정렬 */}
+      <div className="grid grid-cols-3 gap-6 items-stretch">
+        {/* 전환 퍼널 (가로형 · 단계 간 전환율 강조) */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="col-span-2 bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-[15px] font-bold text-[#1A202C]">파이프라인 전환 퍼널</h2>
-              <div className="text-[12px] text-[#718096] mt-0.5">유입부터 확정 인력까지의 단계별 전환율</div>
+              <div className="text-[12px] text-[#718096] mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
             </div>
-            <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors outline-none">
+            <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">
               상세 보기
             </button>
           </div>
-          
-          <div className="flex justify-between items-end flex-1 px-2 pb-2">
-            {[
-              { step: "다채널 유입", val: stats.total, pct: "100%", color: "#E2E8F0" },
-              { step: "AI 스크리닝", val: stats.screening + stats.interview + stats.passed, pct: `${stats.total ? Math.round(((stats.screening + stats.interview + stats.passed) / stats.total) * 100) : 0}%`, color: "#CBD5E0" },
-              { step: "1차 요건 통과", val: stats.interview + stats.passed, pct: `${stats.total ? Math.round(((stats.interview + stats.passed) / stats.total) * 100) : 0}%`, color: "#A0AEC0" },
-              { step: "최종 합격", val: stats.passed, pct: `${stats.total ? Math.round((stats.passed / stats.total) * 100) : 0}%`, color: "#3182CE" },
-            ].map((f, i) => (
-              <div key={i} className="flex flex-col items-center flex-1 group relative">
-                <div className="text-[13px] font-extrabold text-[#1A202C] mb-1.5">{f.val}</div>
-                <div className="w-full px-2 h-40 flex items-end">
-                  <div className="w-full rounded-t-md transition-all duration-300 group-hover:opacity-80" style={{ height: f.pct, backgroundColor: f.color, minHeight: '6px' }}></div>
+
+          <div className="flex flex-col gap-3 flex-1 justify-center">
+            {funnel.map((f, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-[88px] shrink-0 text-[12.5px] font-bold text-[#4A5568] text-right">{f.step}</div>
+                <div className="flex-1 h-9 bg-[#F7FAFC] rounded-lg overflow-hidden relative">
+                  <div
+                    className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
+                    style={{ width: `${Math.max(f.pctTotal, 6)}%`, backgroundColor: f.color }}
+                  >
+                    <span className={`text-[13px] font-extrabold ${i === funnel.length - 1 ? "text-white" : "text-[#2D3748]"}`}>{f.val.toLocaleString()}</span>
+                  </div>
                 </div>
-                <div className="text-[11.5px] font-bold text-[#4A5568] mt-2.5 text-center">{f.step}</div>
-                <div className="text-[10px] font-bold text-[#A0AEC0]">{f.pct}</div>
+                <div className="w-[92px] shrink-0 flex items-center justify-end gap-1.5">
+                  <span className="text-[12px] font-bold text-[#1A202C]">{f.pctTotal}%</span>
+                  {f.conv !== null && (
+                    <span className="text-[10.5px] font-bold text-[#718096] bg-[#EDF2F7] px-1.5 py-0.5 rounded">전환 {f.conv}%</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
 
         {/* 스크리닝 · 온보딩 현황 (실데이터) */}
-        <div className="bg-white border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex flex-col">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-5 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5"><ClipboardCheck size={15} className="text-[#3182CE]" /> 스크리닝 · 온보딩 현황</h2>
-            <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-[#3182CE] hover:underline outline-none">응대로</button>
+            <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-[#3182CE] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40 rounded">응대로</button>
           </div>
 
           {/* 단계별 */}
@@ -279,7 +351,7 @@ export function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
       </div>
     </div>
   );
