@@ -450,7 +450,7 @@ export function Jobs() {
 
   const copyJobLink = async (job: JobRow) => {
     const base = typeof window !== "undefined" ? window.location.origin : "";
-    const params = new URLSearchParams({ source: "direct" });
+    const params = new URLSearchParams({ source: "direct", job: job.id });
     if (job.branch && job.branch !== "-") params.set("branch", job.branch);
     const url = `${base}/apply?${params.toString()}`;
     try {

@@ -63,16 +63,44 @@ const inputCls =
   "w-full px-4 py-3.5 border border-[#E2E8F0] rounded-xl text-[16px] focus:outline-none focus:border-[#FFCB3C] focus:ring-2 focus:ring-[#FFCB3C]/40 bg-white";
 const requiredMark = <span className="text-[#E53E3E] ml-0.5">*</span>;
 
+interface JobContext {
+  id: number;
+  title: string;
+  branch: string | null;
+  client_name: string | null;
+  recruiting: boolean;
+}
+
 function ApplyForm() {
   const searchParams = useSearchParams();
   const source = normalizeSource(searchParams.get("source"));
   const prefillBranch = searchParams.get("branch");
+  const jobParam = searchParams.get("job");
+  const jobId = jobParam && /^\d+$/.test(jobParam) ? Number(jobParam) : null;
 
   const [form, setForm] = useState<FormState>(INITIAL);
   const [branches, setBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [job, setJob] = useState<JobContext | null>(null);
+
+  // 공고 지원 링크(?job=ID)로 들어오면 공고 맥락을 불러와 헤더에 표기하고 지점을 미리 채운다.
+  useEffect(() => {
+    if (jobId == null) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/apply/job/${jobId}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        const j = json.job as JobContext;
+        setJob(j);
+        if (j.branch) setForm((prev) => (prev.branch1 ? prev : { ...prev, branch1: j.branch as string }));
+      } catch {
+        /* 공고 맥락 없이도 일반 지원 가능 */
+      }
+    })();
+  }, [jobId]);
 
   useEffect(() => {
     (async () => {
@@ -136,7 +164,7 @@ function ApplyForm() {
       const res = await fetch("/api/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, source }),
+        body: JSON.stringify({ ...form, source, jobId }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -180,6 +208,21 @@ function ApplyForm() {
           </div>
           <p className="text-[15px] text-[#718096]">아래 항목을 작성해주세요. <span className="text-[#E53E3E]">*</span> 표시는 필수입니다.</p>
         </div>
+
+        {job && (
+          <div className="mb-6 bg-white border border-[#E2E8F0] rounded-2xl px-5 py-4 shadow-sm">
+            <div className="text-[12px] font-bold text-[#B7791F] bg-[#FFFBEB] inline-flex items-center px-2 py-0.5 rounded mb-2">지원 공고</div>
+            <div className="text-[17px] font-extrabold text-[#1A202C] leading-tight">{job.title}</div>
+            <div className="text-[13px] text-[#718096] mt-1">
+              {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹보딩 배송원"}
+            </div>
+            {!job.recruiting && (
+              <div className="mt-2 text-[13px] font-bold text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] rounded-lg px-3 py-2">
+                현재 마감된 공고예요. 지원서는 접수되며, 다른 공고로 안내드릴 수 있어요.
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 flex items-start gap-2 bg-[#FFF5F5] border border-[#FEB2B2] text-[#C53030] rounded-xl px-4 py-3 text-[14px] font-bold">

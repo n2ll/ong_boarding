@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       availableDate,
       selfOwnership,
       marketingConsent,
+      jobId,
     } = body;
 
     // ── 필수 필드 검증 ─────────────────────────────────────
@@ -314,6 +315,49 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {
         console.error("[apply] system job ensure failed", e);
+      }
+    }
+
+    // ── 실제 공고 지원 링크(?job=ID)로 들어온 경우 → 해당 공고 후보로 연결 ──
+    // 외부 채널 게시물의 "지원하기"가 이 흐름을 타며, 매니저는 공고별 후보 보드에서 바로 확인/스크리닝한다.
+    // (당근/배민 시스템 흐름은 위에서 별도 처리되므로 여기선 실공고만 처리)
+    const realJobId = Number(jobId);
+    if (Number.isFinite(realJobId) && realJobId > 0) {
+      try {
+        const { data: job } = await supabase
+          .from("jobs")
+          .select("id, title")
+          .eq("id", realJobId)
+          .maybeSingle();
+        // 시스템 공고(__ 접두)는 제외
+        const isRealJob = job && !(typeof job.title === "string" && job.title.startsWith("__"));
+        if (isRealJob) {
+          const now = new Date().toISOString();
+          await supabase.from("job_candidates").upsert(
+            [
+              {
+                job_id: realJobId,
+                applicant_id: inserted.id,
+                agent_stage: filterPass ? "screening" : "abort",
+                agent_state: filterPass
+                  ? { meta: { screening_entered_at: now, entry: "web_apply" } }
+                  : { meta: { auto_filtered_at: now, entry: "web_apply" } },
+                ...(filterPass ? {} : { closed_at: now, closed_reason: "auto: 자동 필터 부적합" }),
+              },
+            ],
+            { onConflict: "job_id,applicant_id", ignoreDuplicates: true }
+          );
+          // 진행 중인 다른 공고가 없을 때만 이 공고를 현재 공고로 지정
+          if (filterPass) {
+            await supabase
+              .from("applicants")
+              .update({ current_job_id: realJobId })
+              .eq("id", inserted.id)
+              .is("current_job_id", null);
+          }
+        }
+      } catch (linkErr) {
+        console.error("[apply] real job link failed", linkErr);
       }
     }
 
