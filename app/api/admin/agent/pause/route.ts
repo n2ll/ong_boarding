@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { applicant_id } = await req.json();
+    const { applicant_id, job_id } = await req.json();
     if (!applicant_id) {
       return NextResponse.json(
         { error: "applicant_id는 필수입니다." },
@@ -30,11 +30,16 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServiceClient();
-    const { data: jc } = await supabase
+    // job_id가 오면 그 공고 후보를, 아니면 최신 후보(하위호환)를 대상으로.
+    let q = supabase
       .from("job_candidates")
       .select("id, agent_stage, agent_state")
       .eq("applicant_id", applicant_id)
-      .not("agent_stage", "is", null)
+      .not("agent_stage", "is", null);
+    if (job_id != null && Number.isFinite(Number(job_id))) {
+      q = q.eq("job_id", Number(job_id));
+    }
+    const { data: jc } = await q
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();

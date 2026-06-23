@@ -20,6 +20,13 @@ interface Applicant {
   last_message_at?: string | null;
 }
 
+interface ActiveJob {
+  job_id: number;
+  title: string;
+  branch: string | null;
+  agent_stage: string | null;
+}
+
 const STAGE_KO: Record<string, string> = {
   exploration: "탐색",
   screening: "스크리닝",
@@ -69,6 +76,9 @@ export function LiveConsole() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string }>>({});
+  // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
+  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
 
   const loadChats = useCallback(async () => {
     try {
@@ -104,6 +114,36 @@ export function LiveConsole() {
   useEffect(() => {
     loadChats();
   }, [loadChats]);
+
+  // 선택 지원자가 바뀌면 그 사람이 동시에 진행 중인 공고 목록을 불러온다.
+  // 2건 이상이면 대화창 상단에 공고 탭이 떠서 공고별로 스레드·체크리스트·AI 토글이 분리된다.
+  useEffect(() => {
+    if (selectedChatId == null) {
+      setActiveJobs([]);
+      setSelectedJobId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/applicants/${selectedChatId}/active-jobs`);
+        const json = await res.json();
+        if (cancelled) return;
+        const jobs = (json.jobs ?? []) as ActiveJob[];
+        setActiveJobs(jobs);
+        // 공고가 여러 개면 첫 번째를 기본 선택, 1개면 그 공고, 없으면 전체(null)
+        setSelectedJobId(jobs.length > 0 ? jobs[0].job_id : null);
+      } catch {
+        if (!cancelled) {
+          setActiveJobs([]);
+          setSelectedJobId(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChatId]);
 
   const activeChat = chats.find((c) => c.id === selectedChatId) ?? null;
   const interventionChats = chats.filter((c) => (c.unread_count ?? 0) > 0);
@@ -219,11 +259,50 @@ export function LiveConsole() {
               <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">{activeChat.status}</span>
             </div>
           </div>
+
+          {/* 멀티-잡 공고 선택 탭 — 동시에 2개 이상 공고를 진행 중일 때만 노출.
+              공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
+          {activeJobs.length > 1 && (
+            <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-2 flex items-center gap-2 overflow-x-auto">
+              <span className="text-[11px] font-bold text-[#A0AEC0] shrink-0">진행 공고 {activeJobs.length}건 · 탭 전환</span>
+              {activeJobs.map((j) => {
+                const selected = selectedJobId === j.job_id;
+                const paused = j.agent_stage === "paused";
+                const label = (j.branch && j.branch.trim()) || j.title;
+                return (
+                  <button
+                    key={j.job_id}
+                    onClick={() => setSelectedJobId(j.job_id)}
+                    aria-pressed={selected}
+                    className={`shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+                      selected
+                        ? "bg-[#1A202C] text-white shadow-sm"
+                        : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7] hover:border-[#CBD5E0]"
+                    }`}
+                    title={`${j.title} — 클릭해 이 공고 대화로 전환`}
+                  >
+                    {label}
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        paused
+                          ? selected ? "bg-[#4A5568] text-white" : "bg-[#EDF2F7] text-[#4A5568]"
+                          : selected ? "bg-[#3182CE] text-white" : "bg-[#EBF8FF] text-[#3182CE]"
+                      }`}
+                    >
+                      {paused ? "수동" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <ConversationThread
-            key={activeChat.id}
+            key={`${activeChat.id}:${selectedJobId ?? "all"}`}
             applicantId={activeChat.id}
             applicantName={activeChat.name}
             phone={activeChat.phone}
+            jobId={selectedJobId}
             onChanged={loadChats}
             className="flex-1 min-h-0"
           />
@@ -236,8 +315,9 @@ export function LiveConsole() {
       {activeChat && (
         <div className="w-[340px] shrink-0 bg-white border-l border-[#E2E8F0] flex flex-col">
           <ApplicantDetailContent
-            key={activeChat.id}
+            key={`${activeChat.id}:${selectedJobId ?? "all"}`}
             applicantId={activeChat.id}
+            jobId={selectedJobId}
             variant="panel"
             onChanged={loadChats}
           />

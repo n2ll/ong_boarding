@@ -33,6 +33,22 @@ export async function POST(req: NextRequest) {
     text?: string;
   };
 
+  if (body.action === "inspect") {
+    const { data: app } = await supabase.from("applicants").select("id, current_job_id").eq("phone", TEST_PHONE).maybeSingle();
+    if (!app) return NextResponse.json({ error: "no test applicant" }, { status: 404 });
+    const { data: cands } = await supabase
+      .from("job_candidates")
+      .select("id, job_id, agent_stage, jobs:job_id ( title, branch )")
+      .eq("applicant_id", app.id)
+      .order("id", { ascending: true });
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("id, direction, job_id, body, created_at")
+      .eq("applicant_id", app.id)
+      .order("created_at", { ascending: true });
+    return NextResponse.json({ applicant: app, candidates: cands, messages: msgs });
+  }
+
   if (body.action === "cleanup") {
     const { data: app } = await supabase.from("applicants").select("id").eq("phone", TEST_PHONE).maybeSingle();
     if (app) {
@@ -204,6 +220,10 @@ export async function POST(req: NextRequest) {
         sent_by: "multijob-test",
         message_type: "sms",
         job_id: jc.job_id,
+        // ⚠️ classification을 채워 두면 Supabase DB webhook(supabase-new-message)이
+        //    "already classified"로 즉시 skip → 운영 webhook의 이중 처리/실SMS 시도를 차단한다.
+        //    (webhook은 classification IS NULL인 inbound만 처리. 값은 CHECK 제약상 baemin|pending|other 中 하나)
+        classification: "other",
         created_at: now,
       })
       .select("id")

@@ -186,7 +186,7 @@ export function ConversationThread({
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId }),
+        body: JSON.stringify({ applicant_id: applicantId, job_id: jobId ?? undefined }),
       });
       const json = await res.json();
       if (!res.ok) {
