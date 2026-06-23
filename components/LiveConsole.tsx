@@ -40,6 +40,7 @@ interface Handoff {
   category_label: string;
   tone: "urgent" | "answerable" | "human" | "neutral";
   suggested_action: string;
+  is_system_job: boolean;
   paused_at: string;
   age_days: number;
 }
@@ -116,6 +117,12 @@ export function LiveConsole() {
   const [handoffCat, setHandoffCat] = useState<string>("all");
   // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
   const focusJobIdRef = useRef<number | null>(null);
+  // 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영하는 모달
+  const [promote, setPromote] = useState<Handoff | null>(null);
+  const [promoteField, setPromoteField] = useState<"pay_info" | "policy_notes">("pay_info");
+  const [promoteText, setPromoteText] = useState("");
+  const [promoteLoading, setPromoteLoading] = useState(false);
+  const [promoteSaving, setPromoteSaving] = useState(false);
 
   const loadChats = useCallback(async () => {
     try {
@@ -236,6 +243,52 @@ export function LiveConsole() {
     }
   };
 
+  // '공고에 반영' 모달 열기 — 매니저가 직접 보낸 마지막 답변/현재 공고값으로 프리필
+  const openPromote = async (h: Handoff) => {
+    const field: "pay_info" | "policy_notes" = h.category === "pay" ? "pay_info" : "policy_notes";
+    setPromote(h);
+    setPromoteField(field);
+    setPromoteText("");
+    setPromoteLoading(true);
+    try {
+      const res = await fetch(`/api/admin/agent/handoffs/promote?candidate_id=${h.candidate_id}`);
+      const json = await res.json();
+      if (res.ok) {
+        const current = field === "pay_info" ? json.current_pay_info : json.current_policy_notes;
+        setPromoteText(json.last_manual_reply ?? current ?? "");
+      }
+    } catch {
+      /* 프리필 실패해도 빈 칸으로 진행 가능 */
+    } finally {
+      setPromoteLoading(false);
+    }
+  };
+
+  const savePromote = async () => {
+    if (!promote) return;
+    const text = promoteText.trim();
+    if (!text) return toast.error("반영할 내용을 입력해주세요.");
+    setPromoteSaving(true);
+    try {
+      const res = await fetch("/api/admin/agent/handoffs/promote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate_id: promote.candidate_id, field: promoteField, text }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "반영에 실패했어요");
+        return;
+      }
+      toast.success("공고에 반영했어요. 다음부터 AI가 이 질문에 직접 답합니다.");
+      setPromote(null);
+    } catch {
+      toast.error("반영에 실패했어요");
+    } finally {
+      setPromoteSaving(false);
+    }
+  };
+
   const visibleChats = chats
     .filter((c) => {
       if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
@@ -322,13 +375,25 @@ export function LiveConsole() {
                   </button>
                   <div className="flex items-center justify-between gap-2 px-3.5 pb-2.5 pt-0.5">
                     <span className="text-[11px] font-bold text-[#A0AEC0] truncate">→ {h.suggested_action}</span>
-                    <button
-                      onClick={() => resumeHandoff(h)}
-                      className="shrink-0 cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
-                      title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
-                    >
-                      AI 재개
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
+                      {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
+                        <button
+                          onClick={() => openPromote(h)}
+                          className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95"
+                          title="매니저 답변을 공고 단가·정책 필드에 저장 → 다음부터 AI가 직접 응대"
+                        >
+                          공고에 반영
+                        </button>
+                      )}
+                      <button
+                        onClick={() => resumeHandoff(h)}
+                        className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
+                        title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
+                      >
+                        AI 재개
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -474,6 +539,40 @@ export function LiveConsole() {
             </div>
             <div className="p-4 border-t border-[#E2E8F0] bg-white flex justify-end">
               <button onClick={() => setNewMsgModalOpen(false)} className="bg-[#1A202C] text-white px-5 py-2 rounded-lg text-sm font-bold">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영 */}
+      {promote && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !promoteSaving && setPromote(null)}>
+          <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
+              <h2 className="text-[16px] font-extrabold text-[#1A202C]">공고에 반영</h2>
+              <button onClick={() => setPromote(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div className="text-[12.5px] text-[#718096] leading-relaxed">
+                <b className="text-[#4A5568]">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문을 AI가 직접 답해 인계가 줄어듭니다.
+              </div>
+              <div className="flex gap-1.5">
+                <button onClick={() => setPromoteField("pay_info")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "pay_info" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>급여·정산</button>
+                <button onClick={() => setPromoteField("policy_notes")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>고용·정책</button>
+              </div>
+              <textarea
+                value={promoteText}
+                onChange={(e) => setPromoteText(e.target.value)}
+                rows={5}
+                disabled={promoteLoading}
+                placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 기본 건당 3,200원 · 매주 정산 · 프로모션 5천원(1~2개월 후 종료 가능)" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
+                className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
+              />
+              <div className="text-[11px] text-[#A0AEC0]">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
+              <button onClick={() => setPromote(null)} disabled={promoteSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button onClick={savePromote} disabled={promoteSaving || promoteLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#B7791F] hover:bg-[#975A16] disabled:opacity-60">{promoteSaving ? "저장 중…" : "공고에 반영"}</button>
             </div>
           </div>
         </div>

@@ -17,6 +17,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "pickup_address",
   "pickup_lat",
   "pickup_lng",
+  "pay_info",
+  "policy_notes",
   "capacity",
   "status",
   "site_manager_id",

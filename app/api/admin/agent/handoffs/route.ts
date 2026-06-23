@@ -12,16 +12,22 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { classifyHandoff } from "@/lib/agent/handoff-category";
+import { classifyHandoff, getCategory } from "@/lib/agent/handoff-category";
 
 export const dynamic = "force-dynamic";
+
+interface PauseMeta {
+  category?: string | null;
+  summary?: string | null;
+  suggested_action?: string | null;
+}
 
 interface JcRow {
   id: number;
   applicant_id: number;
   job_id: number;
   paused_reason: string | null;
-  agent_state: { meta?: { paused_at?: string } } | null;
+  agent_state: { meta?: { paused_at?: string; pause?: PauseMeta } } | null;
   updated_at: string;
   jobs: { id: number; title: string; branch: string | null } | null;
   applicants: { id: number; name: string | null; phone: string | null; branch: string | null } | null;
@@ -59,7 +65,11 @@ export async function GET(_req: NextRequest) {
       const isSystemJob = job.title.startsWith("__");
       const pausedAt = c.agent_state?.meta?.paused_at ?? c.updated_at;
       const ageDays = Math.max(0, Math.floor((now - new Date(pausedAt).getTime()) / 86400000));
-      const category = classifyHandoff(c.paused_reason);
+      // 1순위: 에이전트가 pause 시 직접 emit한 meta.pause. 없으면 paused_reason 키워드 분류(폴백).
+      const pauseMeta = c.agent_state?.meta?.pause ?? null;
+      const category = pauseMeta?.category ? getCategory(pauseMeta.category) : classifyHandoff(c.paused_reason);
+      const suggestedAction =
+        (pauseMeta?.suggested_action && pauseMeta.suggested_action.trim()) || category.action;
       byCategory[category.id] = (byCategory[category.id] ?? 0) + 1;
       return {
         candidate_id: c.id,
@@ -74,7 +84,9 @@ export async function GET(_req: NextRequest) {
         category: category.id,
         category_label: category.label,
         tone: category.tone,
-        suggested_action: category.action,
+        suggested_action: suggestedAction,
+        // 시스템 더미 공고는 반영할 실제 공고가 없으므로 '공고에 반영' 액션 비활성 대상
+        is_system_job: isSystemJob,
         paused_at: pausedAt,
         age_days: ageDays,
       };

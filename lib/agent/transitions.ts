@@ -89,9 +89,18 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
     // ────────────────────────────────────────────────
     case "pause":
       nextStage = "paused";
-      // 직전 stage를 meta에 저장 → 매니저 답장 후 자동 복귀에 사용
+      // 직전 stage를 meta에 저장 → 매니저 답장 후 자동 복귀에 사용.
+      // pause 구조화 정보(P1a)도 meta.pause에 함께 저장 → 인계 큐 카테고리·추천액션 1순위 소스.
       extraStateUpdate = {
-        meta: { paused_from_stage: current_stage, paused_at: now },
+        meta: {
+          paused_from_stage: current_stage,
+          paused_at: now,
+          pause: {
+            category: transition.category ?? null,
+            summary: transition.reason,
+            suggested_action: transition.suggestedAction ?? null,
+          },
+        },
       };
       await supabase
         .from("job_candidates")

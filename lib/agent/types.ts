@@ -57,6 +57,12 @@ export interface AgentState {
     last_run_at?: string;
     last_reasoning?: string;
     transition_count?: number;
+    /** pause 시점 구조화 인계 정보(P1a) — 큐 카테고리·추천액션의 1순위 소스 */
+    pause?: {
+      category?: string | null;
+      summary?: string | null;
+      suggested_action?: string | null;
+    };
     [k: string]: unknown;
   };
 }
@@ -75,6 +81,10 @@ export interface JobContext {
   vehicle_required: boolean;
   pickup_address: string | null;
   site_manager_id: number | null;
+  /** 급여·정산 정보 — 있으면 에이전트가 단가 질문에 직접 답(없으면 pause). */
+  pay_info?: string | null;
+  /** 고용형태·보험 등 정책 안내 — 있으면 에이전트가 직접 답(없으면 pause). */
+  policy_notes?: string | null;
 }
 
 export interface ApplicantContext {
@@ -124,7 +134,8 @@ export interface StageContext {
 export type StageTransition =
   | { kind: "stay" }
   | { kind: "advance"; to: StageName; reason: string }
-  | { kind: "pause"; reason: string }
+  // 에이전트가 pause 시 인계 사유를 구조화해 함께 넘긴다(P1a). category/suggestedAction은 선택.
+  | { kind: "pause"; reason: string; category?: string; suggestedAction?: string }
   | { kind: "abort"; reason: string };
 
 export interface StageResult {

@@ -15,6 +15,7 @@
 import { emptyOnboarding, isComplete, mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
 import { sendSlackOnboardingReady } from "../../slack";
+import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
   OnboardingChecklist,
   Stage,
@@ -88,7 +89,7 @@ const SYSTEM_PROMPT_BODY = `너는 옹고잉 비마트 배송원 채용 매니�
 onboarding_turn tool로만 응답.`;
 
 async function buildSystemPrompt(branchName?: string | null): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}\n\n${await buildToneGuide(branchName)}`;
+  return `${SYSTEM_PROMPT_BODY}\n${HANDOFF_EMIT_RULE}\n\n${await buildToneGuide(branchName)}`;
 }
 
 /**
@@ -117,6 +118,8 @@ interface OnboardingToolInput {
   baemin_id_text?: string;
   transition: "stay" | "pause" | "abort";
   transition_reason: string;
+  handoff_category?: string;
+  suggested_action?: string;
   reasoning: string;
 }
 
@@ -152,6 +155,7 @@ const TOOL = {
       transition_reason: {
         type: "string",
       },
+      ...handoffToolProperties,
       reasoning: {
         type: "string",
       },
@@ -301,7 +305,12 @@ function toStageResult(out: OnboardingToolInput, ctx: StageContext): StageResult
       transition = { kind: "abort", reason: out.transition_reason };
       break;
     case "pause":
-      transition = { kind: "pause", reason: out.transition_reason };
+      transition = {
+        kind: "pause",
+        reason: out.transition_reason,
+        category: out.handoff_category || undefined,
+        suggestedAction: out.suggested_action || undefined,
+      };
       break;
     case "stay":
     default:

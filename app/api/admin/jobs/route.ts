@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, capacity, status, site_manager_id, created_at, updated_at, closed_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, capacity, status, site_manager_id, created_at, updated_at, closed_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -81,6 +81,8 @@ export async function POST(req: NextRequest) {
     pickup_address,
     pickup_lat,
     pickup_lng,
+    pay_info,
+    policy_notes,
     capacity,
     site_manager_id,
     created_by,
@@ -95,6 +97,8 @@ export async function POST(req: NextRequest) {
     pickup_address?: string | null;
     pickup_lat?: number | null;
     pickup_lng?: number | null;
+    pay_info?: string | null;
+    policy_notes?: string | null;
     capacity?: number;
     site_manager_id?: number | null;
     created_by?: string | null;
@@ -141,6 +145,8 @@ export async function POST(req: NextRequest) {
       pickup_address: pickup_address ?? null,
       pickup_lat: pickup_lat ?? null,
       pickup_lng: pickup_lng ?? null,
+      pay_info: pay_info ?? null,
+      policy_notes: policy_notes ?? null,
       capacity: capacity ?? 1,
       site_manager_id: site_manager_id ?? null,
       created_by: created_by ?? null,

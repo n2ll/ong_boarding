@@ -16,6 +16,7 @@
 import { mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
+import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
   Stage,
   StageContext,
@@ -101,13 +102,15 @@ async function buildSystemPrompt(
   branchName?: string | null,
   ctx?: StageContext
 ): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n\n${await buildToneGuide(branchName)}`;
+  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}\n\n${await buildToneGuide(branchName)}`;
 }
 
 interface ExplorationToolInput {
   reply_text: string;
   transition: "stay" | "advance" | "abort" | "pause";
   transition_reason: string;
+  handoff_category?: string;
+  suggested_action?: string;
   intent_signal: "exploring" | "ready_to_apply" | "rejected" | "manager_needed";
   reasoning: string;
 }
@@ -134,6 +137,7 @@ const TOOL = {
         type: "string",
         description: "advance/abort/pause 사유 한 줄. stay면 빈 문자열.",
       },
+      ...handoffToolProperties,
       intent_signal: {
         type: "string",
         enum: ["exploring", "ready_to_apply", "rejected", "manager_needed"],
@@ -157,15 +161,17 @@ function formatHistory(history: StageContext["history"]): string {
 
 function formatJob(job: StageContext["job"]): string {
   if (!job) return "(공고 없음 — 일반 문의)";
-  return [
+  const lines = [
     `제목: ${job.title}`,
     `지점: ${job.branch ?? "-"} / 슬롯: ${job.slot ?? "-"}`,
     `시작일: ${job.start_date ?? "-"} / 자차필요: ${job.vehicle_required ? "예" : "아니오"}`,
     `픽업지: ${job.pickup_address ?? "-"}`,
-    "",
-    "[공고 본문]",
-    job.body,
-  ].join("\n");
+  ];
+  // 급여·정책 정보가 공고에 입력돼 있으면 '명시된 사실'로 제공 → 단가/정책 질문에 직접 답(pause 불필요).
+  if (job.pay_info && job.pay_info.trim()) lines.push(`급여·정산(명시됨): ${job.pay_info.trim()}`);
+  if (job.policy_notes && job.policy_notes.trim()) lines.push(`고용·정책(명시됨): ${job.policy_notes.trim()}`);
+  lines.push("", "[공고 본문]", job.body);
+  return lines.join("\n");
 }
 
 function formatApplicant(a: StageContext["applicant"]): string {
@@ -265,7 +271,12 @@ function toStageResult(out: ExplorationToolInput, ctx: StageContext): StageResul
       transition = { kind: "abort", reason: out.transition_reason };
       break;
     case "pause":
-      transition = { kind: "pause", reason: out.transition_reason };
+      transition = {
+        kind: "pause",
+        reason: out.transition_reason,
+        category: out.handoff_category || undefined,
+        suggestedAction: out.suggested_action || undefined,
+      };
       break;
     case "stay":
     default:

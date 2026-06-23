@@ -143,7 +143,7 @@ export function Jobs() {
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [branches, setBranches] = useState<BranchOpt[]>([]);
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean } | null>(null);
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -410,7 +410,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "" });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -428,6 +428,8 @@ export function Jobs() {
         branchId: j.branch_id ?? "",
         capacity: j.capacity ?? 1,
         vehicleRequired: !!j.vehicle_required,
+        payInfo: j.pay_info ?? "",
+        policyNotes: j.policy_notes ?? "",
       });
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -452,6 +454,8 @@ export function Jobs() {
           branch_id: editForm.branchId === "" ? null : editForm.branchId,
           capacity: editForm.capacity,
           vehicle_required: editForm.vehicleRequired,
+          pay_info: editForm.payInfo.trim() || null,
+          policy_notes: editForm.policyNotes.trim() || null,
         }),
       });
       const json = await res.json();
@@ -895,6 +899,18 @@ export function Jobs() {
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>
                   <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                </div>
+                {/* AI 응대 근거 — 채워두면 단가·정책 질문을 AI가 직접 답해 매니저 인계가 줄어든다 */}
+                <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
+                  <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 단가·정책 문의를 AI가 직접 안내해 인계가 줄어듭니다</div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">급여·정산 정보</label>
+                    <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당 3,000원 · 매주 정산 · 프로모션 5천원(1~2개월 후 종료 가능)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">고용·정책 안내</label>
+                    <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                  </div>
                 </div>
               </div>
             )}
