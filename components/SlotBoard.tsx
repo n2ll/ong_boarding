@@ -115,19 +115,34 @@ export function SlotBoard() {
 
   const totals = useMemo(() => {
     let cap = 0;
-    let confirmed = 0;
-    let waiting = 0;
+    // 요약 인원은 distinct 인원(머릿수)으로 집계 — 한 사람이 여러 슬롯에 걸려도 1명.
+    // (칸별 표기는 슬롯 커버리지라 다중 카운트하지만, 요약은 실제 머릿수를 보여줘야 정확)
+    const visibleNames = visibleBranches.map((b) => b.name);
+    const confirmedIds = new Set<number>();
+    const waitingIds = new Set<number>();
     for (const b of visibleBranches) {
       const branch: Branch = { id: b.id, name: b.name, sort_order: 0, active: b.active, slot_capacity: b.slot_capacity ?? undefined };
       for (const s of SLOTS) {
         cap += getSlotCapacity(branch, s);
-        const c = cellFor(b.name, s);
-        confirmed += c.confirmed;
-        waiting += c.waiting;
       }
     }
+    for (const a of applicants) {
+      if (a.status === "확정인력") {
+        const branchOk = visibleNames.some(
+          (n) => sameBranch(a.confirmed_branch, n) || sameBranch(a.branch1, n) || sameBranch(a.branch, n)
+        );
+        if (branchOk && SLOTS.some((s) => matchesSlot(effectiveSlot(a), s))) confirmedIds.add(a.id);
+      } else if (a.status === "대기자") {
+        const branchOk = visibleNames.some(
+          (n) => sameBranch(a.branch1, n) || sameBranch(a.confirmed_branch, n) || sameBranch(a.branch, n)
+        );
+        if (branchOk && SLOTS.some((s) => matchesSlot(a.work_hours, s))) waitingIds.add(a.id);
+      }
+    }
+    const confirmed = confirmedIds.size;
+    const waiting = waitingIds.size;
     return { cap, confirmed, waiting, fill: cap > 0 ? Math.round((confirmed / cap) * 100) : 0 };
-  }, [visibleBranches, cellFor]);
+  }, [visibleBranches, applicants]);
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
@@ -235,7 +250,8 @@ export function SlotBoard() {
 
       <p className="mt-4 text-[12px] text-[#A0AEC0] leading-relaxed">
         · 확정 = 상태 ‘확정인력’ + 확정 슬롯(confirmed_slot) 매칭 인원 (확정 슬롯 미입력 시 희망 시간대로 폴백) · 대기 = 상태 ‘대기자’ + 희망 시간대(work_hours) 매칭 인원.<br />
-        · 정원은 지점 관리에서 슬롯별로 설정합니다. 슬롯을 쓰지 않는 화주사는 ‘전체 지점 보기’로만 표시됩니다.
+        · 정원은 지점 관리에서 슬롯별로 설정합니다. 슬롯을 쓰지 않는 화주사는 ‘전체 지점 보기’로만 표시됩니다.<br />
+        · 상단 요약의 확정/대기 인원은 <b>실제 머릿수</b> 기준입니다(한 명이 여러 슬롯에 걸쳐도 1명). 표 안 각 칸 숫자는 해당 슬롯을 커버하는 인원이라 합과 다를 수 있습니다.
       </p>
     </div>
   );

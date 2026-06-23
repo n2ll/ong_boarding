@@ -7,8 +7,18 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
-import { calcAge, STATUS_COLORS, SLOTS } from "@/lib/admin/types";
+import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
 import { ConversationThread } from "./ConversationThread";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 // ──────────────────────────────────────────────────────────────────────────
 // 타입
@@ -184,6 +194,9 @@ export function ApplicantDetailContent({
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Partial<ApplicantFull>>({});
   const [dirty, setDirty] = useState(false);
+  // 확정 모달: 확정 시점에 슬롯을 함께 받아 confirmed_slot 공백을 방지한다.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmSlots, setConfirmSlots] = useState<string[]>([]);
 
   useEffect(() => {
     setEdit({});
@@ -252,6 +265,26 @@ export function ApplicantDetailContent({
     patch(edit, "저장했어요.");
   };
 
+  // 확정 모달 열기 — 기존 확정 슬롯(있으면)을 미리 선택해 둔다.
+  const openConfirm = () => {
+    setConfirmSlots(
+      String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    );
+    setConfirmOpen(true);
+  };
+
+  const toggleConfirmSlot = (slot: string) => {
+    setConfirmSlots((cur) => (cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot]));
+  };
+
+  // 확정 확정(commit) — status + confirmed_slot을 함께 저장. 슬롯 미선택도 허용(비강제)하되 권장.
+  const commitConfirm = async () => {
+    const body: Record<string, unknown> = { status: "확정인력" };
+    if (confirmSlots.length > 0) body.confirmed_slot = confirmSlots.join(", ");
+    const ok = await patch(body, `${a.name}님을 확정인력으로 이동했어요.`);
+    if (ok) setConfirmOpen(false);
+  };
+
   const screening = focusCand?.agent_state?.screening ?? {};
   const onboarding = focusCand?.agent_state?.onboarding ?? {};
   const screeningDone = SCREENING_KEYS.filter((k) => screening[k] === true).length;
@@ -285,7 +318,7 @@ export function ApplicantDetailContent({
           </div>
           <div className="flex gap-2">
             <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
-            <button onClick={() => patch({ status: "확정인력" }, `${a.name}님을 확정인력으로 이동했어요.`)} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+            <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
             <button onClick={() => patch({ status: "부적합" }, `${a.name}님을 부적합 처리했어요.`)} disabled={busy} className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
           </div>
         </div>
@@ -408,6 +441,51 @@ export function ApplicantDetailContent({
           </button>
         </div>
       </div>
+
+      {/* 확정 모달 — 확정 시점에 슬롯을 함께 지정해 슬롯 보드 정확도를 확보 */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{a.name}님을 확정인력으로</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              확정 슬롯을 함께 지정하면 슬롯 보드에 정확히 반영됩니다.
+              {a.work_hours ? `\n희망 시간대: ${a.work_hours}` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div>
+            <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯 (복수 선택 가능)</span>
+            <div className="flex gap-1.5 flex-wrap mt-1.5">
+              {SLOTS.map((s) => {
+                const on = confirmSlots.includes(s);
+                const hoped = matchesSlot(a.work_hours, s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => toggleConfirmSlot(s)}
+                    className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}
+                  >
+                    {s}{hoped && !on ? " ·희망" : ""}
+                  </button>
+                );
+              })}
+            </div>
+            {confirmSlots.length === 0 && (
+              <p className="text-[11.5px] text-[#D69E2E] mt-2 leading-relaxed">
+                슬롯 미선택 시 슬롯 보드에서는 희망 시간대로 <b>추정 표시</b>됩니다. 가능하면 슬롯을 지정해 주세요.
+              </p>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl" disabled={busy}>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy} className="rounded-xl">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} 확정
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
