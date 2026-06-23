@@ -117,16 +117,42 @@ export async function POST(req: NextRequest) {
   // 4a) 매칭됨 → message에 applicant_id 채우고 active candidate에 router 호출
   // ───────────────────────────────────────────────────────────────
   if (applicant) {
-    // 활성 candidate 조회
-    const { data: jc } = await supabase
+    // 활성 candidate 조회 (멀티-잡 대비 Phase 0)
+    // 예전: 가장 최근 '생성된' 후보 1건만 선택 → 한 지원자가 여러 공고에 활성이면 엉뚱한 공고로 답할 위험.
+    // 지금: 활성 후보를 모두 로드한 뒤 "마지막으로 대화한 공고(직전 outbound의 job_id)"를 우선 선택.
+    //       (없으면 가장 최근 생성 후보로 폴백 → 단일 공고일 땐 기존과 동일 동작)
+    type ActiveCand = { id: number; job_id: number | null; agent_stage: string | null; responded_at: string | null };
+    const { data: activeCands } = await supabase
       .from("job_candidates")
-      .select("id, job_id, agent_stage, responded_at")
+      .select("id, job_id, agent_stage, responded_at, created_at")
       .eq("applicant_id", applicant.id)
       .not("agent_stage", "is", null)
       .neq("agent_stage", "abort")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: false });
+
+    let jc: ActiveCand | null = null;
+    const cands = (activeCands ?? []) as (ActiveCand & { created_at: string })[];
+    if (cands.length === 1) {
+      jc = cands[0];
+    } else if (cands.length > 1) {
+      // 직전 outbound 메시지의 job_id = "지금 대화 중인 공고"로 추정
+      const { data: lastOut } = await supabase
+        .from("messages")
+        .select("job_id")
+        .eq("applicant_id", applicant.id)
+        .eq("direction", "outbound")
+        .not("job_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const lastJobId = (lastOut?.job_id as number | null) ?? null;
+      jc =
+        (lastJobId != null ? cands.find((c) => c.job_id === lastJobId) : undefined) ??
+        cands[0];
+      console.warn(
+        `[inbound] applicant ${applicant.id}: ${cands.length}개 공고 동시 진행 — job ${jc.job_id}로 라우팅 (직전 대화 공고: ${lastJobId ?? "없음"})`
+      );
+    }
 
     // message에 applicant_id (+ 가능하면 job_id) 채우기
     const msgUpdate: Record<string, unknown> = { applicant_id: applicant.id };
