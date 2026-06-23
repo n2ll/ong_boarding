@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, Brain, CheckCircle2, Clock, MessageSquare, Phone, Mail, MoreHorizontal, FileText, Activity, Users, Send, Target, Zap, ShieldCheck } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from "recharts";
 import { toast } from "sonner";
+import { DemoBanner } from "./DemoBanner";
 
 interface ApplicantDetail {
   id: number;
@@ -82,6 +83,9 @@ export function CandidateProfile() {
 
   return (
     <div className="flex flex-col h-full bg-[#EEF1F5] overflow-y-auto">
+      <div className="px-8 pt-5">
+        <DemoBanner variant="soon" note="이 상세 화면의 AI 적합도 점수·레이더·분석 코멘트는 예시(샘플)입니다. 실제 지원자 응대·스크리닝은 파이프라인의 ‘지원자 상세 패널’에서 실데이터로 진행됩니다." />
+      </div>
       {/* NBA (Next Best Action) Banner */}
       <div className="bg-gradient-to-r from-[#1A202C] via-[#2D3748] to-[#1A202C] text-white px-8 py-3.5 flex items-center justify-between shrink-0 border-b border-[#FFCB3C]/20 shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 bg-[#FFCB3C]/5 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-[#FFCB3C]/20 via-transparent to-transparent pointer-events-none"></div>
@@ -95,7 +99,7 @@ export function CandidateProfile() {
         </div>
         <button 
           onClick={() => {
-            toast.success("김철수 지원자에게 면접 가능 일정 확인 알림톡이 발송되었습니다.");
+            toast.info(`(예시 화면) ${applicant?.name ?? "지원자"}님 실제 응대는 지원자 상세 패널에서 진행해주세요.`);
           }}
           className="relative z-10 bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] px-4 py-2 rounded-lg text-[13px] font-bold transition-all shadow-sm flex items-center gap-2 hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A202C] focus-visible:ring-[#FFCB3C]"
         >
