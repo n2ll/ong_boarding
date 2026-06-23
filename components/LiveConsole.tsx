@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
@@ -25,6 +25,37 @@ interface ActiveJob {
   title: string;
   branch: string | null;
   agent_stage: string | null;
+}
+
+interface Handoff {
+  candidate_id: number;
+  applicant_id: number;
+  job_id: number;
+  applicant_name: string;
+  phone: string | null;
+  job_title: string;
+  branch: string | null;
+  reason: string | null;
+  category: string;
+  category_label: string;
+  tone: "urgent" | "answerable" | "human" | "neutral";
+  paused_at: string;
+  age_days: number;
+}
+
+// 인계 카테고리 배지 색(tone 기반). urgent=빨강, answerable=호박, human=파랑, neutral=회색
+const TONE_STYLE: Record<Handoff["tone"], string> = {
+  urgent: "bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]",
+  answerable: "bg-[#FFFBEB] text-[#B7791F] border-[#FAF089]",
+  human: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]",
+  neutral: "bg-[#F7FAFC] text-[#4A5568] border-[#E2E8F0]",
+};
+
+/** 방치 경과일 색 — 오래될수록 빨강(SLA 환기). */
+function ageStyle(days: number): string {
+  if (days >= 7) return "text-[#C53030]";
+  if (days >= 3) return "text-[#DD6B20]";
+  return "text-[#718096]";
 }
 
 const STAGE_KO: Record<string, string> = {
@@ -79,6 +110,11 @@ export function LiveConsole() {
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  // 인계 작업 큐(paused 후보) + 카테고리 필터 + 큐에서 선택한 공고 포커스용
+  const [handoffs, setHandoffs] = useState<Handoff[]>([]);
+  const [handoffCat, setHandoffCat] = useState<string>("all");
+  // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
+  const focusJobIdRef = useRef<number | null>(null);
 
   const loadChats = useCallback(async () => {
     try {
@@ -111,9 +147,27 @@ export function LiveConsole() {
     }
   }, []);
 
+  const loadHandoffs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/agent/handoffs");
+      if (!res.ok) return;
+      const json = await res.json();
+      setHandoffs((json.handoffs ?? []) as Handoff[]);
+    } catch {
+      /* 큐는 부가정보이므로 실패 무시 */
+    }
+  }, []);
+
+  // 대화 상태가 바뀌면(재개/보류/발송 등) 목록과 인계 큐를 함께 새로고침.
+  const handleChanged = useCallback(() => {
+    loadChats();
+    loadHandoffs();
+  }, [loadChats, loadHandoffs]);
+
   useEffect(() => {
     loadChats();
-  }, [loadChats]);
+    loadHandoffs();
+  }, [loadChats, loadHandoffs]);
 
   // 선택 지원자가 바뀌면 그 사람이 동시에 진행 중인 공고 목록을 불러온다.
   // 2건 이상이면 대화창 상단에 공고 탭이 떠서 공고별로 스레드·체크리스트·AI 토글이 분리된다.
@@ -131,8 +185,11 @@ export function LiveConsole() {
         if (cancelled) return;
         const jobs = (json.jobs ?? []) as ActiveJob[];
         setActiveJobs(jobs);
-        // 공고가 여러 개면 첫 번째를 기본 선택, 1개면 그 공고, 없으면 전체(null)
-        setSelectedJobId(jobs.length > 0 ? jobs[0].job_id : null);
+        // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 첫 번째(없으면 전체).
+        const fj = focusJobIdRef.current;
+        const wanted = fj != null && jobs.some((j) => j.job_id === fj) ? fj : null;
+        setSelectedJobId(wanted ?? (jobs.length > 0 ? jobs[0].job_id : null));
+        focusJobIdRef.current = null;
       } catch {
         if (!cancelled) {
           setActiveJobs([]);
@@ -146,10 +203,23 @@ export function LiveConsole() {
   }, [selectedChatId]);
 
   const activeChat = chats.find((c) => c.id === selectedChatId) ?? null;
-  const interventionChats = chats.filter((c) => (c.unread_count ?? 0) > 0);
 
-  const baseChats = activeTab === "all" ? chats : interventionChats;
-  const visibleChats = baseChats
+  // 인계 큐: 카테고리 필터 적용(이미 오래된 순으로 서버 정렬됨)
+  const visibleHandoffs = handoffCat === "all" ? handoffs : handoffs.filter((h) => h.category === handoffCat);
+  // 카테고리 칩에 쓸 집계
+  const catCounts = handoffs.reduce<Record<string, number>>((acc, h) => {
+    acc[h.category] = (acc[h.category] ?? 0) + 1;
+    return acc;
+  }, {});
+  const catOrder = Array.from(new Set(handoffs.map((h) => h.category)));
+
+  // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
+  const selectHandoff = (h: Handoff) => {
+    focusJobIdRef.current = h.job_id;
+    setSelectedChatId(h.applicant_id);
+  };
+
+  const visibleChats = chats
     .filter((c) => {
       if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
       if (stageFilter !== "all") {
@@ -184,21 +254,59 @@ export function LiveConsole() {
           </div>
           <div className="flex gap-1.5">
             <button onClick={() => setActiveTab("all")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
-            <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>개입 필요 <span className="opacity-60 ml-1">{interventionChats.length}</span></button>
+            <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>인계 대기 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
           </div>
-          {/* 스크리닝 단계 필터 */}
-          <div className="flex gap-1 flex-wrap">
-            {[
-              { id: "all", label: "전체" },
-              { id: "screening", label: "스크리닝" },
-              { id: "onboarding", label: "온보딩" },
-              { id: "paused", label: "수동" },
-            ].map((f) => (
-              <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{f.label}</button>
-            ))}
-          </div>
+          {/* all 탭: 단계 필터 / 인계 대기 탭: 사유 카테고리 필터 */}
+          {activeTab === "all" ? (
+            <div className="flex gap-1 flex-wrap">
+              {[
+                { id: "all", label: "전체" },
+                { id: "screening", label: "스크리닝" },
+                { id: "onboarding", label: "온보딩" },
+                { id: "paused", label: "수동" },
+              ].map((f) => (
+                <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{f.label}</button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex gap-1 flex-wrap">
+              <button onClick={() => setHandoffCat("all")} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 {handoffs.length}</button>
+              {catOrder.map((cid) => {
+                const sample = handoffs.find((h) => h.category === cid)!;
+                return (
+                  <button key={cid} onClick={() => setHandoffCat(cid)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{sample.category_label} {catCounts[cid]}</button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
+        {/* 인계 대기 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
+        {activeTab === "intervention" ? (
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대기 중인 인계가 없어요</div>}
+            {visibleHandoffs.map((h) => {
+              const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
+              return (
+                <button
+                  key={h.candidate_id}
+                  onClick={() => selectHandoff(h)}
+                  className={`w-full text-left p-3.5 rounded-xl transition-all cursor-pointer ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                    <span className={`text-[11.5px] font-bold ${ageStyle(h.age_days)}`}>⏱ {h.age_days === 0 ? "오늘" : `${h.age_days}일 방치`}</span>
+                  </div>
+                  <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
+                    {h.applicant_name}
+                    {h.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{h.branch}</span>}
+                  </div>
+                  {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
           {loadingList && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대화 목록 불러오는 중…</div>}
           {!loadingList && visibleChats.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">진행 중인 대화가 없어요</div>}
@@ -245,6 +353,7 @@ export function LiveConsole() {
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Middle Chat Window */}
@@ -303,7 +412,7 @@ export function LiveConsole() {
             applicantName={activeChat.name}
             phone={activeChat.phone}
             jobId={selectedJobId}
-            onChanged={loadChats}
+            onChanged={handleChanged}
             className="flex-1 min-h-0"
           />
         </div>
@@ -319,7 +428,7 @@ export function LiveConsole() {
             applicantId={activeChat.id}
             jobId={selectedJobId}
             variant="panel"
-            onChanged={loadChats}
+            onChanged={handleChanged}
           />
         </div>
       )}
