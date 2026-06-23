@@ -10,6 +10,7 @@
 
 import { emptyScreening, isComplete, mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
+import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
 import type {
   Stage,
   StageContext,
@@ -155,8 +156,11 @@ reply_text는 빈 문자열로. transition_reason에 한 줄로 신호를 적어
 ## 출력
 screening_turn tool로만 응답.`;
 
-async function buildSystemPrompt(branchName?: string | null): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}\n\n${await buildToneGuide(branchName)}`;
+async function buildSystemPrompt(
+  branchName?: string | null,
+  ctx?: StageContext
+): Promise<string> {
+  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n\n${await buildToneGuide(branchName)}`;
 }
 
 interface ScreeningToolInput {
@@ -277,7 +281,7 @@ ${formatJob(ctx.job)}
 
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
-
+${formatOtherActiveJobs(ctx.otherActiveJobs)}
 [현재 체크리스트 상태]
 ${formatChecklist(ctx.state)}
 
@@ -300,7 +304,7 @@ ${inboundText}
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1024,
-          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null),
+          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx),
           tools: [TOOL],
           tool_choice: { type: "tool", name: "screening_turn" },
           messages: [{ role: "user", content: userContent }],

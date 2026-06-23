@@ -24,6 +24,7 @@ import type {
   ApplicantContext,
   ConversationTurn,
   JobContext,
+  OtherActiveJob,
   Stage,
   StageContext,
   StageName,
@@ -171,13 +172,37 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   const cleanInbound = stripPrefix(inbound_text);
 
+  // 2b) 멀티-잡 인지 (Phase 1) — 이 지원자가 동시에 진행 중인 '다른' 공고들.
+  // 현재 후보/시스템 더미 공고(__)/abort는 제외. 에이전트가 다른 공고 문의를
+  // 현재 공고 정보로 잘못 답하지 않도록 컨텍스트로만 제공한다(체크리스트는 건드리지 않음).
+  const otherActiveJobs: OtherActiveJob[] = [];
+  {
+    const { data: others } = await supabase
+      .from("job_candidates")
+      .select(`agent_stage, jobs:job_id ( id, title, branch )`)
+      .eq("applicant_id", applicantIdForHistory)
+      .not("agent_stage", "is", null)
+      .neq("agent_stage", "abort")
+      .neq("id", candidate_id);
+    for (const o of others ?? []) {
+      const j = (o.jobs ?? null) as unknown as { id: number; title: string; branch: string | null } | null;
+      if (!j || typeof j.title !== "string" || j.title.startsWith("__")) continue;
+      otherActiveJobs.push({
+        job_id: j.id,
+        title: j.title,
+        branch: j.branch ?? null,
+        stage: (o.agent_stage as StageName) ?? "exploration",
+      });
+    }
+  }
+
   // 3) Stage 호출
   // Supabase 조인 응답은 단일 FK여도 객체/배열이 섞여 들어올 수 있어 unknown 경유
   const job = (jc.jobs ?? null) as unknown as JobContext | null;
   const applicant = jc.applicants as unknown as ApplicantContext;
   const state = (jc.agent_state ?? {}) as AgentState;
 
-  const ctx: StageContext = { job, applicant, history, state };
+  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs };
   const result = await stage.process(ctx, cleanInbound);
 
   // Claude 사용량 → ai_usage_daily 적재. stage 이름 = purpose.

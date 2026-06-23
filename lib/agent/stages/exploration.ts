@@ -15,6 +15,7 @@
 
 import { mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
+import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
 import type {
   Stage,
   StageContext,
@@ -96,8 +97,11 @@ AI가 임의로 차단/회피하면 신뢰도와 모집 기회 모두 손해.
 ## 출력
 exploration_turn tool로만 응답.`;
 
-async function buildSystemPrompt(branchName?: string | null): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}\n\n${await buildToneGuide(branchName)}`;
+async function buildSystemPrompt(
+  branchName?: string | null,
+  ctx?: StageContext
+): Promise<string> {
+  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n\n${await buildToneGuide(branchName)}`;
 }
 
 interface ExplorationToolInput {
@@ -190,7 +194,7 @@ ${formatJob(ctx.job)}
 
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
-
+${formatOtherActiveJobs(ctx.otherActiveJobs)}
 [지금까지의 대화]
 ${formatHistory(ctx.history)}
 
@@ -210,7 +214,7 @@ ${inboundText}
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1024,
-          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null),
+          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx),
           tools: [TOOL],
           tool_choice: { type: "tool", name: "exploration_turn" },
           messages: [{ role: "user", content: userContent }],

@@ -101,11 +101,24 @@ export interface ConversationTurn {
   created_at: string;
 }
 
+/**
+ * 멀티-잡 인지(Phase 1)용 — 이 지원자가 '현재 공고' 외에 동시에 진행 중인 다른 공고들의 요약.
+ * 에이전트가 다른 공고 문의를 현재 공고 정보로 잘못 답하지 않게 하는 컨텍스트.
+ */
+export interface OtherActiveJob {
+  job_id: number;
+  title: string;
+  branch: string | null;
+  stage: StageName;
+}
+
 export interface StageContext {
   job: JobContext | null;       // 매칭된 공고 (active 단계 등에선 null 가능)
   applicant: ApplicantContext;
   history: ConversationTurn[];  // 시간순 (오래된 → 최근), 본 인입 제외
   state: AgentState;
+  /** 이 지원자가 동시에 진행 중인 '다른' 공고들. 비어있으면 단일 공고(기존과 동일). */
+  otherActiveJobs?: OtherActiveJob[];
 }
 
 export type StageTransition =
