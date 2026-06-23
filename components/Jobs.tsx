@@ -41,6 +41,7 @@ interface JobCand {
   id: number;
   applicant_id: number;
   agent_stage: string | null;
+  sent_at: string | null;
   applicants: {
     id: number;
     name: string;
@@ -122,6 +123,8 @@ export function Jobs() {
   const [candidates, setCandidates] = useState<JobCand[]>([]);
   const [candLoading, setCandLoading] = useState(false);
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
+  const [candBusyId, setCandBusyId] = useState<number | null>(null);
+  const [dispatching, setDispatching] = useState(false);
 
   const loadCandidates = useCallback(async (jobId: number) => {
     setCandLoading(true);
@@ -136,11 +139,68 @@ export function Jobs() {
     }
   }, []);
 
+  // 후보 단건 매니저 액션 (응대 정지/재개·부적합·단계 변경)
+  const patchCandidate = async (cid: number, body: Record<string, unknown>, okMsg: string) => {
+    if (!candPanel) return;
+    setCandBusyId(cid);
+    try {
+      const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/candidates/${cid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "처리에 실패했어요");
+        return;
+      }
+      toast.success(okMsg);
+      loadCandidates(candPanel.jobId);
+      loadJobs();
+    } catch {
+      toast.error("처리에 실패했어요");
+    } finally {
+      setCandBusyId(null);
+    }
+  };
+
+  // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
+  const dispatchUnsent = async () => {
+    if (!candPanel) return;
+    setDispatching(true);
+    try {
+      const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "발송에 실패했어요");
+        return;
+      }
+      if (json.sent === 0 && json.skipped === 0) {
+        toast.info("발송할 미발송 후보가 없어요");
+      } else {
+        const extra = json.conflicts?.length ? ` · 다른 공고 진행 중 ${json.conflicts.length}명 보류` : "";
+        toast.success(`${json.sent}명 발송 완료 (제외 ${json.skipped}명${extra})`);
+      }
+      loadCandidates(candPanel.jobId);
+      loadJobs();
+    } catch {
+      toast.error("발송에 실패했어요");
+    } finally {
+      setDispatching(false);
+    }
+  };
+
   const openCandidates = (job: JobRow) => {
     setCandPanel({ jobId: Number(job.id), title: job.title });
     setCandidates([]);
     loadCandidates(Number(job.id));
   };
+
+  const unsentCount = candidates.filter((c) => !c.sent_at).length;
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
   // 헤더 글로벌 검색 → /jobs?q=제목 으로 진입하면 검색어 프리필
@@ -781,13 +841,25 @@ export function Jobs() {
               transition={{ type: "spring", damping: 26, stiffness: 220 }}
               className="fixed top-0 right-0 w-[480px] max-w-[92vw] h-full bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-40 flex flex-col border-l border-[#E2E8F0]"
             >
-              <div className="px-6 py-4 border-b border-[#E2E8F0] bg-[#F7FAFC] flex items-start justify-between shrink-0">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-[12px] font-bold text-[#718096] mb-1"><Users size={13} /> 공고별 지원자</div>
-                  <h2 className="text-[17px] font-extrabold text-[#1A202C] truncate">{candPanel.title}</h2>
-                  <div className="text-[12px] text-[#A0AEC0] mt-0.5">{candidates.length}명 지원</div>
+              <div className="px-6 py-4 border-b border-[#E2E8F0] bg-[#F7FAFC] shrink-0">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-[#718096] mb-1"><Users size={13} /> 공고별 지원자</div>
+                    <h2 className="text-[17px] font-extrabold text-[#1A202C] truncate">{candPanel.title}</h2>
+                    <div className="text-[12px] text-[#A0AEC0] mt-0.5">{candidates.length}명 지원 · 미발송 {unsentCount}명</div>
+                  </div>
+                  <button onClick={() => setCandPanel(null)} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
                 </div>
-                <button onClick={() => setCandPanel(null)} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
+                {unsentCount > 0 && (
+                  <button
+                    onClick={dispatchUnsent}
+                    disabled={dispatching}
+                    className="mt-3 w-full flex items-center justify-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                  >
+                    {dispatching ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                    미발송 {unsentCount}명에게 스크리닝 문자 발송
+                  </button>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-2">
                 {candLoading && <div className="text-[13px] text-[#A0AEC0] text-center py-8">불러오는 중…</div>}
@@ -796,19 +868,40 @@ export function Jobs() {
                   const a = c.applicants;
                   const stage = c.agent_stage ?? "";
                   const unread = a?.unread_count ?? 0;
+                  const busy = candBusyId === c.id;
+                  const isPaused = stage === "paused";
+                  const isClosed = stage === "abort";
                   return (
-                    <button key={c.id} onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#FFCB3C] hover:shadow-sm transition-all">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
-                          <div className="min-w-0">
-                            <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
-                            <div className="text-[11.5px] text-[#718096] truncate">{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}</div>
+                    <div key={c.id} className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#CBD5E0] transition-all">
+                      <button onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
+                            <div className="min-w-0">
+                              <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
+                              <div className="text-[11.5px] text-[#718096] truncate">{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
+                            </div>
                           </div>
+                          {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
                         </div>
-                        {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
-                      </div>
-                    </button>
+                      </button>
+                      {!isClosed && (
+                        <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
+                          {isPaused ? (
+                            <button onClick={() => patchCandidate(c.id, { agent_stage: "screening" }, "AI 응대를 재개했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 응대 재개
+                            </button>
+                          ) : (
+                            <button onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요 (수동 전환)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Pause size={12} />} 응대 정지
+                            </button>
+                          )}
+                          <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 부적합" }, "부적합 처리했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] px-2 py-1 rounded-md disabled:opacity-50 transition-colors ml-auto">
+                            <X size={12} /> 부적합
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
