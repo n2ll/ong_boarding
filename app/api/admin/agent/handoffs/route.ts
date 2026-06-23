@@ -74,6 +74,7 @@ export async function GET(_req: NextRequest) {
         category: category.id,
         category_label: category.label,
         tone: category.tone,
+        suggested_action: category.action,
         paused_at: pausedAt,
         age_days: ageDays,
       };

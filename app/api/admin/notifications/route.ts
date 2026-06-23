@@ -23,20 +23,22 @@ type Notice = {
 export async function GET() {
   const supabase = createServiceClient();
 
-  const [inboxRes, applicantsRes, aiDisabled] = await Promise.all([
+  const [inboxRes, handoffRes, aiDisabled] = await Promise.all([
     supabase
       .from("messages")
       .select("id", { count: "exact", head: true })
       .eq("classification", "pending")
       .eq("direction", "inbound"),
-    supabase.from("applicants").select("unread_count"),
+    // 수동 개입 = 매니저 인계(paused) 후보 수. (기존 unread_count 기준은 현재 0으로 사실상 사문화)
+    supabase
+      .from("job_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("agent_stage", "paused"),
     isAgentDisabled(supabase),
   ]);
 
   const inboxCount = inboxRes.count ?? 0;
-  const interventions = (applicantsRes.data ?? []).filter(
-    (a) => ((a.unread_count as number | null) ?? 0) > 0
-  ).length;
+  const interventions = handoffRes.count ?? 0;
 
   const items: Notice[] = [];
   if (aiDisabled) {
@@ -61,8 +63,8 @@ export async function GET() {
     items.push({
       id: "live",
       tone: "amber",
-      title: `수동 개입 필요 ${interventions}건`,
-      desc: "미답장 상태인 지원자 대화가 있어요. 직접 응대가 필요합니다.",
+      title: `매니저 인계 대기 ${interventions}건`,
+      desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.",
       path: "/live",
     });
   }

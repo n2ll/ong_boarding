@@ -39,6 +39,7 @@ interface Handoff {
   category: string;
   category_label: string;
   tone: "urgent" | "answerable" | "human" | "neutral";
+  suggested_action: string;
   paused_at: string;
   age_days: number;
 }
@@ -219,6 +220,22 @@ export function LiveConsole() {
     setSelectedChatId(h.applicant_id);
   };
 
+  // 처리 완료 → AI 재개. 큐에서 즉시 제거되도록 새로고침.
+  const resumeHandoff = async (h: Handoff) => {
+    try {
+      const res = await fetch("/api/admin/agent/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_id: h.applicant_id, job_id: h.job_id }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(`${h.applicant_name}님 — AI 응대를 재개했어요.`);
+      handleChanged();
+    } catch {
+      toast.error("재개에 실패했어요.");
+    }
+  };
+
   const visibleChats = chats
     .filter((c) => {
       if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
@@ -288,21 +305,32 @@ export function LiveConsole() {
             {visibleHandoffs.map((h) => {
               const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
               return (
-                <button
+                <div
                   key={h.candidate_id}
-                  onClick={() => selectHandoff(h)}
-                  className={`w-full text-left p-3.5 rounded-xl transition-all cursor-pointer ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
+                  className={`rounded-xl transition-all ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
                 >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
-                    <span className={`text-[11.5px] font-bold ${ageStyle(h.age_days)}`}>⏱ {h.age_days === 0 ? "오늘" : `${h.age_days}일 방치`}</span>
+                  <button onClick={() => selectHandoff(h)} className="w-full text-left p-3.5 pb-2 cursor-pointer">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                      <span className={`text-[11.5px] font-bold ${ageStyle(h.age_days)}`}>⏱ {h.age_days === 0 ? "오늘" : `${h.age_days}일 방치`}</span>
+                    </div>
+                    <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
+                      {h.applicant_name}
+                      {h.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{h.branch}</span>}
+                    </div>
+                    {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
+                  </button>
+                  <div className="flex items-center justify-between gap-2 px-3.5 pb-2.5 pt-0.5">
+                    <span className="text-[11px] font-bold text-[#A0AEC0] truncate">→ {h.suggested_action}</span>
+                    <button
+                      onClick={() => resumeHandoff(h)}
+                      className="shrink-0 cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
+                      title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
+                    >
+                      AI 재개
+                    </button>
                   </div>
-                  <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
-                    {h.applicant_name}
-                    {h.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{h.branch}</span>}
-                  </div>
-                  {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
-                </button>
+                </div>
               );
             })}
           </div>
