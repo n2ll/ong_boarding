@@ -31,6 +31,24 @@ export function Sourcing() {
 
   const totalInflow = published.reduce((a, j) => a + j.stats.reduce((b, s) => b + s.applicants, 0), 0);
 
+  // 채널별 실제 유입 집계 (데모 광고 지표와 달리 실제 지원자 데이터 기반)
+  const [inflow, setInflow] = useState<{ bySource: { source: string; total: number; recent7: number; confirmed: number }[]; total: number; recent7: number; confirmed: number } | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/sourcing/inflow");
+        if (res.ok) setInflow(await res.json());
+      } catch {
+        /* 실패 시 실데이터 카드만 숨김 */
+      }
+    })();
+  }, []);
+
+  const SOURCE_KO: Record<string, string> = {
+    danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",
+    manual: "수기 등록", direct: "직접 지원", facebook: "페이스북", naver: "네이버",
+  };
+
   // 외부 채널 게시 모달 — 공고 선택 → 채널 형식 본문 자동 생성 → 미리보기 → 게시
   const [publishOpen, setPublishOpen] = useState(false);
   const [jobOpts, setJobOpts] = useState<JobOpt[]>([]);
@@ -209,6 +227,36 @@ export function Sourcing() {
               </div>
             )}
           </div>
+
+          {/* 실데이터: 채널별 실제 유입 (데모 광고지표와 구분) */}
+          {inflow && inflow.total > 0 && (
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-[#E2E8F0] bg-[#F7FAFC] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users size={16} className="text-[#3182CE]" />
+                  <h2 className="text-[15px] font-bold text-[#1A202C]">채널별 실제 유입</h2>
+                  <span className="text-[10px] font-bold text-[#2F855A] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">실데이터</span>
+                </div>
+                <div className="text-[12px] text-[#718096] font-bold">누적 {inflow.total.toLocaleString()}명 · 최근 7일 +{inflow.recent7} · 확정 {inflow.confirmed}</div>
+              </div>
+              <div className="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {inflow.bySource.map((s) => {
+                  const rate = s.total ? Math.round((s.confirmed / s.total) * 100) : 0;
+                  return (
+                    <div key={s.source} className="border border-[#E2E8F0] rounded-xl p-3.5">
+                      <div className="text-[12px] font-bold text-[#4A5568]">{SOURCE_KO[s.source] ?? s.source}</div>
+                      <div className="text-[22px] font-extrabold text-[#1A202C] tracking-tight mt-1">{s.total.toLocaleString()}<span className="text-[12px] font-medium text-[#A0AEC0] ml-1">명</span></div>
+                      <div className="flex items-center gap-2 mt-1.5 text-[11px] font-bold">
+                        <span className="text-[#38A169]">최근 7일 +{s.recent7}</span>
+                        <span className="text-[#A0AEC0]">·</span>
+                        <span className="text-[#3182CE]">확정 {rate}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-4 gap-4">
             <div className="bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm flex flex-col justify-between h-[120px]">
