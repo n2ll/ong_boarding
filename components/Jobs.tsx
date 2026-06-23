@@ -50,9 +50,34 @@ interface JobCand {
     work_hours: string | null;
     own_vehicle: string | null;
     status: string;
+    source: string | null;
+    confirmed_slot: string | null;
+    confirmed_branch: string | null;
     last_message_at: string | null;
     unread_count: number | null;
   } | null;
+}
+
+const CAND_SOURCE_LABEL: Record<string, string> = {
+  danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",
+  manual: "수기", direct: "직접지원", facebook: "페이스북", naver: "네이버",
+};
+
+const SLOT_KEYS = [
+  { key: "평일오전", label: "평일 오전" },
+  { key: "평일오후", label: "평일 오후" },
+  { key: "주말오전", label: "주말 오전" },
+  { key: "주말오후", label: "주말 오후" },
+];
+
+// 단계 그룹 표시 순서
+const STAGE_ORDER = ["exploration", "screening", "onboarding", "active", "paused", "abort"];
+
+function slotMatch(confirmed: string | null | undefined, key: string): boolean {
+  if (!confirmed) return false;
+  const day = key.startsWith("평일") ? "평일" : "주말";
+  const time = key.endsWith("오전") ? "오전" : "오후";
+  return confirmed.split(",").some((p) => p.includes(day) && p.includes(time));
 }
 
 const STAGE_KO: Record<string, string> = {
@@ -201,6 +226,27 @@ export function Jobs() {
   };
 
   const unsentCount = candidates.filter((c) => !c.sent_at).length;
+
+  // 공고별 요약 집계 (단계/채널/확정 슬롯)
+  const stageCounts = candidates.reduce<Record<string, number>>((acc, c) => {
+    const s = c.agent_stage ?? "exploration";
+    acc[s] = (acc[s] ?? 0) + 1;
+    return acc;
+  }, {});
+  const channelCounts = candidates.reduce<Record<string, number>>((acc, c) => {
+    const s = c.applicants?.source ?? "direct";
+    acc[s] = (acc[s] ?? 0) + 1;
+    return acc;
+  }, {});
+  const confirmedCands = candidates.filter((c) => c.applicants?.status === "확정인력");
+  const slotFill = SLOT_KEYS.map((s) => ({
+    ...s,
+    count: confirmedCands.filter((c) => slotMatch(c.applicants?.confirmed_slot, s.key)).length,
+  }));
+  const hasConfirmedSlot = slotFill.some((s) => s.count > 0);
+  const stageGroups = STAGE_ORDER
+    .map((stage) => ({ stage, items: candidates.filter((c) => (c.agent_stage ?? "exploration") === stage) }))
+    .filter((g) => g.items.length > 0);
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
   // 헤더 글로벌 검색 → /jobs?q=제목 으로 진입하면 검색어 프리필
@@ -861,49 +907,96 @@ export function Jobs() {
                   </button>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {candLoading && <div className="text-[13px] text-[#A0AEC0] text-center py-8">불러오는 중…</div>}
                 {!candLoading && candidates.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 지원자가 없어요</div>}
-                {candidates.map((c) => {
-                  const a = c.applicants;
-                  const stage = c.agent_stage ?? "";
-                  const unread = a?.unread_count ?? 0;
-                  const busy = candBusyId === c.id;
-                  const isPaused = stage === "paused";
-                  const isClosed = stage === "abort";
-                  return (
-                    <div key={c.id} className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#CBD5E0] transition-all">
-                      <button onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
-                            <div className="min-w-0">
-                              <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
-                              <div className="text-[11.5px] text-[#718096] truncate">{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
-                            </div>
-                          </div>
-                          {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
-                        </div>
-                      </button>
-                      {!isClosed && (
-                        <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
-                          {isPaused ? (
-                            <button onClick={() => patchCandidate(c.id, { agent_stage: "screening" }, "AI 응대를 재개했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
-                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 응대 재개
-                            </button>
-                          ) : (
-                            <button onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요 (수동 전환)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
-                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Pause size={12} />} 응대 정지
-                            </button>
-                          )}
-                          <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 부적합" }, "부적합 처리했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] px-2 py-1 rounded-md disabled:opacity-50 transition-colors ml-auto">
-                            <X size={12} /> 부적합
-                          </button>
-                        </div>
-                      )}
+
+                {!candLoading && candidates.length > 0 && (
+                  <div className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl p-3.5 space-y-3">
+                    {/* 단계 분포 */}
+                    <div>
+                      <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5">진행 단계</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => (
+                          <span key={s} className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${STAGE_COLOR[s] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
+                        ))}
+                      </div>
                     </div>
-                  );
-                })}
+                    {/* 채널 유입 */}
+                    <div>
+                      <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5">유입 채널</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(channelCounts).sort((a, b) => b[1] - a[1]).map(([src, n]) => (
+                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-[#E2E8F0] text-[#4A5568]">{CAND_SOURCE_LABEL[src] ?? src} {n}</span>
+                        ))}
+                      </div>
+                    </div>
+                    {/* 확정 슬롯 분포 */}
+                    {hasConfirmedSlot && (
+                      <div>
+                        <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5">확정 슬롯 분포</div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {slotFill.map((s) => (
+                            <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-[#F0FFF4] border border-[#C6F6D5]" : "bg-white border border-[#E2E8F0]"}`}>
+                              <div className="text-[10px] font-bold text-[#718096]">{s.label}</div>
+                              <div className={`text-[14px] font-extrabold ${s.count > 0 ? "text-[#38A169]" : "text-[#CBD5E0]"}`}>{s.count}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {stageGroups.map((group) => (
+                  <div key={group.stage} className="space-y-2">
+                    <div className="flex items-center gap-2 px-0.5">
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${STAGE_COLOR[group.stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
+                      <span className="text-[11px] text-[#A0AEC0] font-bold">{group.items.length}명</span>
+                      <div className="flex-1 h-px bg-[#EDF2F7]" />
+                    </div>
+                    {group.items.map((c) => {
+                      const a = c.applicants;
+                      const stage = c.agent_stage ?? "";
+                      const unread = a?.unread_count ?? 0;
+                      const busy = candBusyId === c.id;
+                      const isPaused = stage === "paused";
+                      const isClosed = stage === "abort";
+                      return (
+                        <div key={c.id} className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#CBD5E0] transition-all">
+                          <button onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
+                                <div className="min-w-0">
+                                  <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
+                                  <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? (CAND_SOURCE_LABEL[a.source] ?? a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
+                                </div>
+                              </div>
+                              {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
+                            </div>
+                          </button>
+                          {!isClosed && (
+                            <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
+                              {isPaused ? (
+                                <button onClick={() => patchCandidate(c.id, { agent_stage: "screening" }, "AI 응대를 재개했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                                  {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 응대 재개
+                                </button>
+                              ) : (
+                                <button onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요 (수동 전환)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                                  {busy ? <Loader2 size={12} className="animate-spin" /> : <Pause size={12} />} 응대 정지
+                                </button>
+                              )}
+                              <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 부적합" }, "부적합 처리했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] px-2 py-1 rounded-md disabled:opacity-50 transition-colors ml-auto">
+                                <X size={12} /> 부적합
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </motion.div>
           </>

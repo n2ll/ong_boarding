@@ -24,6 +24,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       applicants:applicant_id (
         id, name, phone, branch1, branch2, work_hours, location,
         own_vehicle, license_type, vehicle_type, available_date, status,
+        source, confirmed_slot, confirmed_branch,
         last_message_at, unread_count
       )
     `)
