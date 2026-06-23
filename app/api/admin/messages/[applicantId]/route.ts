@@ -107,6 +107,27 @@ export async function GET(
       reasoning: m.direction === "outbound" ? reasoningByMessageId.get(m.id) ?? null : null,
     }));
 
+    // 멀티-잡 인지(Phase 2 UX): 이 대화에 등장하는 공고 라벨 맵.
+    // 한 지원자가 여러 공고를 동시 진행할 때, 말풍선에 "어느 공고 건"인지 칩으로 표시하기 위함.
+    // 시스템 더미 공고(__ 접두)는 제외 → 칩 미표시.
+    const jobIdsInThread = Array.from(
+      new Set(messagesList.map((m) => m.job_id).filter((x): x is number => typeof x === "number"))
+    );
+    const jobsMap: Record<number, { title: string; branch: string | null }> = {};
+    if (jobIdsInThread.length > 0) {
+      const { data: jobRows } = await supabase
+        .from("jobs")
+        .select("id, title, branch")
+        .in("id", jobIdsInThread);
+      for (const j of jobRows ?? []) {
+        if (typeof j.title === "string" && j.title.startsWith("__")) continue;
+        jobsMap[j.id as number] = {
+          title: (j.title as string) ?? "",
+          branch: (j.branch as string | null) ?? null,
+        };
+      }
+    }
+
     // 현재 후보의 agent_stage + agent_state (체크리스트)
     let agentStage: string | null = null;
     let agentState: Record<string, unknown> | null = null;
@@ -130,6 +151,7 @@ export async function GET(
       draft: latestDraft || null,
       agent_stage: agentStage,
       agent_state: agentState,
+      jobs: jobsMap,
     });
   } catch (err) {
     console.error("[messages API error]", err);

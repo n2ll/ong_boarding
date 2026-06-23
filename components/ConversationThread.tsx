@@ -20,6 +20,19 @@ interface ApiMessage {
   body: string | null;
   created_at: string;
   sent_by?: string | null;
+  job_id?: number | null;
+}
+
+interface JobLabel {
+  title: string;
+  branch: string | null;
+}
+
+/** 공고 라벨 칩에 쓸 짧은 텍스트 — 지점명 우선, 없으면 제목 앞부분. */
+function jobChipLabel(j: JobLabel): string {
+  if (j.branch && j.branch.trim()) return j.branch.trim();
+  const t = (j.title ?? "").trim();
+  return t.length > 14 ? t.slice(0, 14) + "…" : t || "공고";
 }
 
 function fmtTime(iso: string): string {
@@ -91,6 +104,7 @@ export function ConversationThread({
   className = "",
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
+  const [jobsMap, setJobsMap] = useState<Record<number, JobLabel>>({});
   const [agentStage, setAgentStage] = useState<string | null>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
@@ -109,6 +123,7 @@ export function ConversationThread({
         const res = await fetch(`/api/admin/messages/${applicantId}${jobQS}`);
         const json = await res.json();
         setMessages((json.messages ?? []) as ApiMessage[]);
+        setJobsMap((json.jobs ?? {}) as Record<number, JobLabel>);
         setAgentStage(json.agent_stage ?? null);
       } catch {
         if (!opts?.silent) toast.error("대화 내역을 불러오지 못했어요");
@@ -156,6 +171,10 @@ export function ConversationThread({
   const hasActiveFlow = agentStage != null && agentStage !== "abort";
   const isAiEnabled = hasActiveFlow && !isPaused;
   const canSend = !isAiEnabled;
+
+  // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
+  // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
+  const showJobChips = jobId == null && Object.keys(jobsMap).length > 1;
 
   const handleToggleAi = async (checked: boolean) => {
     if (!hasActiveFlow) {
@@ -328,6 +347,11 @@ export function ConversationThread({
               {sender === "ai" && <div className="w-9 h-9 rounded-full bg-[#FFCB3C] flex items-center justify-center shrink-0 border border-[#E0B500]"><Bot size={18} className="text-[#1A202C]" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
                 {sender === "ai" && <span className="text-[11.5px] font-bold text-[#718096] ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
+                {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
+                  <span className="text-[10.5px] font-bold text-[#3182CE] bg-[#EBF8FF] border border-[#BEE3F8] px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
+                    {jobChipLabel(jobsMap[msg.job_id]!)}
+                  </span>
+                )}
                 <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-[#1A202C] text-white rounded-tr-sm" : "bg-white border border-[#E2E8F0] text-[#2D3748] rounded-tl-sm"}`}>
                   {msg.body}
                 </div>
