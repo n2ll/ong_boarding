@@ -9,6 +9,17 @@ import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 
+const SEGMENTS_KEY = "ong_pipeline_segments";
+
+interface SavedSegment {
+  id: string;
+  name: string;
+  channels: string[];
+  vehicle: "all" | "vehicle" | "walk";
+  slots: string[];
+  query: string;
+}
+
 // Types
 interface CardData {
   id: string;
@@ -159,6 +170,45 @@ export function Pipeline() {
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
   const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");
   const [slotFilter, setSlotFilter] = useState<Set<string>>(new Set());
+
+  // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
+  const [segments, setSegments] = useState<SavedSegment[]>([]);
+  const [segNameDraft, setSegNameDraft] = useState("");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SEGMENTS_KEY);
+      if (raw) setSegments(JSON.parse(raw) as SavedSegment[]);
+    } catch {
+      /* 손상된 값이면 무시 */
+    }
+  }, []);
+  const persistSegments = (next: SavedSegment[]) => {
+    setSegments(next);
+    try { localStorage.setItem(SEGMENTS_KEY, JSON.stringify(next)); } catch { /* 용량 초과 등 무시 */ }
+  };
+  const saveCurrentSegment = () => {
+    const name = segNameDraft.trim();
+    if (!name) return;
+    const seg: SavedSegment = {
+      id: `${Date.now()}`,
+      name,
+      channels: Array.from(channelFilter),
+      vehicle: vehicleFilter,
+      slots: Array.from(slotFilter),
+      query: query.trim(),
+    };
+    persistSegments([seg, ...segments.filter((s) => s.name !== name)]);
+    setSegNameDraft("");
+    toast.success(`세그먼트 '${name}'을 저장했어요`);
+  };
+  const applySegment = (seg: SavedSegment) => {
+    setChannelFilter(new Set(seg.channels));
+    setVehicleFilter(seg.vehicle);
+    setSlotFilter(new Set(seg.slots));
+    setQuery(seg.query ?? "");
+    toast.info(`'${seg.name}' 세그먼트를 적용했어요`);
+  };
+  const deleteSegment = (id: string) => persistSegments(segments.filter((s) => s.id !== id));
 
   // Modals state
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
@@ -507,6 +557,30 @@ export function Pipeline() {
                         );
                       })}
                     </div>
+                  </div>
+                </div>
+
+                {/* 저장된 세그먼트 (필터 프리셋) */}
+                <div className="border-t border-[#E2E8F0] pt-3 flex flex-col gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12px] font-bold text-[#4A5568]">저장된 세그먼트</span>
+                    {segments.length === 0 && <span className="text-[11.5px] text-[#A0AEC0]">자주 쓰는 필터 조합을 저장해 1클릭으로 재적용하세요.</span>}
+                    {segments.map((seg) => (
+                      <span key={seg.id} className="group inline-flex items-center gap-1 bg-white border border-[#E2E8F0] rounded-lg pl-2.5 pr-1 py-1 text-[12px] font-bold text-[#4A5568] hover:border-[#FFCB3C]">
+                        <button onClick={() => applySegment(seg)} className="hover:text-[#1A202C]">{seg.name}</button>
+                        <button onClick={() => deleteSegment(seg.id)} className="text-[#CBD5E0] hover:text-[#E53E3E] p-0.5 rounded" title="삭제"><X size={12} /></button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={segNameDraft}
+                      onChange={(e) => setSegNameDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
+                      placeholder="현재 필터를 이름 붙여 저장 (예: 강서·자차·주말)"
+                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-[#E2E8F0] rounded-lg text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white"
+                    />
+                    <button onClick={saveCurrentSegment} disabled={!segNameDraft.trim()} className="text-[12.5px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg">현재 필터 저장</button>
                   </div>
                 </div>
 
