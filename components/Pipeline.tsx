@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2 } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase } from "lucide-react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
@@ -165,6 +165,50 @@ export function Pipeline() {
   const [bulkStageModalOpen, setBulkStageModalOpen] = useState(false);
   const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
   const [bulkSending, setBulkSending] = useState(false);
+
+  // 세그먼트 → 공고 타겟 전환: 선택된 지원자를 공고 후보로 일괄 추가
+  const [jobPickerOpen, setJobPickerOpen] = useState(false);
+  const [activeJobs, setActiveJobs] = useState<{ id: number; title: string; branch: string | null }[]>([]);
+  const [addingJobId, setAddingJobId] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/jobs?status=active");
+        const json = await res.json();
+        const jobs = ((json.jobs ?? []) as { id: number; title: string; branch: string | null }[])
+          .filter((j) => !j.title.startsWith("__"));
+        setActiveJobs(jobs);
+      } catch {
+        /* 공고 목록 없이도 다른 기능은 동작 */
+      }
+    })();
+  }, []);
+
+  const addSelectedToJob = async (jobId: number) => {
+    const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
+    if (ids.length === 0) return;
+    setAddingJobId(jobId);
+    try {
+      const res = await fetch(`/api/admin/jobs/${jobId}/candidates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_ids: ids }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "공고 후보 추가에 실패했어요");
+        return;
+      }
+      toast.success(`${json.added ?? ids.length}명을 공고 후보로 추가했어요. (이미 추가된 인원은 제외)`);
+      setJobPickerOpen(false);
+      setSelectedRows(new Set());
+    } catch {
+      toast.error("공고 후보 추가에 실패했어요");
+    } finally {
+      setAddingJobId(null);
+    }
+  };
 
   const loadApplicants = async () => {
     try {
@@ -506,6 +550,9 @@ export function Pipeline() {
                     <button onClick={() => setBulkStageModalOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Columns size={16} /> 일괄 상태 변경
                     </button>
+                    <button onClick={() => setJobPickerOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
+                      <Briefcase size={16} /> 공고 후보로 추가
+                    </button>
                     <button onClick={() => setBulkMsgModalOpen(true)} className="bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all shadow-md">
                       <MessageCircle size={16} /> 알림톡/문자 캠페인 발송
                     </button>
@@ -612,6 +659,41 @@ export function Pipeline() {
           )}
         </div>
       </div>
+
+      {jobPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setJobPickerOpen(false)}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px] max-h-[80vh] flex flex-col border border-[#E2E8F0]">
+            <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-start justify-between">
+              <div>
+                <h2 className="text-[16px] font-bold text-[#1A202C]">공고 후보로 추가</h2>
+                <div className="text-[12.5px] text-[#718096] mt-0.5">선택된 {selectedRows.size}명을 추가할 공고를 선택하세요.</div>
+              </div>
+              <button onClick={() => setJobPickerOpen(false)} className="p-1.5 hover:bg-[#EDF2F7] rounded-lg text-[#A0AEC0]"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {activeJobs.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">진행 중인 공고가 없어요</div>}
+              {activeJobs.map((j) => (
+                <button
+                  key={j.id}
+                  onClick={() => addSelectedToJob(j.id)}
+                  disabled={addingJobId !== null}
+                  className="w-full text-left flex items-center justify-between gap-3 p-3.5 rounded-xl border border-[#E2E8F0] hover:border-[#FFCB3C] hover:bg-[#FFFBEB] disabled:opacity-50 transition-all"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[14px] font-bold text-[#1A202C] truncate">{j.title}</div>
+                    {j.branch && <div className="text-[12px] text-[#718096]">{j.branch}</div>}
+                  </div>
+                  {addingJobId === j.id ? <Loader2 size={16} className="animate-spin text-[#A0AEC0] shrink-0" /> : <ArrowRight size={16} className="text-[#A0AEC0] shrink-0" />}
+                </button>
+              ))}
+            </div>
+            <div className="px-5 py-3 border-t border-[#E2E8F0] text-[11.5px] text-[#A0AEC0]">
+              추가 후 공고 상세에서 일괄 스크리닝 문자를 발송할 수 있어요.
+            </div>
+          </div>
+        </div>
+      )}
 
       <ApplicantDetailPanel isOpen={selectedApplicantId != null} onClose={() => setSelectedApplicantId(null)} applicantId={selectedApplicantId} onChanged={loadApplicants} />
 
