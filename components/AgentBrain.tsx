@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import { useConfirm } from "./ConfirmDialog";
 import { DemoBanner } from "./DemoBanner";
 
 interface PromptExample {
@@ -59,6 +60,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export function AgentBrain() {
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState("knowledge");
   const [isSaving, setIsSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -131,10 +133,10 @@ export function AgentBrain() {
   const handleToggleKillSwitch = async () => {
     if (killBusy || killEnvForced) return;
     const next = !killDisabled; // next=true 면 AI 중단으로 전환
-    const confirmMsg = next
-      ? "AI 전역 응답을 중단할까요?\n\n이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)"
-      : "AI 전역 응답을 재개할까요?\n\n이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)";
-    if (!confirm(confirmMsg)) return;
+    const ok = next
+      ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
+      : await confirm({ title: "AI 전역 응답을 재개할까요?", description: "이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)", confirmText: "재개하기" });
+    if (!ok) return;
     setKillBusy(true);
     try {
       const res = await fetch("/api/admin/agent/kill-switch", {
@@ -216,7 +218,7 @@ export function AgentBrain() {
   };
 
   const handleKbDelete = async (ex: PromptExample) => {
-    if (!confirm(`'${ex.title}' 항목을 삭제할까요? 이 작업은 되돌릴 수 없어요.`)) return;
+    if (!(await confirm({ title: "항목을 삭제할까요?", description: `'${ex.title}' 항목을 삭제합니다. 이 작업은 되돌릴 수 없어요.`, confirmText: "삭제", destructive: true }))) return;
     try {
       const res = await fetch(`/api/admin/prompt-examples/${ex.id}`, { method: "DELETE" });
       const json = await res.json();

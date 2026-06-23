@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4, ChevronRight, MapPin } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "./ConfirmDialog";
 import { CLIENT_TYPE_LABEL, type ClientType } from "@/lib/admin/types";
 
 interface BranchLite { id: number; name: string; active: boolean; client_id: number | null }
@@ -58,6 +59,7 @@ function emptyForm(): ClientForm {
 
 export function Clients() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [clients, setClients] = useState<ApiClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -189,7 +191,7 @@ export function Clients() {
 
   const handleDelete = async () => {
     if (!form || form.id === null) return;
-    if (!confirm(`'${form.name}' 화주사를 삭제할까요? 소속 지점이 있으면 비활성 처리됩니다.`)) return;
+    if (!(await confirm({ title: "화주사를 삭제할까요?", description: `'${form.name}' 화주사를 삭제합니다. 소속 지점이 있으면 비활성 처리됩니다.`, confirmText: "삭제", destructive: true }))) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/clients/${form.id}`, { method: "DELETE" });

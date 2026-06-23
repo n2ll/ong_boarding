@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Shield, UserPlus, Phone, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "./ConfirmDialog";
 
 interface SiteManager {
   id: number;
@@ -29,6 +30,7 @@ function emptyForm(): TeamForm {
 }
 
 export function Team() {
+  const confirm = useConfirm();
   const [members, setMembers] = useState<SiteManager[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,7 @@ export function Team() {
 
   const handleDelete = async () => {
     if (!form || form.id === null) return;
-    if (!confirm(`'${form.name}' 담당자를 삭제할까요?`)) return;
+    if (!(await confirm({ title: "담당자를 삭제할까요?", description: `'${form.name}' 담당자를 삭제합니다.`, confirmText: "삭제", destructive: true }))) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/site-managers/${form.id}`, { method: "DELETE" });

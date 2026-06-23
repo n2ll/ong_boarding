@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Search, Building2, Users, Briefcase, Plus, ArrowUpRight, AlertTriangle, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "./ConfirmDialog";
 import { SLOTS, DEFAULT_SLOT_CAPACITY, type SlotKey } from "@/lib/admin/types";
 
 interface ApiBranch {
@@ -90,6 +91,7 @@ function sumCapacity(cap: Record<string, number> | null): number {
 }
 
 export function Branches() {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<BranchRow[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
@@ -213,7 +215,7 @@ export function Branches() {
 
   const handleDelete = async () => {
     if (!form || form.id === null) return;
-    if (!confirm(`'${form.name}' 지점을 삭제할까요? 소속 지원자가 있으면 비활성 처리됩니다.`)) return;
+    if (!(await confirm({ title: "지점을 삭제할까요?", description: `'${form.name}' 지점을 삭제합니다. 소속 지원자가 있으면 비활성 처리됩니다.`, confirmText: "삭제", destructive: true }))) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/branches/${form.id}`, { method: "DELETE" });

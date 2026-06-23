@@ -5,6 +5,7 @@ import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pau
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { useConfirm } from "./ConfirmDialog";
 
 interface JobRow {
   id: string;
@@ -120,6 +121,7 @@ function toJobRow(j: ApiJob): JobRow {
 export function Jobs() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState('active');
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -455,10 +457,10 @@ export function Jobs() {
 
   const handleToggleClose = async (job: JobRow) => {
     const next = job.status === "active" ? "closed" : "active";
-    const msg = next === "closed"
-      ? `'${job.title}' 공고를 마감할까요? 마감 후에도 언제든 재개할 수 있어요.`
-      : `'${job.title}' 공고를 다시 진행할까요?`;
-    if (!confirm(msg)) return;
+    const ok = next === "closed"
+      ? await confirm({ title: "공고를 마감할까요?", description: `'${job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.`, confirmText: "마감하기" })
+      : await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    if (!ok) return;
     setStatusBusyId(job.id);
     try {
       const res = await fetch(`/api/admin/jobs/${job.id}`, {
