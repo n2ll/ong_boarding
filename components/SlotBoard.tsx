@@ -8,6 +8,7 @@ import {
   type SlotKey,
   getSlotCapacity,
   matchesSlot,
+  effectiveSlot,
   type Branch,
   type Applicant,
   type Client,
@@ -30,13 +31,6 @@ const SLOT_LABEL: Record<SlotKey, string> = {
 
 function sameBranch(a: string | null | undefined, name: string): boolean {
   return !!a && a.trim() === name.trim();
-}
-
-function confirmedSlots(a: Applicant): string[] {
-  return (a.confirmed_slot ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
 }
 
 export function SlotBoard() {
@@ -93,9 +87,13 @@ export function SlotBoard() {
       let waiting = 0;
       for (const a of applicants) {
         if (a.status === "확정인력") {
+          // 확정 슬롯이 비면 희망(work_hours)으로 폴백 — effectiveSlot.
+          // 매니저가 confirmed_slot을 안 채운 확정인력도 보드에 잡히게 한다.
           if (
-            confirmedSlots(a).includes(slot) &&
-            (sameBranch(a.confirmed_branch, branchName) || sameBranch(a.branch, branchName))
+            matchesSlot(effectiveSlot(a), slot) &&
+            (sameBranch(a.confirmed_branch, branchName) ||
+              sameBranch(a.branch1, branchName) ||
+              sameBranch(a.branch, branchName))
           ) {
             confirmed++;
           }
@@ -236,7 +234,7 @@ export function SlotBoard() {
       )}
 
       <p className="mt-4 text-[12px] text-[#A0AEC0] leading-relaxed">
-        · 확정 = 상태 ‘확정인력’ + 확정 슬롯(confirmed_slot) 매칭 인원 · 대기 = 상태 ‘대기자’ + 희망 시간대(work_hours) 매칭 인원.<br />
+        · 확정 = 상태 ‘확정인력’ + 확정 슬롯(confirmed_slot) 매칭 인원 (확정 슬롯 미입력 시 희망 시간대로 폴백) · 대기 = 상태 ‘대기자’ + 희망 시간대(work_hours) 매칭 인원.<br />
         · 정원은 지점 관리에서 슬롯별로 설정합니다. 슬롯을 쓰지 않는 화주사는 ‘전체 지점 보기’로만 표시됩니다.
       </p>
     </div>
