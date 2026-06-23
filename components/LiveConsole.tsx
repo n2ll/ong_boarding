@@ -68,6 +68,7 @@ export function LiveConsole() {
   const [newMsgModalOpen, setNewMsgModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
+  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string }>>({});
 
   const loadChats = useCallback(async () => {
     try {
@@ -79,6 +80,20 @@ export function LiveConsole() {
       );
       setChats(active);
       setSelectedChatId((prev) => prev ?? (active[0]?.id ?? null));
+
+      // 활성 대화 subset에 한해 마지막 메시지 미리보기를 가볍게 조회
+      const ids = active.map((a) => a.id);
+      if (ids.length > 0) {
+        try {
+          const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}`);
+          if (pRes.ok) {
+            const pJson = await pRes.json();
+            setPreviewById(pJson.previews ?? {});
+          }
+        } catch {
+          /* 미리보기는 부가정보이므로 실패 무시 */
+        }
+      }
     } catch {
       toast.error("대화 목록을 불러오지 못했어요");
     } finally {
@@ -167,7 +182,18 @@ export function LiveConsole() {
                   </div>
                   <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(chat.last_message_at ?? chat.created_at)}</div>
                 </div>
-                <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
+                {(() => {
+                  const pv = previewById[chat.id];
+                  if (pv?.body) {
+                    return (
+                      <div className="text-[13px] line-clamp-1 mb-2.5">
+                        <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : "발신"}</span>
+                        <span className="text-[#4A5568]"> · {pv.body}</span>
+                      </div>
+                    );
+                  }
+                  return <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>;
+                })()}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {src && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{src}</span>}
                   {(chat.branch || chat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{chat.branch || chat.branch1}</span>}

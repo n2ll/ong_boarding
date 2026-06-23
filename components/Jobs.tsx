@@ -17,6 +17,8 @@ interface JobRow {
   status: "active" | "closed";
   candidates: number;
   newCandidates: number;
+  confirmed: number;
+  capacity: number;
   automation: boolean;
   created: string;
   deadline: string;
@@ -30,6 +32,7 @@ interface ApiJob {
   client_id: number | null;
   status: string;
   vehicle_required: boolean;
+  capacity: number | null;
   created_at: string;
   closed_at: string | null;
   counts: Record<string, number>;
@@ -112,6 +115,8 @@ function toJobRow(j: ApiJob): JobRow {
     status: j.status === "active" ? "active" : "closed",
     candidates: total,
     newCandidates: j.counts?.["sent"] ?? 0,
+    confirmed: j.counts?.["active"] ?? 0,
+    capacity: j.capacity ?? 0,
     automation: j.status === "active",
     created: fmtDate(j.created_at),
     deadline: j.closed_at ? fmtDate(j.closed_at) : "상시 모집",
@@ -209,8 +214,17 @@ export function Jobs() {
       if (json.sent === 0 && json.skipped === 0) {
         toast.info("발송할 미발송 후보가 없어요");
       } else {
-        const extra = json.conflicts?.length ? ` · 다른 공고 진행 중 ${json.conflicts.length}명 보류` : "";
-        toast.success(`${json.sent}명 발송 완료 (제외 ${json.skipped}명${extra})`);
+        const r = json.skip_reasons ?? {};
+        const reasons = [
+          r.conflict ? `다른 공고 진행 중 ${r.conflict}명` : "",
+          r.no_consent ? `수신 미동의 ${r.no_consent}명` : "",
+          r.no_phone ? `연락처 없음 ${r.no_phone}명` : "",
+          r.send_fail ? `발송 실패 ${r.send_fail}명` : "",
+        ].filter(Boolean);
+        toast.success(`${json.sent}명에게 발송 완료`, {
+          description: reasons.length ? `제외 ${json.skipped}명 — ${reasons.join(" · ")}` : undefined,
+          duration: reasons.length ? 7000 : 4000,
+        });
       }
       loadCandidates(candPanel.jobId);
       loadJobs();
@@ -619,6 +633,21 @@ export function Jobs() {
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div onClick={() => openCandidates(job)} className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
                   <div className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</div>
+                  {job.capacity > 0 && (() => {
+                    const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
+                    const done = job.confirmed >= job.capacity;
+                    return (
+                      <div className="mt-1 pr-2" title={`확정 ${job.confirmed}명 / 정원 ${job.capacity}명`}>
+                        <div className="flex items-center justify-between text-[11px] font-bold mb-0.5">
+                          <span className="text-[#718096]">충원율</span>
+                          <span className={done ? "text-[#38A169]" : "text-[#4A5568]"}>{job.confirmed}/{job.capacity}{done && " ✓"}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-[#EDF2F7] overflow-hidden">
+                          <div className={`h-full rounded-full ${done ? "bg-[#38A169]" : "bg-[#FFCB3C]"}`} style={{ width: `${Math.max(pct, job.confirmed > 0 ? 6 : 0)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex flex-col gap-1.5">

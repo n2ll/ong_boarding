@@ -87,23 +87,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   let skipped = 0;
   const conflicts: number[] = [];        // 다른 active job에 묶여있어 보류한 applicant
   const sentApplicantIds: number[] = [];
+  // 제외 사유별 집계 — 매니저가 "왜 빠졌는지" 바로 알 수 있게
+  const skipReasons = { no_phone: 0, no_consent: 0, conflict: 0, send_fail: 0 };
   const now = new Date().toISOString();
 
   for (const c of candidates) {
     const a = aMap.get(c.applicant_id as number);
     if (!a || !a.phone) {
       skipped++;
+      skipReasons.no_phone++;
       continue;
     }
     // 마케팅 수신 미동의 → 발송 제외 (광고성 일괄)
     if (a.marketing_consent === false) {
       skipped++;
+      skipReasons.no_consent++;
       continue;
     }
-    // 다른 공고 진행 중이면 보류 (정책: 한 사람 = 하나의 active job)
+    // 다른 공고 진행 중이면 보류 (정책: 한 사람 = 하나의 '진행 중' 공고)
     if (a.current_job_id && a.current_job_id !== jobId) {
       conflicts.push(a.id);
       skipped++;
+      skipReasons.conflict++;
       continue;
     }
 
@@ -111,6 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!result.success) {
       console.error("[dispatch] SMS fail", a.id, result.error);
       skipped++;
+      skipReasons.send_fail++;
       continue;
     }
 
@@ -149,6 +155,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({
     sent,
     skipped,
+    skip_reasons: skipReasons,             // 제외 사유별 집계
     conflicts,                             // 매니저가 처리해야 할 충돌 목록
     sent_applicant_ids: sentApplicantIds,
   });
