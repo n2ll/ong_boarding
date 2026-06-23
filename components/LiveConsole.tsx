@@ -94,15 +94,25 @@ export function LiveConsole() {
   const interventionChats = chats.filter((c) => (c.unread_count ?? 0) > 0);
 
   const baseChats = activeTab === "all" ? chats : interventionChats;
-  const visibleChats = baseChats.filter((c) => {
-    if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
-    if (stageFilter !== "all") {
-      if (stageFilter === "paused") return c.agent_stage === "paused";
-      if (stageFilter === "intervention") return (c.unread_count ?? 0) > 0;
-      return c.agent_stage === stageFilter;
-    }
-    return true;
-  });
+  const visibleChats = baseChats
+    .filter((c) => {
+      if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
+      if (stageFilter !== "all") {
+        if (stageFilter === "paused") return c.agent_stage === "paused";
+        if (stageFilter === "intervention") return (c.unread_count ?? 0) > 0;
+        return c.agent_stage === stageFilter;
+      }
+      return true;
+    })
+    // SLA 정렬: 미답장(개입 필요)을 최상단, 그 안에서는 가장 오래 기다린 순. 그 외는 최근 활동 순.
+    .sort((a, b) => {
+      const aInt = (a.unread_count ?? 0) > 0 ? 1 : 0;
+      const bInt = (b.unread_count ?? 0) > 0 ? 1 : 0;
+      if (aInt !== bInt) return bInt - aInt;
+      const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
+      const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
+      return aInt === 1 ? at - bt : bt - at;
+    });
 
   return (
     <div className="flex h-full overflow-hidden bg-white">
@@ -155,7 +165,7 @@ export function LiveConsole() {
                       <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{chat.name} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
                     </div>
                   </div>
-                  <div className="text-[11px] font-semibold text-[#A0AEC0]">{relTime(chat.last_message_at ?? chat.created_at)}</div>
+                  <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(chat.last_message_at ?? chat.created_at)}</div>
                 </div>
                 <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -174,8 +184,14 @@ export function LiveConsole() {
       {/* Middle Chat Window */}
       {activeChat ? (
         <div className="flex-1 flex flex-col bg-[#EEF1F5] min-w-0">
-          <div className="h-[60px] shrink-0 bg-white border-b border-[#E2E8F0] px-6 flex items-center">
+          <div className="min-h-[60px] shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-lg font-bold text-[#1A202C]">{activeChat.name} <span className="text-[15px] text-[#718096]">지원자</span></div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {activeChat.source && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
+              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{activeChat.branch || activeChat.branch1}</span>}
+              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-[#EDF2F7] text-[#4A5568]" : "bg-[#EBF8FF] text-[#3182CE]"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
+              <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">{activeChat.status}</span>
+            </div>
           </div>
           <ConversationThread
             key={activeChat.id}

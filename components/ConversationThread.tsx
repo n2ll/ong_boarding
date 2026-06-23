@@ -64,6 +64,18 @@ interface ConversationThreadProps {
   className?: string;
 }
 
+// 매니저가 자주 쓰는 문구 — 클릭 시 입력창에 삽입. {이름}은 지원자명으로 치환.
+function quickTemplates(name: string): { label: string; text: string }[] {
+  const n = (name || "지원자").trim();
+  return [
+    { label: "통화 안내", text: `${n}님, 안녕하세요. 옹보딩입니다. 통화 가능하신 시간을 알려주시면 담당자가 연락드리겠습니다.` },
+    { label: "서류 요청", text: `${n}님, 지원 감사합니다. 진행을 위해 신분증 사진 1장 회신 부탁드립니다.` },
+    { label: "슬롯 안내", text: `${n}님, 희망 근무 시간대(평일/주말 · 오전/오후)를 알려주시면 가능한 자리를 안내드리겠습니다.` },
+    { label: "온보딩 안내", text: `${n}님, 확정되셨습니다! 카카오 채널 친구추가 후 첫 근무 준비 안내를 받아주세요.` },
+    { label: "감사 인사", text: `${n}님, 문의 주셔서 감사합니다. 추가로 궁금하신 점 있으면 편하게 말씀해주세요.` },
+  ];
+}
+
 /**
  * 지원자별 SMS 대화 스레드(말풍선 + AI 초안 검수 + 입력창)를 self-contained하게 렌더.
  * LiveConsole·지원자 상세 패널 등 어디서든 applicantId만 주면 재사용 가능.
@@ -369,6 +381,19 @@ export function ConversationThread({
       {/* 입력 영역 */}
       <div className="p-5 bg-white border-t border-[#E2E8F0] shrink-0">
         {canSend ? (
+          <>
+          <div className="flex gap-1.5 flex-wrap mb-2.5">
+            {quickTemplates(applicantName).map((t) => (
+              <button
+                key={t.label}
+                onClick={() => setInputValue((prev) => (prev.trim() ? prev + "\n" + t.text : t.text))}
+                className="text-[11.5px] font-bold text-[#4A5568] bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] px-2.5 py-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                title={t.text}
+              >
+                + {t.label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-end gap-3">
             <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-[#F7FAFC] focus-within:bg-white ${isLMS ? "border-[#FC8181]" : "border-[#E2E8F0] focus-within:border-[#FFCB3C]"}`}>
               <textarea
@@ -389,6 +414,7 @@ export function ConversationThread({
             </div>
             <button onClick={handleSendMessage} disabled={sending} className="w-[54px] h-[54px] rounded-[14px] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-[#1A202C] animate-spin" /> : <Send size={22} className="text-[#1A202C]" />}</button>
           </div>
+          </>
         ) : (
           <div className="flex items-center justify-between bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
