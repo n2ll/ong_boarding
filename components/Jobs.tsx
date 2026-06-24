@@ -409,7 +409,7 @@ export function Jobs() {
 
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
-  const openEdit = async (id: string) => {
+  const openEdit = useCallback(async (id: string) => {
     setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "" });
     setEditLoading(true);
     try {
@@ -437,7 +437,16 @@ export function Jobs() {
     } finally {
       setEditLoading(false);
     }
-  };
+  }, []);
+
+  // 두뇌 'AI 지식 현황' 등에서 /jobs?edit=<id> 로 진입하면 해당 공고 편집 모달 자동 오픈
+  useEffect(() => {
+    const editParam = searchParams.get("edit");
+    if (editParam) {
+      openEdit(editParam);
+      router.replace("/jobs");
+    }
+  }, [searchParams, router, openEdit]);
 
   const handleEditSave = async () => {
     if (!editForm) return;

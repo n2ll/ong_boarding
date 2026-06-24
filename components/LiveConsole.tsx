@@ -123,6 +123,13 @@ export function LiveConsole() {
   const [promoteText, setPromoteText] = useState("");
   const [promoteLoading, setPromoteLoading] = useState(false);
   const [promoteSaving, setPromoteSaving] = useState(false);
+  // 인계 → 지식 자산화(③-2): 매니저 답변을 공통/지점 지식으로 승인 등록하는 모달
+  const [kb, setKb] = useState<Handoff | null>(null);
+  const [kbTarget, setKbTarget] = useState<"common" | "branch">("common");
+  const [kbTitle, setKbTitle] = useState("");
+  const [kbBody, setKbBody] = useState("");
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbSaving, setKbSaving] = useState(false);
 
   const loadChats = useCallback(async () => {
     try {
@@ -224,7 +231,13 @@ export function LiveConsole() {
   // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
   const selectHandoff = (h: Handoff) => {
     focusJobIdRef.current = h.job_id;
-    setSelectedChatId(h.applicant_id);
+    if (h.applicant_id === selectedChatId) {
+      // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
+      // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
+      setSelectedJobId(h.job_id);
+    } else {
+      setSelectedChatId(h.applicant_id);
+    }
   };
 
   // 처리 완료 → AI 재개. 큐에서 즉시 제거되도록 새로고침.
@@ -286,6 +299,51 @@ export function LiveConsole() {
       toast.error("반영에 실패했어요");
     } finally {
       setPromoteSaving(false);
+    }
+  };
+
+  // '공통지식 등록' 모달 열기 — 질문 요지(인계 사유) + 매니저 마지막 답변으로 프리필
+  const openKb = async (h: Handoff) => {
+    setKb(h);
+    setKbTarget("common");
+    setKbTitle(h.reason ? h.reason.slice(0, 40) : "");
+    setKbBody("");
+    setKbLoading(true);
+    try {
+      const res = await fetch(`/api/admin/agent/handoffs/promote?candidate_id=${h.candidate_id}`);
+      const json = await res.json();
+      if (res.ok) setKbBody(json.last_manual_reply ?? "");
+    } catch {
+      /* 프리필 실패해도 직접 입력 가능 */
+    } finally {
+      setKbLoading(false);
+    }
+  };
+
+  const saveKb = async () => {
+    if (!kb) return;
+    const title = kbTitle.trim();
+    const body = kbBody.trim();
+    if (!title || !body) return toast.error("제목과 내용을 입력해주세요.");
+    if (kbTarget === "branch" && !kb.branch) return toast.error("이 건은 지점 정보가 없어 공통으로만 등록할 수 있어요.");
+    setKbSaving(true);
+    try {
+      const res = await fetch("/api/admin/agent/handoffs/promote-kb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: kbTarget, title, body, branch_name: kb.branch ?? undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "등록에 실패했어요");
+        return;
+      }
+      toast.success(kbTarget === "common" ? "공통 지식에 등록했어요. 다음부터 AI가 참고합니다." : `${kb.branch} 지점 지식에 등록했어요.`);
+      setKb(null);
+    } catch {
+      toast.error("등록에 실패했어요");
+    } finally {
+      setKbSaving(false);
     }
   };
 
@@ -384,6 +442,15 @@ export function LiveConsole() {
                           title="매니저 답변을 공고 단가·정책 필드에 저장 → 다음부터 AI가 직접 응대"
                         >
                           공고에 반영
+                        </button>
+                      )}
+                      {!["manual", "auto"].includes(h.category) && (
+                        <button
+                          onClick={() => openKb(h)}
+                          className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95"
+                          title="매니저 답변을 공통/지점 지식에 등록 → 다음부터 AI가 직접 응대"
+                        >
+                          지식 등록
                         </button>
                       )}
                       <button
@@ -573,6 +640,52 @@ export function LiveConsole() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
               <button onClick={() => setPromote(null)} disabled={promoteSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
               <button onClick={savePromote} disabled={promoteSaving || promoteLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#B7791F] hover:bg-[#975A16] disabled:opacity-60">{promoteSaving ? "저장 중…" : "공고에 반영"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 인계 → 지식 자산화(③-2): 매니저 답변을 공통/지점 지식으로 승인 등록 */}
+      {kb && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !kbSaving && setKb(null)}>
+          <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
+              <h2 className="text-[16px] font-extrabold text-[#1A202C]">지식 등록</h2>
+              <button onClick={() => setKb(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div className="text-[12.5px] text-[#718096] leading-relaxed">
+                매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문을 AI가 직접 답해 인계가 줄어듭니다.
+              </div>
+              <div className="flex gap-1.5">
+                <button onClick={() => setKbTarget("common")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${kbTarget === "common" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>공통(전 지점)</button>
+                <button onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
+              </div>
+              <div>
+                <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">제목(무슨 질문인가)</label>
+                <input
+                  value={kbTitle}
+                  onChange={(e) => setKbTitle(e.target.value)}
+                  placeholder="예: 배민 커넥트 가입 순서"
+                  className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">내용(AI가 답할 사실)</label>
+                <textarea
+                  value={kbBody}
+                  onChange={(e) => setKbBody(e.target.value)}
+                  rows={4}
+                  disabled={kbLoading}
+                  placeholder={kbLoading ? "불러오는 중…" : "예: 앱에서 본인인증 → 차량 등록 → 안전교육 순서로 진행합니다."}
+                  className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
+                />
+              </div>
+              <div className="text-[11px] text-[#A0AEC0]">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
+              <button onClick={() => setKb(null)} disabled={kbSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button onClick={saveKb} disabled={kbSaving || kbLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] disabled:opacity-60">{kbSaving ? "등록 중…" : "지식 등록"}</button>
             </div>
           </div>
         </div>

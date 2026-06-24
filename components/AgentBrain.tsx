@@ -1,9 +1,25 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power } from "lucide-react";
+import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
+import { useRouter } from "next/navigation";
 import { useConfirm } from "./ConfirmDialog";
 import { DemoBanner } from "./DemoBanner";
+import { AGENT_CATEGORY_IDS, getCategory } from "@/lib/agent/handoff-category";
+
+interface OverviewBranch {
+  id: number;
+  name: string;
+  ai_facts: string | null;
+}
+interface OverviewJob {
+  id: number;
+  title: string;
+  branch: string | null;
+  pay_info: string | null;
+  policy_notes: string | null;
+  status: string;
+}
 
 interface PromptExample {
   id: number;
@@ -59,9 +75,30 @@ const CATEGORY_LABEL: Record<string, string> = {
   system_message: "자동 발송 문구",
 };
 
+// 인계 tone별 배지 색
+const TONE_BADGE: Record<string, string> = {
+  urgent: "bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]",
+  answerable: "bg-[#FFFBEC] text-[#B7791F] border-[#FAF089]",
+  human: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]",
+  neutral: "bg-[#F7FAFC] text-[#718096] border-[#E2E8F0]",
+};
+const TONE_LABEL: Record<string, string> = {
+  urgent: "긴급",
+  answerable: "정보채우면 자동화 가능",
+  human: "사람이 직접",
+  neutral: "일반",
+};
+
 export function AgentBrain() {
   const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState("knowledge");
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("overview");
+  // AI 지식 현황(개선1·3): 사실 3계층 집계 + 인계 분포
+  const [ovLoading, setOvLoading] = useState(true);
+  const [ovBranches, setOvBranches] = useState<OverviewBranch[]>([]);
+  const [ovJobs, setOvJobs] = useState<OverviewJob[]>([]);
+  const [ovByCategory, setOvByCategory] = useState<Record<string, number>>({});
+  const [ovHandoffTotal, setOvHandoffTotal] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'vectorizing' | 'complete'>('idle');
@@ -173,11 +210,35 @@ export function AgentBrain() {
     }
   }, []);
 
+  // AI 지식 현황 — 사실 3계층(공통 facts는 examples에서) + 공고 단가·정책 + 인계 분포
+  const loadOverview = useCallback(async () => {
+    setOvLoading(true);
+    try {
+      const [bRes, jRes, hRes] = await Promise.all([
+        fetch("/api/admin/branches"),
+        fetch("/api/admin/jobs?status=active"),
+        fetch("/api/admin/agent/handoffs"),
+      ]);
+      const bJson = await bRes.json().catch(() => ({}));
+      const jJson = await jRes.json().catch(() => ({}));
+      const hJson = await hRes.json().catch(() => ({}));
+      setOvBranches((bJson.data ?? []) as OverviewBranch[]);
+      setOvJobs(((jJson.jobs ?? []) as OverviewJob[]).filter((j) => !j.title.startsWith("__")));
+      setOvByCategory((hJson.by_category ?? {}) as Record<string, number>);
+      setOvHandoffTotal((hJson.total ?? 0) as number);
+    } catch {
+      /* 현황은 부가 정보 — 실패해도 화면 유지 */
+    } finally {
+      setOvLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadExamples();
     loadKillSwitch();
     loadPersona();
-  }, [loadExamples, loadKillSwitch, loadPersona]);
+    loadOverview();
+  }, [loadExamples, loadKillSwitch, loadPersona, loadOverview]);
 
   const openKbAdd = () =>
     setKbForm({ id: null, category: kbCategory, title: "", body: "" });
@@ -259,6 +320,12 @@ export function AgentBrain() {
 
   // '__' 접두 제목은 내부 설정용 예약 항목(예: __persona__) — KB 목록에 노출하지 않는다.
   const kbItems = examples.filter((e) => e.category === kbCategory && !e.title.startsWith("__"));
+
+  // AI 지식 현황 집계
+  const factsCount = examples.filter((e) => e.category === "facts" && !e.title.startsWith("__")).length;
+  const branchesFilled = ovBranches.filter((b) => (b.ai_facts ?? "").trim()).length;
+  const jobsPayFilled = ovJobs.filter((j) => (j.pay_info ?? "").trim()).length;
+  const payGapJobs = ovJobs.filter((j) => !(j.pay_info ?? "").trim());
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -361,7 +428,7 @@ export function AgentBrain() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">에이전트 두뇌</h1>
-            <p className="text-[14px] text-[#718096]">페르소나·지식 베이스는 실데이터(prompt_examples)와 연동됩니다. 예외 처리 규칙 편집은 데모입니다.</p>
+            <p className="text-[14px] text-[#718096]">페르소나·지식 베이스·인계 규칙·지식 현황은 모두 실데이터와 연동됩니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -385,6 +452,12 @@ export function AgentBrain() {
       <div className="flex gap-8">
         {/* Sidebar Nav */}
         <div className="w-[240px] shrink-0 flex flex-col gap-2">
+          <button
+            onClick={() => setActiveTab("overview")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <Layers size={18} className={activeTab === 'overview' ? 'text-[#DD6B20]' : ''} /> AI 지식 현황
+          </button>
           <button
             onClick={() => setActiveTab("persona")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'persona' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
@@ -419,6 +492,88 @@ export function AgentBrain() {
 
         {/* Content Area */}
         <div className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-8">
+          {activeTab === 'overview' && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-bold text-[#1A202C] flex items-center gap-2">
+                  <Layers size={20} className="text-[#DD6B20]" /> AI가 참고하는 사실 — 한눈에
+                </h2>
+                <button onClick={loadOverview} disabled={ovLoading} className="flex items-center gap-1.5 text-[12.5px] font-bold text-[#718096] hover:text-[#1A202C] disabled:opacity-50">
+                  {ovLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 새로고침
+                </button>
+              </div>
+              <p className="text-sm text-[#718096] mb-6">옹봇은 응대할 때 <b>① 공통 운영정보 · ② 지점별 정보 · ③ 공고별 단가·정책</b> 세 곳의 사실만 인용합니다. 비어 있는 곳은 인용할 수 없어 매니저 인계가 늘어납니다. 빈칸을 채우면 인계가 줄어요.</p>
+
+              {/* 3계층 커버리지 카드 */}
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <button onClick={() => setActiveTab("knowledge")} className="text-left p-4 border border-[#E2E8F0] rounded-2xl bg-white hover:border-[#3182CE] transition-colors">
+                  <div className="flex items-center gap-2 text-[#3182CE] mb-2"><Database size={16} /><span className="text-[12px] font-bold">① 공통 운영정보</span></div>
+                  <div className="text-[22px] font-extrabold text-[#1A202C]">{factsCount}<span className="text-[13px] font-bold text-[#A0AEC0]">개 항목</span></div>
+                  <div className="text-[11.5px] text-[#718096] mt-1 flex items-center gap-1">두뇌 &gt; 사내 지식 베이스 <ExternalLink size={11} /></div>
+                </button>
+                <button onClick={() => router.push("/branches")} className="text-left p-4 border border-[#E2E8F0] rounded-2xl bg-white hover:border-[#38A169] transition-colors">
+                  <div className="flex items-center gap-2 text-[#38A169] mb-2"><Building2 size={16} /><span className="text-[12px] font-bold">② 지점별 정보</span></div>
+                  <div className="text-[22px] font-extrabold text-[#1A202C]">{branchesFilled}<span className="text-[13px] font-bold text-[#A0AEC0]">/{ovBranches.length} 지점 작성</span></div>
+                  <div className="text-[11.5px] text-[#718096] mt-1 flex items-center gap-1">지점관리에서 편집 <ExternalLink size={11} /></div>
+                </button>
+                <button onClick={() => router.push("/jobs")} className="text-left p-4 border border-[#E2E8F0] rounded-2xl bg-white hover:border-[#DD6B20] transition-colors">
+                  <div className="flex items-center gap-2 text-[#DD6B20] mb-2"><Briefcase size={16} /><span className="text-[12px] font-bold">③ 공고별 단가·정책</span></div>
+                  <div className="text-[22px] font-extrabold text-[#1A202C]">{jobsPayFilled}<span className="text-[13px] font-bold text-[#A0AEC0]">/{ovJobs.length} 공고 단가입력</span></div>
+                  <div className="text-[11.5px] text-[#718096] mt-1 flex items-center gap-1">공고 편집에서 입력 <ExternalLink size={11} /></div>
+                </button>
+              </div>
+
+              {/* 단가 미입력 공고 — 인계 위험 */}
+              {payGapJobs.length > 0 && (
+                <div className="p-4 border border-[#FBD38D] bg-[#FFFAF0] rounded-2xl mb-6">
+                  <div className="flex items-center gap-2 text-[#C05621] mb-3 text-[13.5px] font-bold"><AlertTriangle size={16} /> 단가 미입력 공고 {payGapJobs.length}개 — 단가 문의가 오면 매니저 인계됩니다</div>
+                  <div className="flex flex-col gap-1.5">
+                    {payGapJobs.slice(0, 6).map((j) => (
+                      <div key={j.id} className="flex items-center justify-between gap-2 bg-white border border-[#FEEBC8] rounded-lg px-3 py-2">
+                        <div className="min-w-0">
+                          <span className="text-[13px] font-bold text-[#1A202C]">{j.title}</span>
+                          {j.branch && <span className="ml-2 text-[11px] font-bold text-[#A0AEC0]">{j.branch}</span>}
+                        </div>
+                        <button onClick={() => router.push(`/jobs?edit=${j.id}`)} className="shrink-0 px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#DD6B20] text-white hover:bg-[#C05621] transition-colors">단가 채우기</button>
+                      </div>
+                    ))}
+                    {payGapJobs.length > 6 && <div className="text-[11.5px] text-[#A0AEC0] px-1">외 {payGapJobs.length - 6}개</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* 인계 분포(개선3) — 어떤 질문이 자주 매니저로 넘어가나 */}
+              <div className="p-5 border border-[#E2E8F0] rounded-2xl bg-white">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 text-[#1A202C] text-[14px] font-bold"><TrendingUp size={16} className="text-[#805AD5]" /> 인계 사유 분포 (현재 대기 {ovHandoffTotal}건)</div>
+                  <button onClick={() => router.push("/live")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">인계 큐 열기 <ExternalLink size={11} /></button>
+                </div>
+                <p className="text-[12px] text-[#718096] mb-4">자주 인계되는 카테고리는 위 ①②③ 사실을 채우면 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
+                {ovLoading ? (
+                  <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
+                ) : Object.keys(ovByCategory).length === 0 ? (
+                  <div className="text-[13px] text-[#A0AEC0] py-2">대기 중인 인계가 없어요.</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {Object.entries(ovByCategory).sort((a, b) => b[1] - a[1]).map(([cid, count]) => {
+                      const cat = getCategory(cid);
+                      const pct = ovHandoffTotal > 0 ? Math.round((count / ovHandoffTotal) * 100) : 0;
+                      return (
+                        <div key={cid} className="flex items-center gap-3">
+                          <span className="w-[88px] shrink-0 text-[12.5px] font-bold text-[#4A5568] text-right">{cat.label}</span>
+                          <div className="flex-1 h-5 bg-[#F1F4F8] rounded-md overflow-hidden">
+                            <div className="h-full bg-[#805AD5] rounded-md" style={{ width: `${Math.max(pct, 4)}%` }} />
+                          </div>
+                          <span className="w-[52px] shrink-0 text-[12px] font-bold text-[#718096]">{count}건</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'persona' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-[#1A202C] mb-6 flex items-center gap-2">
@@ -703,46 +858,32 @@ export function AgentBrain() {
               <h2 className="text-lg font-bold text-[#1A202C] mb-6 flex items-center gap-2">
                 <SlidersHorizontal size={20} className="text-[#38A169]" /> 예외 처리 및 폴백(Fallback) 규칙
               </h2>
-              <p className="text-sm text-[#718096] mb-6">AI가 처리할 수 없는 특정 상황이나 금지어, 에스컬레이션(상담원 연결) 조건을 정의합니다.</p>
+              <p className="text-sm text-[#718096] mb-6">옹봇이 <b>스스로 답하지 않고 매니저에게 인계(pause)</b>하는 실제 사유 분류입니다. 안전을 위해 항상 작동하며, 각 카테고리 옆 숫자는 <b>현재 대기 중인 인계 건수</b>입니다. ‘정보 채우면 자동화 가능’ 항목은 위 ①②③ 사실을 채우면 인계가 줄어듭니다.</p>
 
-              <div className="space-y-4">
-                <div className="p-4 border border-[#E2E8F0] rounded-xl bg-white shadow-sm flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-[#EBF8FF] text-[#3182CE] px-2 py-1 rounded text-[11px] font-bold">조건 1</span>
-                      <span className="text-[14px] font-bold text-[#1A202C]">지원자가 "퇴사", "산재", "사고" 단어 언급 시</span>
+              <div className="space-y-2.5">
+                {AGENT_CATEGORY_IDS.map((cid) => {
+                  const cat = getCategory(cid);
+                  const count = ovByCategory[cid] ?? 0;
+                  return (
+                    <div key={cid} className="p-4 border border-[#E2E8F0] rounded-xl bg-white shadow-sm flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[14px] font-bold text-[#1A202C]">{cat.label}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${TONE_BADGE[cat.tone]}`}>{TONE_LABEL[cat.tone]}</span>
+                        </div>
+                        <div className="text-[12.5px] text-[#718096]">↳ {cat.action}</div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className={`text-[18px] font-extrabold ${count > 0 ? "text-[#805AD5]" : "text-[#CBD5E0]"}`}>{count}</div>
+                        <div className="text-[10.5px] font-bold text-[#A0AEC0]">대기</div>
+                      </div>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" defaultChecked className="sr-only peer" />
-                      <div className="w-11 h-6 bg-[#CBD5E0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#38A169]"></div>
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-3 pl-2 text-[13px]">
-                    <span className="text-[#A0AEC0]">↳ 액션:</span>
-                    <span className="text-[#4A5568] bg-[#F7FAFC] px-3 py-1.5 rounded-lg border border-[#E2E8F0]">즉시 답변을 중단하고 <b className="text-[#E53E3E]">매니저 호출 (Human Takeover)</b> 실행</span>
-                  </div>
-                </div>
+                  );
+                })}
+              </div>
 
-                <div className="p-4 border border-[#E2E8F0] rounded-xl bg-white shadow-sm flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-[#EBF8FF] text-[#3182CE] px-2 py-1 rounded text-[11px] font-bold">조건 2</span>
-                      <span className="text-[14px] font-bold text-[#1A202C]">AI가 지식 베이스(RAG)에서 답변을 찾지 못했을 때</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" defaultChecked className="sr-only peer" />
-                      <div className="w-11 h-6 bg-[#CBD5E0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#38A169]"></div>
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-3 pl-2 text-[13px]">
-                    <span className="text-[#A0AEC0]">↳ 액션:</span>
-                    <span className="text-[#4A5568] bg-[#F7FAFC] px-3 py-1.5 rounded-lg border border-[#E2E8F0]">"죄송합니다. 정확한 확인을 위해 담당자에게 연결해 드리겠습니다." 메시지 전송 후 대기</span>
-                  </div>
-                </div>
-
-                <button className="w-full py-3 border-2 border-dashed border-[#E2E8F0] rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC] hover:border-[#CBD5E0] transition-colors flex items-center justify-center gap-2">
-                  + 새 예외 규칙 추가
-                </button>
+              <div className="mt-5 p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[12.5px] text-[#718096] leading-relaxed">
+                <b className="text-[#4A5568]">항상 적용되는 안전 규칙:</b> 항의·법적 표현(취소/불법/신고 등), 반복 재촉·감정 격화, 계약·세금·보험 질문은 카테고리와 무관하게 즉시 인계됩니다. 이 안전 규칙은 끌 수 없습니다.
               </div>
             </div>
           )}
