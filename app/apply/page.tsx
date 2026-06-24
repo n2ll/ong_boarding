@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { LogoMark } from "@/components/Logo";
 
 const TIMESLOTS = [
   { label: "평일 오전", sub: "월~금 09:00 ~ 14:00", value: "평일(월~금) 오전 타임 (09:00 ~ 14:00)" },
@@ -203,7 +204,7 @@ function ApplyForm() {
         {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-3">
-            <div className="w-9 h-9 bg-[#FFCB3C] rounded-xl flex items-center justify-center font-extrabold text-[#1A202C]">옹</div>
+            <LogoMark size={36} />
             <span className="text-[18px] font-extrabold text-[#1A202C]">옹보딩 배송원 지원</span>
           </div>
           <p className="text-[15px] text-[#718096]">아래 항목을 작성해주세요. <span className="text-[#E53E3E]">*</span> 표시는 필수입니다.</p>

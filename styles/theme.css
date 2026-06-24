@@ -2,6 +2,9 @@
 
 :root {
   --font-size: 16px;
+  /* 브랜드 토큰 (브랜드 가이드) */
+  --brand-yellow: #FFC83D;
+  --brand-dark: #0F141E;
   --background: #ffffff;
   --foreground: oklch(0.145 0 0);
   --card: #ffffff;
@@ -79,6 +82,8 @@
 }
 
 @theme inline {
+  --color-brand-yellow: var(--brand-yellow);
+  --color-brand-dark: var(--brand-dark);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

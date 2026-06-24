@@ -21,6 +21,7 @@ import {
   Settings,
   ChevronRight
 } from "lucide-react";
+import { LogoMark } from "./Logo";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -79,8 +80,8 @@ export function Sidebar() {
   return (
     <aside className="w-[248px] shrink-0 bg-[#1A202C] text-white flex flex-col h-full">
       <div className="pt-[26px] px-[22px] pb-[22px] flex items-center gap-[11px] border-b border-white/5">
-        <div className="w-[38px] h-[38px] rounded-[10px] bg-[#FFCB3C] flex items-center justify-center font-black text-[21px] text-[#1A202C] tracking-tight">
-          옹
+        <div className="w-[38px] h-[38px] rounded-[10px] bg-white flex items-center justify-center">
+          <LogoMark size={30} />
         </div>
         <div>
           <div className="font-extrabold text-[20px] tracking-tight leading-none">옹보딩</div>
