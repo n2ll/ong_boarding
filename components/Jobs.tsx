@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight } from "lucide-react";
+import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -62,6 +62,18 @@ interface JobCand {
     last_message_at: string | null;
     unread_count: number | null;
   } | null;
+}
+
+interface PoolApplicant {
+  id: number;
+  name: string | null;
+  phone: string | null;
+  branch1: string | null;
+  work_hours: string | null;
+  own_vehicle: string | null;
+  status: string | null;
+  source: string | null;
+  current_job_id: number | null;
 }
 
 const CAND_SOURCE_LABEL: Record<string, string> = {
@@ -171,6 +183,13 @@ export function Jobs() {
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
   const [candBusyId, setCandBusyId] = useState<number | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  // 인재풀에서 후보 추가(피커)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pool, setPool] = useState<PoolApplicant[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [adding, setAdding] = useState(false);
 
   const loadCandidates = useCallback(async (jobId: number) => {
     setCandLoading(true);
@@ -255,7 +274,62 @@ export function Jobs() {
     loadCandidates(Number(job.id));
   };
 
+  // 인재풀에서 후보 추가 — 피커 열기(전체 인재풀 로드)
+  const openPicker = async () => {
+    setPickerOpen(true);
+    setPicked(new Set());
+    setPickerQuery("");
+    setPoolLoading(true);
+    try {
+      const res = await fetch("/api/admin/applicants");
+      const json = await res.json();
+      setPool((json.data ?? []) as PoolApplicant[]);
+    } catch {
+      toast.error("인재풀을 불러오지 못했어요");
+    } finally {
+      setPoolLoading(false);
+    }
+  };
+
+  // 선택한 인재풀 후보를 공고에 추가 — '미발송' 상태로만 들어가고, 발송은 별도(컨택은 매니저 판단)
+  const addFromPool = async () => {
+    if (!candPanel || picked.size === 0) return;
+    setAdding(true);
+    try {
+      const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/candidates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_ids: [...picked] }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "후보 추가에 실패했어요");
+        return;
+      }
+      toast.success(`${json.added ?? 0}명을 후보로 추가했어요`, {
+        description: "미발송 상태로 추가됨 — 위 ‘스크리닝 문자 발송’으로 컨택하세요",
+      });
+      setPickerOpen(false);
+      loadCandidates(candPanel.jobId);
+      loadJobs();
+    } catch {
+      toast.error("후보 추가에 실패했어요");
+    } finally {
+      setAdding(false);
+    }
+  };
+
   const unsentCount = candidates.filter((c) => !c.sent_at).length;
+
+  // 피커에 띄울 인재풀 — 이미 이 공고 후보인 사람·부적합·이탈 제외 + 검색어 매칭
+  const existingCandIds = new Set(candidates.map((c) => c.applicant_id));
+  const pq = pickerQuery.trim();
+  const pickablePool = pool.filter((p) => {
+    if (existingCandIds.has(p.id)) return false;
+    if (p.status === "부적합" || p.status === "이탈") return false;
+    if (pq && !((p.name ?? "").includes(pq) || (p.phone ?? "").includes(pq) || (p.branch1 ?? "").includes(pq))) return false;
+    return true;
+  });
 
   // 공고별 요약 집계 (단계/채널/확정 슬롯)
   const stageCounts = candidates.reduce<Record<string, number>>((acc, c) => {
@@ -1004,6 +1078,12 @@ export function Jobs() {
                   </div>
                   <button onClick={() => setCandPanel(null)} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
                 </div>
+                <button
+                  onClick={openPicker}
+                  className="mt-3 w-full flex items-center justify-center gap-2 bg-white hover:bg-[#F7FAFC] text-[#1A202C] border border-[#E2E8F0] px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                >
+                  <UserPlus size={15} /> 인재풀에서 후보 추가
+                </button>
                 {unsentCount > 0 && (
                   <button
                     onClick={dispatchUnsent}
@@ -1110,6 +1190,68 @@ export function Jobs() {
           </>
         )}
       </AnimatePresence>
+
+      {/* 인재풀에서 후보 추가 — 피커 모달 */}
+      {pickerOpen && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !adding && setPickerOpen(false)}>
+          <div className="bg-white w-full max-w-[560px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
+              <div>
+                <h2 className="text-[17px] font-extrabold text-[#1A202C] flex items-center gap-2"><UserPlus size={18} className="text-[#805AD5]" /> 인재풀에서 후보 추가</h2>
+                <p className="text-[12px] text-[#718096] mt-0.5">선택한 분들을 <b>미발송 후보</b>로 추가합니다. 컨택(문자 발송)은 이후 매니저가 진행해요.</p>
+              </div>
+              <button onClick={() => setPickerOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={22} /></button>
+            </div>
+            <div className="px-6 py-3 border-b border-[#F1F4F8]">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
+                <input
+                  type="text"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  placeholder="이름, 연락처, 지점 검색"
+                  className="w-full pl-9 pr-3 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {poolLoading && <div className="text-[13px] text-[#A0AEC0] text-center py-10">불러오는 중…</div>}
+              {!poolLoading && pickablePool.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-10">추가할 수 있는 인재풀 후보가 없어요</div>}
+              {!poolLoading && pickablePool.map((p) => {
+                const sel = picked.has(p.id);
+                const conflict = p.current_job_id != null && p.current_job_id !== candPanel?.jobId;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setPicked((prev) => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
+                    className={`w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl border transition-colors ${sel ? "border-[#805AD5] bg-[#FAF5FF]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                  >
+                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${sel ? "bg-[#805AD5] border-[#805AD5]" : "border-[#CBD5E0]"}`}>
+                      {sel && <CheckCircle2 size={14} className="text-white" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">
+                        {p.name ?? `#${p.id}`}
+                        {conflict && <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFAF0] text-[#DD6B20] border border-[#FEEBC8]">다른 공고 진행 중</span>}
+                      </div>
+                      <div className="text-[11.5px] text-[#718096] truncate">{(p.source ? (CAND_SOURCE_LABEL[p.source] ?? p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-[#E2E8F0] bg-white">
+              <div className="text-[13px] font-bold text-[#4A5568]">{picked.size}명 선택</div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPickerOpen(false)} disabled={adding} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+                <button onClick={addFromPool} disabled={adding || picked.size === 0} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 flex items-center gap-2">
+                  {adding ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />} 후보로 추가
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ApplicantDetailPanel
         isOpen={selectedApplicantId != null}
