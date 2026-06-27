@@ -9,6 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
 
+const RECRUIT_MODES = new Set(["external", "internal", "both"]);
+
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
   const url = new URL(req.url);
@@ -18,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, capacity, status, site_manager_id, created_at, updated_at, closed_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -84,6 +86,7 @@ export async function POST(req: NextRequest) {
     pay_info,
     policy_notes,
     capacity,
+    recruit_mode,
     site_manager_id,
     created_by,
   } = body as {
@@ -100,6 +103,7 @@ export async function POST(req: NextRequest) {
     pay_info?: string | null;
     policy_notes?: string | null;
     capacity?: number;
+    recruit_mode?: string;
     site_manager_id?: number | null;
     created_by?: string | null;
   };
@@ -112,6 +116,9 @@ export async function POST(req: NextRequest) {
   }
   if (slot && !["평일오전", "평일오후", "주말오전", "주말오후"].includes(slot)) {
     return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (recruit_mode && !RECRUIT_MODES.has(recruit_mode)) {
+    return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
   }
 
   const supabase = createServiceClient();
@@ -148,6 +155,7 @@ export async function POST(req: NextRequest) {
       pay_info: pay_info ?? null,
       policy_notes: policy_notes ?? null,
       capacity: capacity ?? 1,
+      recruit_mode: recruit_mode ?? "external",
       site_manager_id: site_manager_id ?? null,
       created_by: created_by ?? null,
     })

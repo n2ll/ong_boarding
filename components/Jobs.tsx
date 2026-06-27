@@ -15,6 +15,7 @@ interface JobRow {
   clientId: number | null;
   role: string;
   status: "active" | "closed";
+  recruitMode: RecruitMode;
   candidates: number;
   newCandidates: number;
   confirmed: number;
@@ -31,6 +32,7 @@ interface ApiJob {
   branch_id: number | null;
   client_id: number | null;
   status: string;
+  recruit_mode: string | null;
   vehicle_required: boolean;
   capacity: number | null;
   created_at: string;
@@ -97,6 +99,16 @@ const STAGE_COLOR: Record<string, string> = {
   abort: "bg-[#FFF5F5] text-[#E53E3E]",
 };
 
+type RecruitMode = "external" | "internal" | "both";
+const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
+  external: { label: "공개 모집", desc: "지원 폼·광고로 새 지원자 모집", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
+  internal: { label: "인재풀 진행", desc: "보유 인재풀에서 골라 컨택", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
+  both: { label: "병행", desc: "공개 모집 + 인재풀 동시", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
+};
+function asRecruitMode(v: unknown): RecruitMode {
+  return v === "internal" || v === "both" ? v : "external";
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -113,6 +125,7 @@ function toJobRow(j: ApiJob): JobRow {
     clientId: j.client_id ?? null,
     role: j.vehicle_required ? "배송원" : "도보 배달",
     status: j.status === "active" ? "active" : "closed",
+    recruitMode: asRecruitMode(j.recruit_mode),
     candidates: total,
     newCandidates: j.counts?.["sent"] ?? 0,
     confirmed: j.counts?.["active"] ?? 0,
@@ -143,7 +156,8 @@ export function Jobs() {
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [branches, setBranches] = useState<BranchOpt[]>([]);
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string } | null>(null);
+  const [newJobMode, setNewJobMode] = useState<RecruitMode>("external");
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; recruitMode: RecruitMode } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -377,6 +391,7 @@ export function Jobs() {
           title,
           body,
           branch_id: newJobBranchId === "" ? null : newJobBranchId,
+          recruit_mode: newJobMode,
         }),
       });
       const json = await res.json();
@@ -390,6 +405,7 @@ export function Jobs() {
       setChannelDrafts(null);
       setAiSource(null);
       setNewJobBranchId("");
+      setNewJobMode("external");
       await loadJobs();
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -410,7 +426,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "" });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", recruitMode: "external" });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -430,6 +446,7 @@ export function Jobs() {
         vehicleRequired: !!j.vehicle_required,
         payInfo: j.pay_info ?? "",
         policyNotes: j.policy_notes ?? "",
+        recruitMode: asRecruitMode(j.recruit_mode),
       });
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -465,6 +482,7 @@ export function Jobs() {
           vehicle_required: editForm.vehicleRequired,
           pay_info: editForm.payInfo.trim() || null,
           policy_notes: editForm.policyNotes.trim() || null,
+          recruit_mode: editForm.recruitMode,
         }),
       });
       const json = await res.json();
@@ -645,7 +663,10 @@ export function Jobs() {
               <div key={job.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div onClick={() => openCandidates(job)} className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
-                  <div className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
+                  </div>
                   {job.capacity > 0 && (() => {
                     const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
                     const done = job.confirmed >= job.capacity;
@@ -714,9 +735,11 @@ export function Jobs() {
                 </div>
 
                 <div className="flex justify-end gap-1">
-                  <button onClick={() => copyJobLink(job)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 지원 링크 복사">
-                    <Copy size={16} />
-                  </button>
+                  {job.recruitMode !== "internal" && (
+                    <button onClick={() => copyJobLink(job)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 지원 링크 복사">
+                      <Copy size={16} />
+                    </button>
+                  )}
                   <button onClick={() => openEdit(job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 수정">
                     <Edit2 size={16} />
                   </button>
@@ -848,6 +871,16 @@ export function Jobs() {
                   <option value="">지점 선택(선택)</option>
                   {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
+                <select
+                  value={newJobMode}
+                  onChange={(e) => setNewJobMode(e.target.value as RecruitMode)}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
+                  title="모집 방식"
+                >
+                  {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => (
+                    <option key={m} value={m}>{RECRUIT_MODE_META[m].label}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-3">
               <button
@@ -904,6 +937,25 @@ export function Jobs() {
                   <button onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`w-12 h-7 rounded-full relative transition-colors ${editForm.vehicleRequired ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}>
                     <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
                   </button>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 방식</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
+                      const sel = editForm.recruitMode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, recruitMode: m })}
+                          className={`text-left p-3 rounded-xl border transition-colors ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                        >
+                          <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>{RECRUIT_MODE_META[m].label}</div>
+                          <div className="text-[11px] text-[#A0AEC0] mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>

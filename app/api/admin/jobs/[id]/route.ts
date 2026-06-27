@@ -21,6 +21,7 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "policy_notes",
   "capacity",
   "status",
+  "recruit_mode",
   "site_manager_id",
 ]);
 
@@ -86,6 +87,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     !["평일오전", "평일오후", "주말오전", "주말오후"].includes(update.slot)
   ) {
     return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (
+    typeof update.recruit_mode === "string" &&
+    !["external", "internal", "both"].includes(update.recruit_mode)
+  ) {
+    return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
   }
 
   // 마감 처리 — closed로 바뀌면 closed_at 자동 기록, 재개 시 해제
