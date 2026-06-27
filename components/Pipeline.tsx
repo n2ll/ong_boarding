@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon } from "lucide-react";
+import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
@@ -157,7 +158,9 @@ export function Pipeline() {
   const { branch: scopeBranch } = useBranchScope();
   const [loading, setLoading] = useState(true);
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
-  const [view, setView] = useState<"kanban" | "list">("list");
+  const [view, setView] = useState<"kanban" | "list" | "map">("list");
+  const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
+  const [mapJobs, setMapJobs] = useState<MapJob[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
@@ -264,8 +267,10 @@ export function Pipeline() {
     try {
       const res = await fetch("/api/admin/applicants");
       const json = await res.json();
-      if (json.data) setColumns(mapApplicantsToColumns(json.data as Applicant[]));
-      else toast.error("지원자 목록을 불러오지 못했어요");
+      if (json.data) {
+        setRawApplicants(json.data as Applicant[]);
+        setColumns(mapApplicantsToColumns(json.data as Applicant[]));
+      } else toast.error("지원자 목록을 불러오지 못했어요");
     } catch {
       toast.error("지원자 목록을 불러오지 못했어요");
     } finally {
@@ -275,6 +280,19 @@ export function Pipeline() {
 
   useEffect(() => {
     loadApplicants();
+    // 공고 픽업 좌표(있으면) — 지도 뷰 오버레이용. 실패해도 무시.
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/jobs?status=active");
+        const json = await res.json();
+        const list = ((json.jobs ?? []) as Array<{ id: number; title: string; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null }>)
+          .filter((j) => !String(j.title).startsWith("__"))
+          .map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null }));
+        setMapJobs(list);
+      } catch {
+        /* 공고 오버레이는 선택사항 */
+      }
+    })();
   }, []);
 
   const allCards = columns.flatMap(c => c.cards.map(card => ({ ...card, stage: c.title, stageColor: c.color, stageId: c.id })));
@@ -309,6 +327,19 @@ export function Pipeline() {
     if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
     return true;
   });
+
+  // 지도 뷰용 — 원본 지원자에 지점 스코프 + 검색어 필터 적용
+  const mapApplicants: MapApplicant[] = rawApplicants
+    .filter((a) => {
+      const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "";
+      if (!matchesBranchScope(branch, scopeBranch)) return false;
+      if (q && ![a.name ?? "", a.phone ?? "", a.sigungu ?? "", a.location ?? ""].some((v) => v.toLowerCase().includes(q))) return false;
+      return true;
+    })
+    .map((a) => ({
+      id: a.id, name: a.name, lat: a.lat, lng: a.lng,
+      sigungu: a.sigungu, sido: a.sido, geo_precision: a.geo_precision, status: a.status,
+    }));
 
   const exportCardsCsv = (cards: CardData[], stageOf: (c: CardData) => string, fileLabel: string) => {
     if (cards.length === 0) return toast.error("내보낼 지원자가 없어요.");
@@ -493,6 +524,9 @@ export function Pipeline() {
             <button onClick={() => setView("kanban")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "kanban" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
               <LayoutGrid size={16} /> 칸반 보드
             </button>
+            <button onClick={() => setView("map")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "map" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
+              <MapIcon size={16} /> 지도 분포
+            </button>
           </div>
 
           <div className="w-px h-6 bg-[#E2E8F0] mx-2"></div>
@@ -608,6 +642,10 @@ export function Pipeline() {
                 <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => setSelectedApplicantId(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
               ))}
             </div>
+          )}
+
+          {view === "map" && (
+            <PipelineMap applicants={mapApplicants} jobs={mapJobs} />
           )}
 
           {view === "list" && (

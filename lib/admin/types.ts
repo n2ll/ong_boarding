@@ -38,6 +38,10 @@ export interface Applicant {
   kakao_channel_friend: boolean | null;
   bname: string | null;
   sigungu: string | null;
+  sido: string | null;
+  lat: number | null;
+  lng: number | null;
+  geo_precision: string | null;
 }
 
 export interface Message {
