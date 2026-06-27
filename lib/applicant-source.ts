@@ -3,6 +3,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   baemin: "배민",
   facebook: "페이스북",
   naver: "네이버 검색",
+  homepage: "홈페이지",
   direct: "해당없음",
 };
 

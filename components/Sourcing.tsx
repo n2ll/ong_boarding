@@ -47,6 +47,7 @@ export function Sourcing() {
   const SOURCE_KO: Record<string, string> = {
     danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",
     manual: "수기 등록", direct: "직접 지원", facebook: "페이스북", naver: "네이버",
+    homepage: "홈페이지",
   };
 
   // 외부 채널 게시 모달 — 공고 선택 → 채널 형식 본문 자동 생성 → 미리보기 → 게시

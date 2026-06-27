@@ -181,6 +181,29 @@ export async function geocodeAddress(query: string): Promise<GeocodeResult | nul
   }
 }
 
+/**
+ * 전체 주소 → 실패 시 시/군/구 단위로 폴백 지오코딩.
+ * precision: 'exact'(전체 주소 성공) / 'approx'(시군구 폴백) / null(둘 다 실패).
+ *
+ * coarse는 주소 앞 2토큰(예: "서울특별시 강동구")을 쓴다 — 시/도+시/군/구 형태.
+ */
+export async function geocodeAddressWithFallback(
+  full: string
+): Promise<{ geo: GeocodeResult | null; precision: "exact" | "approx" | null }> {
+  const trimmed = full?.trim();
+  if (!trimmed) return { geo: null, precision: null };
+
+  const exact = await geocodeAddress(trimmed);
+  if (exact) return { geo: exact, precision: "exact" };
+
+  const coarse = trimmed.split(/\s+/).slice(0, 2).join(" ");
+  if (coarse && coarse !== trimmed) {
+    const approx = await geocodeAddress(coarse);
+    if (approx) return { geo: approx, precision: "approx" };
+  }
+  return { geo: null, precision: null };
+}
+
 export function haversineKm(
   lat1: number,
   lng1: number,

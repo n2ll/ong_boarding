@@ -3,6 +3,10 @@
     {
       "path": "/api/admin/cron/onboarding-reminder",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/airtable-sync",
+      "schedule": "15 * * * *"
     }
   ]
 }
