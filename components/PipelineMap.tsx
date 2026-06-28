@@ -53,8 +53,9 @@ function loadNaverScript(clientId: string, timeoutMs = 8000): Promise<void> {
     if (!document.getElementById(SCRIPT_ID)) {
       const s = document.createElement("script");
       s.id = SCRIPT_ID;
-      // NAVER Maps v3 현재 표준: oapi 도메인 + ncpKeyId (구 openapi/ncpClientId는 레거시)
-      s.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`;
+      // 이 키는 AI·NAVER API(레거시) 발급분: openapi 도메인 + ncpClientId 로 인증된다.
+      // (신규 NCP Maps는 oapi + ncpKeyId. 키 발급처가 바뀌면 이 줄을 함께 바꿔야 함)
+      s.src = `https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${clientId}`;
       s.async = true;
       document.head.appendChild(s);
     }
