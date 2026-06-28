@@ -345,7 +345,8 @@ export function Jobs() {
   const confirmedCands = candidates.filter((c) => c.applicants?.status === "확정인력");
   const slotFill = SLOT_KEYS.map((s) => ({
     ...s,
-    count: confirmedCands.filter((c) => slotMatch(c.applicants?.confirmed_slot, s.key)).length,
+    // 확정 슬롯이 비면 희망 시간대(work_hours)로 폴백 — confirmed_slot 미입력 확정인력도 집계.
+    count: confirmedCands.filter((c) => slotMatch(c.applicants?.confirmed_slot || c.applicants?.work_hours, s.key)).length,
   }));
   const hasConfirmedSlot = slotFill.some((s) => s.count > 0);
   const stageGroups = STAGE_ORDER
