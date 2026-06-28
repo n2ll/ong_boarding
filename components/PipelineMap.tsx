@@ -75,19 +75,27 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
     [applicants]
   );
 
-  // 시/군/구별 분포 (좌표 유무와 무관하게 sigungu 기준 집계)
-  const distribution = useMemo(() => {
+  // 시/군/구별 분포. 시군구·시도 둘 다 없는 건(주소 미입력/지오코딩 실패) 별도 버킷으로 분리해
+  // 실제 지역 랭킹이 묻히지 않게 한다.
+  const { regions, unknownCount } = useMemo(() => {
     const counts = new Map<string, number>();
+    let unknown = 0;
     for (const a of applicants) {
-      const key = a.sigungu?.trim() || (a.sido?.trim() ? `${a.sido.trim()} (구 미상)` : "지역 미상");
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const sig = a.sigungu?.trim();
+      const sido = a.sido?.trim();
+      if (sig) counts.set(sig, (counts.get(sig) ?? 0) + 1);
+      else if (sido) {
+        const k = `${sido} (구 미상)`;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      } else unknown++;
     }
-    return Array.from(counts.entries())
+    const regions = Array.from(counts.entries())
       .map(([region, count]) => ({ region, count }))
       .sort((a, b) => b.count - a.count);
+    return { regions, unknownCount: unknown };
   }, [applicants]);
 
-  const maxCount = distribution[0]?.count ?? 1;
+  const maxCount = regions[0]?.count ?? 1;
   const jobsWithCoords = useMemo(
     () => jobs.filter((j) => j.pickup_lat != null && j.pickup_lng != null),
     [jobs]
@@ -216,20 +224,28 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
           </div>
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-custom p-2">
-          {distribution.length === 0 ? (
+          {regions.length === 0 && unknownCount === 0 ? (
             <div className="text-center text-[12.5px] text-[#A0AEC0] py-8">표시할 지원자가 없어요.</div>
           ) : (
-            distribution.map((d) => (
-              <div key={d.region} className="px-2.5 py-2 rounded-lg hover:bg-[#F7FAFC]">
-                <div className="flex items-center justify-between text-[12.5px] mb-1">
-                  <span className="font-bold text-[#2D3748] truncate">{d.region}</span>
-                  <span className="font-extrabold text-[#1A202C] tabular-nums ml-2">{d.count}</span>
+            <>
+              {regions.map((d) => (
+                <div key={d.region} className="px-2.5 py-2 rounded-lg hover:bg-[#F7FAFC]">
+                  <div className="flex items-center justify-between text-[12.5px] mb-1">
+                    <span className="font-bold text-[#2D3748] truncate">{d.region}</span>
+                    <span className="font-extrabold text-[#1A202C] tabular-nums ml-2">{d.count}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-[#F1F4F8] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#DD6B20] rounded-full" style={{ width: `${(d.count / maxCount) * 100}%` }} />
+                  </div>
                 </div>
-                <div className="h-1.5 w-full bg-[#F1F4F8] rounded-full overflow-hidden">
-                  <div className="h-full bg-[#DD6B20] rounded-full" style={{ width: `${(d.count / maxCount) * 100}%` }} />
+              ))}
+              {unknownCount > 0 && (
+                <div className="mt-1.5 mx-1 px-2.5 py-2 rounded-lg bg-[#F7FAFC] flex items-center justify-between text-[12px] text-[#A0AEC0]">
+                  <span className="font-semibold">주소 미입력</span>
+                  <span className="font-bold tabular-nums">{unknownCount.toLocaleString()}</span>
                 </div>
-              </div>
-            ))
+              )}
+            </>
           )}
         </div>
         {jobsWithCoords.length === 0 && jobs.length > 0 && (
