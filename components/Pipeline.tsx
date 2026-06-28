@@ -165,10 +165,13 @@ export function Pipeline() {
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
 
-  // 헤더 글로벌 검색에서 ?q= 로 진입하면 검색어 프리필
+  // 헤더 글로벌 검색에서 ?q= 로 진입하면 검색어 프리필.
+  // 대시보드 '지도에서 보기'에서 ?view=map 으로 진입하면 지도 분포 뷰로 시작.
   useEffect(() => {
     const q = searchParams.get("q");
     if (q) setQuery(q);
+    const v = searchParams.get("view");
+    if (v === "map" || v === "kanban" || v === "list") setView(v);
   }, [searchParams]);
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
   const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");

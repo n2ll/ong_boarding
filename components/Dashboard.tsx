@@ -1,4 +1,4 @@
-import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "motion/react";
@@ -25,6 +25,8 @@ interface AppRow {
   guide_sent?: boolean | null;
   baemin_id?: string | null;
   onboarding_call_status?: string | null;
+  sigungu?: string | null;
+  sido?: string | null;
 }
 
 export function Dashboard() {
@@ -125,6 +127,27 @@ export function Dashboard() {
       called: onboardingTargets.filter((a) => (a.onboarding_call_status ?? "").includes("완료")).length,
       pct: (n: number) => Math.round((n / t) * 100),
     };
+  }, [apps]);
+
+  // 지역(시/군/구)별 인재풀 분포 Top 5. 시군구가 없으면 시도(구 미상)로, 둘 다 없으면 '주소 미입력'으로 집계.
+  // 깊은 탐색은 파이프라인 지도 뷰에서. (PipelineMap의 분포 계산과 동일 규칙)
+  const regionDist = useMemo(() => {
+    const counts = new Map<string, number>();
+    let unknown = 0;
+    for (const a of apps) {
+      const sig = a.sigungu?.trim();
+      const sido = a.sido?.trim();
+      if (sig) counts.set(sig, (counts.get(sig) ?? 0) + 1);
+      else if (sido) {
+        const k = `${sido} (구 미상)`;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      } else unknown++;
+    }
+    const top = Array.from(counts.entries())
+      .map(([region, count]) => ({ region, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    return { top, unknownCount: unknown, max: top[0]?.count ?? 1 };
   }, [apps]);
 
   const urgent = useMemo(() => {
@@ -353,6 +376,43 @@ export function Dashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* 4행: 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><MapPin size={15} className="text-[#3182CE]" /> 지역별 인재풀 분포</h2>
+            <div className="text-[12px] text-[#718096] mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
+          </div>
+          <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">
+            지도에서 보기
+          </button>
+        </div>
+
+        {regionDist.top.length === 0 ? (
+          <div className="py-6 text-center text-[13px] text-[#A0AEC0]">집계할 지역 데이터가 없어요.</div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {regionDist.top.map((r) => (
+              <div key={r.region} className="flex items-center gap-3">
+                <div className="w-[120px] shrink-0 text-[12.5px] font-bold text-[#4A5568] text-right truncate" title={r.region}>{r.region}</div>
+                <div className="flex-1 h-8 bg-[#F7FAFC] rounded-lg overflow-hidden relative">
+                  <div
+                    className="h-full rounded-lg transition-all duration-500 flex items-center px-3 bg-[#63B3ED]"
+                    style={{ width: `${Math.max(Math.round((r.count / regionDist.max) * 100), 8)}%` }}
+                  >
+                    <span className="text-[12.5px] font-extrabold text-[#2D3748]">{r.count.toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="w-[40px] shrink-0 text-[12px] font-bold text-[#A0AEC0] text-right">명</div>
+              </div>
+            ))}
+            {regionDist.unknownCount > 0 && (
+              <div className="text-[11.5px] text-[#A0AEC0] mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
+            )}
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }
