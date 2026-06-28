@@ -5,6 +5,7 @@ import { Search, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
+import { getBrowserClient } from "@/lib/supabase";
 
 interface Applicant {
   id: number;
@@ -182,6 +183,28 @@ export function LiveConsole() {
   useEffect(() => {
     loadChats();
     loadHandoffs();
+  }, [loadChats, loadHandoffs]);
+
+  // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
+  // PII 없는 "changed" 신호만 broadcast → 받으면 디바운스 후 목록·인계 큐를 재조회한다.
+  // (테이블 직접 구독이 아니라 공개 broadcast라 anon에 데이터가 노출되지 않는다.)
+  useEffect(() => {
+    const supabase = getBrowserClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const channel = supabase
+      .channel("live-console")
+      .on("broadcast", { event: "changed" }, () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          loadChats();
+          loadHandoffs();
+        }, 800);
+      })
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, [loadChats, loadHandoffs]);
 
   // 선택 지원자가 바뀌면 그 사람이 동시에 진행 중인 공고 목록을 불러온다.
