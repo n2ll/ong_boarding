@@ -44,22 +44,30 @@ declare global {
 const SCRIPT_ID = "naver-maps-sdk";
 const SEOUL = { lat: 37.5665, lng: 126.978 };
 
-function loadNaverScript(clientId: string): Promise<void> {
+// 스크립트 태그를 1회만 주입하고, window.naver.maps가 준비될 때까지 폴링한다.
+// onload 리스너에만 의존하면 React StrictMode 이중 마운트/이른 주입 시 init을 놓칠 수 있어
+// 폴링으로 준비 상태를 직접 확인한다.
+function loadNaverScript(clientId: string, timeoutMs = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
     if (window.naver?.maps) return resolve();
-    const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("naver script error")));
-      return;
+    if (!document.getElementById(SCRIPT_ID)) {
+      const s = document.createElement("script");
+      s.id = SCRIPT_ID;
+      // NAVER Maps v3 현재 표준: oapi 도메인 + ncpKeyId (구 openapi/ncpClientId는 레거시)
+      s.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`;
+      s.async = true;
+      document.head.appendChild(s);
     }
-    const s = document.createElement("script");
-    s.id = SCRIPT_ID;
-    s.src = `https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${clientId}`;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("naver script load failed"));
-    document.head.appendChild(s);
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (window.naver?.maps) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(timer);
+        reject(new Error("naver maps load timeout"));
+      }
+    }, 100);
   });
 }
 
@@ -107,8 +115,30 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
     let cancelled = false;
     setStatus("loading");
     loadNaverScript(clientId)
+      // 컨테이너가 레이아웃되어 실제 크기를 가질 때까지 대기.
+      // 0×0 상태에서 지도를 만들면 내부 projection이 null이 되어 마커 추가 시 크래시한다.
+      .then(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const start = Date.now();
+            const t = setInterval(() => {
+              if (cancelled) {
+                clearInterval(t);
+                return resolve();
+              }
+              const el = mapEl.current;
+              if (el && el.clientHeight > 0 && el.clientWidth > 0) {
+                clearInterval(t);
+                resolve();
+              } else if (Date.now() - start > 5000) {
+                clearInterval(t);
+                reject(new Error("map container has no size"));
+              }
+            }, 80);
+          })
+      )
       .then(() => {
-        if (cancelled || !mapEl.current) return;
+        if (cancelled || !mapEl.current || mapRef.current) return;
         const naver = window.naver;
         mapRef.current = new naver.maps.Map(mapEl.current, {
           center: new naver.maps.LatLng(SEOUL.lat, SEOUL.lng),
