@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import useSWR from "swr";
 import { useSearchParams } from "next/navigation";
 import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon } from "lucide-react";
 import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
@@ -9,6 +10,7 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const SEGMENTS_KEY = "ong_pipeline_segments";
 
@@ -156,11 +158,28 @@ export function Pipeline() {
   );
   const searchParams = useSearchParams();
   const { branch: scopeBranch } = useBranchScope();
-  const [loading, setLoading] = useState(true);
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
   const [view, setView] = useState<"kanban" | "list" | "map">("list");
   const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
-  const [mapJobs, setMapJobs] = useState<MapJob[]>([]);
+
+  // 지원자 목록은 SWR 캐시로 관리 — 탭 재방문 시 즉시 표시 + 대시보드와 중복 호출 dedup.
+  // 칸반 컬럼은 드래그로 낙관적 변경되는 로컬 상태라, SWR 데이터가 갱신될 때만 동기화한다.
+  const { data: applicantsData, isLoading, mutate: mutateApplicants } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const loading = isLoading && rawApplicants.length === 0;
+  useEffect(() => {
+    if (applicantsData?.data) {
+      setRawApplicants(applicantsData.data as Applicant[]);
+      setColumns(mapApplicantsToColumns(applicantsData.data as Applicant[]));
+    }
+  }, [applicantsData]);
+  // 변경 후 목록 갱신(낙관적 변경 롤백/상세 패널 변경 반영)은 SWR 재검증으로 처리.
+  const loadApplicants = () => { void mutateApplicants(); };
+
+  // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
+  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null }> }>("/api/admin/jobs?status=active");
+  const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
+  const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null })), [visibleJobs]);
+  const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
@@ -224,22 +243,7 @@ export function Pipeline() {
 
   // 세그먼트 → 공고 타겟 전환: 선택된 지원자를 공고 후보로 일괄 추가
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
-  const [activeJobs, setActiveJobs] = useState<{ id: number; title: string; branch: string | null }[]>([]);
   const [addingJobId, setAddingJobId] = useState<number | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/jobs?status=active");
-        const json = await res.json();
-        const jobs = ((json.jobs ?? []) as { id: number; title: string; branch: string | null }[])
-          .filter((j) => !j.title.startsWith("__"));
-        setActiveJobs(jobs);
-      } catch {
-        /* 공고 목록 없이도 다른 기능은 동작 */
-      }
-    })();
-  }, []);
 
   const addSelectedToJob = async (jobId: number) => {
     const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
@@ -265,38 +269,6 @@ export function Pipeline() {
       setAddingJobId(null);
     }
   };
-
-  const loadApplicants = async () => {
-    try {
-      const res = await fetch("/api/admin/applicants");
-      const json = await res.json();
-      if (json.data) {
-        setRawApplicants(json.data as Applicant[]);
-        setColumns(mapApplicantsToColumns(json.data as Applicant[]));
-      } else toast.error("지원자 목록을 불러오지 못했어요");
-    } catch {
-      toast.error("지원자 목록을 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadApplicants();
-    // 공고 픽업 좌표(있으면) — 지도 뷰 오버레이용. 실패해도 무시.
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/jobs?status=active");
-        const json = await res.json();
-        const list = ((json.jobs ?? []) as Array<{ id: number; title: string; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null }>)
-          .filter((j) => !String(j.title).startsWith("__"))
-          .map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null }));
-        setMapJobs(list);
-      } catch {
-        /* 공고 오버레이는 선택사항 */
-      }
-    })();
-  }, []);
 
   const allCards = columns.flatMap(c => c.cards.map(card => ({ ...card, stage: c.title, stageColor: c.color, stageId: c.id })));
 
@@ -636,9 +608,7 @@ export function Pipeline() {
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-hidden relative">
-          {loading && (
-            <div className="px-8 py-3 text-[13px] text-[#718096] bg-[#F7FAFC]">지원자 목록 불러오는 중…</div>
-          )}
+          {loading && <PipelineSkeleton />}
           {view === "kanban" && (
             <div className="flex gap-6 h-full overflow-x-auto p-8">
               {columns.map((column, idx) => (
@@ -890,6 +860,26 @@ export function Pipeline() {
       )}
 
     </DndProvider>
+  );
+}
+
+// 첫 진입(캐시 없음) 로딩 중 빈 화면 대신 보여주는 목록 스켈레톤. 콘텐츠 영역을 덮는 오버레이.
+function PipelineSkeleton() {
+  return (
+    <div className="absolute inset-0 z-10 bg-white p-8 overflow-hidden">
+      <Skeleton className="h-10 w-full rounded-lg mb-3" />
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 py-3 border-b border-[#F1F4F8]">
+          <Skeleton className="h-4 w-4 rounded" />
+          <Skeleton className="h-9 w-9 rounded-full" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-24" />
+          <div className="flex-1" />
+          <Skeleton className="h-6 w-16 rounded-full" />
+        </div>
+      ))}
+    </div>
   );
 }
 

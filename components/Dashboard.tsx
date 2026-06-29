@@ -1,9 +1,11 @@
 import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import useSWR from "swr";
 import { motion } from "motion/react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface UrgentItem {
   id: string;
@@ -32,23 +34,13 @@ interface AppRow {
 export function Dashboard() {
   const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
-  const [rawApps, setRawApps] = useState<AppRow[]>([]);
-  const [inboxCount, setInboxCount] = useState(0);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [aRes, iRes] = await Promise.all([
-          fetch("/api/admin/applicants"),
-          fetch("/api/admin/inbox/pending"),
-        ]);
-        setRawApps(((await aRes.json()).data ?? []) as AppRow[]);
-        setInboxCount((((await iRes.json()).data ?? []) as unknown[]).length);
-      } catch {
-        /* 대시보드 통계는 실패해도 화면은 유지 */
-      }
-    })();
-  }, []);
+  // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
+  const { data: appsRes, isLoading } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
+  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
+  const rawApps = appsRes?.data ?? [];
+  const inboxCount = inboxRes?.data?.length ?? 0;
+  // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
+  const showSkeleton = isLoading && rawApps.length === 0;
 
   const branchOf = (a: AppRow) => a.confirmed_branch || a.branch1 || a.branch || null;
   const apps = useMemo(
@@ -161,6 +153,8 @@ export function Dashboard() {
     }
     return u;
   }, [apps, inboxCount]);
+
+  if (showSkeleton) return <DashboardSkeleton />;
 
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
@@ -413,6 +407,37 @@ export function Dashboard() {
           </div>
         )}
       </motion.div>
+    </div>
+  );
+}
+
+// 첫 진입(캐시 없음) 로딩 중 0값 깜빡임을 막는 스켈레톤. 실제 레이아웃 골격과 동일한 그리드 사용.
+function DashboardSkeleton() {
+  return (
+    <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
+      <div className="bg-[#1A202C] rounded-[20px] p-8 shadow-md">
+        <div className="flex items-center justify-between mb-8">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-64 bg-white/10" />
+            <Skeleton className="h-3 w-48 bg-white/10" />
+          </div>
+          <Skeleton className="h-9 w-36 rounded-xl bg-white/10" />
+        </div>
+        <div className="grid grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-[88px] rounded-[12px] bg-white/10" />
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-6 items-stretch">
+        <Skeleton className="col-span-2 h-[280px] rounded-[16px]" />
+        <Skeleton className="h-[280px] rounded-[16px]" />
+      </div>
+      <div className="grid grid-cols-3 gap-6 items-stretch">
+        <Skeleton className="col-span-2 h-[240px] rounded-[16px]" />
+        <Skeleton className="h-[240px] rounded-[16px]" />
+      </div>
+      <Skeleton className="h-[220px] rounded-[16px]" />
     </div>
   );
 }

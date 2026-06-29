@@ -1,12 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { SWRConfig } from "swr";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { Toaster } from "@/components/ui/sonner";
 import { ChatWidget } from "@/components/ChatWidget";
 import { BranchScopeProvider } from "@/lib/branch-scope";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import { jsonFetcher } from "@/lib/swr";
 
 function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/automation")) return { pageTitle: "자동화 현황", crumb: "개요 > 자동화 현황" };
@@ -31,8 +33,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { pageTitle, crumb } = resolveHeader(pathname);
 
   return (
-    <BranchScopeProvider>
-      <ConfirmProvider>
+    <SWRConfig
+      value={{
+        fetcher: jsonFetcher,
+        // 탭 재방문 시 이전 데이터를 즉시 보여주고 백그라운드에서 갱신
+        keepPreviousData: true,
+        // 짧은 시간 내 동일 키 요청은 1회로 병합 (대시보드/파이프라인 동시 호출 dedup)
+        dedupingInterval: 5000,
+        revalidateOnFocus: false,
+      }}
+    >
+      <BranchScopeProvider>
+        <ConfirmProvider>
         <div className="flex h-screen w-full overflow-hidden bg-[#EEF1F5] font-sans">
           <Sidebar />
           <div className="flex flex-col flex-1 min-w-0">
@@ -44,7 +56,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Toaster position="bottom-right" richColors />
           <ChatWidget />
         </div>
-      </ConfirmProvider>
-    </BranchScopeProvider>
+        </ConfirmProvider>
+      </BranchScopeProvider>
+    </SWRConfig>
   );
 }

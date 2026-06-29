@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
@@ -153,7 +154,6 @@ export function Jobs() {
   const searchParams = useSearchParams();
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState('active');
-  const [jobs, setJobs] = useState<JobRow[]>([]);
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -165,8 +165,6 @@ export function Jobs() {
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState<number | "">("");
   const [branchFilter, setBranchFilter] = useState<number | "">("");
-  const [clients, setClients] = useState<ClientOpt[]>([]);
-  const [branches, setBranches] = useState<BranchOpt[]>([]);
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
   const [newJobMode, setNewJobMode] = useState<RecruitMode>("external");
   const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; recruitMode: RecruitMode } | null>(null);
@@ -367,42 +365,19 @@ export function Jobs() {
     }
   }, [searchParams, router]);
 
-  const loadJobs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/jobs?status=all");
-      const json = await res.json();
-      if (json.jobs)
-        setJobs(
-          (json.jobs as ApiJob[])
-            .filter((j) => !j.title.startsWith("__"))
-            .map(toJobRow)
-        );
-      else toast.error("공고 목록을 불러오지 못했어요");
-    } catch {
-      toast.error("공고 목록을 불러오지 못했어요");
-    }
-  }, []);
+  // 공고 목록은 SWR 캐시로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 loadJobs(=mutate)로.
+  const { data: jobsApi, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const jobs = useMemo(
+    () => (jobsApi?.jobs ?? []).filter((j) => !j.title.startsWith("__")).map(toJobRow),
+    [jobsApi]
+  );
+  const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
 
-  useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [cRes, bRes] = await Promise.all([
-          fetch("/api/admin/clients"),
-          fetch("/api/admin/branches"),
-        ]);
-        const cList = ((await cRes.json()).data ?? []) as ClientOpt[];
-        const bList = ((await bRes.json()).data ?? []) as BranchOpt[];
-        setClients(cList.map((c) => ({ id: c.id, name: c.name })));
-        setBranches(bList.map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })));
-      } catch {
-        /* 필터용 메타데이터 로드 실패는 조용히 무시 */
-      }
-    })();
-  }, []);
+  // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
+  const { data: clientsApi } = useSWR<{ data?: ClientOpt[] }>("/api/admin/clients");
+  const { data: branchesApi } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name })), [clientsApi]);
+  const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })), [branchesApi]);
 
   const handleGenerateJD = async () => {
     if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");

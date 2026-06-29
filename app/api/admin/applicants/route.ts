@@ -29,18 +29,32 @@ function validConfirmedSlot(v: unknown): boolean {
   return tokens.every((t) => VALID_SLOT_SET.has(t));
 }
 
+// 목록(요약) 응답 컬럼. 무거운 자유텍스트(introduction/screening/note/memo/churn_reason)는
+// 목록에서 쓰이지 않으므로 제외해 페이로드를 줄인다. 전체 행은 상세 엔드포인트(/[id])에서 제공.
+const LIST_COLUMNS = [
+  "id", "created_at", "name", "birth_date", "phone", "location",
+  "own_vehicle", "license_type", "vehicle_type",
+  "branch1", "branch2", "work_hours", "experience", "available_date", "self_ownership",
+  "status", "branch", "source", "filter_pass", "sort_order",
+  "last_message_at", "unread_count", "start_date",
+  "confirmed_slot", "confirmed_branch", "current_branch", "churned_at",
+  "baemin_id", "guide_sent", "onboarding_call_status", "kakao_channel_friend",
+  "bname", "sigungu", "sido", "lat", "lng", "geo_precision",
+].join(", ");
+
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
   const source = new URL(req.url).searchParams.get("source");
 
   let q = supabase
     .from("applicants")
-    .select("*")
+    .select(LIST_COLUMNS)
     .order("created_at", { ascending: false });
 
   if (source) q = q.eq("source", source);
 
-  const { data, error } = await q;
+  // LIST_COLUMNS는 런타임 문자열이라 select 타입 추론이 안 되므로 결과 타입을 명시한다.
+  const { data, error } = await q.returns<({ id: number } & Record<string, unknown>)[]>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
