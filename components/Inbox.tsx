@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import useSWR from "swr";
 import { Inbox as InboxIcon, RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,25 +23,10 @@ function formatTime(iso: string): string {
 }
 
 export function Inbox() {
-  const [messages, setMessages] = useState<PendingMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading, isValidating, mutate } = useSWR<{ data?: PendingMessage[] }>("/api/admin/inbox/pending");
+  const messages = data?.data ?? [];
+  const loading = isLoading && messages.length === 0;
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/inbox/pending");
-      const json = await res.json();
-      setMessages((json.data ?? []) as PendingMessage[]);
-    } catch {
-      toast.error("미분류 메시지를 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const classify = async (msg: PendingMessage, action: "baemin" | "other") => {
     if (busyId) return;
@@ -65,7 +51,11 @@ export function Inbox() {
       } else {
         toast.success("기타로 분류해 종결했어요.");
       }
-      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      // 처리 완료 항목을 캐시에서 즉시 제거(낙관적). 재검증은 다음 진입/새로고침에서.
+      void mutate(
+        (cur) => ({ data: (cur?.data ?? []).filter((m) => m.id !== msg.id) }),
+        { revalidate: false }
+      );
     } catch {
       toast.error("분류에 실패했어요");
     } finally {
@@ -86,10 +76,10 @@ export function Inbox() {
           </div>
         </div>
         <button
-          onClick={() => { setLoading(true); load(); }}
+          onClick={() => mutate()}
           className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
         >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> 새로고침
+          <RefreshCw size={16} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
       </div>
 

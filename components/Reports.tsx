@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
+import useSWR from "swr";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from "recharts";
 import { Download, TrendingUp, Users, Brain, CheckCircle, Coins } from "lucide-react";
 import { toast } from "sonner";
@@ -40,23 +41,11 @@ function inRange(created_at: string | null, range: string): boolean {
 
 export function Reports() {
   const [dateRange, setDateRange] = useState("올해");
-  const [apps, setApps] = useState<ApplicantRow[]>([]);
-  const [usage, setUsage] = useState<UsageRow[]>([]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [aRes, uRes] = await Promise.all([
-          fetch("/api/admin/applicants"),
-          fetch("/api/admin/usage"),
-        ]);
-        setApps(((await aRes.json()).data ?? []) as ApplicantRow[]);
-        setUsage(((await uRes.json()).data ?? []) as UsageRow[]);
-      } catch {
-        toast.error("리포트 데이터를 불러오지 못했어요");
-      }
-    })();
-  }, []);
+  // applicants는 여러 탭과 동일 키라 SWR이 dedup·캐시; usage도 캐시.
+  const { data: appsRes } = useSWR<{ data?: ApplicantRow[] }>("/api/admin/applicants");
+  const { data: usageRes } = useSWR<{ data?: UsageRow[] }>("/api/admin/usage");
+  const apps = useMemo(() => appsRes?.data ?? [], [appsRes]);
+  const usage = useMemo(() => usageRes?.data ?? [], [usageRes]);
 
   const rangedApps = useMemo(() => apps.filter((a) => inRange(a.created_at, dateRange)), [apps, dateRange]);
 

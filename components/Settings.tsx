@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import useSWR from "swr";
 import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { DemoBanner } from "./DemoBanner";
@@ -20,22 +21,11 @@ const INTEGRATION_META: Record<string, { name: string; desc: string; badge: stri
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState("profile");
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
-  const [intLoading, setIntLoading] = useState(true);
-
-  useEffect(() => {
-    if (activeTab !== "integrations" || integrations.length > 0) return;
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/settings/integrations");
-        setIntegrations(((await res.json()).data ?? []) as Integration[]);
-      } catch {
-        toast.error("연동 상태를 불러오지 못했어요");
-      } finally {
-        setIntLoading(false);
-      }
-    })();
-  }, [activeTab, integrations.length]);
+  // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
+  const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
+    activeTab === "integrations" ? "/api/admin/settings/integrations" : null
+  );
+  const integrations = intData?.data ?? [];
 
   const handleSave = () => {
     toast.success("설정이 저장되었습니다.");

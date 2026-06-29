@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import useSWR from "swr";
 import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -93,18 +94,28 @@ export function AgentBrain() {
   const confirm = useConfirm();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("overview");
-  // AI 지식 현황(개선1·3): 사실 3계층 집계 + 인계 분포
-  const [ovLoading, setOvLoading] = useState(true);
-  const [ovBranches, setOvBranches] = useState<OverviewBranch[]>([]);
-  const [ovJobs, setOvJobs] = useState<OverviewJob[]>([]);
-  const [ovByCategory, setOvByCategory] = useState<Record<string, number>>({});
-  const [ovHandoffTotal, setOvHandoffTotal] = useState(0);
+  // AI 지식 현황(개선1·3): 사실 3계층 집계 + 인계 분포 — 모두 SWR로 캐시·dedup(타 탭과 키 공유).
+  const { data: ovBranchesApi, mutate: mutateOvBranches } = useSWR<{ data?: OverviewBranch[] }>("/api/admin/branches");
+  const { data: ovJobsApi, mutate: mutateOvJobs } = useSWR<{ jobs?: OverviewJob[] }>("/api/admin/jobs?status=active");
+  const { data: ovHandoffsApi, isLoading: ovHandoffsLoading, mutate: mutateOvHandoffs } = useSWR<{ by_category?: Record<string, number>; total?: number }>("/api/admin/agent/handoffs");
+  const ovBranches = useMemo(() => ovBranchesApi?.data ?? [], [ovBranchesApi]);
+  const ovJobs = useMemo(() => ((ovJobsApi?.jobs ?? []) as OverviewJob[]).filter((j) => !j.title.startsWith("__")), [ovJobsApi]);
+  const ovByCategory = useMemo(() => ovHandoffsApi?.by_category ?? {}, [ovHandoffsApi]);
+  const ovHandoffTotal = ovHandoffsApi?.total ?? 0;
+  const ovLoading = ovHandoffsLoading;
+  const loadOverview = useCallback(() => {
+    void mutateOvBranches();
+    void mutateOvJobs();
+    void mutateOvHandoffs();
+  }, [mutateOvBranches, mutateOvJobs, mutateOvHandoffs]);
   const [isSaving, setIsSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'vectorizing' | 'complete'>('idle');
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [examples, setExamples] = useState<PromptExample[]>([]);
-  const [kbLoading, setKbLoading] = useState(true);
+  const { data: examplesApi, isLoading: examplesLoading, mutate: mutateExamples } = useSWR<{ data?: PromptExample[] }>("/api/admin/prompt-examples");
+  const examples = useMemo(() => examplesApi?.data ?? [], [examplesApi]);
+  const kbLoading = examplesLoading && examples.length === 0;
+  const loadExamples = useCallback(async () => { await mutateExamples(); }, [mutateExamples]);
   const [kbCategory, setKbCategory] = useState<KbCategory>("facts");
   const [kbForm, setKbForm] = useState<KbForm | null>(null);
   const [kbBusy, setKbBusy] = useState(false);
@@ -118,54 +129,39 @@ export function AgentBrain() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 운영자 페르소나 (시스템 프롬프트에 반영) — prompt_examples(agent_config/persona) 실연동
+  // 운영자 페르소나 (시스템 프롬프트에 반영) — SWR로 로드 후 폼에 시드(이후 로컬 편집).
+  const { data: personaApi, isLoading: personaLoading } = useSWR<{ data?: { role?: string; instructions?: string; tone?: string; emoji?: number } }>("/api/admin/agent/persona");
   const [persona, setPersona] = useState<PersonaForm>(DEFAULT_PERSONA);
-  const [personaLoaded, setPersonaLoaded] = useState(false);
-
-  const loadPersona = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/agent/persona");
-      const json = await res.json();
-      if (res.ok && json.data) {
-        setPersona({
-          role: json.data.role || DEFAULT_PERSONA.role,
-          instructions: json.data.instructions || DEFAULT_PERSONA.instructions,
-          tone: json.data.tone || DEFAULT_PERSONA.tone,
-          emoji: typeof json.data.emoji === "number" ? json.data.emoji : DEFAULT_PERSONA.emoji,
-        });
-      }
-    } catch {
-      /* 실패 시 기본 페르소나 유지 */
-    } finally {
-      setPersonaLoaded(true);
+  const personaLoaded = !personaLoading;
+  useEffect(() => {
+    const d = personaApi?.data;
+    if (d) {
+      setPersona({
+        role: d.role || DEFAULT_PERSONA.role,
+        instructions: d.instructions || DEFAULT_PERSONA.instructions,
+        tone: d.tone || DEFAULT_PERSONA.tone,
+        emoji: typeof d.emoji === "number" ? d.emoji : DEFAULT_PERSONA.emoji,
+      });
     }
-  }, []);
+  }, [personaApi]);
 
   const setPersonaField = <K extends keyof PersonaForm>(key: K, value: PersonaForm[K]) =>
     setPersona((prev) => ({ ...prev, [key]: value }));
 
   // 전역 AI 응답 스위치 (kill-switch). killDisabled=true 면 AI 전역 중단.
-  const [killLoading, setKillLoading] = useState(true);
+  // 전역 AI 스위치도 SWR로 로드 후 로컬 상태에 시드(토글은 로컬 갱신). kill-switch 키는 자동화 탭과 공유.
+  const { data: killApi, isLoading: killLoading } = useSWR<{ disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch");
   const [killDisabled, setKillDisabled] = useState(false);
   const [killEnvForced, setKillEnvForced] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
   const [killUpdatedAt, setKillUpdatedAt] = useState<string | null>(null);
-
-  const loadKillSwitch = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/agent/kill-switch");
-      const json = await res.json();
-      if (res.ok) {
-        setKillDisabled(!!json.disabled);
-        setKillEnvForced(!!json.env_forced);
-        setKillUpdatedAt(json.updated_at ?? null);
-      }
-    } catch {
-      /* 실패해도 화면 유지 */
-    } finally {
-      setKillLoading(false);
+  useEffect(() => {
+    if (killApi) {
+      setKillDisabled(!!killApi.disabled);
+      setKillEnvForced(!!killApi.env_forced);
+      setKillUpdatedAt(killApi.updated_at ?? null);
     }
-  }, []);
+  }, [killApi]);
 
   const handleToggleKillSwitch = async () => {
     if (killBusy || killEnvForced) return;
@@ -198,47 +194,6 @@ export function AgentBrain() {
     }
   };
 
-  const loadExamples = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/prompt-examples");
-      const json = await res.json();
-      setExamples((json.data ?? []) as PromptExample[]);
-    } catch {
-      /* 지식 베이스는 실패해도 화면 유지 */
-    } finally {
-      setKbLoading(false);
-    }
-  }, []);
-
-  // AI 지식 현황 — 사실 3계층(공통 facts는 examples에서) + 공고 단가·정책 + 인계 분포
-  const loadOverview = useCallback(async () => {
-    setOvLoading(true);
-    try {
-      const [bRes, jRes, hRes] = await Promise.all([
-        fetch("/api/admin/branches"),
-        fetch("/api/admin/jobs?status=active"),
-        fetch("/api/admin/agent/handoffs"),
-      ]);
-      const bJson = await bRes.json().catch(() => ({}));
-      const jJson = await jRes.json().catch(() => ({}));
-      const hJson = await hRes.json().catch(() => ({}));
-      setOvBranches((bJson.data ?? []) as OverviewBranch[]);
-      setOvJobs(((jJson.jobs ?? []) as OverviewJob[]).filter((j) => !j.title.startsWith("__")));
-      setOvByCategory((hJson.by_category ?? {}) as Record<string, number>);
-      setOvHandoffTotal((hJson.total ?? 0) as number);
-    } catch {
-      /* 현황은 부가 정보 — 실패해도 화면 유지 */
-    } finally {
-      setOvLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadExamples();
-    loadKillSwitch();
-    loadPersona();
-    loadOverview();
-  }, [loadExamples, loadKillSwitch, loadPersona, loadOverview]);
 
   const openKbAdd = () =>
     setKbForm({ id: null, category: kbCategory, title: "", body: "" });

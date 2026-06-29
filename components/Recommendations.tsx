@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import useSWR from "swr";
 import { Sparkles, Briefcase, User, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -51,7 +52,6 @@ function buildReason(c: ScoredCand): string {
 }
 
 export function Recommendations() {
-  const [jobs, setJobs] = useState<ApiJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [recs, setRecs] = useState<ScoredCand[]>([]);
   const [poolSize, setPoolSize] = useState(0);
@@ -61,21 +61,16 @@ export function Recommendations() {
   const [addingId, setAddingId] = useState<number | null>(null);
   const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
 
+  // 공고 목록은 SWR 캐시로 — Jobs 탭과 동일 키라 dedup, 탭 재방문 시 즉시 표시.
+  const { data: jobsApi } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const jobs = useMemo(
+    () => ((jobsApi?.jobs ?? []) as ApiJob[]).filter((j) => j.status !== "closed" && !j.title.startsWith("__")),
+    [jobsApi]
+  );
+  // 첫 로드 시 첫 공고 자동 선택.
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/jobs?status=all");
-        const json = await res.json();
-        const list = ((json.jobs ?? []) as ApiJob[]).filter(
-          (j) => j.status !== "closed" && !j.title.startsWith("__")
-        );
-        setJobs(list);
-        if (list.length > 0) setSelectedJobId(list[0].id);
-      } catch {
-        toast.error("공고 목록을 불러오지 못했어요");
-      }
-    })();
-  }, []);
+    if (selectedJobId == null && jobs.length > 0) setSelectedJobId(jobs[0].id);
+  }, [jobs, selectedJobId]);
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId) ?? null;
 

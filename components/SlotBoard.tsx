@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import useSWR from "swr";
 import { LayoutGrid, Clock4, Users, AlertTriangle, Loader2, Filter } from "lucide-react";
-import { toast } from "sonner";
 import {
   SLOTS,
   type SlotKey,
@@ -34,33 +34,16 @@ function sameBranch(a: string | null | undefined, name: string): boolean {
 }
 
 export function SlotBoard() {
-  const [branches, setBranches] = useState<ApiBranch[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [applicants, setApplicants] = useState<Applicant[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 슬롯 현황 3종 데이터는 모두 SWR로 캐시·dedup(타 탭과 키 공유).
+  const { data: branchesApi, isLoading } = useSWR<{ data?: ApiBranch[] }>("/api/admin/branches");
+  const { data: clientsApi } = useSWR<{ data?: Client[] }>("/api/admin/clients");
+  const { data: applicantsApi } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const branches = useMemo(() => branchesApi?.data ?? [], [branchesApi]);
+  const clients = useMemo(() => clientsApi?.data ?? [], [clientsApi]);
+  const applicants = useMemo(() => applicantsApi?.data ?? [], [applicantsApi]);
+  const loading = isLoading && branches.length === 0;
   const [clientFilter, setClientFilter] = useState<number | "">("");
   const [showAll, setShowAll] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const [bRes, cRes, aRes] = await Promise.all([
-        fetch("/api/admin/branches"),
-        fetch("/api/admin/clients"),
-        fetch("/api/admin/applicants"),
-      ]);
-      setBranches(((await bRes.json()).data ?? []) as ApiBranch[]);
-      setClients(((await cRes.json()).data ?? []) as Client[]);
-      setApplicants(((await aRes.json()).data ?? []) as Applicant[]);
-    } catch {
-      toast.error("슬롯 현황을 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const slotClientIds = useMemo(
     () => new Set(clients.filter((c) => c.uses_slots).map((c) => c.id)),

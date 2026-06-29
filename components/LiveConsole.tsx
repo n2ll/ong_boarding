@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import useSWR from "swr";
 import { Search, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
@@ -103,9 +104,7 @@ const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
 export function LiveConsole() {
   const [activeTab, setActiveTab] = useState<"all" | "intervention">("all");
-  const [chats, setChats] = useState<Applicant[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
-  const [loadingList, setLoadingList] = useState(true);
   const [newMsgModalOpen, setNewMsgModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
@@ -114,7 +113,6 @@ export function LiveConsole() {
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   // 인계 작업 큐(paused 후보) + 카테고리 필터 + 큐에서 선택한 공고 포커스용
-  const [handoffs, setHandoffs] = useState<Handoff[]>([]);
   const [handoffCat, setHandoffCat] = useState<string>("all");
   // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
   const focusJobIdRef = useRef<number | null>(null);
@@ -132,58 +130,50 @@ export function LiveConsole() {
   const [kbLoading, setKbLoading] = useState(false);
   const [kbSaving, setKbSaving] = useState(false);
 
-  const loadChats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/applicants");
-      const json = await res.json();
-      const all = (json.data ?? []) as Applicant[];
-      const active = all.filter(
-        (a) => (a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status)
-      );
-      setChats(active);
-      setSelectedChatId((prev) => prev ?? (active[0]?.id ?? null));
+  // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
+  const { data: appsData, isLoading: appsLoading, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const chats = useMemo(
+    () => (appsData?.data ?? []).filter((a) => (a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status)),
+    [appsData]
+  );
+  const loadingList = appsLoading && chats.length === 0;
 
-      // 활성 대화 subset에 한해 마지막 메시지 미리보기를 가볍게 조회
-      const ids = active.map((a) => a.id);
-      if (ids.length > 0) {
-        try {
-          const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}`);
-          if (pRes.ok) {
-            const pJson = await pRes.json();
-            setPreviewById(pJson.previews ?? {});
-          }
-        } catch {
-          /* 미리보기는 부가정보이므로 실패 무시 */
-        }
-      }
-    } catch {
-      toast.error("대화 목록을 불러오지 못했어요");
-    } finally {
-      setLoadingList(false);
-    }
-  }, []);
+  // 인계 큐도 SWR로 캐시.
+  const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs");
+  const handoffs = useMemo(() => handoffsData?.handoffs ?? [], [handoffsData]);
 
-  const loadHandoffs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/agent/handoffs");
-      if (!res.ok) return;
-      const json = await res.json();
-      setHandoffs((json.handoffs ?? []) as Handoff[]);
-    } catch {
-      /* 큐는 부가정보이므로 실패 무시 */
-    }
-  }, []);
+  const loadChats = useCallback(() => { void mutateApps(); }, [mutateApps]);
+  const loadHandoffs = useCallback(() => { void mutateHandoffs(); }, [mutateHandoffs]);
 
   // 대화 상태가 바뀌면(재개/보류/발송 등) 목록과 인계 큐를 함께 새로고침.
   const handleChanged = useCallback(() => {
-    loadChats();
-    loadHandoffs();
-  }, [loadChats, loadHandoffs]);
+    void mutateApps();
+    void mutateHandoffs();
+  }, [mutateApps, mutateHandoffs]);
 
+  // 첫 선택 자동 지정.
   useEffect(() => {
-    loadChats();
-    loadHandoffs();
-  }, [loadChats, loadHandoffs]);
+    setSelectedChatId((prev) => prev ?? (chats[0]?.id ?? null));
+  }, [chats]);
+
+  // 활성 대화 subset의 마지막 메시지 미리보기를 가볍게 조회(목록이 갱신될 때).
+  useEffect(() => {
+    const ids = chats.map((c) => c.id);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}`);
+        if (pRes.ok && !cancelled) {
+          const pJson = await pRes.json();
+          setPreviewById(pJson.previews ?? {});
+        }
+      } catch {
+        /* 미리보기는 부가정보이므로 실패 무시 */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [chats]);
 
   // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
   // PII 없는 "changed" 신호만 broadcast → 받으면 디바운스 후 목록·인계 큐를 재조회한다.

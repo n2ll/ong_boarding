@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { Building2, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4, ChevronRight, MapPin } from "lucide-react";
 import { toast } from "sonner";
@@ -60,37 +61,27 @@ function emptyForm(): ClientForm {
 export function Clients() {
   const router = useRouter();
   const confirm = useConfirm();
-  const [clients, setClients] = useState<ApiClient[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 화주사 목록은 SWR로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 load(=mutate)로.
+  const { data: clientsApi, isLoading, mutate: mutateClients } = useSWR<{ data?: ApiClient[] }>("/api/admin/clients");
+  const clients = useMemo(() => clientsApi?.data ?? [], [clientsApi]);
+  const loading = isLoading && clients.length === 0;
+  const load = useCallback(() => { void mutateClients(); }, [mutateClients]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ClientForm | null>(null);
   const [saving, setSaving] = useState(false);
-  const [branches, setBranches] = useState<BranchLite[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const loadBranches = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/branches");
-      const json = await res.json();
-      setBranches((json.data ?? []) as BranchLite[]);
-    } catch {
-      /* 지점 목록 실패는 조용히 무시 */
-    }
-  }, []);
+  // 지점 목록(읽기 전용 표시) — 타 탭과 동일 키라 dedup.
+  const { data: branchesApi } = useSWR<{ data?: BranchLite[] }>("/api/admin/branches");
+  const branches = useMemo(() => branchesApi?.data ?? [], [branchesApi]);
 
-  // 데이터 정합성 점검 (5-a)
+  // 데이터 정합성 점검 (5-a) — 첫 로드는 SWR, 재백필 결과는 로컬에서 갱신.
+  const { data: integApi } = useSWR<{ report?: IntegrityReport }>("/api/admin/data-integrity");
   const [integ, setInteg] = useState<IntegrityReport | null>(null);
   const [integRunning, setIntegRunning] = useState(false);
-
-  const loadInteg = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/data-integrity");
-      const json = await res.json();
-      if (res.ok) setInteg(json.report as IntegrityReport);
-    } catch {
-      /* 점검 실패해도 화면 유지 */
-    }
-  }, []);
+  useEffect(() => {
+    if (integApi?.report) setInteg(integApi.report);
+  }, [integApi]);
 
   const runBackfill = async () => {
     if (integRunning) return;
@@ -112,28 +103,6 @@ export function Clients() {
       setIntegRunning(false);
     }
   };
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/clients");
-      const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error || "화주사 목록을 불러오지 못했어요");
-        return;
-      }
-      setClients((json.data ?? []) as ApiClient[]);
-    } catch {
-      toast.error("화주사 목록을 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    loadInteg();
-    loadBranches();
-  }, [load, loadInteg, loadBranches]);
 
   const addBranchForClient = (clientId: number) => router.push(`/branches?client=${clientId}`);
 

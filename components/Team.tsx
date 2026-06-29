@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
+import useSWR from "swr";
 import { Shield, UserPlus, Phone, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
@@ -31,36 +32,17 @@ function emptyForm(): TeamForm {
 
 export function Team() {
   const confirm = useConfirm();
-  const [members, setMembers] = useState<SiteManager[]>([]);
-  const [branches, setBranches] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 담당자 목록은 SWR로 — 변경 후 갱신은 loadMembers(=mutate). 지점 목록은 읽기 전용 derive.
+  const { data: membersApi, isLoading, mutate: mutateMembers } = useSWR<{ data?: SiteManager[] }>("/api/admin/site-managers");
+  const members = useMemo(() => membersApi?.data ?? [], [membersApi]);
+  const loading = isLoading && members.length === 0;
+  const loadMembers = useCallback(async () => { await mutateMembers(); }, [mutateMembers]);
+
+  const { data: branchesApi } = useSWR<{ data?: { name: string }[] }>("/api/admin/branches");
+  const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => b.name), [branchesApi]);
+
   const [form, setForm] = useState<TeamForm | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const loadMembers = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/site-managers");
-      const json = await res.json();
-      setMembers((json.data ?? []) as SiteManager[]);
-    } catch {
-      toast.error("담당자 목록을 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadMembers();
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/branches");
-        const json = await res.json();
-        setBranches(((json.data ?? []) as { name: string }[]).map((b) => b.name));
-      } catch {
-        /* 지점 목록 실패해도 등록은 가능 */
-      }
-    })();
-  }, [loadMembers]);
 
   const openCreate = () => setForm(emptyForm());
   const openEdit = (m: SiteManager) =>

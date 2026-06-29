@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import useSWR from "swr";
 import { Plus, Link2, Sparkles, Target, Users, Megaphone, Map, Send, X, Smartphone, DollarSign, Lock, PieChart as PieChartIcon, TrendingUp, BarChart2, PlayCircle, Globe, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -31,18 +32,8 @@ export function Sourcing() {
 
   const totalInflow = published.reduce((a, j) => a + j.stats.reduce((b, s) => b + s.applicants, 0), 0);
 
-  // 채널별 실제 유입 집계 (데모 광고 지표와 달리 실제 지원자 데이터 기반)
-  const [inflow, setInflow] = useState<{ bySource: { source: string; total: number; recent7: number; confirmed: number }[]; total: number; recent7: number; confirmed: number } | null>(null);
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/sourcing/inflow");
-        if (res.ok) setInflow(await res.json());
-      } catch {
-        /* 실패 시 실데이터 카드만 숨김 */
-      }
-    })();
-  }, []);
+  // 채널별 실제 유입 집계 (데모 광고 지표와 달리 실제 지원자 데이터 기반) — SWR 캐시.
+  const { data: inflow } = useSWR<{ bySource: { source: string; total: number; recent7: number; confirmed: number }[]; total: number; recent7: number; confirmed: number }>("/api/admin/sourcing/inflow");
 
   const SOURCE_KO: Record<string, string> = {
     danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",

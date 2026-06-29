@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import useSWR from "swr";
 import { Plus, CheckCircle2, MessageSquare, Save, FileText, Filter, Calendar, Users, AlertTriangle, Sparkles, Zap, Smartphone, Briefcase, Activity, Clock, Play, X, Power, Inbox } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -42,27 +43,18 @@ const MOCK_WORKFLOWS = [
 export function Automation() {
   const [selectedWf, setSelectedWf] = useState(1);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [stats, setStats] = useState<AutoStats>({ aiDisabled: false, screening: 0, confirmed: 0, waiting: 0, inbox: 0, activeJobs: 0, loading: true });
 
-  // 자동 점검 규칙 (실동작)
-  const [ruleDefs, setRuleDefs] = useState<RuleDef[]>([]);
+  // 자동 점검 규칙 (실동작) — 정의는 SWR로, 설정은 로컬에서 편집/저장하므로 첫 로드 시 시드.
+  const { data: rulesApi } = useSWR<{ rules?: RuleDef[]; config?: Record<string, RuleConfig> }>("/api/admin/automation/rules");
+  const ruleDefs = useMemo(() => rulesApi?.rules ?? [], [rulesApi]);
   const [ruleConfig, setRuleConfig] = useState<Record<string, RuleConfig>>({});
   const [ruleResults, setRuleResults] = useState<Record<string, RuleResult>>({});
   const [ruleRunning, setRuleRunning] = useState(false);
   const [ruleRanAt, setRuleRanAt] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/automation/rules");
-        const json = await res.json();
-        setRuleDefs((json.rules ?? []) as RuleDef[]);
-        setRuleConfig((json.config ?? {}) as Record<string, RuleConfig>);
-      } catch {
-        /* 실패해도 화면 유지 */
-      }
-    })();
-  }, []);
+    if (rulesApi?.config) setRuleConfig(rulesApi.config);
+  }, [rulesApi]);
 
   const persistConfig = async (next: Record<string, RuleConfig>) => {
     try {
@@ -118,34 +110,24 @@ export function Automation() {
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [aRes, kRes, iRes, jRes] = await Promise.all([
-          fetch("/api/admin/applicants"),
-          fetch("/api/admin/agent/kill-switch"),
-          fetch("/api/admin/inbox/pending"),
-          fetch("/api/admin/jobs?status=active"),
-        ]);
-        const apps = ((await aRes.json()).data ?? []) as { status: string }[];
-        const k = await kRes.json();
-        const inbox = ((await iRes.json()).data ?? []) as unknown[];
-        const jobs = ((await jRes.json()).jobs ?? []) as { title: string }[];
-        const by = (s: string) => apps.filter((a) => a.status === s).length;
-        setStats({
-          aiDisabled: !!k.disabled || !!k.env_forced,
-          screening: by("스크리닝 중"),
-          confirmed: by("확정인력"),
-          waiting: by("대기자"),
-          inbox: inbox.length,
-          activeJobs: jobs.filter((j) => !String(j.title).startsWith("__")).length,
-          loading: false,
-        });
-      } catch {
-        setStats((s) => ({ ...s, loading: false }));
-      }
-    })();
-  }, []);
+  // 상단 통계는 여러 엔드포인트 조합 — 모두 SWR로 캐시·dedup(타 탭과 키 공유).
+  const { data: appsRes, isLoading: appsLoading } = useSWR<{ data?: { status: string }[] }>("/api/admin/applicants");
+  const { data: killRes } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
+  const { data: activeJobsRes } = useSWR<{ jobs?: { title: string }[] }>("/api/admin/jobs?status=active");
+  const stats = useMemo<AutoStats>(() => {
+    const apps = appsRes?.data ?? [];
+    const by = (s: string) => apps.filter((a) => a.status === s).length;
+    return {
+      aiDisabled: !!killRes?.disabled || !!killRes?.env_forced,
+      screening: by("스크리닝 중"),
+      confirmed: by("확정인력"),
+      waiting: by("대기자"),
+      inbox: (inboxRes?.data ?? []).length,
+      activeJobs: (activeJobsRes?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")).length,
+      loading: appsLoading && (appsRes?.data?.length ?? 0) === 0,
+    };
+  }, [appsRes, killRes, inboxRes, activeJobsRes, appsLoading]);
 
   const selectedWorkflow = MOCK_WORKFLOWS.find(w => w.id === selectedWf) || MOCK_WORKFLOWS[0];
   

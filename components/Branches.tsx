@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import useSWR from "swr";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Search, Building2, Users, Briefcase, Plus, ArrowUpRight, AlertTriangle, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -92,66 +93,54 @@ function sumCapacity(cap: Record<string, number> | null): number {
 
 export function Branches() {
   const confirm = useConfirm();
-  const [rows, setRows] = useState<BranchRow[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<BranchForm | null>(null);
   const [saving, setSaving] = useState(false);
-  const [clients, setClients] = useState<ClientOption[]>([]);
 
-  const loadBranches = useCallback(async () => {
-    try {
-      const [bRes, aRes, jRes, mRes, cRes] = await Promise.all([
-        fetch("/api/admin/branches"),
-        fetch("/api/admin/applicants"),
-        fetch("/api/admin/jobs?status=all"),
-        fetch("/api/admin/site-managers"),
-        fetch("/api/admin/clients"),
-      ]);
-      const branches = ((await bRes.json()).data ?? []) as ApiBranch[];
-      const applicants = ((await aRes.json()).data ?? []) as ApiApplicant[];
-      const jobs = ((await jRes.json()).jobs ?? []) as ApiJob[];
-      const managers = ((await mRes.json()).data ?? []) as ApiManager[];
-      const clientList = ((await cRes.json()).data ?? []) as ClientOption[];
-      setClients(clientList.map((c) => ({ id: c.id, name: c.name })));
+  // 지점 현황은 5종 데이터 조합 — 모두 SWR로 캐시·dedup(타 탭과 키 공유). rows는 파생 계산.
+  const { data: branchesApi, isLoading, mutate: mutateBranches } = useSWR<{ data?: ApiBranch[] }>("/api/admin/branches");
+  const { data: applicantsApi } = useSWR<{ data?: ApiApplicant[] }>("/api/admin/applicants");
+  const { data: jobsApi } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const { data: managersApi } = useSWR<{ data?: ApiManager[] }>("/api/admin/site-managers");
+  const { data: clientsApi } = useSWR<{ data?: ClientOption[] }>("/api/admin/clients");
 
-      const computed: BranchRow[] = branches.map((b) => {
-        const mine = applicants.filter((a) => belongsToBranch(a, b.name));
-        const currentStaff = mine.filter((a) => a.status === "확정인력").length;
-        const applications = mine.filter((a) => SCREENING_STATUSES.has(a.status)).length;
-        const activeJobs = jobs.filter((j) => j.branch === b.name && j.status !== "closed").length;
-        const targetStaff = sumCapacity(b.slot_capacity);
-        const fillRatio = targetStaff > 0 ? Math.round((currentStaff / targetStaff) * 100) : 100;
-        const status: BranchRow["status"] =
-          targetStaff === 0 ? "good" : fillRatio < 70 ? "critical" : fillRatio < 90 ? "warning" : "good";
-        const mgr = managers.find((m) => m.active && m.branch === b.name);
-        return {
-          id: b.id,
-          name: b.name,
-          active: b.active,
-          clientId: b.client_id ?? null,
-          slotCapacity: (b.slot_capacity ?? {}) as Record<string, number>,
-          aiFacts: b.ai_facts ?? "",
-          manager: mgr?.name ? `${mgr.name} 담당` : "담당자 미지정",
-          currentStaff,
-          targetStaff,
-          activeJobs,
-          applications,
-          fillRatio,
-          status,
-        };
-      });
-      setRows(computed);
-    } catch {
-      toast.error("지점 현황을 불러오지 못했어요");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name })), [clientsApi]);
+  const loading = isLoading && (branchesApi?.data?.length ?? 0) === 0;
+  // 지점 추가/수정 후 목록 갱신은 지점 키만 재검증하면 충분(파생 계산이 자동 반영).
+  const loadBranches = useCallback(() => { void mutateBranches(); }, [mutateBranches]);
 
-  useEffect(() => {
-    loadBranches();
-  }, [loadBranches]);
+  const rows = useMemo<BranchRow[]>(() => {
+    const branches = branchesApi?.data ?? [];
+    const applicants = applicantsApi?.data ?? [];
+    const jobs = jobsApi?.jobs ?? [];
+    const managers = managersApi?.data ?? [];
+    return branches.map((b) => {
+      const mine = applicants.filter((a) => belongsToBranch(a, b.name));
+      const currentStaff = mine.filter((a) => a.status === "확정인력").length;
+      const applications = mine.filter((a) => SCREENING_STATUSES.has(a.status)).length;
+      const activeJobs = jobs.filter((j) => j.branch === b.name && j.status !== "closed").length;
+      const targetStaff = sumCapacity(b.slot_capacity);
+      const fillRatio = targetStaff > 0 ? Math.round((currentStaff / targetStaff) * 100) : 100;
+      const status: BranchRow["status"] =
+        targetStaff === 0 ? "good" : fillRatio < 70 ? "critical" : fillRatio < 90 ? "warning" : "good";
+      const mgr = managers.find((m) => m.active && m.branch === b.name);
+      return {
+        id: b.id,
+        name: b.name,
+        active: b.active,
+        clientId: b.client_id ?? null,
+        slotCapacity: (b.slot_capacity ?? {}) as Record<string, number>,
+        aiFacts: b.ai_facts ?? "",
+        manager: mgr?.name ? `${mgr.name} 담당` : "담당자 미지정",
+        currentStaff,
+        targetStaff,
+        activeJobs,
+        applications,
+        fillRatio,
+        status,
+      };
+    });
+  }, [branchesApi, applicantsApi, jobsApi, managersApi]);
 
   const openCreate = () => setForm(emptyForm(clients[0]?.id ?? null));
   const openCreateForClient = (clientId: number | null) => setForm(emptyForm(clientId));
