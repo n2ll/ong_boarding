@@ -21,7 +21,7 @@
  *   Table: messages
  *   Events: INSERT
  *   HTTP method: POST
- *   URL: https://recruitment-z9vp.vercel.app/api/webhooks/supabase-new-message
+ *   URL: https://ong-boarding-pi.vercel.app/api/webhooks/supabase-new-message
  *   Headers: Authorization: Bearer <SUPABASE_WEBHOOK_SECRET 값>
  */
 
@@ -330,7 +330,7 @@ export async function POST(req: NextRequest) {
     const baseUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-      "https://recruitment-z9vp.vercel.app";
+      "https://ong-boarding-pi.vercel.app";
     const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
     const applyUrl = `${normalizedBase}/apply?source=baemin`;
     const nameForFill = ext.name?.trim() ? ` ${ext.name.trim()}` : "";
