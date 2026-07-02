@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { sendSms } from "@/lib/solapi";
 import { sendSlackOnboardingHandoff } from "@/lib/slack";
 import { fillTemplate, getSystemMessage } from "@/lib/agent/system-messages";
@@ -40,13 +41,9 @@ const FALLBACK_BODY = (name: string) =>
   ].join("\n");
 
 export async function GET(req: NextRequest) {
-  // 인증 — Vercel cron 또는 Bearer CRON_SECRET
-  const isVercelCron = req.headers.get("user-agent")?.includes("vercel-cron");
-  const secret = process.env.CRON_SECRET;
-  const expected = secret ? `Bearer ${secret}` : null;
-  if (!isVercelCron && (!expected || req.headers.get("authorization") !== expected)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  // 인증 — Bearer CRON_SECRET만 허용(위조 가능한 user-agent 검사 제거, 미설정 시 fail-closed)
+  const authFail = requireCronAuth(req);
+  if (authFail) return authFail;
 
   const supabase = createServiceClient();
   const now = Date.now();

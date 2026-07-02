@@ -3,6 +3,18 @@ import crypto from "crypto";
 const SOLAPI_URL = "https://api.solapi.com/messages/v4/send-many/detail";
 const FROM_NUMBER = "01035037252";
 
+/**
+ * 실제 SMS 발송을 건너뛸지 판단(개발 오발송 방지).
+ * - SMS_DRY_RUN=1 → 항상 건너뜀.  SMS_DRY_RUN=0 → 항상 실제 발송.
+ * - 미설정이면 프로덕션만 실제 발송(dev/preview는 자동 dry-run).
+ */
+function isSmsDryRun(): boolean {
+  const flag = process.env.SMS_DRY_RUN;
+  if (flag === "1") return true;
+  if (flag === "0") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
 function getAuthHeader() {
   const apiKey = process.env.SOLAPI_API_KEY!;
   const apiSecret = process.env.SOLAPI_API_SECRET!;
@@ -20,6 +32,10 @@ export async function sendSms(
   to: string,
   text: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  if (isSmsDryRun()) {
+    console.warn(`[SMS DRY-RUN] 발송 생략 (SMS_DRY_RUN) to=${to} text="${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
+    return { success: true, messageId: "dry-run" };
+  }
   const res = await fetch(SOLAPI_URL, {
     method: "POST",
     headers: {
@@ -53,6 +69,10 @@ export async function sendAlimtalk(
   variables: Record<string, string>,
   fallbackText?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  if (isSmsDryRun()) {
+    console.warn(`[SMS DRY-RUN] 알림톡 발송 생략 (SMS_DRY_RUN) to=${to} template=${templateId}`);
+    return { success: true, messageId: "dry-run" };
+  }
   const pfId = process.env.SOLAPI_PFID!;
 
   const res = await fetch(SOLAPI_URL, {

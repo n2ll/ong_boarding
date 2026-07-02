@@ -1,15 +1,15 @@
 /**
  * Stage: onboarding
  *
- * screening → onboarding 전이 직후, 시스템이 자동으로 앱설치·교육 안내 + 확정 메시지를 발송한다
+ * screening → onboarding 전이 직후, 시스템이 자동으로 앱설치·교육 안내(GUIDE)를 발송한다
  * (transitions.ts의 부수효과). 그 이후 지원자 회신을 받아 배민 커넥트 아이디를 수집한다.
  *
- * 체크리스트 (4항목):
- *   - 앱설치_교육_안내발송됨    : 진입 시 자동 true (transitions.ts에서)
+ * 체크리스트 (3항목):
+ *   - 앱설치_교육_안내발송됨    : 진입 시 GUIDE 발송 성공하면 자동 true (transitions.ts에서)
  *   - 배민_아이디_수신          : 지원자 회신에서 추출
- *   - 만남장소_안내발송됨       : 시작일 D-1 cron이 발송 후 자동 true
+ *   - 만남장소_안내발송됨       : 현재 미사용 — 만남장소 자동 발송/D-day cron 미구현 (매니저 수동)
  *
- * 모두 true + 시작일 D-day 도달 시 → advance: active
+ * 배민_아이디_수신 시 → advance: active. 단 active는 자동 단계 전이일 뿐 매니저 확정이 아니다.
  */
 
 import { emptyOnboarding, isComplete, mergeAgentState } from "../checklist";
@@ -93,21 +93,32 @@ async function buildSystemPrompt(branchName?: string | null): Promise<string> {
 }
 
 /**
- * 인입 텍스트에서 배민 커넥트 아이디로 보이는 토큰을 추출 (AI가 놓치는 경우 백업).
+ * 배민 커넥트 아이디 유효성 판정.
  *
- * 조건: 2~30자, 영문+숫자가 둘 다 포함, 점/밑줄/하이픈 허용.
- * 핸드폰번호(0으로 시작하는 10~11자리 숫자), URL, 단순 숫자만, 단순 영문만은 제외.
+ * 조건: 2~30자, 영문 1자 이상 포함, [A-Za-z0-9._-]만 허용.
+ * 제외: 핸드폰번호형(0으로 시작 10~11자리), 순수 숫자만.
+ * (영문만으로 된 아이디 'kim_delivery'도 허용 — 숫자 필수 아님)
+ */
+export function isValidBaeminId(t: string): boolean {
+  if (!t) return false;
+  if (t.length < 2 || t.length > 30) return false;
+  if (!/^[A-Za-z0-9._-]+$/.test(t)) return false;   // 허용 문자만
+  if (!/[A-Za-z]/.test(t)) return false;            // 영문 1자 이상
+  if (/^0\d{9,10}$/.test(t)) return false;          // 핸드폰번호형 제외
+  if (/^\d+$/.test(t)) return false;                // 순수 숫자만 제외
+  return true;
+}
+
+/**
+ * 인입 텍스트에서 배민 커넥트 아이디로 보이는 토큰을 추출 (AI가 놓치는 경우 백업).
  */
 export function detectBaeminIdFallback(text: string): string {
   // 라인/공백 단위로 토큰 분리 후 후보 추출
   const tokens = text.split(/[\s,;:|/()[\]{}<>"'`]+/).filter(Boolean);
   for (const raw of tokens) {
     const t = raw.replace(/[.!?,。、~^]+$/, ""); // 끝 구두점 제거
-    if (t.length < 2 || t.length > 30) continue;
-    if (!/^[A-Za-z0-9._-]+$/.test(t)) continue;       // 허용 문자만
-    if (!/[A-Za-z]/.test(t) || !/\d/.test(t)) continue; // 영문+숫자 모두 필요
     if (/^https?$/i.test(t)) continue;
-    return t;
+    if (isValidBaeminId(t)) return t;
   }
   return "";
 }
@@ -241,7 +252,8 @@ onboarding_turn tool로 응답해라.`;
       if (!idText) {
         idText = detectBaeminIdFallback(inboundText);
       }
-      if (idText && /^[A-Za-z0-9._-]{2,40}$/.test(idText) && /[A-Za-z]/.test(idText) && /\d/.test(idText)) {
+      const validId = isValidBaeminId(idText);
+      if (validId) {
         result.applicant_patch = { ...(result.applicant_patch ?? {}), baemin_id: idText };
         // AI가 체크리스트를 놓쳤어도 강제로 마킹
         const after = result.state_update.onboarding ?? {};
@@ -251,17 +263,26 @@ onboarding_turn tool로 응답해라.`;
             onboarding: { ...after, 배민_아이디_수신: true },
           };
         }
+      } else if (result.state_update.onboarding?.배민_아이디_수신 && !ctx.applicant.baemin_id) {
+        // AI가 '아이디 수신' 플래그를 켰지만 유효 토큰이 없고 기존 저장 ID도 없다 →
+        // 플래그를 되돌리고 매니저 인계. (NULL baemin_id인 채 조용히 active로 넘어가는 원버그 차단)
+        const reverted = { ...(result.state_update.onboarding ?? {}) };
+        delete reverted.배민_아이디_수신;
+        result.state_update = { ...result.state_update, onboarding: reverted };
+        result.transition = {
+          kind: "pause",
+          reason: "배민 아이디 수신으로 판단됐으나 유효한 아이디를 추출하지 못함 — 매니저 확인 필요",
+        };
       }
 
-      // 배민 아이디가 '이번 턴에 처음' 채워진 시점:
+      // 배민 아이디가 '이번 턴에 처음' 유효하게 확보된 시점:
       //  1) 슬랙 '준비 완료' 알림
       //  2) AI 마무리 멘트("감사합니다 곧 매니저가...") 그대로 발송
       //  3) 자동으로 active 단계로 advance → applicants.status='스크리닝 완료'
-      const before = ctx.state.onboarding ?? {};
-      const after = result.state_update.onboarding ?? {};
-      const wasReady = !!before.배민_아이디_수신;
-      const nowReady = !!after.배민_아이디_수신;
-      if (!wasReady && nowReady) {
+      // 트리거 기준은 AI 체크리스트 플래그가 아니라 '실제 patch된 유효 baemin_id'.
+      const alreadyHadId = !!ctx.applicant.baemin_id;
+      const firstTimeId = validId && !alreadyHadId;
+      if (firstTimeId) {
         try {
           await sendSlackOnboardingReady({
             applicant_name: ctx.applicant.name,
@@ -318,8 +339,8 @@ function toStageResult(out: OnboardingToolInput, ctx: StageContext): StageResult
       break;
   }
 
-  // onboarding → active 전이는 시작일 D-day cron이 트리거 (AI 결정 X)
-  // 다만 4항목 모두 true면 메타에 표시
+  // onboarding → active 전이는 process()에서 유효 baemin_id 최초 확보 시 자동 처리(AI 결정 X).
+  // 3항목 모두 true면 메타에 완료 시각 표시(참고용).
   if (isComplete(state_update, "onboarding")) {
     state_update.meta = { ...(state_update.meta ?? {}), onboarding_complete_at: new Date().toISOString() };
   }

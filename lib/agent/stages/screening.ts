@@ -2,7 +2,7 @@
  * Stage: screening
  *
  * 1차 응대 + 스크리닝 (= 본인 명세의 2단계 + 3단계 통합).
- * 8항목 체크리스트를 채우며, 모두 충족 시 advance: onboarding.
+ * 7항목 체크리스트를 채우며, 모두 충족 시 advance: onboarding.
  *
  * 항목 정의는 lib/agent/types.ts 의 ScreeningChecklist 참조.
  * 운영 톤 reference: prompts/screening-examples.txt + prompts/conversation-examples.txt
@@ -209,7 +209,7 @@ const TOOL = {
         type: "string",
         enum: ["stay", "advance", "abort", "pause"],
         description:
-          "stay=계속 대화, advance=8개 모두 true → onboarding, abort=결격 사유, pause=매니저 직접 응대 필요",
+          "stay=계속 대화, advance=7개 모두 true → onboarding, abort=결격 사유, pause=매니저 직접 응대 필요",
       },
       transition_reason: {
         type: "string",
