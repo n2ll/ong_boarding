@@ -7,10 +7,19 @@ import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
+
+// SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
+function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number } {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) bytes += text.charCodeAt(i) > 0x7f ? 2 : 1;
+  const sms_type = bytes <= 90 ? "SMS" : "LMS";
+  return { sms_type, cost_krw: sms_type === "SMS" ? 20 : 33 };
+}
 
 const SEGMENTS_KEY = "ong_pipeline_segments";
 
@@ -236,6 +245,7 @@ export function Pipeline() {
   const deleteSegment = (id: string) => persistSegments(segments.filter((s) => s.id !== id));
 
   // Modals state
+  const confirm = useConfirm();
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
   const [bulkStageModalOpen, setBulkStageModalOpen] = useState(false);
   const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
@@ -435,6 +445,13 @@ export function Pipeline() {
       applicant_id: Number(c.id),
     }));
     if (recipients.length === 0) return toast.error("발송 가능한 연락처가 없어요.");
+
+    const est = estimateSmsCost(text);
+    if (!(await confirm({
+      title: `${recipients.length}명에게 문자를 발송할까요?`,
+      description: `실제 SMS가 즉시 발송됩니다. 되돌릴 수 없어요.\n예상 비용: ${est.sms_type} · 약 ${(est.cost_krw * recipients.length).toLocaleString()}원 (1인 ${est.cost_krw}원 × ${recipients.length}명)`,
+      confirmText: `${recipients.length}명 발송`,
+    }))) return;
 
     setBulkSending(true);
     try {
@@ -846,7 +863,7 @@ export function Pipeline() {
               </div>
             </div>
             <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">
-              <span className="text-[13px] font-bold text-[#718096]">예상 소요 비용: ₩ {selectedRows.size * 15}</span>
+              <span className="text-[13px] font-bold text-[#718096]">예상 비용: {(() => { const c = estimateSmsCost(bulkMsgBody); return `${c.sms_type} · 약 ${(c.cost_krw * selectedRows.size).toLocaleString()}원 (1인 ${c.cost_krw}원 × ${selectedRows.size}명)`; })()}</span>
               <div className="flex gap-2">
                 <button onClick={() => setBulkMsgModalOpen(false)} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0]">취소</button>
                 <button onClick={handleBulkSend} disabled={bulkSending} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
