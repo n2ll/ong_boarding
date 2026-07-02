@@ -90,6 +90,26 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+
+  // 멱등 클레임 — 이 inbound 메시지를 정확히 한 번만 처리한다.
+  // Supabase 웹훅은 at-least-once(재전송)라, 매칭 지원자 경로(classification 미기재)도 이 가드로 보호.
+  // webhook_processed_at을 원자적으로 선점(0건이면 이미 처리됨 → skip).
+  {
+    const { data: claimed, error: claimErr } = await supabase
+      .from("messages")
+      .update({ webhook_processed_at: new Date().toISOString() })
+      .eq("id", msg.id)
+      .is("webhook_processed_at", null)
+      .select("id");
+    if (claimErr) {
+      // 컬럼 미존재 등으로 클레임 실패 시 인바운드 전면 장애를 피하려 fail-open(계속 진행).
+      // 마이그레이션(2026-07-messages-webhook-idempotency.sql) 적용 후 정상 멱등 동작.
+      console.error("[supabase-webhook] idempotency claim failed (proceeding)", claimErr);
+    } else if (!claimed || claimed.length === 0) {
+      return NextResponse.json({ ok: true, skipped: "already processed (webhook re-delivery)" });
+    }
+  }
+
   const phone = String(msg.applicant_phone || "").replace(/[^\d]/g, "");
   const text = String(msg.body || "").trim();
   const receivedAt = msg.created_at;

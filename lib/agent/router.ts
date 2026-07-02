@@ -90,7 +90,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,
-        branch1, branch2, work_hours, available_date, self_ownership, introduction, experience
+        branch1, branch2, work_hours, available_date, self_ownership, introduction, experience, status, baemin_id
       )
     `)
     .eq("id", candidate_id)
@@ -98,6 +98,13 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   if (jcErr || !jc) {
     return { ok: false, error: `job_candidate not found: ${jcErr?.message}` };
+  }
+
+  // 매니저가 '부적합'/'이탈'로 처리한 지원자는 agent_stage가 활성이어도 자동 응답하지 않는다.
+  // (kill-switch·답장 텀 sleep 이후, stage 디스패치·Claude 호출 전 초크포인트 — 세 호출자 모두 커버)
+  const applicantStatus = (jc.applicants as { status?: string | null } | null)?.status ?? null;
+  if (applicantStatus === "부적합" || applicantStatus === "이탈") {
+    return { ok: true, skipped: `applicant status=${applicantStatus} — agent silenced` };
   }
 
   const stageName = jc.agent_stage as StageName | null;

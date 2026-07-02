@@ -78,6 +78,9 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
   let nextStage: StageName | null = current_stage;
   let extraStateUpdate: AgentState = {};
   let autoSent = 0;
+  // advance 전이의 크리티컬 자동 발송(SCREENING_ANNOUNCE/GUIDE)이 실패하면 사유를 기록.
+  // switch 종료 후 이 값이 있으면 단계 진행을 취소하고 paused로 되돌린다.
+  let criticalSendFailure: string | null = null;
   const now = new Date().toISOString();
 
   switch (transition.kind) {
@@ -175,40 +178,45 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
               job_id,
             });
             autoSent++;
+          } else {
+            criticalSendFailure = `SCREENING_ANNOUNCE 발송 실패: ${r.error ?? "unknown"}`;
           }
           }
         } catch (e) {
+          criticalSendFailure = `SCREENING_ANNOUNCE 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
           console.error("[transitions] SCREENING_ANNOUNCE send failed", e);
         }
 
-        // 2) 안내 항목 + 조건부 항목 자동 true
-        const autoTrue: Partial<ScreeningChecklist> = {
-          프로모션_종료가능성_안내: true,
-          정산주기_안내: true,
-          업무시간_체계_이해: true,
-        };
-        // 자차 필요 없는 공고면 자차_재확인 자동 통과
-        if (job && job.vehicle_required === false) {
-          autoTrue.자차_재확인 = true;
-        }
-        // 주말 슬롯이 아니면 공휴일 항목 자동 통과
-        const slot = job?.slot ?? "";
-        if (!slot.includes("주말")) {
-          autoTrue.공휴일_업무여부_확인 = true;
-        }
+        // 2) 안내 항목 + 조건부 항목 자동 true — 안내 발송이 실패했으면 진행하지 않는다.
+        if (!criticalSendFailure) {
+          const autoTrue: Partial<ScreeningChecklist> = {
+            프로모션_종료가능성_안내: true,
+            정산주기_안내: true,
+            업무시간_체계_이해: true,
+          };
+          // 자차 필요 없는 공고면 자차_재확인 자동 통과
+          if (job && job.vehicle_required === false) {
+            autoTrue.자차_재확인 = true;
+          }
+          // 주말 슬롯이 아니면 공휴일 항목 자동 통과
+          const slot = job?.slot ?? "";
+          if (!slot.includes("주말")) {
+            autoTrue.공휴일_업무여부_확인 = true;
+          }
 
-        extraStateUpdate = {
-          screening: autoTrue,
-          meta: { screening_entered_at: now },
-        };
+          extraStateUpdate = {
+            screening: autoTrue,
+            meta: { screening_entered_at: now },
+          };
 
-        // applicants.status를 자동 AI 상태와 통일 — '스크리닝 중'
-        // (매니저가 이미 확정인력/대기자/부적합으로 설정했으면 건드리지 않음)
-        await supabase
-          .from("applicants")
-          .update({ status: "스크리닝 중" })
-          .eq("id", applicant_id)
-          .in("status", ["스크리닝 전", "스크리닝 중"]);
+          // applicants.status를 자동 AI 상태와 통일 — '스크리닝 중'
+          // (매니저가 이미 확정인력/대기자/부적합으로 설정했으면 건드리지 않음)
+          await supabase
+            .from("applicants")
+            .update({ status: "스크리닝 중" })
+            .eq("id", applicant_id)
+            .in("status", ["스크리닝 전", "스크리닝 중"]);
+        }
       }
 
       if (transition.to === "onboarding") {
@@ -270,9 +278,12 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
               onboarding: { 앱설치_교육_안내발송됨: true },
               meta: { onboarding_entered_at: now },
             };
+          } else {
+            criticalSendFailure = `GUIDE 발송 실패: ${r2.error ?? "unknown"}`;
           }
           }
         } catch (e) {
+          criticalSendFailure = `GUIDE 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
           console.error("[transitions] GUIDE send failed", e);
         }
       }
@@ -280,7 +291,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
       if (transition.to === "active") {
         // onboarding → active: 자동 단계 전이지만 매니저 확정은 아님.
         // 배민 아이디 회신까지 = 스크리닝 완료. 이후 매니저가 통화로 확인 후 '확정인력'으로 직접 변경.
-        // 첫 출근 룰 자동 발송은 D-day cron이 별도 처리해야 하므로 생략.
+        // 첫 출근 룰/만남장소 자동 발송은 미구현(D-day cron 없음) — 현재 매니저가 수동 발송.
         await supabase
           .from("job_candidates")
           .update({ activated_at: now })
@@ -293,6 +304,40 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
       }
       break;
+    }
+  }
+
+  // advance 전이인데 크리티컬 자동 발송(SCREENING_ANNOUNCE/GUIDE)이 실패했으면
+  // 단계를 조용히 진행시키지 않고 paused로 되돌려 매니저에게 인계한다.
+  // (지원자는 0통 수신 → 확정 뉘앙스 금지 자동 준수. 알림은 매니저 대상.)
+  if (transition.kind === "advance" && criticalSendFailure) {
+    nextStage = "paused";
+    extraStateUpdate = mergeAgentState(extraStateUpdate, {
+      meta: {
+        paused_from_stage: transition.to,
+        paused_at: now,
+        pause: {
+          category: "tech",
+          summary: `자동 발송 실패 — 수동 발송 필요 (${criticalSendFailure})`,
+          suggested_action: "안내 메시지를 수동 발송한 뒤 단계를 재개하세요.",
+        },
+      },
+    });
+    await supabase
+      .from("job_candidates")
+      .update({ paused_reason: `자동 발송 실패: ${criticalSendFailure}` })
+      .eq("id", candidate_id);
+    if (!simulate) {
+      try {
+        await sendSlackPausedAlert({
+          applicant_name,
+          applicant_phone,
+          branch: input.applicant_branch ?? job?.branch ?? null,
+          reason: `자동 발송 실패 — 수동 발송 필요 (${criticalSendFailure})`,
+        });
+      } catch (e) {
+        console.error("[transitions] slack send-failure alert failed", e);
+      }
     }
   }
 

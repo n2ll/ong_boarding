@@ -37,7 +37,7 @@ export interface ScreeningChecklist {
  * 온보딩(onboarding) 체크리스트 — 차량번호 수집 제거.
  * - 진입 즉시 자동 발송: 앱설치+교육 안내 → 앱설치_교육_안내발송됨=true
  * - 지원자 회신에서: 배민_아이디_수신
- * - D-1 cron이 만남장소_안내발송됨=true
+ * - 만남장소_안내발송됨: 현재 미사용 (만남장소 자동 발송/D-day cron 미구현 — 매니저 수동)
  */
 export interface OnboardingChecklist {
   앱설치_교육_안내발송됨: boolean;
@@ -103,6 +103,8 @@ export interface ApplicantContext {
   self_ownership: string | null;
   introduction: string | null;
   experience: string | null;
+  status: string | null;
+  baemin_id: string | null;
 }
 
 export interface ConversationTurn {
