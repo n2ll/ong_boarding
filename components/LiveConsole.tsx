@@ -6,6 +6,7 @@ import { Search, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
+import { useConfirm } from "./ConfirmDialog";
 import { getBrowserClient } from "@/lib/supabase";
 
 interface Applicant {
@@ -45,6 +46,21 @@ interface Handoff {
   is_system_job: boolean;
   paused_at: string;
   age_days: number;
+}
+
+interface ConfirmPending {
+  applicant_id: number;
+  name: string;
+  phone: string | null;
+  branch: string | null;
+  baemin_id: string | null;
+  job_id: number | null;
+  job_title: string | null;
+  start_date: string | null;
+  pickup_address: string | null;
+  site_manager_name: string | null;
+  site_manager_phone: string | null;
+  can_send_venue: boolean;
 }
 
 // 인계 카테고리 배지 색(tone 기반). urgent=빨강, answerable=호박, human=파랑, neutral=회색
@@ -103,7 +119,8 @@ function relTime(iso: string | null | undefined): string {
 const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
 export function LiveConsole() {
-  const [activeTab, setActiveTab] = useState<"all" | "intervention">("all");
+  const confirm = useConfirm();
+  const [activeTab, setActiveTab] = useState<"all" | "intervention" | "confirm">("all");
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [newMsgModalOpen, setNewMsgModalOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -142,6 +159,17 @@ export function LiveConsole() {
   const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs");
   const handoffs = useMemo(() => handoffsData?.handoffs ?? [], [handoffsData]);
 
+  // 확정 대기 큐(온보딩 완료·미확정) SWR.
+  const { data: confirmData, mutate: mutateConfirm } = useSWR<{ pending?: ConfirmPending[] }>("/api/admin/confirm/pending");
+  const confirmPending = useMemo(() => confirmData?.pending ?? [], [confirmData]);
+
+  // 발송 미리보기 모달(내용·비용 확인 후 발송) — 첫날규칙/만남장소 공용
+  const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: "venue" | "first_day" } | null>(null);
+  const [venueDate, setVenueDate] = useState("");
+  const [preview, setPreview] = useState<{ text: string; sms_type: string; cost_krw: number } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sendSaving, setSendSaving] = useState(false);
+
   const loadChats = useCallback(() => { void mutateApps(); }, [mutateApps]);
   const loadHandoffs = useCallback(() => { void mutateHandoffs(); }, [mutateHandoffs]);
 
@@ -149,7 +177,8 @@ export function LiveConsole() {
   const handleChanged = useCallback(() => {
     void mutateApps();
     void mutateHandoffs();
-  }, [mutateApps, mutateHandoffs]);
+    void mutateConfirm();
+  }, [mutateApps, mutateHandoffs, mutateConfirm]);
 
   // 첫 선택 자동 지정.
   useEffect(() => {
@@ -188,6 +217,7 @@ export function LiveConsole() {
         timer = setTimeout(() => {
           loadChats();
           loadHandoffs();
+          void mutateConfirm();
         }, 800);
       })
       .subscribe();
@@ -195,7 +225,7 @@ export function LiveConsole() {
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [loadChats, loadHandoffs]);
+  }, [loadChats, loadHandoffs, mutateConfirm]);
 
   // 선택 지원자가 바뀌면 그 사람이 동시에 진행 중인 공고 목록을 불러온다.
   // 2건 이상이면 대화창 상단에 공고 탭이 떠서 공고별로 스레드·체크리스트·AI 토글이 분리된다.
@@ -360,6 +390,77 @@ export function LiveConsole() {
     }
   };
 
+  // ── 확정 대기 액션 (내용·비용 미리보기 → 발송) ──
+  const fetchPreview = useCallback(async (p: ConfirmPending, kind: "venue" | "first_day", startDate?: string) => {
+    setPreviewLoading(true);
+    setPreview(null);
+    try {
+      const res = await fetch("/api/admin/confirm/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: startDate, preview: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(json.error || "미리보기 실패"); return; }
+      setPreview({ text: json.text, sms_type: json.sms_type, cost_krw: json.cost_krw });
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, []);
+
+  const openSend = (p: ConfirmPending, kind: "venue" | "first_day") => {
+    setSendModal({ p, kind });
+    setPreview(null);
+    const d = p.start_date ?? "";
+    setVenueDate(d);
+    // 첫날규칙은 시작일 불필요 → 즉시 미리보기. 만남장소는 시작일 있어야 미리보기.
+    if (kind === "first_day") void fetchPreview(p, "first_day");
+    else if (d) void fetchPreview(p, "venue", d);
+  };
+
+  const doSend = async () => {
+    if (!sendModal) return;
+    const { p, kind } = sendModal;
+    if (kind === "venue" && !venueDate) return toast.error("시작일을 선택해주세요.");
+    if (!preview) return toast.error("미리보기를 불러온 뒤 발송하세요.");
+    setSendSaving(true);
+    try {
+      const res = await fetch("/api/admin/confirm/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: kind === "venue" ? venueDate : undefined }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "발송 실패");
+      toast.success(`${p.name}님 — ${kind === "venue" ? "만남장소 안내" : "첫날 규칙 안내"}를 발송했어요.`);
+      setSendModal(null);
+      handleChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "발송 실패");
+    } finally {
+      setSendSaving(false);
+    }
+  };
+
+  const confirmHire = async (p: ConfirmPending) => {
+    if (!(await confirm({
+      title: `${p.name}님을 '확정인력'으로 전환할까요?`,
+      confirmText: "확정",
+    }))) return;
+    try {
+      const res = await fetch(`/api/admin/applicants/${p.applicant_id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "확정인력" }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(`${p.name}님을 확정인력으로 전환했어요.`);
+      handleChanged();
+    } catch {
+      toast.error("확정 처리에 실패했어요.");
+    }
+  };
+
   const visibleChats = chats
     .filter((c) => {
       if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
@@ -396,6 +497,7 @@ export function LiveConsole() {
           <div className="flex gap-1.5">
             <button onClick={() => setActiveTab("all")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
             <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>인계 대기 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
+            <button onClick={() => setActiveTab("confirm")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-[#2F855A] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
           {/* all 탭: 단계 필터 / 인계 대기 탭: 사유 카테고리 필터 */}
           {activeTab === "all" ? (
@@ -409,7 +511,7 @@ export function LiveConsole() {
                 <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{f.label}</button>
               ))}
             </div>
-          ) : (
+          ) : activeTab === "intervention" ? (
             <div className="flex gap-1 flex-wrap">
               <button onClick={() => setHandoffCat("all")} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
@@ -419,7 +521,7 @@ export function LiveConsole() {
                 );
               })}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* 인계 대기 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
@@ -474,6 +576,35 @@ export function LiveConsole() {
                         AI 재개
                       </button>
                     </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : activeTab === "confirm" ? (
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+            {confirmPending.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
+            {confirmPending.map((p) => {
+              const selected = selectedChatId === p.applicant_id;
+              return (
+                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}>
+                  <button onClick={() => setSelectedChatId(p.applicant_id)} className="w-full text-left p-3.5 pb-2 cursor-pointer">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold border bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]">온보딩 완료</span>
+                      {p.baemin_id && <span className="text-[11px] font-bold text-[#718096]">ID {p.baemin_id}</span>}
+                    </div>
+                    <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
+                      {p.name}
+                      {p.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{p.branch}</span>}
+                    </div>
+                    <div className="text-[12px] text-[#4A5568] leading-snug line-clamp-2">
+                      {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
+                    </div>
+                  </button>
+                  <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
+                    <button onClick={() => openSend(p, "venue")} disabled={!p.can_send_venue} title={p.can_send_venue ? "만남장소 안내 발송 (내용·비용 확인)" : "공고에 픽업주소·현장매니저가 있어야 발송 가능"} className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">만남장소 발송</button>
+                    <button onClick={() => openSend(p, "first_day")} title="첫날 규칙 안내 발송 (내용·비용 확인)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95">첫날규칙</button>
+                    <button onClick={() => confirmHire(p)} title="확정인력으로 전환" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
                   </div>
                 </div>
               );
@@ -699,6 +830,43 @@ export function LiveConsole() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
               <button onClick={() => setKb(null)} disabled={kbSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
               <button onClick={saveKb} disabled={kbSaving || kbLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] disabled:opacity-60">{kbSaving ? "등록 중…" : "지식 등록"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 확정 대기 → 발송 미리보기 (내용·비용 확인 후 발송) */}
+      {sendModal && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !sendSaving && setSendModal(null)}>
+          <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
+              <h2 className="text-[16px] font-extrabold text-[#1A202C]">{sendModal.kind === "venue" ? "만남장소 안내 발송" : "첫날 규칙 안내 발송"}</h2>
+              <button onClick={() => setSendModal(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div className="text-[12.5px] text-[#718096] leading-relaxed">
+                <b className="text-[#4A5568]">{sendModal.p.name}</b>님({sendModal.p.phone})에게 <b className="text-[#E53E3E]">실제 문자</b>가 발송됩니다. 아래 내용과 예상 비용을 확인하세요.
+              </div>
+              {sendModal.kind === "venue" && (
+                <div>
+                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">근무 시작일 (매니저가 정함)</label>
+                  <input type="date" value={venueDate} onChange={(e) => { const v = e.target.value; setVenueDate(v); if (v) void fetchPreview(sendModal.p, "venue", v); else setPreview(null); }} className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                </div>
+              )}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[12px] font-bold text-[#4A5568]">발송 내용 미리보기</label>
+                  {preview && <span className="text-[11px] font-bold text-[#B7791F] bg-[#FFFBEB] border border-[#FAF089] rounded-md px-2 py-0.5">{preview.sms_type} · 약 {preview.cost_krw}원</span>}
+                </div>
+                <div className="w-full min-h-[120px] px-4 py-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[13px] leading-relaxed whitespace-pre-line text-[#2D3748]">
+                  {previewLoading ? "불러오는 중…" : preview ? preview.text : (sendModal.kind === "venue" && !venueDate ? "시작일을 선택하면 발송 내용이 표시됩니다." : "미리보기를 불러오지 못했어요.")}
+                </div>
+                <div className="text-[11px] text-[#A0AEC0] mt-1.5">* 비용은 SOLAPI 기준 대략치입니다(SMS 20원 / LMS 33원). 실제 청구는 발송 결과에 따릅니다.</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
+              <button onClick={() => setSendModal(null)} disabled={sendSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button onClick={doSend} disabled={sendSaving || previewLoading || !preview} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2B6CB0] hover:bg-[#2C5282] disabled:opacity-50">{sendSaving ? "발송 중…" : "발송"}</button>
             </div>
           </div>
         </div>
