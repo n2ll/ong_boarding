@@ -24,6 +24,7 @@ export type UsagePurpose =
   | "screening"
   | "onboarding"
   | "exploration"
+  | "active"
   | "triage"
   | "job_generate"
   | "job_extract";

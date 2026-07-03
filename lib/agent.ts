@@ -38,6 +38,13 @@ export interface AgentDraft {
   draft_text: string | null;
   reasoning: string;
   missing_info?: string;
+  /** Claude 응답 usage (모델명 포함) — active 단계 사용량 집계용. 호출 실패 시 undefined. */
+  usage?: {
+    model: string;
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 const MANAGER_NAME = process.env.AGENT_MANAGER_NAME || "홍석범";
@@ -233,13 +240,15 @@ ${input.latestInbound}
     }
     const data = (await res.json()) as {
       content: Array<{ type: string; input?: AgentDraft }>;
+      usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
     };
     const block = data.content?.find((c) => c.type === "tool_use");
     if (!block?.input) {
       console.error("[agent] no tool_use block");
       return null;
     }
-    return block.input;
+    // active 단계 사용량 집계를 위해 usage(모델명 포함)를 함께 반환.
+    return { ...block.input, usage: data.usage ? { model: "claude-sonnet-4-6", ...data.usage } : undefined };
   } catch (err) {
     console.error("[agent] exception", err);
     return null;
