@@ -21,9 +21,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { sendSms } from "@/lib/solapi";
-import { sendSlackOnboardingHandoff } from "@/lib/slack";
+import { sendSlackOnboardingHandoff, sendSlackPausedAlert } from "@/lib/slack";
 import { fillTemplate, getSystemMessage } from "@/lib/agent/system-messages";
-import { mergeAgentState } from "@/lib/agent/checklist";
+import { mergeAgentState, isComplete } from "@/lib/agent/checklist";
 import type { AgentState } from "@/lib/agent/types";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const results: Array<{ candidate_id: number; stage: "reminder" | "handoff" | "skip"; success: boolean; reason?: string; error?: string }> = [];
+  const results: Array<{ candidate_id: number; stage: "reminder" | "handoff" | "skip" | "screening_stall"; success: boolean; reason?: string; error?: string }> = [];
 
   for (const row of rows ?? []) {
     const state = (row.agent_state ?? {}) as AgentState;
@@ -155,6 +155,62 @@ export async function GET(req: NextRequest) {
       await supabase.from("job_candidates").update({ agent_state: merged }).eq("id", row.id);
       results.push({ candidate_id: row.id as number, stage: "reminder", success: true });
     }
+  }
+
+  // ─── 단계 C: 침묵성 스크리닝 정체 → pause + Slack (P1-2 cron backstop) ───
+  // agent_stage='screening'인데 48h+ 에이전트 활동 없음(meta.last_run_at) + 체크리스트 미완료 →
+  // 지원자가 답 끊긴 채 방치된 케이스. paused로 전환해 인계 큐에 노출 + Slack 알림.
+  // last_run_at 14일 초과(오래된/죽은 건)는 스킵해 첫 실행 backlog 폭주 방지.
+  const screeningStallCutoff = new Date(now - 48 * 60 * 60 * 1000).toISOString();
+  const staleFloor = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: screeningRows } = await supabase
+    .from("job_candidates")
+    .select(`id, applicant_id, job_id, agent_state, applicants:applicant_id ( id, name, phone, source, branch1 )`)
+    .eq("agent_stage", "screening")
+    .limit(500);
+
+  for (const row of screeningRows ?? []) {
+    const state = (row.agent_state ?? {}) as AgentState;
+    const meta = (state.meta ?? {}) as Record<string, string | undefined>;
+    const applicant = row.applicants as unknown as {
+      id: number; name: string | null; phone: string;
+      source: string | null; branch1: string | null;
+    };
+    const lastRun = meta.last_run_at;
+    if (!lastRun) continue;                          // 활동 이력 없음 — 스킵
+    if (lastRun > screeningStallCutoff) continue;    // 최근 48h 내 활동 — 정상 진행 중
+    if (lastRun < staleFloor) continue;              // 14일 초과 — 오래된 건, 폭주 방지 스킵
+    if (isComplete(state, "screening")) continue;    // 이미 완료(방어)
+    if (!applicant?.phone) continue;
+
+    const merged = mergeAgentState(state, {
+      meta: {
+        paused_from_stage: "screening",
+        paused_at: new Date().toISOString(),
+        pause: {
+          category: "auto",
+          summary: "스크리닝 침묵 정체 — 48h+ 무응답, 체크리스트 미완료",
+          suggested_action: "지원자가 스크리닝 중 답이 끊겼습니다. 대화 확인 후 매니저가 직접 진행하세요.",
+        },
+      },
+    });
+    await supabase
+      .from("job_candidates")
+      .update({ agent_stage: "paused", paused_reason: "스크리닝 침묵 정체 — 48h+ 무응답", agent_state: merged })
+      .eq("id", row.id);
+    if (applicant.source !== "danggeun_practice") {
+      try {
+        await sendSlackPausedAlert({
+          applicant_name: applicant.name,
+          applicant_phone: applicant.phone,
+          branch: applicant.branch1,
+          reason: "스크리닝 침묵 정체 — 48h+ 무응답, 매니저 확인 필요",
+        });
+      } catch (e) {
+        console.error("[onboarding-reminder cron] screening-stall slack fail", row.id, e);
+      }
+    }
+    results.push({ candidate_id: row.id as number, stage: "screening_stall", success: true });
   }
 
   return NextResponse.json({
