@@ -80,6 +80,7 @@ export const activeStage: Stage = {
         state_update: { meta: { last_reasoning: draft.reasoning } },
         transition: { kind: "pause", reason: draft.missing_info || "정보 부족" },
         reasoning: draft.reasoning,
+        usage: draft.usage,
       };
     }
 
@@ -88,6 +89,7 @@ export const activeStage: Stage = {
       state_update: { meta: { last_run_at: new Date().toISOString(), last_reasoning: draft.reasoning } },
       transition: { kind: "stay" },
       reasoning: draft.reasoning,
+      usage: draft.usage,
     };
   },
 };
