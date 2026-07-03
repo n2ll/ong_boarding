@@ -100,7 +100,7 @@ const STAGE_LABEL: Record<string, string> = {
   active: "활성", paused: "수동", abort: "중단",
 };
 
-const CALL_STATUS_OPTIONS = ["미실시", "통화 완료", "부재중", "예정"];
+const CALL_STATUS_OPTIONS = ["미실시", "통화 완료", "부재중", "예정", "카톡대체"];
 
 // ──────────────────────────────────────────────────────────────────────────
 // 데이터 훅
@@ -231,6 +231,12 @@ export function ApplicantDetailContent({
     const next = cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot];
     setField("confirmed_slot", next.join(", "));
   };
+
+  // 온보딩 통화: select 옵션이 사후 도입이라 옵션에 없는 자유입력 기존 값이 존재한다.
+  // 그대로 두면 매칭되는 option이 없어 빈 값으로 렌더돼 화면에서 사라져 보이므로,
+  // 기존 값을 fallback option으로 그대로 노출한다. (정규화는 별도 마이그레이션)
+  const callStatus = String(val("onboarding_call_status") ?? "");
+  const legacyCallStatus = callStatus !== "" && !CALL_STATUS_OPTIONS.includes(callStatus);
 
   const patch = async (body: Record<string, unknown>, msg: string) => {
     if (busy) return false;
@@ -418,8 +424,9 @@ export function ApplicantDetailContent({
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-[#A0AEC0]">온보딩 통화</span>
-              <select value={String(val("onboarding_call_status") ?? "")} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
+              <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
                 <option value="">미지정</option>
+                {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                 {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </label>

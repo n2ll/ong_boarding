@@ -414,23 +414,40 @@ export function Pipeline() {
     setBulkStageModalOpen(false);
     const status = BULK_LABEL_TO_STATUS[stageName];
     const ids = Array.from(selectedRows);
-    if (status && ids.length > 0) {
-      try {
-        await Promise.all(
-          ids.map((id) =>
-            fetch(`/api/admin/applicants/${id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ status }),
-            })
-          )
-        );
-        await loadApplicants();
-      } catch {
-        toast.error("일괄 상태 변경에 실패했어요");
+    if (!status || ids.length === 0) {
+      setSelectedRows(new Set());
+      return;
+    }
+
+    let success = 0;
+    let failed = 0;
+    // 대량 선택 시 동시 요청 폭주 방지 → 25건씩 끊어서 순차 처리
+    for (let i = 0; i < ids.length; i += 25) {
+      const chunk = ids.slice(i, i + 25);
+      const results = await Promise.all(
+        chunk.map((id) =>
+          fetch(`/api/admin/applicants/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          })
+            .then((res) => res.ok)
+            .catch(() => false)
+        )
+      );
+      for (const ok of results) {
+        if (ok) success++;
+        else failed++;
       }
     }
-    toast.success(`선택한 ${ids.length}명의 지원자가 [${stageName}] 단계로 일괄 이동되었습니다.`);
+
+    // 성공/실패와 무관하게 서버 상태 기준으로 목록 재동기화 (칸반 드래그 롤백 패턴과 동일)
+    loadApplicants();
+    if (failed === 0) {
+      toast.success(`선택한 ${success}명의 지원자가 [${stageName}] 단계로 일괄 이동되었습니다.`);
+    } else {
+      toast.error(`일괄 이동 결과: ${success}건 성공, ${failed}건 실패했어요`);
+    }
     setSelectedRows(new Set());
   };
 

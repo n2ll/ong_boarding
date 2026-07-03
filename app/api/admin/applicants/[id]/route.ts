@@ -119,6 +119,17 @@ const VALID_STATUS = new Set([
 
 const VALID_SLOT = new Set(["평일오전", "평일오후", "주말오전", "주말오후"]);
 
+// 온보딩 통화 상태 — UI(ApplicantDetailPanel) select 옵션과 동일 집합.
+// TEXT 자유입력 시절 쌓인 쓰레기값('o', 'o 10:00', '전화완료' 등) 재유입 방지.
+// null/빈값(미지정)은 허용.
+const VALID_CALL_STATUS = new Set([
+  "미실시",
+  "통화 완료",
+  "부재중",
+  "예정",
+  "카톡대체",
+]);
+
 // 콤마로 구분된 confirmed_slot 값 검증 — 각 토큰이 VALID_SLOT에 포함돼야 함.
 function isValidConfirmedSlot(v: unknown): boolean {
   if (typeof v !== "string") return false;
@@ -150,6 +161,12 @@ export async function PATCH(
     if (key === "confirmed_slot" && value && !isValidConfirmedSlot(value)) {
       return NextResponse.json(
         { error: `invalid confirmed_slot: ${value}` },
+        { status: 400 }
+      );
+    }
+    if (key === "onboarding_call_status" && value && !VALID_CALL_STATUS.has(value as string)) {
+      return NextResponse.json(
+        { error: `invalid onboarding_call_status: ${value}` },
         { status: 400 }
       );
     }

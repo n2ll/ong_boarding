@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { LogoMark } from "@/components/Logo";
+import { SOURCE_LABELS } from "@/lib/applicant-source";
 
 const TIMESLOTS = [
   { label: "평일 오전", sub: "월~금 09:00 ~ 14:00", value: "평일(월~금) 오전 타임 (09:00 ~ 14:00)" },
@@ -50,8 +51,9 @@ const INITIAL: FormState = {
   marketingConsent: false,
 };
 
+// SOURCE_LABELS에 정의된 소스만 허용하고, 알 수 없는 값은 'direct'로 처리한다.
 function normalizeSource(raw: string | null): string {
-  if (raw === "danggeun" || raw === "baemin") return raw;
+  if (raw && Object.prototype.hasOwnProperty.call(SOURCE_LABELS, raw)) return raw;
   return "direct";
 }
 
@@ -106,12 +108,10 @@ function ApplyForm() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/admin/branches");
+        const res = await fetch("/api/branches");
+        if (!res.ok) return;
         const json = await res.json();
-        const names = ((json.data ?? []) as { name: string; active: boolean }[])
-          .filter((b) => b.active)
-          .map((b) => b.name);
-        setBranches(names);
+        setBranches((json.branches ?? []) as string[]);
       } catch {
         /* 지점 목록 못 불러와도 직접 입력 가능 */
       }

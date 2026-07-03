@@ -33,11 +33,12 @@ interface RuleResult {
   detail: string;
 }
 
+// 예시 워크플로우 — 실행 엔진 연동 전이라 실행 횟수·성공률·최근 실행은 집계되지 않는다('—' 표기).
 const MOCK_WORKFLOWS = [
-  { id: 1, name: "신규 지원자 대화형 스크리닝", status: "active", category: "지원자 파이프라인 관리", runs: "1,240", success: "98.5%", lastRun: "방금 전" },
-  { id: 2, name: "고득점자 자동 면접 제안 (캘린더)", status: "active", category: "지원자 파이프라인 관리", runs: "342", success: "95.2%", lastRun: "10분 전" },
-  { id: 5, name: "결원 발생 시 긴급 소싱 포스팅", status: "active", category: "인력 충원 및 채널 연동", runs: "12", success: "100%", lastRun: "어제" },
-  { id: 6, name: "휴면 인재풀(DB) 자동 최신화 (알림톡)", status: "paused", category: "CRM 리타겟팅", runs: "-", success: "-", lastRun: "-" }
+  { id: 1, name: "신규 지원자 대화형 스크리닝", status: "active", category: "지원자 파이프라인 관리", runs: "—", success: "—", lastRun: "—" },
+  { id: 2, name: "고득점자 자동 면접 제안 (캘린더)", status: "active", category: "지원자 파이프라인 관리", runs: "—", success: "—", lastRun: "—" },
+  { id: 5, name: "결원 발생 시 긴급 소싱 포스팅", status: "active", category: "인력 충원 및 채널 연동", runs: "—", success: "—", lastRun: "—" },
+  { id: 6, name: "휴면 인재풀(DB) 자동 최신화 (알림톡)", status: "paused", category: "CRM 리타겟팅", runs: "—", success: "—", lastRun: "—" }
 ];
 
 export function Automation() {
@@ -347,7 +348,7 @@ export function Automation() {
       <div className="w-[340px] shrink-0 border-r border-[#E2E8F0] flex flex-col bg-white z-20">
         <div className="p-5 border-b border-[#E2E8F0] flex justify-between items-center bg-white">
           <h2 className="text-[16px] font-extrabold text-[#1A202C] flex items-center gap-2">오토메이션 <span className="text-[10px] font-bold text-[#718096] bg-[#EDF2F7] px-1.5 py-0.5 rounded">준비중</span></h2>
-          <button onClick={() => toast.success("새 워크플로우를 생성합니다.")} className="text-[#4A5568] hover:text-[#1A202C] transition-colors p-1 border border-[#E2E8F0] rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+          <button onClick={() => toast.info("준비 중 — 워크플로우 생성은 자동화 엔진 연동 후 제공됩니다.")} className="text-[#4A5568] hover:text-[#1A202C] transition-colors p-1 border border-[#E2E8F0] rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
             <Plus size={18} />
           </button>
         </div>
@@ -363,7 +364,7 @@ export function Automation() {
                   className={`w-full text-left p-4 rounded-xl transition-all border outline-none ${selectedWf === wf.id ? 'bg-[#F7FAFC] border-[#CBD5E0] shadow-sm' : 'border-transparent hover:border-[#E2E8F0] hover:bg-[#F7FAFC]'}`}
                 >
                   <div className="flex justify-between items-start mb-2">
-                    <div className="text-[13px] font-bold text-[#1A202C] leading-snug">{wf.name}</div>
+                    <div className="text-[13px] font-bold text-[#1A202C] leading-snug">{wf.name} <span className="ml-1 text-[10px] font-bold text-[#718096] bg-[#EDF2F7] px-1.5 py-0.5 rounded align-middle">예시</span></div>
                     <span className={`w-2 h-2 mt-1 shrink-0 rounded-full ${wf.status === 'active' ? 'bg-[#38A169]' : 'bg-[#A0AEC0]'}`}></span>
                   </div>
                   <div className="flex items-center gap-3 text-[11px] font-medium text-[#718096]">
@@ -391,10 +392,10 @@ export function Automation() {
             <div className="text-[11.5px] text-[#A0AEC0] font-medium mr-2 flex flex-col text-right">
               <span>최근 실행: {selectedWorkflow.lastRun}</span>
             </div>
-            <button onClick={() => toast.success("해당 워크플로우 강제 실행(Test Run)이 시작되었습니다.")} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-bold text-[#4A5568] border border-[#E2E8F0] hover:bg-[#F7FAFC] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+            <button onClick={() => toast.info("준비 중 — 강제 실행은 자동화 엔진 연동 후 제공됩니다.")} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-bold text-[#4A5568] border border-[#E2E8F0] hover:bg-[#F7FAFC] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
               <Play size={14} /> 강제 실행
             </button>
-            <button onClick={() => toast.success("워크플로우 설정이 저장되었습니다.")} className="flex items-center gap-1.5 bg-[#1A202C] hover:bg-[#2D3748] text-white px-4 py-2 rounded-lg text-[13px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#1A202C]">
+            <button onClick={() => toast.info("준비 중 — 배포는 자동화 엔진 연동 후 제공됩니다.")} className="flex items-center gap-1.5 bg-[#1A202C] hover:bg-[#2D3748] text-white px-4 py-2 rounded-lg text-[13px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#1A202C]">
               <Save size={16} /> 배포하기
             </button>
           </div>
@@ -444,7 +445,7 @@ export function Automation() {
                   </div>
                 </div>
                 <div className="p-4 border-t border-[#E2E8F0] bg-white">
-                  <button onClick={() => toast.success("노드 설정이 임시 저장되었습니다.")} className="w-full bg-[#E2E8F0] hover:bg-[#CBD5E0] text-[#1A202C] rounded-lg py-2.5 text-[13px] font-bold transition-colors outline-none">노드 설정 저장</button>
+                  <button onClick={() => toast.info("준비 중 — 노드 설정 저장은 자동화 엔진 연동 후 제공됩니다.")} className="w-full bg-[#E2E8F0] hover:bg-[#CBD5E0] text-[#1A202C] rounded-lg py-2.5 text-[13px] font-bold transition-colors outline-none">노드 설정 저장</button>
                 </div>
               </motion.div>
             )}
