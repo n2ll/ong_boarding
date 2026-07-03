@@ -348,6 +348,11 @@ ${inboundText}
   },
 };
 
+// 체크리스트에서 true인 항목 수 (진행도 측정용).
+function countTrueFlags(obj: Record<string, unknown> | undefined): number {
+  return obj ? Object.values(obj).filter(Boolean).length : 0;
+}
+
 function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult {
   const state_update = mergeAgentState(ctx.state, {
     screening: out.checklist_update,
@@ -393,7 +398,28 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
     transition.kind !== "advance" &&
     isComplete(state_update, "screening")
   ) {
-    transition = { kind: "advance", to: "onboarding", reason: "체크리스트 8항목 완료 — 자동 전이" };
+    transition = { kind: "advance", to: "onboarding", reason: "체크리스트 7항목 완료 — 자동 전이" };
+  }
+
+  // 무한정체 backstop(P1-2): stay 유지인데 체크리스트가 이번 턴 전혀 진전이 없으면 연속 카운트.
+  // 3턴 연속 무진전이면 pause로 매니저 인계(자동 진행 없음 — 안전). 모델이 확인만 하고
+  // checklist_update를 누락해 스크리닝이 멈추는 케이스 대비. (침묵성 정체는 cron이 별도 커버)
+  if (transition.kind === "stay") {
+    const beforeTrue = countTrueFlags(ctx.state.screening as Record<string, unknown> | undefined);
+    const afterTrue = countTrueFlags(state_update.screening as Record<string, unknown> | undefined);
+    const prevStall = Number(ctx.state.meta?.screening_stall_count ?? 0) || 0;
+    if (afterTrue > beforeTrue) {
+      state_update.meta = { ...state_update.meta, screening_stall_count: 0 };
+    } else if (prevStall + 1 >= 3) {
+      transition = {
+        kind: "pause",
+        reason: "스크리닝 진행 정체 — 체크리스트 3턴 연속 무변화, 매니저 확인 필요",
+        suggestedAction: "AI가 체크리스트를 채우지 못하고 있습니다. 대화를 확인해 매니저가 직접 진행하세요.",
+      };
+      state_update.meta = { ...state_update.meta, screening_stall_count: 0 };
+    } else {
+      state_update.meta = { ...state_update.meta, screening_stall_count: prevStall + 1 };
+    }
   }
 
   // advance 시: AI 응답("그럼 온보딩 절차로 안내드릴게요" 식) 발송 생략 →
