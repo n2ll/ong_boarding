@@ -62,6 +62,25 @@ export interface RunAgentResult {
   error?: string;
 }
 
+// 확정 뉘앙스 금지 — 발송 직전 결정적 백스톱. AI 응답에 근무 확정/배정/출근 지시성 문구가
+// 있으면 발송하지 않고 pause로 전환해 매니저 검토 큐로 넘긴다. (프롬프트 규칙의 코드 가드)
+// 고정밀 패턴만 — "확정은 매니저가", "확정되면", "시작일" 등 정상 설명 문구는 걸리지 않도록.
+const CONFIRMATION_NUANCE_PATTERNS: RegExp[] = [
+  /근무\s*(?:가|이|를)?\s*확정/,               // 근무 확정
+  /확정\s*(?:됐|되었|되셨|완료)/,               // 확정됐습니다 (조건형 '확정되면'은 제외)
+  /배정\s*(?:이|을|가)?\s*(?:완료|됐|되었|드렸|해\s*드)/, // 배정 완료/됐어요
+  /(?:내일|모레|다음\s*주|이번\s*주)\s*부터\s*(?:출근|근무|나오)/, // 내일부터 출근
+  /(?:근무|출근)\s*시작\s*(?:하시면|하세요|합니다)/,  // 근무 시작하시면 됩니다 ('시작일'은 제외)
+  /합격\s*(?:하셨|입니다|이에요|이십니다)/,     // 합격하셨습니다
+];
+function detectConfirmationNuance(text: string): string | null {
+  for (const re of CONFIRMATION_NUANCE_PATTERNS) {
+    const m = re.exec(text);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
   const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at } = input;
 
@@ -228,6 +247,20 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       .update(result.applicant_patch)
       .eq("id", applicant.id);
     if (patchErr) console.error("[router] applicant_patch failed", patchErr);
+  }
+
+  // 확정 뉘앙스 금지 결정적 가드 — AI가 확정/배정/출근 지시 문구를 만들면 발송하지 않고
+  // pause로 전환(매니저 인계 큐 + Slack). stay/advance 무관하게 우선 적용.
+  if (result.reply_text) {
+    const hit = detectConfirmationNuance(result.reply_text);
+    if (hit) {
+      console.warn(`[router] 확정 뉘앙스 감지 → 발송 보류 + pause: "${hit}"`);
+      result.transition = {
+        kind: "pause",
+        reason: `확정 뉘앙스 문구 감지("${hit}") — 발송 보류, 매니저 확인 필요`,
+        suggestedAction: "AI가 확정/배정/출근 지시 뉘앙스 문구를 생성해 자동 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
+      };
+    }
   }
 
   // 4) 응답 발송 (simulate=true면 SOLAPI 건너뛰고 DB만 기록)
