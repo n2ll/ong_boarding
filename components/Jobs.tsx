@@ -167,7 +167,10 @@ export function Jobs() {
   const [branchFilter, setBranchFilter] = useState<number | "">("");
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
   const [newJobMode, setNewJobMode] = useState<RecruitMode>("external");
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; recruitMode: RecruitMode } | null>(null);
+  const [newJobCapacity, setNewJobCapacity] = useState(1);
+  const [newJobPayType, setNewJobPayType] = useState("");
+  const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -442,6 +445,9 @@ export function Jobs() {
           body,
           branch_id: newJobBranchId === "" ? null : newJobBranchId,
           recruit_mode: newJobMode,
+          capacity: newJobCapacity,
+          pay_type: newJobPayType || null,
+          pay_amount: newJobPayAmount === "" ? null : Number(newJobPayAmount),
         }),
       });
       const json = await res.json();
@@ -449,13 +455,16 @@ export function Jobs() {
         toast.error(json.error || "공고 등록에 실패했어요");
         return;
       }
-      toast.success("새 공고가 등록되었어요. AI 자동 스크리닝이 시작됩니다.");
+      toast.success("새 공고가 등록되었어요. 공고 수정에서 'AI 응대 근거'까지 채우면 단가·정책 문의를 AI가 직접 안내합니다.");
       setAiModalOpen(false);
       setAiPrompt("");
       setChannelDrafts(null);
       setAiSource(null);
       setNewJobBranchId("");
       setNewJobMode("external");
+      setNewJobCapacity(1);
+      setNewJobPayType("");
+      setNewJobPayAmount("");
       await loadJobs();
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -476,7 +485,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", recruitMode: "external" });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external" });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -496,6 +505,9 @@ export function Jobs() {
         vehicleRequired: !!j.vehicle_required,
         payInfo: j.pay_info ?? "",
         policyNotes: j.policy_notes ?? "",
+        payType: j.pay_type ?? "",
+        payAmount: typeof j.pay_amount === "number" ? j.pay_amount : "",
+        aiFacts: j.ai_facts ?? "",
         recruitMode: asRecruitMode(j.recruit_mode),
       });
     } catch {
@@ -532,6 +544,9 @@ export function Jobs() {
           vehicle_required: editForm.vehicleRequired,
           pay_info: editForm.payInfo.trim() || null,
           policy_notes: editForm.policyNotes.trim() || null,
+          pay_type: editForm.payType || null,
+          pay_amount: editForm.payAmount === "" ? null : Number(editForm.payAmount),
+          ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
         }),
       });
@@ -931,6 +946,34 @@ export function Jobs() {
                     <option key={m} value={m}>{RECRUIT_MODE_META[m].label}</option>
                   ))}
                 </select>
+                <input
+                  type="number"
+                  min={1}
+                  value={newJobCapacity}
+                  onChange={(e) => setNewJobCapacity(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-[72px] bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
+                  title="모집 인원(정원) — 충원율의 분모"
+                />
+                <select
+                  value={newJobPayType}
+                  onChange={(e) => setNewJobPayType(e.target.value)}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
+                  title="대표 단가 형태 — 채우면 AI가 단가 문의에 직접 답합니다"
+                >
+                  <option value="">단가 형태(선택)</option>
+                  {["건당", "일당", "주급", "월급", "혼합", "협의"].map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                {newJobPayType && newJobPayType !== "협의" && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={newJobPayAmount}
+                    onChange={(e) => setNewJobPayAmount(e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0))}
+                    placeholder="금액(원)"
+                    className="w-[110px] bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
+                    title="대표 금액(원)"
+                  />
+                )}
               </div>
               <div className="flex items-center gap-3">
               <button
@@ -1014,6 +1057,19 @@ export function Jobs() {
                 {/* AI 응대 근거 — 채워두면 단가·정책 질문을 AI가 직접 답해 매니저 인계가 줄어든다 */}
                 <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
                   <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 단가·정책 문의를 AI가 직접 안내해 인계가 줄어듭니다</div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 단가 형태</label>
+                      <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                        <option value="">미지정</option>
+                        {["건당", "일당", "주급", "월급", "혼합", "협의"].map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 금액(원)</label>
+                      <input type="number" min={0} value={editForm.payAmount} onChange={(e) => setEditForm({ ...editForm, payAmount: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="예: 3500" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] bg-white" />
+                    </div>
+                  </div>
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">급여·정산 정보</label>
                     <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당 3,000원 · 매주 정산 · 프로모션 5천원(1~2개월 후 종료 가능)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
@@ -1021,6 +1077,10 @@ export function Jobs() {
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">고용·정책 안내</label>
                     <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">기타 참고정보 (근무·차량 정책 등)</label>
+                    <textarea value={editForm.aiFacts} onChange={(e) => setEditForm({ ...editForm, aiFacts: e.target.value })} rows={3} placeholder={"예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가"} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
                   </div>
                 </div>
               </div>

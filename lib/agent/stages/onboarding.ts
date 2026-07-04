@@ -175,6 +175,19 @@ const TOOL = {
   },
 };
 
+// 명시된 급여·정책 정보 — 온보딩 중에도 단가 질문이 오면 이 값으로 직접 답(없으면 기존대로 pause).
+function formatJobBrief(job: NonNullable<StageContext["job"]>): string {
+  const lines = [`${job.title}`, `시작일: ${job.start_date ?? "-"} / 지점: ${job.branch ?? "-"}`];
+  if (job.pay_type) {
+    const amt = typeof job.pay_amount === "number" ? ` ${job.pay_amount.toLocaleString("ko-KR")}원` : "";
+    lines.push(`대표 단가(명시됨): ${job.pay_type}${amt}`);
+  }
+  if (job.pay_info?.trim()) lines.push(`급여·정산(명시됨): ${job.pay_info.trim()}`);
+  if (job.policy_notes?.trim()) lines.push(`고용·정책(명시됨): ${job.policy_notes.trim()}`);
+  if (job.ai_facts?.trim()) lines.push(`공고 참고정보(명시됨): ${job.ai_facts.trim()}`);
+  return lines.join("\n");
+}
+
 function formatChecklist(state: StageContext["state"]): string {
   const cl = { ...emptyOnboarding(), ...(state.onboarding ?? {}) };
   return Object.entries(cl)
@@ -197,7 +210,7 @@ export const onboardingStage: Stage = {
     if (!apiKey) return failResult("CLAUDE_API env missing");
 
     const userContent = `[현재 공고]
-${ctx.job ? `${ctx.job.title}\n시작일: ${ctx.job.start_date ?? "-"} / 지점: ${ctx.job.branch ?? "-"}` : "(공고 없음)"}
+${ctx.job ? formatJobBrief(ctx.job) : "(공고 없음)"}
 
 [지원자]
 ${ctx.applicant.name ?? ""} (${ctx.applicant.phone})

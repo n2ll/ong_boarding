@@ -19,6 +19,9 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "pickup_lng",
   "pay_info",
   "policy_notes",
+  "pay_type",
+  "pay_amount",
+  "ai_facts",
   "capacity",
   "status",
   "recruit_mode",
@@ -94,6 +97,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   ) {
     return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
   }
+  if (
+    typeof update.pay_type === "string" &&
+    update.pay_type !== "" &&
+    !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(update.pay_type)
+  ) {
+    return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (update.pay_type === "") update.pay_type = null;
 
   // 마감 처리 — closed로 바뀌면 closed_at 자동 기록, 재개 시 해제
   if (update.status === "closed") {

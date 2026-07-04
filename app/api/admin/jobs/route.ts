@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -85,6 +85,9 @@ export async function POST(req: NextRequest) {
     pickup_lng,
     pay_info,
     policy_notes,
+    pay_type,
+    pay_amount,
+    ai_facts,
     capacity,
     recruit_mode,
     site_manager_id,
@@ -102,6 +105,9 @@ export async function POST(req: NextRequest) {
     pickup_lng?: number | null;
     pay_info?: string | null;
     policy_notes?: string | null;
+    pay_type?: string | null;
+    pay_amount?: number | null;
+    ai_facts?: string | null;
     capacity?: number;
     recruit_mode?: string;
     site_manager_id?: number | null;
@@ -119,6 +125,9 @@ export async function POST(req: NextRequest) {
   }
   if (recruit_mode && !RECRUIT_MODES.has(recruit_mode)) {
     return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (pay_type && !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(pay_type)) {
+    return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
   }
 
   const supabase = createServiceClient();
@@ -154,6 +163,9 @@ export async function POST(req: NextRequest) {
       pickup_lng: pickup_lng ?? null,
       pay_info: pay_info ?? null,
       policy_notes: policy_notes ?? null,
+      pay_type: pay_type ?? null,
+      pay_amount: typeof pay_amount === "number" ? pay_amount : null,
+      ai_facts: ai_facts ?? null,
       capacity: capacity ?? 1,
       recruit_mode: recruit_mode ?? "external",
       site_manager_id: site_manager_id ?? null,
