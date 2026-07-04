@@ -133,6 +133,50 @@ export async function saveAutomationConfig(supabase: SupabaseClient, config: Aut
   }
 }
 
+const NOTIFY_STATE_TITLE = "__automation_notify_state__";
+
+/**
+ * 마지막 Slack 발송 시각. cron 정기 실행의 재알림 쿨다운 판단에 사용한다.
+ * (수동 '지금 점검' 버튼은 쿨다운 없이 항상 발송 — 관리자가 명시적으로 요청한 실행이므로)
+ */
+export async function loadLastNotifiedAt(supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("prompt_examples")
+    .select("body")
+    .eq("category", CATEGORY)
+    .eq("title", NOTIFY_STATE_TITLE)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data?.body) return null;
+  try {
+    const parsed = JSON.parse(data.body as string) as { last_notified_at?: string };
+    return typeof parsed.last_notified_at === "string" ? parsed.last_notified_at : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLastNotifiedAt(supabase: SupabaseClient, iso: string): Promise<void> {
+  const body = JSON.stringify({ last_notified_at: iso });
+  const { data: existing } = await supabase
+    .from("prompt_examples")
+    .select("id")
+    .eq("category", CATEGORY)
+    .eq("title", NOTIFY_STATE_TITLE)
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) {
+    await supabase
+      .from("prompt_examples")
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+  } else {
+    await supabase
+      .from("prompt_examples")
+      .insert({ category: CATEGORY, title: NOTIFY_STATE_TITLE, body, sort_order: 0 });
+  }
+}
+
 export interface RuleResult {
   id: RuleId;
   label: string;

@@ -11,9 +11,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { requireCronAuth } from "@/lib/cron-auth";
-import { loadAutomationConfig, evaluateAutomation } from "@/lib/automation";
+import {
+  loadAutomationConfig,
+  evaluateAutomation,
+  loadLastNotifiedAt,
+  saveLastNotifiedAt,
+} from "@/lib/automation";
 
 export const dynamic = "force-dynamic";
+
+// 재알림 쿨다운 — cron은 매시 돌지만 같은 적체 상황을 반복 알리지 않는다(하루 1회 요약 수준).
+// 수동 '지금 점검' 버튼(POST /api/admin/automation/evaluate)은 쿨다운 없이 항상 발송.
+const NOTIFY_COOLDOWN_HOURS = 24;
 
 export async function GET(req: NextRequest) {
   // 인증 — Bearer CRON_SECRET만 허용(미설정 시 fail-closed)
@@ -23,13 +32,23 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = createServiceClient();
     const config = await loadAutomationConfig(supabase);
-    const result = await evaluateAutomation(supabase, config, { notify: true });
+
+    const lastNotifiedAt = await loadLastNotifiedAt(supabase);
+    const cooldownActive =
+      lastNotifiedAt !== null &&
+      Date.now() - new Date(lastNotifiedAt).getTime() < NOTIFY_COOLDOWN_HOURS * 60 * 60 * 1000;
+
+    const result = await evaluateAutomation(supabase, config, { notify: !cooldownActive });
+    if (result.notified) {
+      await saveLastNotifiedAt(supabase, result.ran_at);
+    }
 
     return NextResponse.json({
       ran_at: result.ran_at,
       evaluated: result.results.length,
       triggered: result.triggered_count,
       notified: result.notified,
+      notify_suppressed_by_cooldown: cooldownActive && result.triggered_count > 0,
       results: result.results.map((r) => ({ id: r.id, triggered: r.triggered, detail: r.detail })),
     });
   } catch (e) {
