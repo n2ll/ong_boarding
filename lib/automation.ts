@@ -6,14 +6,18 @@
  *
  * 저장소: prompt_examples(category='system_message', title='__automation__')에 설정 JSON.
  *   - 신규 테이블/마이그레이션 없이 동작(기존 CHECK 제약 우회용 예약 제목).
- * 실행: /api/admin/automation/evaluate (수동 '지금 점검' 또는 추후 cron 연결).
+ * 실행: /api/admin/automation/evaluate (수동 '지금 점검')
+ *       + /api/admin/cron/automation-evaluate (매시 30분 정기 실행).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSlackText } from "@/lib/slack";
 import { isAgentDisabled } from "@/lib/agent/kill-switch";
 
-export type RuleId = "inbox_pending" | "waiting_backlog" | "ai_offline";
+export type RuleId = "inbox_pending" | "waiting_backlog" | "ai_offline" | "screening_backlog";
+
+/** '스크리닝 전 적체' 판정 기준 경과 시간 (지원 접수 후 N시간) */
+const SCREENING_BACKLOG_HOURS = 24;
 
 export interface RuleConfig {
   enabled: boolean;
@@ -54,12 +58,21 @@ export const AUTOMATION_RULES: RuleDef[] = [
     desc: "전역 AI 응답이 꺼져 있으면(수동 응대 부담) 알립니다.",
     hasThreshold: false,
   },
+  {
+    id: "screening_backlog",
+    label: "스크리닝 전 적체 알림",
+    desc: `스크리닝 전 상태로 ${SCREENING_BACKLOG_HOURS}시간 넘게 방치된 지원자가 기준치 이상이면 알립니다.`,
+    hasThreshold: true,
+    defaultThreshold: 3,
+    unit: "명",
+  },
 ];
 
 export const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
   inbox_pending: { enabled: true, threshold: 1 },
   waiting_backlog: { enabled: true, threshold: 5 },
   ai_offline: { enabled: true },
+  screening_backlog: { enabled: true, threshold: 3 },
 };
 
 const CATEGORY = "system_message";
@@ -120,6 +133,50 @@ export async function saveAutomationConfig(supabase: SupabaseClient, config: Aut
   }
 }
 
+const NOTIFY_STATE_TITLE = "__automation_notify_state__";
+
+/**
+ * 마지막 Slack 발송 시각. cron 정기 실행의 재알림 쿨다운 판단에 사용한다.
+ * (수동 '지금 점검' 버튼은 쿨다운 없이 항상 발송 — 관리자가 명시적으로 요청한 실행이므로)
+ */
+export async function loadLastNotifiedAt(supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("prompt_examples")
+    .select("body")
+    .eq("category", CATEGORY)
+    .eq("title", NOTIFY_STATE_TITLE)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data?.body) return null;
+  try {
+    const parsed = JSON.parse(data.body as string) as { last_notified_at?: string };
+    return typeof parsed.last_notified_at === "string" ? parsed.last_notified_at : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLastNotifiedAt(supabase: SupabaseClient, iso: string): Promise<void> {
+  const body = JSON.stringify({ last_notified_at: iso });
+  const { data: existing } = await supabase
+    .from("prompt_examples")
+    .select("id")
+    .eq("category", CATEGORY)
+    .eq("title", NOTIFY_STATE_TITLE)
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) {
+    await supabase
+      .from("prompt_examples")
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+  } else {
+    await supabase
+      .from("prompt_examples")
+      .insert({ category: CATEGORY, title: NOTIFY_STATE_TITLE, body, sort_order: 0 });
+  }
+}
+
 export interface RuleResult {
   id: RuleId;
   label: string;
@@ -152,13 +209,19 @@ export async function evaluateAutomation(
       .select("id", { count: "exact", head: true })
       .eq("classification", "pending")
       .eq("direction", "inbound"),
-    supabase.from("applicants").select("status"),
+    supabase.from("applicants").select("status, created_at"),
     isAgentDisabled(supabase).catch(() => false),
   ]);
 
   const inboxCount = inboxRes.count ?? 0;
-  const applicants = (applicantsRes.data ?? []) as { status: string }[];
+  const applicants = (applicantsRes.data ?? []) as { status: string; created_at: string | null }[];
   const waitingCount = applicants.filter((a) => a.status === "대기자").length;
+
+  // 스크리닝 전 적체 — 접수 후 N시간이 지나도록 '스크리닝 전' 그대로인 지원자 수
+  const backlogCutoffMs = Date.now() - SCREENING_BACKLOG_HOURS * 60 * 60 * 1000;
+  const screeningBacklogCount = applicants.filter(
+    (a) => a.status === "스크리닝 전" && a.created_at && new Date(a.created_at).getTime() < backlogCutoffMs
+  ).length;
 
   const results: RuleResult[] = [];
 
@@ -182,6 +245,11 @@ export async function evaluateAutomation(
     } else if (rule.id === "ai_offline") {
       triggered = rc.enabled && aiDisabled;
       detail = aiDisabled ? "AI 자동응답이 중단된 상태" : "AI 자동응답 정상 작동";
+    } else if (rule.id === "screening_backlog") {
+      value = screeningBacklogCount;
+      threshold = rc.threshold ?? rule.defaultThreshold ?? 3;
+      triggered = rc.enabled && value >= threshold;
+      detail = `스크리닝 전 ${SCREENING_BACKLOG_HOURS}시간 초과 ${value}명 (기준 ${threshold}명)`;
     }
 
     results.push({ id: rule.id, label: rule.label, enabled: rc.enabled, triggered, value, threshold, detail });

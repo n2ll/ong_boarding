@@ -142,14 +142,18 @@ async function loadBranchAiFacts(branchName: string | null | undefined): Promise
 /**
  * 시스템 프롬프트 끝에 붙일 톤 가이드 블록.
  *
+ * 운영자 페르소나(두뇌 탭 지시사항)도 '운영자 추가 지침' 섹션으로 포함한다
+ * — 스크리닝/탐색/온보딩 stage 프롬프트에 반영되는 유일한 경로.
+ *
  * @param branchName 지원자의 1지망 지점명 — 그 지점의 ai_facts를 별도 섹션으로 추가.
  *                   비어 있으면 공통 facts만 포함.
  */
 export async function buildToneGuide(branchName?: string | null): Promise<string> {
-  const [conv, commonFacts, branchFacts] = await Promise.all([
+  const [conv, commonFacts, branchFacts, persona] = await Promise.all([
     loadConversationExamples(),
     loadFacts(),
     loadBranchAiFacts(branchName),
+    loadPersonaGuidance(),
   ]);
   const lines = [
     "## 매니저 실제 대화 톤 — 반드시 모방",
@@ -183,6 +187,15 @@ export async function buildToneGuide(branchName?: string | null): Promise<string
       "다른 지점의 사실은 절대 인용하거나 추측하지 마라.",
       "",
       branchFacts
+    );
+  }
+
+  // 운영자 페르소나 — lib/agent.ts buildSystemPrompt와 동일한 섹션 형식. 비어 있으면 생략.
+  if (persona) {
+    lines.push(
+      "",
+      "## 운영자 추가 지침 (관리자 설정 — 안전 규칙은 유지하되 아래 톤·세부 지침을 우선 반영)",
+      persona
     );
   }
 

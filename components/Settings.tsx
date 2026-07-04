@@ -1,7 +1,6 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { DemoBanner } from "./DemoBanner";
 
 interface Integration {
@@ -20,16 +19,13 @@ const INTEGRATION_META: Record<string, { name: string; desc: string; badge: stri
 };
 
 export function Settings() {
-  const [activeTab, setActiveTab] = useState("profile");
+  // 실동작인 '외부 연동' 탭을 기본으로 승격 — 프로필/알림/보안은 인증 도입 전 미리보기.
+  const [activeTab, setActiveTab] = useState("integrations");
   // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
   const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
     activeTab === "integrations" ? "/api/admin/settings/integrations" : null
   );
   const integrations = intData?.data ?? [];
-
-  const handleSave = () => {
-    toast.success("설정이 저장되었습니다.");
-  };
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
@@ -77,21 +73,22 @@ export function Settings() {
               <div className="space-y-6 max-w-md">
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">이름</label>
-                  <input type="text" defaultValue="정현강" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  <input type="text" disabled placeholder="인증 도입 후 표시됩니다" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">이메일 (로그인 ID)</label>
-                  <input type="email" disabled defaultValue="hk.jung@ongboarding.com" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
+                  <input type="email" disabled placeholder="인증 도입 후 표시됩니다" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">연락처</label>
-                  <input type="tel" defaultValue="010-1234-5678" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  <input type="tel" disabled placeholder="인증 도입 후 표시됩니다" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
 
                 <div className="pt-6">
-                  <button onClick={handleSave} className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-6 py-2.5 rounded-xl font-bold transition-colors">
+                  <button disabled className="flex items-center gap-2 bg-[#1A202C] text-white px-6 py-2.5 rounded-xl font-bold opacity-50 cursor-not-allowed">
                     <Save size={16} /> 변경사항 저장
                   </button>
+                  <p className="text-[12px] text-[#A0AEC0] mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
                 </div>
               </div>
             </div>
@@ -142,9 +139,10 @@ export function Settings() {
                   <input type="password" placeholder="비밀번호 다시 입력" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                 </div>
                 <div className="pt-4">
-                  <button onClick={handleSave} className="bg-white border border-[#E2E8F0] text-[#1A202C] hover:bg-[#F7FAFC] px-6 py-2.5 rounded-xl font-bold transition-colors shadow-sm">
+                  <button disabled className="bg-white border border-[#E2E8F0] text-[#A0AEC0] px-6 py-2.5 rounded-xl font-bold shadow-sm cursor-not-allowed">
                     비밀번호 변경
                   </button>
+                  <p className="text-[12px] text-[#A0AEC0] mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
                 </div>
               </div>
             </div>

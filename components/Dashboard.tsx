@@ -1,6 +1,6 @@
 import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { motion } from "motion/react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
@@ -35,12 +35,30 @@ export function Dashboard() {
   const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
   // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
-  const { data: appsRes, isLoading } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
+  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
   const rawApps = appsRes?.data ?? [];
   const inboxCount = inboxRes?.data?.length ?? 0;
   // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
   const showSkeleton = isLoading && rawApps.length === 0;
+
+  // 최근 동기화 — SWR 응답을 받은 시각을 기록해 하드코딩('방금 전') 대신 실제 상대시간을 표시한다.
+  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (appsRes) setSyncedAt(Date.now());
+  }, [appsRes]);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const syncLabel = useMemo(() => {
+    if (!syncedAt) return "대기 중";
+    const min = Math.floor(Math.max(0, nowTick - syncedAt) / 60_000);
+    if (min < 1) return "방금 전";
+    if (min < 60) return `${min}분 전`;
+    return `${Math.floor(min / 60)}시간 전`;
+  }, [syncedAt, nowTick]);
 
   const branchOf = (a: AppRow) => a.confirmed_branch || a.branch1 || a.branch || null;
   const apps = useMemo(
@@ -168,9 +186,13 @@ export function Dashboard() {
               {scopeBranch ? `${scopeBranch} 파이프라인 오버뷰` : "전사 채용 파이프라인 오버뷰"}
             </h1>
             <div className="flex items-center gap-2 text-[13px] text-white/70">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#48BB78] animate-pulse"></span> 통합 시스템 정상 가동 중</span>
+              {/* 상태 dot·문구는 SWR 로딩/에러와 연동 — 하드코딩 '정상 가동' 아님 */}
+              <span className="flex items-center gap-1">
+                <span className={`w-2 h-2 rounded-full ${appsError ? "bg-[#E53E3E]" : isLoading ? "bg-[#ECC94B]" : "bg-[#48BB78] animate-pulse"}`}></span>
+                {appsError ? "동기화 오류 — 데이터가 최신이 아닐 수 있어요" : isLoading ? "동기화 중…" : "파이프라인 데이터 동기화됨"}
+              </span>
               <span className="text-white/30">|</span>
-              <span>최근 동기화: 방금 전</span>
+              <span>최근 동기화: {syncLabel}</span>
             </div>
           </div>
           <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">

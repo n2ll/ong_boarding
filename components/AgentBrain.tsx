@@ -350,8 +350,8 @@ export function AgentBrain() {
 
   const simulateVectorization = () => {
     setTimeout(() => {
+      // 데모 시연 — 실제 학습(RAG 인덱싱)은 일어나지 않으므로 성공 토스트를 띄우지 않는다.
       setUploadState('complete');
-      toast.success("문서가 성공적으로 에이전트 두뇌에 학습되었습니다!");
       setTimeout(() => setUploadState('idle'), 3000);
     }, 2500);
   };
@@ -673,11 +673,11 @@ export function AgentBrain() {
 
                   {uploadState === 'complete' && (
                     <motion.div key="complete" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
-                      <div className="w-16 h-16 bg-[#F0FFF4] rounded-full flex items-center justify-center mb-4">
-                        <CheckCircle2 size={32} className="text-[#38A169]" />
+                      <div className="w-16 h-16 bg-[#FFFBEC] rounded-full flex items-center justify-center mb-4">
+                        <AlertTriangle size={32} className="text-[#B7791F]" />
                       </div>
-                      <h3 className="text-[18px] font-extrabold text-[#1A202C] mb-1">학습 완료!</h3>
-                      <p className="text-[13px] text-[#718096]">이제 옹봇이 이 문서의 내용을 바탕으로 지원자에게 답변할 수 있습니다.</p>
+                      <h3 className="text-[18px] font-extrabold text-[#1A202C] mb-1">데모 시연입니다 — 실제로 학습되지 않습니다</h3>
+                      <p className="text-[13px] text-[#718096]">옹봇이 실제로 참고하는 지식은 아래 지식 베이스 목록에 직접 추가해주세요.</p>
                     </motion.div>
                   )}
                 </AnimatePresence>

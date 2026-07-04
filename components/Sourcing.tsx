@@ -130,8 +130,9 @@ export function Sourcing() {
     }
   };
 
-  const handleAction = (msg: string) => {
-    toast.success(msg, { action: { label: '실행 취소', onClick: () => toast.info('작업이 취소되었습니다.') } });
+  // 데모 표면 안내 — 광고 집행·예산 변경 등은 매체 API 연동 전이라 실제로 실행되지 않는다.
+  const handleAction = (_msg: string) => {
+    toast.info("데모 — 실제 실행되지 않습니다. (광고 매체 연동 준비중)");
   };
 
   return (
@@ -259,9 +260,10 @@ export function Sourcing() {
               <div className="flex items-center justify-between text-[#718096] font-bold text-[12.5px]"><span>활성 캠페인</span> <span className="text-[#38A169] bg-[#F0FFF4] px-2 py-0.5 rounded-md text-[11px] font-bold border border-[#C6F6D5]">운영 중</span></div>
               <div><div className="text-[24px] font-extrabold text-[#1A202C] tracking-tight">12<span className="text-[14px] font-medium text-[#A0AEC0] ml-1">건</span></div><div className="text-[12px] text-[#A0AEC0] mt-1 font-medium">총 4개 매체 노출 중</div></div>
             </div>
+            {/* 획득 리드는 실제 유입 집계(/api/admin/sourcing/inflow)로 표시 — 하드코딩 예시값 아님 */}
             <div className="bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm flex flex-col justify-between h-[120px]">
               <div className="flex items-center justify-between text-[#718096] font-bold text-[12.5px]"><span>획득 리드 (지원자 수)</span> <TrendingUp size={16} className="text-[#38A169]"/></div>
-              <div><div className="text-[24px] font-extrabold text-[#1A202C] tracking-tight">342<span className="text-[14px] font-medium text-[#A0AEC0] ml-1">명</span></div><div className="text-[12px] text-[#38A169] mt-1 font-bold">+15% vs 지난달</div></div>
+              <div><div className="text-[24px] font-extrabold text-[#1A202C] tracking-tight">{inflow ? inflow.total.toLocaleString() : "—"}<span className="text-[14px] font-medium text-[#A0AEC0] ml-1">명</span></div><div className="text-[12px] text-[#38A169] mt-1 font-bold">{inflow ? `최근 7일 +${inflow.recent7} · 실데이터` : "실집계 불러오는 중"}</div></div>
             </div>
             <div className="bg-gradient-to-br from-[#1A202C] to-[#2D3748] border border-[#1A202C] p-5 rounded-2xl shadow-md text-white flex flex-col justify-between h-[120px] relative overflow-hidden">
               <div className="absolute right-[-20px] bottom-[-20px] opacity-10"><PieChartIcon size={100} /></div>
@@ -331,7 +333,7 @@ export function Sourcing() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6">
           <div className="bg-white p-6 border border-[#E2E8F0] rounded-2xl shadow-sm flex items-center justify-between">
             <div><h2 className="text-[18px] font-extrabold text-[#1A202C]">공고 A/B 테스트 현황</h2><p className="text-[13.5px] text-[#718096] mt-1">동일한 공고를 2개의 다른 소구점으로 테스트합니다.</p></div>
-            <button onClick={() => toast.success("새 A/B 테스트 생성 모달이 열립니다.")} className="flex items-center gap-1.5 bg-[#FFCB3C] text-[#1A202C] px-4 py-2.5 rounded-xl text-[14px] font-bold outline-none"><Plus size={16} /> 테스트 생성</button>
+            <button onClick={() => toast.info("데모 — A/B 테스트 생성은 매체 연동 준비중입니다.")} className="flex items-center gap-1.5 bg-[#FFCB3C] text-[#1A202C] px-4 py-2.5 rounded-xl text-[14px] font-bold outline-none"><Plus size={16} /> 테스트 생성</button>
           </div>
           <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between mb-6 border-b border-[#E2E8F0] pb-4">
@@ -402,7 +404,7 @@ export function Sourcing() {
               <div className="w-16 h-16 bg-[#1A202C] rounded-2xl flex items-center justify-center text-white mb-5 shadow-xl"><Lock size={28} /></div>
               <h3 className="text-[22px] font-extrabold text-[#1A202C] tracking-tight mb-2">기능 준비중</h3>
               <p className="text-[14.5px] text-[#4A5568] text-center max-w-[400px]">지도 기반 QR 히트맵 기능이 곧 업데이트 됩니다.</p>
-              <button onClick={() => toast.success("업데이트 알림 예약이 완료되었습니다.")} className="mt-6 px-6 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F7FAFC] shadow-sm outline-none">업데이트 알림 받기</button>
+              <button onClick={() => toast.info("데모 — 업데이트 알림 예약은 준비중입니다.")} className="mt-6 px-6 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F7FAFC] shadow-sm outline-none">업데이트 알림 받기</button>
             </div>
           </div>
         </motion.div>
@@ -418,7 +420,7 @@ export function Sourcing() {
               <div><label className="text-[13px] font-bold mb-2 block">플랫폼 선택</label><select className="w-full border border-[#E2E8F0] rounded-xl p-3 outline-none"><option>당근알바</option><option>Meta Ads</option></select></div>
               <div><label className="text-[13px] font-bold mb-2 block">API Key</label><input type="password" placeholder="키 입력" className="w-full border border-[#E2E8F0] rounded-xl p-3 outline-none" /></div>
             </div>
-            <div className="p-5 border-t border-[#E2E8F0] flex justify-end gap-2"><button onClick={() => setAddChannelModalOpen(false)} className="px-5 py-2.5 font-bold text-[#718096]">취소</button><button onClick={() => { setAddChannelModalOpen(false); toast.success("매체 연동 성공!"); }} className="px-5 py-2.5 bg-[#1A202C] text-white rounded-xl font-bold">연동하기</button></div>
+            <div className="p-5 border-t border-[#E2E8F0] flex justify-end gap-2"><button onClick={() => setAddChannelModalOpen(false)} className="px-5 py-2.5 font-bold text-[#718096]">취소</button><button onClick={() => { setAddChannelModalOpen(false); toast.info("데모 — 실제 연동되지 않습니다. (매체 API 연동 준비중)"); }} className="px-5 py-2.5 bg-[#1A202C] text-white rounded-xl font-bold">연동하기</button></div>
           </motion.div>
         </div>
       )}
@@ -437,7 +439,7 @@ export function Sourcing() {
               </section>
               <section><h3 className="font-bold mb-4">4. 예산</h3><input type="text" placeholder="₩ 500,000" className="w-full border rounded-xl p-3 outline-none" /></section>
             </div>
-            <div className="p-5 border-t border-[#E2E8F0] flex justify-end gap-2 bg-[#F7FAFC]"><button onClick={() => setNewCampaignModalOpen(false)} className="px-5 py-2.5 font-bold text-[#718096]">취소</button><button onClick={() => { setNewCampaignModalOpen(false); toast.success("캠페인이 시작되었습니다."); }} className="px-6 py-2.5 bg-[#FFCB3C] text-[#1A202C] rounded-xl font-bold flex items-center gap-2"><Megaphone size={16}/> 라이브하기</button></div>
+            <div className="p-5 border-t border-[#E2E8F0] flex justify-end gap-2 bg-[#F7FAFC]"><button onClick={() => setNewCampaignModalOpen(false)} className="px-5 py-2.5 font-bold text-[#718096]">취소</button><button onClick={() => { setNewCampaignModalOpen(false); toast.info("데모 — 캠페인은 실제 집행되지 않습니다. (매체 연동 준비중)"); }} className="px-6 py-2.5 bg-[#FFCB3C] text-[#1A202C] rounded-xl font-bold flex items-center gap-2"><Megaphone size={16}/> 라이브하기</button></div>
           </motion.div>
         </div>
       )}
@@ -452,7 +454,7 @@ export function Sourcing() {
                 <div key={i} className="border p-4 rounded-xl flex items-center justify-between"><span className="font-bold text-[14px] w-24">{item.n}</span><input type="range" defaultValue={item.v} className="flex-1 mx-4 accent-[#FFCB3C]"/><span className="font-bold">{item.v}%</span></div>
               ))}
             </div>
-            <div className="p-5 border-t border-[#E2E8F0] flex justify-between items-center"><span className="text-[13px] font-bold text-[#38A169]">AI 비율 적용됨</span><button onClick={() => { setBudgetModalOpen(false); toast.success("예산이 저장되었습니다."); }} className="px-6 py-2.5 bg-[#1A202C] text-white rounded-xl font-bold">저장하기</button></div>
+            <div className="p-5 border-t border-[#E2E8F0] flex justify-between items-center"><span className="text-[13px] font-bold text-[#38A169]">AI 비율 적용됨</span><button onClick={() => { setBudgetModalOpen(false); toast.info("데모 — 예산은 실제 저장·집행되지 않습니다."); }} className="px-6 py-2.5 bg-[#1A202C] text-white rounded-xl font-bold">저장하기</button></div>
           </motion.div>
         </div>
       )}
@@ -463,7 +465,7 @@ export function Sourcing() {
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white w-[500px] rounded-2xl shadow-xl overflow-hidden">
             <div className="p-5 border-b border-[#E2E8F0] flex justify-between bg-[#F7FAFC]"><h2 className="text-[16px] font-bold">CRM 알림톡 발송</h2><button onClick={() => setRetargetModalOpen(false)}><X size={20}/></button></div>
             <div className="p-6"><textarea className="w-full h-32 border rounded-xl p-4 outline-none resize-none text-[13.5px]" defaultValue="[비마트 강남점] 옹보딩님!\n우수 크루 복귀 보너스 5만원 이벤트를 진행합니다." /></div>
-            <div className="p-5 border-t flex justify-between items-center"><span className="text-[13px] font-bold text-[#718096]">비용: ₩6,780</span><button onClick={() => { setRetargetModalOpen(false); toast.success("알림톡 발송 시작!"); }} className="px-6 py-2.5 bg-[#FFCB3C] rounded-xl font-bold flex items-center gap-2"><Send size={16}/> 일괄 발송</button></div>
+            <div className="p-5 border-t flex justify-between items-center"><span className="text-[13px] font-bold text-[#718096]">비용: ₩6,780</span><button onClick={() => { setRetargetModalOpen(false); toast.info("데모 — 알림톡은 실제 발송되지 않습니다."); }} className="px-6 py-2.5 bg-[#FFCB3C] rounded-xl font-bold flex items-center gap-2"><Send size={16}/> 일괄 발송</button></div>
           </motion.div>
         </div>
       )}

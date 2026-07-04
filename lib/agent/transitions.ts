@@ -273,6 +273,16 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             });
             autoSent++;
 
+            // 가이드 자동 발송 성공 → applicants.guide_sent 동기화 (대시보드 '가이드 발송' 지표 실측 반영)
+            // 실패해도 발송 흐름은 유지 (non-fatal)
+            const { error: guideSentErr } = await supabase
+              .from("applicants")
+              .update({ guide_sent: true })
+              .eq("id", applicant_id);
+            if (guideSentErr) {
+              console.error("[transitions] guide_sent sync failed", guideSentErr);
+            }
+
             // 안내 발송됨 체크리스트 자동 true
             extraStateUpdate = {
               onboarding: { 앱설치_교육_안내발송됨: true },
