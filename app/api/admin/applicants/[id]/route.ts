@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import {
+  VALID_STATUS,
+  VALID_CALL_STATUS,
+  VALID_AVAILABILITY,
+  isValidConfirmedSlot,
+} from "@/lib/admin/applicant-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -104,38 +110,11 @@ const ALLOWED_FIELDS = new Set([
   "marketing_consent", "kakao_channel_friend",
   // PPC 상세 페이지에서 매니저가 편집하는 필드
   "baemin_id", "guide_sent", "onboarding_call_status",
+  // 가용성 축 (Phase B) — availability_updated_at은 서버가 자동 기록하므로 제외
+  "availability", "line_experience",
 ]);
 
-const VALID_STATUS = new Set([
-  "스크리닝 전",
-  "스크리닝 중",
-  "스크리닝 완료",
-  "기타",
-  "확정인력",
-  "대기자",
-  "부적합",
-  "이탈",
-]);
-
-const VALID_SLOT = new Set(["평일오전", "평일오후", "주말오전", "주말오후"]);
-
-// 온보딩 통화 상태 — UI(ApplicantDetailPanel) select 옵션과 동일 집합.
-// TEXT 자유입력 시절 쌓인 쓰레기값('o', 'o 10:00', '전화완료' 등) 재유입 방지.
-// null/빈값(미지정)은 허용.
-const VALID_CALL_STATUS = new Set([
-  "미실시",
-  "통화 완료",
-  "부재중",
-  "예정",
-  "카톡대체",
-]);
-
-// 콤마로 구분된 confirmed_slot 값 검증 — 각 토큰이 VALID_SLOT에 포함돼야 함.
-function isValidConfirmedSlot(v: unknown): boolean {
-  if (typeof v !== "string") return false;
-  const tokens = v.split(",").map((t) => t.trim()).filter(Boolean);
-  return tokens.every((t) => VALID_SLOT.has(t));
-}
+// 검증 상수·헬퍼는 벌크 라우트(bulk-status)와 공유 — lib/admin/applicant-validation.ts
 
 export async function PATCH(
   req: NextRequest,
@@ -170,6 +149,12 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    if (key === "availability" && value && !VALID_AVAILABILITY.has(value as string)) {
+      return NextResponse.json(
+        { error: `invalid availability: ${value}` },
+        { status: 400 }
+      );
+    }
     updates[key] = value === "" ? null : value;
   }
 
@@ -189,20 +174,46 @@ export async function PATCH(
 
   const supabase = createServiceClient();
 
+  // 이전 상태가 필요한 자동 기록(확정지점 채움·확정 시각·가용성 이벤트)은 1회 조회로 해결.
+  const needPrev =
+    updates.status === "확정인력" || updates.status === "대기자" || "availability" in updates;
+  let prev: {
+    status: string | null;
+    hired_at: string | null;
+    confirmed_branch: string | null;
+    branch1: string | null;
+    availability: string | null;
+  } | null = null;
+  if (needPrev) {
+    const { data: cur } = await supabase
+      .from("applicants")
+      .select("status, hired_at, confirmed_branch, branch1, availability")
+      .eq("id", id)
+      .single();
+    prev = cur ?? null;
+  }
+
   // status를 확정인력/대기자로 바꿀 때 confirmed_branch가 비어 있으면 branch1로 자동 채움.
   // 매니저가 지원자 목록에서 status만 인라인 변경했을 때 PPC 매트릭스/상세에 안 보이는 문제 방지.
-  if (updates.status === "확정인력" || updates.status === "대기자") {
-    if (!("confirmed_branch" in updates)) {
-      const { data: cur } = await supabase
-        .from("applicants")
-        .select("confirmed_branch, branch1")
-        .eq("id", id)
-        .single();
-      if (cur && !cur.confirmed_branch && cur.branch1) {
-        updates.confirmed_branch = cur.branch1;
-      }
-    }
+  if (
+    (updates.status === "확정인력" || updates.status === "대기자") &&
+    !("confirmed_branch" in updates) &&
+    prev && !prev.confirmed_branch && prev.branch1
+  ) {
+    updates.confirmed_branch = prev.branch1;
   }
+
+  // 매니저 확정 시각 — status가 처음 '확정인력'이 될 때 1회 기록 (churned_at 자동 기록과 대칭).
+  // TTF(요청→확정 리드타임) 측정 기반. 이미 값이 있으면 유지(재확정으로 덮지 않음).
+  if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && !prev.hired_at) {
+    updates.hired_at = new Date().toISOString();
+  }
+
+  // 가용성은 값이 같아도 "재확인" 자체가 신선도 신호 — 갱신 시각은 서버가 항상 기록.
+  if ("availability" in updates) {
+    updates.availability_updated_at = new Date().toISOString();
+  }
+
   const { data, error } = await supabase
     .from("applicants")
     .update(updates)
@@ -213,6 +224,16 @@ export async function PATCH(
   if (error) {
     console.error("[applicant PATCH error]", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // 가용성 변경 이력 — pool_events 기록 (신선도·신뢰 점수 근거, 실패해도 응답은 성공 유지)
+  if ("availability" in updates && prev && prev.availability !== updates.availability) {
+    const { error: evErr } = await supabase.from("pool_events").insert({
+      applicant_id: id,
+      event_type: "availability_set",
+      meta: { from: prev.availability, to: updates.availability, source: "manual" },
+    });
+    if (evErr) console.error("[applicant PATCH] pool_events insert failed", evErr);
   }
 
   return NextResponse.json({ success: true, data });

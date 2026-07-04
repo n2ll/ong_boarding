@@ -24,6 +24,51 @@ export const dynamic = "force-dynamic";
 // 수동 '지금 점검' 버튼(POST /api/admin/automation/evaluate)은 쿨다운 없이 항상 발송.
 const NOTIFY_COOLDOWN_HOURS = 24;
 
+// 가용성 휴면 전이 기준 — 마지막 재확인 후 60일 (2026-07-04 실무자 인터뷰 확정, PRODUCT_DIRECTION §6.2).
+// 휴면 = 삭제가 아니라 기본 발송 타깃 제외. 선별 재컨택·재확인으로 복구 가능.
+const DORMANT_AFTER_DAYS = 60;
+
+/**
+ * 가용성 신선도 decay — 즉시가능/이번주가능인데 60일 넘게 재확인이 없으면 휴면 전이.
+ * 전이 건은 pool_events(dormant_transition)로 이력을 남긴다.
+ */
+async function transitionDormant(
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<number> {
+  const cutoff = new Date(Date.now() - DORMANT_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data: stale, error: selErr } = await supabase
+    .from("applicants")
+    .select("id, availability")
+    .in("availability", ["즉시가능", "이번주가능"])
+    .lt("availability_updated_at", cutoff);
+  if (selErr) {
+    console.error("[automation-evaluate cron] dormant select failed", selErr);
+    return 0;
+  }
+  if (!stale || stale.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("applicants")
+    .update({ availability: "휴면", availability_updated_at: now })
+    .in("id", stale.map((r) => r.id));
+  if (updErr) {
+    console.error("[automation-evaluate cron] dormant update failed", updErr);
+    return 0;
+  }
+
+  const { error: evErr } = await supabase.from("pool_events").insert(
+    stale.map((r) => ({
+      applicant_id: r.id,
+      event_type: "dormant_transition",
+      meta: { from: r.availability, after_days: DORMANT_AFTER_DAYS },
+    }))
+  );
+  if (evErr) console.error("[automation-evaluate cron] dormant pool_events failed", evErr);
+
+  return stale.length;
+}
+
 export async function GET(req: NextRequest) {
   // 인증 — Bearer CRON_SECRET만 허용(미설정 시 fail-closed)
   const authFail = requireCronAuth(req);
@@ -31,6 +76,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const supabase = createServiceClient();
+
+    // 규칙 평가 전에 가용성 신선도 decay 먼저 — 평가·알림이 최신 상태를 보게.
+    const dormantTransitions = await transitionDormant(supabase);
+
     const config = await loadAutomationConfig(supabase);
 
     const lastNotifiedAt = await loadLastNotifiedAt(supabase);
@@ -49,6 +98,7 @@ export async function GET(req: NextRequest) {
       triggered: result.triggered_count,
       notified: result.notified,
       notify_suppressed_by_cooldown: cooldownActive && result.triggered_count > 0,
+      dormant_transitions: dormantTransitions,
       results: result.results.map((r) => ({ id: r.id, triggered: r.triggered, detail: r.detail })),
     });
   } catch (e) {

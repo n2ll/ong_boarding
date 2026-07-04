@@ -65,6 +65,8 @@ interface ApplicantFull {
   current_branch: string | null;
   start_date: string | null;
   last_message_at: string | null;
+  availability: string | null;
+  availability_updated_at: string | null;
 }
 
 interface Detail {
@@ -101,6 +103,9 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 const CALL_STATUS_OPTIONS = ["미실시", "통화 완료", "부재중", "예정", "카톡대체"];
+
+// 가용성 축 — status(채용 단계)와 별개. 빈값 = 미확인. 갱신 시각은 서버가 기록.
+const AVAILABILITY_OPTIONS = ["즉시가능", "이번주가능", "휴면"];
 
 // ──────────────────────────────────────────────────────────────────────────
 // 데이터 훅
@@ -428,6 +433,13 @@ export function ApplicantDetailContent({
                 <option value="">미지정</option>
                 {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                 {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-[#A0AEC0]">가용성</span>
+              <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
+                <option value="">미확인</option>
+                {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </label>
           </div>
