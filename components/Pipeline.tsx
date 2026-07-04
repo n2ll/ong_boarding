@@ -975,6 +975,7 @@ export function Pipeline() {
                 >
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>[긴급] 야간 파트너 충원 (단가 1.5배)</option>
+                  <option value={"[옹보딩] #{이름}님, 안녕하세요!\n지금 모집 중인 일자리를 모아 보실 수 있는 본인 전용 페이지를 보내드려요.\n\n#{맞춤링크}\n\n마음에 드는 일자리가 있으면 [관심 있어요]를 눌러주세요. 확인 후 연락드리겠습니다!"}>맞춤 공고 링크 안내 (재컨택)</option>
                   <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
                   <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
                 </select>
@@ -986,6 +987,7 @@ export function Pipeline() {
                   onChange={(e) => setBulkMsgBody(e.target.value)}
                   className="w-full h-[150px] border border-[#E2E8F0] rounded-xl p-4 text-[14px] outline-none focus:border-[#FFCB3C] resize-none leading-relaxed text-[#2D3748] bg-[#F7FAFC]"
                 />
+                <p className="mt-1.5 text-[11.5px] text-[#A0AEC0]">치환자: <b className="text-[#718096]">#{"{이름}"}</b> 수신자 이름 · <b className="text-[#718096]">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 페이지 주소</p>
               </div>
             </div>
             <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">

@@ -67,6 +67,7 @@ interface ApplicantFull {
   last_message_at: string | null;
   availability: string | null;
   availability_updated_at: string | null;
+  access_token: string | null;
 }
 
 interface Detail {
@@ -329,6 +330,21 @@ export function ApplicantDetailContent({
           </div>
           <div className="flex gap-2">
             <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
+            <button
+              onClick={async () => {
+                if (!a.access_token) return toast.error("맞춤 링크 토큰이 없어요.");
+                try {
+                  await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
+                  toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
+                } catch {
+                  toast.error("복사에 실패했어요");
+                }
+              }}
+              className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
+              title="본인 전용 맞춤 공고 페이지(/p/토큰) 링크 복사"
+            >
+              <MessageSquare size={14} /> 맞춤링크
+            </button>
             <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
             <button onClick={() => patch({ status: "부적합" }, `${a.name}님을 부적합 처리했어요.`)} disabled={busy} className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
           </div>
