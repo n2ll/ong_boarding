@@ -606,14 +606,27 @@ export function Jobs() {
     })();
   }, []);
 
-  const copyJobLink = async (job: JobRow) => {
+  // 채널별 게시 링크 — source 파라미터로 유입을 게시 채널에 귀속시킨다 (외부 게시 = 이중 인입의 ② 트랙).
+  const PUBLISH_CHANNELS: { source: string; label: string }[] = [
+    { source: "danggeun", label: "당근" },
+    { source: "albamon", label: "알바몬" },
+    { source: "jobkorea", label: "잡코리아" },
+    { source: "openchat", label: "오픈카톡(용차방)" },
+    { source: "referral", label: "지인 추천" },
+    { source: "direct", label: "기타" },
+  ];
+  const [linkMenuJobId, setLinkMenuJobId] = useState<string | null>(null);
+
+  const copyJobLink = async (job: JobRow, source: string) => {
     const base = typeof window !== "undefined" ? window.location.origin : "";
-    const params = new URLSearchParams({ source: "direct", job: job.id });
+    const params = new URLSearchParams({ source, job: job.id });
     if (job.branch && job.branch !== "-") params.set("branch", job.branch);
     const url = `${base}/apply?${params.toString()}`;
+    setLinkMenuJobId(null);
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("공고 지원 링크를 복사했어요.");
+      const label = PUBLISH_CHANNELS.find((c) => c.source === source)?.label ?? source;
+      toast.success(`${label} 게시용 지원 링크를 복사했어요. 유입이 '${label}' 채널로 집계됩니다.`);
     } catch {
       toast.error(`링크 복사 실패 — 직접 복사: ${url}`);
     }
@@ -801,9 +814,21 @@ export function Jobs() {
 
                 <div className="flex justify-end gap-1">
                   {job.recruitMode !== "internal" && (
-                    <button onClick={() => copyJobLink(job)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 지원 링크 복사">
-                      <Copy size={16} />
-                    </button>
+                    <div className="relative">
+                      <button onClick={() => setLinkMenuJobId(linkMenuJobId === job.id ? null : job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
+                        <Copy size={16} />
+                      </button>
+                      {linkMenuJobId === job.id && (
+                        <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E2E8F0] rounded-xl shadow-lg py-1 w-[170px]">
+                          <div className="px-3 py-1.5 text-[11px] font-bold text-[#A0AEC0]">게시 채널 선택</div>
+                          {PUBLISH_CHANNELS.map((ch) => (
+                            <button key={ch.source} onClick={() => copyJobLink(job, ch.source)} className="w-full text-left px-3 py-2 text-[12.5px] font-semibold text-[#4A5568] hover:bg-[#F7FAFC]">
+                              {ch.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                   <button onClick={() => openEdit(job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="공고 수정">
                     <Edit2 size={16} />
