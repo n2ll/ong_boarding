@@ -20,6 +20,7 @@ const PUBLIC_API_PREFIXES = [
   "/api/apply",
   "/api/webhooks",
   "/api/branches",
+  "/api/pool", // pull 채널 — 지원자별 무로그인 토큰(access_token)으로 자체 식별
   "/api/admin/cron", // 머신 트리거 — 자체 Bearer(CRON_SECRET)로 인증
 ];
 
@@ -65,8 +66,11 @@ export function middleware(req: NextRequest) {
     // /api/admin/*(cron 제외)만 보호. 그 외 API는 범위 밖 → 통과.
     if (!pathname.startsWith("/api/admin/")) return NextResponse.next();
   } else {
-    // 페이지: 지원 폼만 공개, 나머지(어드민 루트 포함) 보호.
-    if (pathname === "/apply" || pathname.startsWith("/apply/")) {
+    // 페이지: 지원 폼 + 맞춤 공고(pull 링크)만 공개, 나머지(어드민 루트 포함) 보호.
+    if (
+      pathname === "/apply" || pathname.startsWith("/apply/") ||
+      pathname === "/p" || pathname.startsWith("/p/")
+    ) {
       return NextResponse.next();
     }
   }

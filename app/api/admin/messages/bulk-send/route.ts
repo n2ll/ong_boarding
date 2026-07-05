@@ -36,6 +36,33 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient();
     const results: Array<{ phone: string; success: boolean; error?: string }> = [];
 
+    // 수신자별 치환 — #{이름}, #{맞춤링크}(무로그인 pull 페이지 /p/[token]).
+    // 기존엔 치환 없이 원문 그대로 발송돼 '#{이름}님' 문자가 나갔다.
+    const needsFill = text.includes("#{이름}") || text.includes("#{맞춤링크}");
+    const infoById = new Map<number, { name: string | null; access_token: string | null }>();
+    if (needsFill) {
+      const ids = recipients
+        .map((r) => r.applicant_id)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (ids.length > 0) {
+        const { data: rows } = await supabase
+          .from("applicants")
+          .select("id, name, access_token")
+          .in("id", ids);
+        for (const row of rows ?? []) {
+          infoById.set(row.id as number, {
+            name: (row.name as string | null) ?? null,
+            access_token: (row.access_token as string | null) ?? null,
+          });
+        }
+      }
+    }
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+      "https://ong-boarding-pi.vercel.app";
+    const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
+
     for (const r of recipients) {
       const phone = (r.phone || "").replace(/\D/g, "");
       if (!/^\d{10,11}$/.test(phone)) {
@@ -43,7 +70,21 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const sent = await sendSms(phone, text);
+      let personalText = text;
+      if (needsFill) {
+        const info = typeof r.applicant_id === "number" ? infoById.get(r.applicant_id) : undefined;
+        personalText = personalText.replace(/#\{이름\}/g, info?.name?.trim() || "고객");
+        if (personalText.includes("#{맞춤링크}")) {
+          if (!info?.access_token) {
+            // 링크를 만들 수 없는 수신자에게 깨진 문구를 보내지 않는다.
+            results.push({ phone, success: false, error: "맞춤링크 생성 불가(토큰 없음)" });
+            continue;
+          }
+          personalText = personalText.replace(/#\{맞춤링크\}/g, `${normalizedBase}/p/${info.access_token}`);
+        }
+      }
+
+      const sent = await sendSms(phone, personalText);
       results.push({
         phone,
         success: sent.success,
@@ -55,7 +96,7 @@ export async function POST(req: NextRequest) {
           applicant_id: r.applicant_id ?? null,
           applicant_phone: phone,
           direction: "outbound",
-          body: text,
+          body: personalText,
           status: "sent",
           sent_by: "system-bulk",
           solapi_msg_id: sent.messageId || null,

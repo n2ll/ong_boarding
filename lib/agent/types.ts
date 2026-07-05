@@ -85,6 +85,12 @@ export interface JobContext {
   pay_info?: string | null;
   /** 고용형태·보험 등 정책 안내 — 있으면 에이전트가 직접 답(없으면 pause). */
   policy_notes?: string | null;
+  /** 대표 단가 형태 (건당/일당/주급/월급/혼합/협의) — pull 공고 카드 표시 + 프롬프트 주입. */
+  pay_type?: string | null;
+  /** 대표 금액(원, pay_type 기준 단위). */
+  pay_amount?: number | null;
+  /** 공고별 AI 참고 정보 (근무·차량 정책 등 자유 기재) — branches.ai_facts의 공고 레벨 미러. */
+  ai_facts?: string | null;
 }
 
 export interface ApplicantContext {

@@ -24,6 +24,11 @@ Supabase SQL Editor에서 한 번씩 실행. 대부분 멱등(`IF NOT EXISTS` / 
 | `2026-06-revert-bulk-complete.sql` | 위 SQL revert (메시지 마커 기반 정정) | ⚠️ 1회용 |
 | `2026-06-ai-usage-tracking.sql` | AI 토큰 추적 — messages 토큰 컬럼 + `ai_usage_daily` + upsert RPC | ✅ |
 | `2026-06-sms-cost-tracking.sql` | SMS 발송 비용 추적 — `sms_type`/`sms_cost_krw` + 자동 분류 트리거 + 통합 비용 view | ✅ |
+| *(2026-06 중반~7월 초 파일 다수 이 표에 미기재 — 파일 헤더 주석 참조. 추후 백필 필요)* | | |
+| `2026-07-onboarding-call-status-normalize.sql` | 통화 상태 쓰레기값 32건 → '통화 완료' 정규화 (2026-07-04 프로덕션 적용됨) | ✅ |
+| `2026-07-applicants-availability-pool.sql` | Phase B-1: `availability`(3단계)/`access_token`(pull 링크)/`line_experience`/`hired_at` + 인덱스 (2026-07-04 적용됨) | ✅ |
+| `2026-07-pool-events.sql` | Phase B-1: 인력풀 접점 이벤트 로그 테이블 (신선도·신뢰점수 근거, RLS 잠금) (2026-07-04 적용됨) | ✅ |
+| `2026-07-jobs-pay-structure.sql` | Phase B-1: 공고 `pay_type`/`pay_amount` 구조화 + `ai_facts`(공고별 AI 참고정보) (2026-07-04 적용됨) | ✅ |
 
 ## 파일 작성 규칙
 

@@ -65,6 +65,9 @@ interface ApplicantFull {
   current_branch: string | null;
   start_date: string | null;
   last_message_at: string | null;
+  availability: string | null;
+  availability_updated_at: string | null;
+  access_token: string | null;
 }
 
 interface Detail {
@@ -101,6 +104,9 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 const CALL_STATUS_OPTIONS = ["미실시", "통화 완료", "부재중", "예정", "카톡대체"];
+
+// 가용성 축 — status(채용 단계)와 별개. 빈값 = 미확인. 갱신 시각은 서버가 기록.
+const AVAILABILITY_OPTIONS = ["즉시가능", "이번주가능", "휴면"];
 
 // ──────────────────────────────────────────────────────────────────────────
 // 데이터 훅
@@ -324,6 +330,21 @@ export function ApplicantDetailContent({
           </div>
           <div className="flex gap-2">
             <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
+            <button
+              onClick={async () => {
+                if (!a.access_token) return toast.error("맞춤 링크 토큰이 없어요.");
+                try {
+                  await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
+                  toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
+                } catch {
+                  toast.error("복사에 실패했어요");
+                }
+              }}
+              className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
+              title="본인 전용 맞춤 공고 페이지(/p/토큰) 링크 복사"
+            >
+              <MessageSquare size={14} /> 맞춤링크
+            </button>
             <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
             <button onClick={() => patch({ status: "부적합" }, `${a.name}님을 부적합 처리했어요.`)} disabled={busy} className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
           </div>
@@ -428,6 +449,13 @@ export function ApplicantDetailContent({
                 <option value="">미지정</option>
                 {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                 {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-[#A0AEC0]">가용성</span>
+              <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
+                <option value="">미확인</option>
+                {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </label>
           </div>

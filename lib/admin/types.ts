@@ -42,7 +42,14 @@ export interface Applicant {
   lat: number | null;
   lng: number | null;
   geo_precision: string | null;
+  availability: "즉시가능" | "이번주가능" | "휴면" | null;
+  availability_updated_at: string | null;
+  line_experience: string[] | null;
+  hired_at: string | null;
 }
+
+/** availability 유효값 — null(미확인)은 별도 처리 */
+export const AVAILABILITY_VALUES = ["즉시가능", "이번주가능", "휴면"] as const;
 
 export interface Message {
   id: string;

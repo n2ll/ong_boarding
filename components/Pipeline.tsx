@@ -46,6 +46,10 @@ interface CardData {
   lastActive: string;
   phone: string | null;
   agentStage: string | null;
+  status: string;
+  availability: string | null;
+  createdAtIso: string | null;
+  lastMessageAtIso: string | null;
 }
 
 const STAGE_KO: Record<string, string> = {
@@ -146,6 +150,10 @@ function toCard(a: Applicant): CardData {
     lastActive: relTime(a.last_message_at ?? a.created_at),
     phone: a.phone ?? null,
     agentStage: a.agent_stage ?? null,
+    status: a.status,
+    availability: a.availability ?? null,
+    createdAtIso: a.created_at ?? null,
+    lastMessageAtIso: a.last_message_at ?? null,
   };
 }
 
@@ -204,6 +212,13 @@ export function Pipeline() {
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
   const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");
   const [slotFilter, setSlotFilter] = useState<Set<string>>(new Set());
+  // 진행 단계(status)·가용성 필터 — 적체 트리아지의 핵심 동선 (예: '스크리닝 전'만 격리 → 벌크 처리)
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [availabilityFilter, setAvailabilityFilter] = useState<Set<string>>(new Set());
+  // 부적합/이탈/기타는 칸반 보드에서 제외되지만, 리스트에서는 토글로 복구·재검토 가능해야 한다.
+  const [showExcluded, setShowExcluded] = useState(false);
+  // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
+  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected">("recent");
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -282,8 +297,19 @@ export function Pipeline() {
 
   const allCards = columns.flatMap(c => c.cards.map(card => ({ ...card, stage: c.title, stageColor: c.color, stageId: c.id })));
 
+  // 칸반 컬럼에 매핑되지 않는 status(부적합/이탈/기타) — 리스트 뷰 '제외 인원 표시' 토글 전용.
+  // 벌크 부적합 처리의 실수 복구·재검토 동선 확보 (기존엔 화면에서 완전히 사라졌음).
+  const excludedCards = rawApplicants
+    .filter((a) => !STATUS_TO_COLUMN[a.status])
+    .map((a) => ({ ...toCard(a), stage: a.status, stageColor: "bg-[#A0AEC0]", stageId: "excluded" }));
+
+  const listCards = view === "list" && showExcluded ? [...allCards, ...excludedCards] : allCards;
+
   const availableChannels = Array.from(new Set(allCards.map((c) => c.channel))).sort();
   const SLOT_TOKENS = ["평일 오전", "평일 오후", "주말 오전", "주말 오후"];
+  const STATUS_TOKENS = ["스크리닝 전", "대기자", "스크리닝 중", "스크리닝 완료", "확정인력"];
+  const EXCLUDED_STATUS_TOKENS = ["부적합", "이탈", "기타"];
+  const AVAILABILITY_TOKENS = ["즉시가능", "이번주가능", "휴면", "미확인"];
 
   const toggleSetValue = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) =>
     setter((prev) => {
@@ -294,23 +320,37 @@ export function Pipeline() {
     });
 
   const activeFilterCount =
-    channelFilter.size + slotFilter.size + (vehicleFilter !== "all" ? 1 : 0);
+    channelFilter.size + slotFilter.size + statusFilter.size + availabilityFilter.size +
+    (vehicleFilter !== "all" ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
     setVehicleFilter("all");
     setSlotFilter(new Set());
+    setStatusFilter(new Set());
+    setAvailabilityFilter(new Set());
   };
 
   const q = query.trim().toLowerCase();
-  const filteredCards = allCards.filter((c) => {
+  const filteredCards = listCards.filter((c) => {
     if (!matchesBranchScope(c.branch, scopeBranch)) return false;
     if (q && ![c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag].some((v) => v.toLowerCase().includes(q))) return false;
     if (channelFilter.size && !channelFilter.has(c.channel)) return false;
     if (vehicleFilter === "walk" && c.tag !== "도보") return false;
     if (vehicleFilter === "vehicle" && c.tag === "도보") return false;
     if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
+    if (statusFilter.size && !statusFilter.has(c.status)) return false;
+    if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
     return true;
+  }).sort((a, b) => {
+    const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
+    const lastMsg = (c: typeof a) => (c.lastMessageAtIso ? new Date(c.lastMessageAtIso).getTime() : 0);
+    switch (sortMode) {
+      case "oldest": return created(a) - created(b);
+      case "active": return lastMsg(b) - lastMsg(a);                 // 최근 활동순 (무활동은 뒤)
+      case "neglected": return lastMsg(a) - lastMsg(b);              // 방치 오래된 순 (무활동=0 → 최상단)
+      default: return created(b) - created(a);                       // 최근 등록순 (API 기본 순서와 동일)
+    }
   });
 
   // 지도 뷰용 — 원본 지원자에 지점 스코프 + 검색어 필터 적용
@@ -419,35 +459,41 @@ export function Pipeline() {
       return;
     }
 
-    let success = 0;
-    let failed = 0;
-    // 대량 선택 시 동시 요청 폭주 방지 → 25건씩 끊어서 순차 처리
-    for (let i = 0; i < ids.length; i += 25) {
-      const chunk = ids.slice(i, i + 25);
-      const results = await Promise.all(
-        chunk.map((id) =>
-          fetch(`/api/admin/applicants/${id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status }),
-          })
-            .then((res) => res.ok)
-            .catch(() => false)
-        )
-      );
-      for (const ok of results) {
-        if (ok) success++;
-        else failed++;
+    // 벌크 전용 API — 단일 쿼리 갱신 + 부수효과(hired_at/churned_at/confirmed_branch) 서버 보장.
+    // API 상한(500건/호출)에 맞춰 나눠 호출하고 합산 리포트.
+    let requested = 0;
+    let updated = 0;
+    let apiError: string | null = null;
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const res = await fetch("/api/admin/applicants/bulk-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ids.slice(i, i + 500).map(Number), status }),
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.success) {
+          requested += json.requested as number;
+          updated += json.updated as number;
+        } else {
+          apiError = json?.error || "일괄 상태 변경에 실패했어요";
+          requested += ids.slice(i, i + 500).length;
+        }
       }
+    } catch {
+      apiError = "일괄 상태 변경에 실패했어요";
+    }
+
+    if (!apiError && updated === requested) {
+      toast.success(`선택한 ${updated}명의 지원자가 [${stageName}] 단계로 일괄 이동되었습니다.`);
+    } else if (updated > 0) {
+      toast.error(`일괄 이동 결과: ${updated}건 성공, ${requested - updated}건 실패했어요`);
+    } else {
+      toast.error(apiError ?? "일괄 상태 변경에 실패했어요");
     }
 
     // 성공/실패와 무관하게 서버 상태 기준으로 목록 재동기화 (칸반 드래그 롤백 패턴과 동일)
     loadApplicants();
-    if (failed === 0) {
-      toast.success(`선택한 ${success}명의 지원자가 [${stageName}] 단계로 일괄 이동되었습니다.`);
-    } else {
-      toast.error(`일괄 이동 결과: ${success}건 성공, ${failed}건 실패했어요`);
-    }
     setSelectedRows(new Set());
   };
 
@@ -547,6 +593,20 @@ export function Pipeline() {
 
           <div className="flex-1" />
 
+          {view === "list" && (
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+              className="px-3 py-2.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer"
+              title="리스트 정렬"
+            >
+              <option value="recent">최근 등록순</option>
+              <option value="oldest">오래된 등록순</option>
+              <option value="active">최근 활동순</option>
+              <option value="neglected">방치 오래된 순</option>
+            </select>
+          )}
+
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" placeholder="이름, 연락처, 지점, 지역 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-[#E2E8F0] rounded-lg text-[13px] outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] shadow-sm" />
@@ -600,6 +660,48 @@ export function Pipeline() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* 진행 단계 — 적체 트리아지: '스크리닝 전'만 골라 벌크 처리하는 동선 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">진행 단계</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[...STATUS_TOKENS, ...(showExcluded ? EXCLUDED_STATUS_TOKENS : [])].map((s) => {
+                        const on = statusFilter.has(s);
+                        return (
+                          <button key={s} onClick={() => toggleSetValue(setStatusFilter, s)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 가용성 — status(채용 단계)와 별개의 공급 축 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">가용성</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {AVAILABILITY_TOKENS.map((s) => {
+                        const on = availabilityFilter.has(s);
+                        return (
+                          <button key={s} onClick={() => toggleSetValue(setAvailabilityFilter, s)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#38A169] border-[#38A169] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 제외 인원 — 부적합/이탈/기타 (리스트 뷰 한정, 실수 복구·재검토용) */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">제외 인원</label>
+                    <button
+                      onClick={() => setShowExcluded((v) => !v)}
+                      className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${showExcluded ? 'bg-[#E53E3E] border-[#E53E3E] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                      title="부적합·이탈·기타 상태를 리스트 뷰에 표시합니다"
+                    >
+                      부적합·이탈 표시 {showExcluded ? "ON" : "OFF"}
+                    </button>
                   </div>
                 </div>
 
@@ -735,10 +837,17 @@ export function Pipeline() {
                             </div>
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-[#E2E8F0] text-[#4A5568]' : c.stageId === 'screening' ? 'border-[#F6E05E] text-[#D69E2E] bg-[#FEFCBF]' : c.stageId === 'interview' ? 'border-[#9AE6B4] text-[#38A169] bg-[#F0FFF4]' : 'border-[#90CDF4] text-[#3182CE] bg-[#EBF8FF]'}`}>
-                              <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
-                              {c.stage}
-                            </span>
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-[#E2E8F0] text-[#4A5568]' : c.stageId === 'screening' ? 'border-[#F6E05E] text-[#D69E2E] bg-[#FEFCBF]' : c.stageId === 'interview' ? 'border-[#9AE6B4] text-[#38A169] bg-[#F0FFF4]' : c.stageId === 'excluded' ? 'border-[#CBD5E0] text-[#718096] bg-[#F7FAFC]' : 'border-[#90CDF4] text-[#3182CE] bg-[#EBF8FF]'}`}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
+                                {c.stage}
+                              </span>
+                              {c.availability && (
+                                <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
+                                  {c.availability}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
@@ -866,6 +975,7 @@ export function Pipeline() {
                 >
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>[긴급] 야간 파트너 충원 (단가 1.5배)</option>
+                  <option value={"[옹보딩] #{이름}님, 안녕하세요!\n지금 모집 중인 일자리를 모아 보실 수 있는 본인 전용 페이지를 보내드려요.\n\n#{맞춤링크}\n\n마음에 드는 일자리가 있으면 [관심 있어요]를 눌러주세요. 확인 후 연락드리겠습니다!"}>맞춤 공고 링크 안내 (재컨택)</option>
                   <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
                   <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
                 </select>
@@ -877,6 +987,7 @@ export function Pipeline() {
                   onChange={(e) => setBulkMsgBody(e.target.value)}
                   className="w-full h-[150px] border border-[#E2E8F0] rounded-xl p-4 text-[14px] outline-none focus:border-[#FFCB3C] resize-none leading-relaxed text-[#2D3748] bg-[#F7FAFC]"
                 />
+                <p className="mt-1.5 text-[11.5px] text-[#A0AEC0]">치환자: <b className="text-[#718096]">#{"{이름}"}</b> 수신자 이름 · <b className="text-[#718096]">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 페이지 주소</p>
               </div>
             </div>
             <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">

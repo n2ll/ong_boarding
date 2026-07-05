@@ -4,6 +4,10 @@ export const SOURCE_LABELS: Record<string, string> = {
   facebook: "페이스북",
   naver: "네이버 검색",
   homepage: "홈페이지",
+  albamon: "알바몬",
+  jobkorea: "잡코리아",
+  openchat: "오픈카톡",
+  referral: "지인 추천",
   direct: "해당없음",
 };
 

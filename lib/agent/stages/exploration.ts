@@ -168,8 +168,13 @@ function formatJob(job: StageContext["job"]): string {
     `픽업지: ${job.pickup_address ?? "-"}`,
   ];
   // 급여·정책 정보가 공고에 입력돼 있으면 '명시된 사실'로 제공 → 단가/정책 질문에 직접 답(pause 불필요).
+  if (job.pay_type) {
+    const amt = typeof job.pay_amount === "number" ? ` ${job.pay_amount.toLocaleString("ko-KR")}원` : "";
+    lines.push(`대표 단가(명시됨): ${job.pay_type}${amt}`);
+  }
   if (job.pay_info && job.pay_info.trim()) lines.push(`급여·정산(명시됨): ${job.pay_info.trim()}`);
   if (job.policy_notes && job.policy_notes.trim()) lines.push(`고용·정책(명시됨): ${job.policy_notes.trim()}`);
+  if (job.ai_facts && job.ai_facts.trim()) lines.push(`공고 참고정보(명시됨): ${job.ai_facts.trim()}`);
   lines.push("", "[공고 본문]", job.body);
   return lines.join("\n");
 }
