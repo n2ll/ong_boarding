@@ -227,12 +227,25 @@ export async function POST(req: NextRequest) {
         } else {
           // DB에 시작 멘트 미저장 — 폴백으로 접수 안내
           const stored = (await getSystemMessage(supabase, "apply_received"))?.trim();
-          sendBody = stored || defaultReceived;
+          // 저장 템플릿도 placeholder 치환 필수 — 미치환 시 '{{이름}}님' 문자가 그대로 나간다
+          sendBody = stored
+            ? fillTemplate(stored, {
+                이름: inserted.name,
+                지점: inserted.branch ?? "",
+                접수일시: receivedAt,
+              })
+            : defaultReceived;
           sentByLabel = "system-auto";
         }
       } else {
         const stored = (await getSystemMessage(supabase, "apply_received"))?.trim();
-        sendBody = stored || defaultReceived;
+        sendBody = stored
+          ? fillTemplate(stored, {
+              이름: inserted.name,
+              지점: inserted.branch ?? "",
+              접수일시: receivedAt,
+            })
+          : defaultReceived;
         sentByLabel = "system-auto";
       }
 
