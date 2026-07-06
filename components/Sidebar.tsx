@@ -11,7 +11,6 @@ import {
   Inbox,
   Brain,
   Users,
-  Search,
   CheckCircle,
   Briefcase,
   Building2,
@@ -64,7 +63,6 @@ export function Sidebar() {
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
     
     { label: "인재 관리", type: "header" },
-    { label: "인력 소싱", icon: Search, path: "/sourcing" },
     { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
     { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" },
     

@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { runAgentForCandidate } from "@/lib/agent/router";
 import { triageInbound, isHardSpam } from "@/lib/agent/baemin-triage";
+import { classifyAvailabilitySignal } from "@/lib/agent/availability";
 import { sendSms } from "@/lib/solapi";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { recordUsage, toMessageTokens } from "@/lib/agent/usage";
@@ -205,6 +206,90 @@ export async function POST(req: NextRequest) {
           .eq("id", applicant.id);
       }
     );
+
+    // 가용성 신호 수집 (Phase C) — 풀 응답(활성 후보 없음) 또는 최근 14일 내 ping 발송
+    // 대상의 답장만 분류한다(비용 가드 §5.7). 실패해도 인입 처리는 깨지 않는다.
+    try {
+      const { data: recentPings } = await supabase
+        .from("pool_events")
+        .select("id, created_at")
+        .eq("applicant_id", applicant.id)
+        .eq("event_type", "ping_sent")
+        .gte("created_at", new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const lastPing = recentPings?.[0] ?? null;
+
+      if (!jc || lastPing) {
+        // ping 응답 이벤트 — 응답률·응답속도(신뢰점수 §6.4-4) 재료
+        if (lastPing) {
+          const latencyMin = Math.max(
+            0,
+            Math.round(
+              (new Date(receivedAt).getTime() - new Date(lastPing.created_at as string).getTime()) / 60_000
+            )
+          );
+          await supabase.from("pool_events").insert({
+            applicant_id: applicant.id,
+            event_type: "ping_reply",
+            meta: { message_id: String(msg.id), latency_minutes: latencyMin },
+          });
+        }
+
+        const cls = await classifyAvailabilitySignal({ body: text });
+        if (cls.usage?.model) {
+          await recordUsage(supabase, {
+            model: cls.usage.model,
+            purpose: "availability",
+            usage: cls.usage,
+          });
+        }
+        if (cls.signal !== "none" && cls.confidence >= 0.6) {
+          const { data: cur } = await supabase
+            .from("applicants")
+            .select("availability, sms_opt_out_at")
+            .eq("id", applicant.id)
+            .single();
+          const curRow = cur as { availability?: string | null; sms_opt_out_at?: string | null } | null;
+          const from = (curRow?.availability ?? null) as string | null;
+          // 강등 금지: '즉시가능'은 this_week 신호로 내려가지 않는다. 거절/수신거부만 휴면.
+          const to =
+            cls.signal === "immediate"
+              ? "즉시가능"
+              : cls.signal === "this_week"
+                ? from === "즉시가능"
+                  ? "즉시가능"
+                  : "이번주가능"
+                : "휴면";
+          const patch: Record<string, unknown> = {
+            availability: to,
+            availability_updated_at: new Date().toISOString(),
+          };
+          // 수신거부 하드 플래그 — 휴면(소프트, 재컨택 복구 가능)과 별개의 컴플라이언스 상태.
+          // 캠페인성 발송(벌크·디스패치)에서 영구 제외된다. 1:1 응대는 제한하지 않음.
+          if (cls.signal === "opt_out" && !curRow?.sms_opt_out_at) {
+            patch.sms_opt_out_at = new Date().toISOString();
+          }
+          await supabase.from("applicants").update(patch).eq("id", applicant.id);
+          if (from !== to || cls.signal === "opt_out") {
+            await supabase.from("pool_events").insert({
+              applicant_id: applicant.id,
+              event_type: "availability_set",
+              meta: {
+                from,
+                to,
+                source: "ping",
+                confidence: cls.confidence,
+                reasoning: cls.reasoning,
+                opt_out: cls.signal === "opt_out",
+              },
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[supabase-webhook] availability signal collection failed", e);
+    }
 
     // Agent 호출
     if (!jc || !jc.agent_stage) {

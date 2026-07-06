@@ -22,6 +22,7 @@ interface Applicant {
   phone: string;
   marketing_consent: boolean | null;
   current_job_id: number | null;
+  sms_opt_out_at: string | null;
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const aids = candidates.map((c) => c.applicant_id);
   const { data: applicants } = await supabase
     .from("applicants")
-    .select("id, phone, marketing_consent, current_job_id")
+    .select("id, phone, marketing_consent, current_job_id, sms_opt_out_at")
     .in("id", aids);
   const aMap = new Map<number, Applicant>(
     (applicants ?? []).map((a) => [a.id as number, a as Applicant])
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const conflicts: number[] = [];        // 다른 active job에 묶여있어 보류한 applicant
   const sentApplicantIds: number[] = [];
   // 제외 사유별 집계 — 매니저가 "왜 빠졌는지" 바로 알 수 있게
-  const skipReasons = { no_phone: 0, no_consent: 0, conflict: 0, send_fail: 0 };
+  const skipReasons = { no_phone: 0, no_consent: 0, opt_out: 0, conflict: 0, send_fail: 0 };
   const now = new Date().toISOString();
 
   for (const c of candidates) {
@@ -102,6 +103,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (a.marketing_consent === false) {
       skipped++;
       skipReasons.no_consent++;
+      continue;
+    }
+    // 수신거부 하드 가드 — '그만' 답장 등으로 기록된 지원자는 영구 제외
+    if (a.sms_opt_out_at) {
+      skipped++;
+      skipReasons.opt_out++;
       continue;
     }
     // 다른 공고 진행 중이면 보류 (정책: 한 사람 = 하나의 '진행 중' 공고)
@@ -147,6 +154,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       message_type: "sms",
       job_id: jobId,
     });
+
+    // ping 발송 이벤트 — 응답률·응답속도(신뢰점수) 분모 (bulk-send와 동일 규칙)
+    const { error: evErr } = await supabase.from("pool_events").insert({
+      applicant_id: a.id,
+      job_id: jobId,
+      event_type: "ping_sent",
+      meta: { source: "dispatch" },
+    });
+    if (evErr) console.error("[dispatch] pool_events ping_sent failed", evErr);
 
     sent++;
     sentApplicantIds.push(a.id);

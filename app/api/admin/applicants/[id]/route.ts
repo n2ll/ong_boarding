@@ -183,11 +183,13 @@ export async function PATCH(
     confirmed_branch: string | null;
     branch1: string | null;
     availability: string | null;
+    current_job_id: number | null;
+    line_experience: string[] | null;
   } | null = null;
   if (needPrev) {
     const { data: cur } = await supabase
       .from("applicants")
-      .select("status, hired_at, confirmed_branch, branch1, availability")
+      .select("status, hired_at, confirmed_branch, branch1, availability, current_job_id, line_experience")
       .eq("id", id)
       .single();
     prev = cur ?? null;
@@ -207,6 +209,22 @@ export async function PATCH(
   // TTF(요청→확정 리드타임) 측정 기반. 이미 값이 있으면 유지(재확정으로 덮지 않음).
   if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && !prev.hired_at) {
     updates.hired_at = new Date().toISOString();
+  }
+
+  // 라인 경험 자동 태깅 — 확정으로 전환될 때 진행 공고 제목을 append (§6.2: 벤치는 라인 단위, 수기 태깅 금지)
+  if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && prev.current_job_id) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("title")
+      .eq("id", prev.current_job_id)
+      .maybeSingle();
+    const title = ((job?.title as string | null) ?? "").trim();
+    if (title && !title.startsWith("__")) {
+      const existing = prev.line_experience ?? [];
+      if (!existing.includes(title)) {
+        updates.line_experience = [...existing, title];
+      }
+    }
   }
 
   // 가용성은 값이 같아도 "재확인" 자체가 신선도 신호 — 갱신 시각은 서버가 항상 기록.
