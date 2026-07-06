@@ -49,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   // 활성 실공고 (시스템 더미 공고 제외)
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at")
+    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at")
     .eq("status", "active")
     .not("title", "like", "\\_\\_%")
     .order("created_at", { ascending: false });
@@ -77,6 +77,9 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
       return {
         id: j.id,
         title: j.title,
+        // 공고 본문 — 지원자가 '관심 있음' 판단에 필요한 상세(업무 형태·일정 등).
+        // 민감정보(업체명·상세주소·연락처)는 본문 작성 단계에서 제외하는 게 원칙.
+        body: j.body,
         branch: j.branch,
         slot: j.slot,
         start_date: j.start_date,
