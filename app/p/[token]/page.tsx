@@ -26,8 +26,10 @@ interface PoolJob {
   pay_info: string | null;
   work_period: string | null;
   closes_at: string | null;
+  expired: boolean;
   distance_km: number | null;
   interested: boolean;
+  notified: boolean;
 }
 
 const PERIOD_LABEL: Record<string, string> = {
@@ -68,6 +70,7 @@ export default function PoolPage() {
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
+  const [notifyIds, setNotifyIds] = useState<Set<number>>(new Set());
 
   const toggleExpanded = (id: number) =>
     setExpandedIds((prev) => {
@@ -112,6 +115,7 @@ export default function PoolPage() {
         setName(json.name ?? null);
         setJobs(json.jobs ?? []);
         setDoneIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id)));
+        setNotifyIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id)));
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -128,6 +132,29 @@ export default function PoolPage() {
       });
       if (res.ok) {
         setDoneIds((prev) => new Set(prev).add(job.id));
+      } else {
+        const json = await res.json().catch(() => null);
+        alert(json?.error ?? "잠시 후 다시 시도해주세요.");
+      }
+    } catch {
+      alert("잠시 후 다시 시도해주세요.");
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  // 마감된 공고 카드의 "다음 급구 때 먼저 알려주세요" — 놓친 지원자의 가용성 수집
+  const expressNotify = async (job: PoolJob) => {
+    if (sendingId !== null || notifyIds.has(job.id)) return;
+    setSendingId(job.id);
+    try {
+      const res = await fetch(`/api/pool/${token}/notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: job.id }),
+      });
+      if (res.ok) {
+        setNotifyIds((prev) => new Set(prev).add(job.id));
       } else {
         const json = await res.json().catch(() => null);
         alert(json?.error ?? "잠시 후 다시 시도해주세요.");
@@ -173,8 +200,8 @@ export default function PoolPage() {
           </p>
         </header>
 
-        {jobs.length === 0 && (
-          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 text-center">
+        {jobs.filter((j) => !j.expired).length === 0 && (
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 text-center mb-4">
             <p className="text-[17px] font-bold text-[#1A202C] mb-1">지금은 모집 중인 공고가 없어요</p>
             <p className="text-[14px] text-[#718096]">새 일자리가 나오면 문자로 알려드릴게요.</p>
           </div>
@@ -182,6 +209,40 @@ export default function PoolPage() {
 
         <div className="flex flex-col gap-4">
           {jobs.map((job) => {
+            // 마감된 공고 — 조용히 사라지는 대신 '다음 기회 알림' 수집 카드로 3일간 노출
+            if (job.expired) {
+              const notified = notifyIds.has(job.id);
+              return (
+                <section key={job.id} className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-2xl p-5">
+                  <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#EDF2F7] text-[#718096] border border-[#E2E8F0]">
+                    마감됨
+                  </span>
+                  <h2 className="mt-2 text-[17px] font-extrabold text-[#718096] leading-snug">{job.title}</h2>
+                  {job.interested && (
+                    <p className="mt-2 text-[14px] font-bold text-[#38A169]">
+                      ✓ 관심을 접수하셨던 공고예요 — 매니저가 확인했어요.
+                    </p>
+                  )}
+                  <p className="mt-2 text-[14px] text-[#A0AEC0] leading-relaxed">
+                    이 공고는 마감됐어요. 비슷한 급구 건이 생기면 먼저 안내받으실 수 있어요.
+                  </p>
+                  {notified ? (
+                    <p className="mt-3 py-3 text-[15px] font-bold text-[#38A169] text-center">
+                      ✓ 다음 급구 때 먼저 안내드릴게요
+                    </p>
+                  ) : (
+                    <button
+                      onClick={() => expressNotify(job)}
+                      disabled={sendingId === job.id}
+                      className="mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#CBD5E0] text-[#4A5568] hover:bg-[#EDF2F7] active:bg-[#EDF2F7]"
+                    >
+                      {sendingId === job.id ? "접수 중…" : "다음 급구 때 먼저 알려주세요"}
+                    </button>
+                  )}
+                </section>
+              );
+            }
+
             const done = doneIds.has(job.id);
             const pay = payLabel(job);
             return (
@@ -293,7 +354,7 @@ export default function PoolPage() {
 
                 {job.closes_at && (
                   <p className="mt-3 text-[13px] text-[#A0AEC0] text-center leading-relaxed">
-                    마감시각이 지나면 이 공고는 목록에서 사라져요.
+                    마감시각이 지나면 새 지원은 받을 수 없어요.
                     <br />먼저 관심 주신 분부터 매니저가 연락드립니다.
                   </p>
                 )}

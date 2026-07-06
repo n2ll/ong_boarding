@@ -66,12 +66,27 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     .eq("applicant_id", applicant.id);
   const linkedJobIds = new Set((jcs ?? []).map((r) => r.job_id as number));
 
+  // '다음 급구 알림' 요청 이력 — 마감 카드 버튼 상태 재수화용 (새로고침 시 중복 접수 방지)
+  const { data: notifies } = await supabase
+    .from("pool_events")
+    .select("job_id")
+    .eq("applicant_id", applicant.id)
+    .eq("event_type", "notify_request");
+  const notifiedJobIds = new Set((notifies ?? []).map((r) => r.job_id as number));
+
   // 맞춤 정렬 — 좌표가 있으면 가까운 순, 없으면 최신 등록순 유지
   const hasGeo = typeof applicant.lat === "number" && typeof applicant.lng === "number";
   const nowMs = Date.now();
+  // 마감 경과 공고는 3일간 '마감됨' 카드로 노출 — "다음 급구 때 먼저 알림" 수집(두 번째 수확).
+  // 3일 지나면 완전히 제거. 마감 카드가 실제로 사라지는 걸 보여줘야 긴박감 문구가 거짓이 아니게 된다.
+  const EXPIRED_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
+  const expiredAt = (j: { closes_at: string | null }) =>
+    j.closes_at ? new Date(j.closes_at).getTime() : null;
   const list = (jobs ?? [])
-    // 모집 마감시각 경과 공고는 지원자에게 노출하지 않는다 (status와 별개의 자동 마감)
-    .filter((j) => !j.closes_at || new Date(j.closes_at as string).getTime() > nowMs)
+    .filter((j) => {
+      const e = expiredAt(j as { closes_at: string | null });
+      return e === null || e > nowMs - EXPIRED_GRACE_MS;
+    })
     .map((j) => {
       const d =
         hasGeo && typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
@@ -93,11 +108,17 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
         pay_info: j.pay_info,
         work_period: j.work_period,
         closes_at: j.closes_at,
+        expired: (() => {
+          const e = expiredAt(j as { closes_at: string | null });
+          return e !== null && e <= nowMs;
+        })(),
         distance_km: d === null ? null : Math.round(d * 10) / 10,
         interested: linkedJobIds.has(j.id as number),
+        notified: notifiedJobIds.has(j.id as number),
       };
     })
     .sort((a, b) => {
+      if (a.expired !== b.expired) return a.expired ? 1 : -1; // 진행 중 공고 먼저
       if (a.distance_km !== null && b.distance_km !== null) return a.distance_km - b.distance_km;
       if (a.distance_km !== null) return -1;
       if (b.distance_km !== null) return 1;
