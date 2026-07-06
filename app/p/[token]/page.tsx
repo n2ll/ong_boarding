@@ -63,6 +63,7 @@ export default function PoolPage() {
   const token = params?.token ?? "";
 
   const [name, setName] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<string | null>(null);
   const [jobs, setJobs] = useState<PoolJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -92,6 +93,7 @@ export default function PoolPage() {
       });
       if (res.ok) {
         setImmediateIds((prev) => new Set(prev).add(job.id));
+        setAvailability("즉시가능");
       } else {
         const json = await res.json().catch(() => null);
         alert(json?.error ?? "잠시 후 다시 시도해주세요.");
@@ -113,6 +115,7 @@ export default function PoolPage() {
         }
         const json = await res.json();
         setName(json.name ?? null);
+        setAvailability(json.availability ?? null);
         setJobs(json.jobs ?? []);
         setDoneIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id)));
         setNotifyIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id)));
@@ -331,7 +334,9 @@ export default function PoolPage() {
 
                 {done && (
                   <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
-                    {immediateIds.has(job.id) ? (
+                    {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
+                        새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
+                    {immediateIds.has(job.id) || availability === "즉시가능" ? (
                       <p className="text-[15px] font-bold text-[#38A169] text-center">
                         ⚡ 바로 시작 가능 — 확인했어요! 매니저가 참고할게요
                       </p>
