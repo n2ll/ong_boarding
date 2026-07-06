@@ -15,6 +15,7 @@ import { useParams } from "next/navigation";
 interface PoolJob {
   id: number;
   title: string;
+  body: string | null;
   branch: string | null;
   slot: string | null;
   start_date: string | null;
@@ -46,6 +47,15 @@ export default function PoolPage() {
   const [notFound, setNotFound] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+
+  const toggleExpanded = (id: number) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   useEffect(() => {
     if (!token) return;
@@ -164,6 +174,26 @@ export default function PoolPage() {
                     <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
                   </div>
                 </dl>
+
+                {job.body && (
+                  <div className="mt-3 border-t border-[#EDF2F7] pt-3">
+                    <p
+                      className={`text-[15px] text-[#4A5568] leading-relaxed whitespace-pre-line ${
+                        expandedIds.has(job.id) ? "" : "line-clamp-4"
+                      }`}
+                    >
+                      {job.body}
+                    </p>
+                    {job.body.split("\n").length > 4 && (
+                      <button
+                        onClick={() => toggleExpanded(job.id)}
+                        className="mt-1 py-1 text-[15px] font-bold text-[#B7791F]"
+                      >
+                        {expandedIds.has(job.id) ? "접기 ▲" : "자세한 내용 보기 ▼"}
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={() => expressInterest(job)}
