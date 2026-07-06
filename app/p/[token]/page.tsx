@@ -24,8 +24,27 @@ interface PoolJob {
   pay_type: string | null;
   pay_amount: number | null;
   pay_info: string | null;
+  work_period: string | null;
+  closes_at: string | null;
   distance_km: number | null;
   interested: boolean;
+}
+
+const PERIOD_LABEL: Record<string, string> = {
+  하루: "하루 단기",
+  단기: "단기",
+  정기: "정기 라인",
+};
+
+/** 마감시각 → "7/7(화) 오전 8시 마감" (KST) */
+function closesLabel(iso: string): string {
+  const kst = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  const days = ["일", "월", "화", "수", "목", "금", "토"];
+  const h = kst.getUTCHours();
+  const ampm = h < 12 ? "오전" : "오후";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  const min = kst.getUTCMinutes();
+  return `${kst.getUTCMonth() + 1}/${kst.getUTCDate()}(${days[kst.getUTCDay()]}) ${ampm} ${h12}시${min ? ` ${min}분` : ""} 마감`;
 }
 
 function payLabel(j: PoolJob): string | null {
@@ -48,6 +67,7 @@ export default function PoolPage() {
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
 
   const toggleExpanded = (id: number) =>
     setExpandedIds((prev) => {
@@ -56,6 +76,29 @@ export default function PoolPage() {
       else next.add(id);
       return next;
     });
+
+  // '바로 시작 가능' 후속 버튼 — 관심 표시 이후에만 노출되는 강한 가용성 신호
+  const expressImmediate = async (job: PoolJob) => {
+    if (sendingId !== null || immediateIds.has(job.id)) return;
+    setSendingId(job.id);
+    try {
+      const res = await fetch(`/api/pool/${token}/interest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: job.id, immediate: true }),
+      });
+      if (res.ok) {
+        setImmediateIds((prev) => new Set(prev).add(job.id));
+      } else {
+        const json = await res.json().catch(() => null);
+        alert(json?.error ?? "잠시 후 다시 시도해주세요.");
+      }
+    } catch {
+      alert("잠시 후 다시 시도해주세요.");
+    } finally {
+      setSendingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -143,7 +186,25 @@ export default function PoolPage() {
             const pay = payLabel(job);
             return (
               <section key={job.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
-                <h2 className="text-[18px] font-extrabold text-[#1A202C] leading-snug">{job.title}</h2>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {job.work_period && (
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold ${
+                        job.work_period === "정기"
+                          ? "bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]"
+                          : "bg-[#FFF9E6] text-[#B7791F] border border-[#F6E4B0]"
+                      }`}
+                    >
+                      {PERIOD_LABEL[job.work_period] ?? job.work_period}
+                    </span>
+                  )}
+                  {job.closes_at && (
+                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#FFF5F5] text-[#C53030] border border-[#FED7D7]">
+                      ⏰ {closesLabel(job.closes_at)}
+                    </span>
+                  )}
+                </div>
+                <h2 className="mt-2 text-[18px] font-extrabold text-[#1A202C] leading-snug">{job.title}</h2>
                 <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-[#4A5568]">
                   {pay && (
                     <div className="flex gap-2">
@@ -206,6 +267,36 @@ export default function PoolPage() {
                 >
                   {done ? "✓ 접수됐어요 — 매니저가 연락드릴게요" : sendingId === job.id ? "접수 중…" : "관심 있어요"}
                 </button>
+
+                {done && (
+                  <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
+                    {immediateIds.has(job.id) ? (
+                      <p className="text-[15px] font-bold text-[#38A169] text-center">
+                        ⚡ 바로 시작 가능 — 확인했어요! 매니저가 참고할게요
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-[15px] font-bold text-[#4A5568] text-center mb-2">
+                          혹시 시작일에 바로 시작도 가능하세요?
+                        </p>
+                        <button
+                          onClick={() => expressImmediate(job)}
+                          disabled={sendingId === job.id}
+                          className="w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#FFCB3C] text-[#1A202C] hover:bg-[#FFF9E6] active:bg-[#FFF9E6]"
+                        >
+                          {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {job.closes_at && (
+                  <p className="mt-3 text-[13px] text-[#A0AEC0] text-center leading-relaxed">
+                    마감시각이 지나면 이 공고는 목록에서 사라져요.
+                    <br />먼저 관심 주신 분부터 매니저가 연락드립니다.
+                  </p>
+                )}
               </section>
             );
           })}

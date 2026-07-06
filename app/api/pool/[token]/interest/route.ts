@@ -27,6 +27,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (!Number.isFinite(jobId)) {
     return NextResponse.json({ error: "job_id 필수" }, { status: 400 });
   }
+  // '바로(내일부터) 시작 가능' 후속 버튼 — 관심 표시보다 강한 가용성 신호.
+  // 여전히 '가능 의사 수집'일 뿐 확정 아님 (확정 뉘앙스 금지).
+  const immediate = body?.immediate === true;
 
   const supabase = createServiceClient();
 
@@ -41,10 +44,15 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status")
+    .select("id, title, status, closes_at")
     .eq("id", jobId)
     .maybeSingle();
-  if (!job || job.status !== "active" || String(job.title).startsWith("__")) {
+  const closed =
+    !job ||
+    job.status !== "active" ||
+    String(job.title).startsWith("__") ||
+    (job.closes_at && new Date(job.closes_at as string).getTime() <= Date.now());
+  if (closed) {
     return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
   }
 
@@ -60,9 +68,13 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     return NextResponse.json({ error: "처리 실패" }, { status: 500 });
   }
 
-  // 2) 가용성 갱신 — 관심 클릭은 '이번 주 일할 의사' 프록시
+  // 2) 가용성 갱신 — 관심 클릭은 '이번 주 일할 의사', '바로 가능' 버튼은 '즉시 투입 가능' 프록시
   const prevAvailability = applicant.availability as string | null;
-  const nextAvailability = prevAvailability === "즉시가능" ? "즉시가능" : "이번주가능";
+  const nextAvailability = immediate
+    ? "즉시가능"
+    : prevAvailability === "즉시가능"
+      ? "즉시가능"
+      : "이번주가능";
   const { error: avErr } = await supabase
     .from("applicants")
     .update({ availability: nextAvailability, availability_updated_at: new Date().toISOString() })
@@ -71,13 +83,18 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   // 3) 이벤트 기록 (non-fatal)
   const events: { applicant_id: number; job_id?: number; event_type: string; meta?: unknown }[] = [
-    { applicant_id: applicant.id as number, job_id: jobId, event_type: "interest_click" },
+    {
+      applicant_id: applicant.id as number,
+      job_id: jobId,
+      event_type: "interest_click",
+      meta: immediate ? { immediate: true } : undefined,
+    },
   ];
   if (prevAvailability !== nextAvailability) {
     events.push({
       applicant_id: applicant.id as number,
       event_type: "availability_set",
-      meta: { from: prevAvailability, to: nextAvailability, source: "pull" },
+      meta: { from: prevAvailability, to: nextAvailability, source: "pull", immediate },
     });
   }
   const { error: evErr } = await supabase.from("pool_events").insert(events);
@@ -85,7 +102,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   // 4) 매니저 알림 (non-fatal)
   await sendSlackText(
-    `💡 *맞춤 공고 관심 표시* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`
+    immediate
+      ? `⚡ *바로 시작 가능* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 "바로 시작 가능"이라고 답했어요.\n우선 컨택 후보입니다 — 파이프라인에서 확인해주세요.`
+      : `💡 *맞춤 공고 관심 표시* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`
   ).catch(() => false);
 
   return NextResponse.json({ success: true });
