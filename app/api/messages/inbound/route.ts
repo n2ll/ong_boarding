@@ -98,6 +98,7 @@ export async function POST(req: NextRequest) {
       body: text,
       status: "received",
       sent_by: payload.device_id ?? "sms-gateway",
+      device_id: payload.device_id ?? null, // 게이트웨이 직접 INSERT 시절 컬럼과의 연속성 유지
       solapi_msg_id: payload.external_id ?? null,
       message_type: "sms",
       created_at: receivedAt,
