@@ -64,7 +64,10 @@ export async function POST(req: NextRequest) {
   }
   const signature = req.headers.get("tally-signature") ?? "";
   const expected = crypto.createHmac("sha256", secret).update(raw).digest("base64");
-  if (!signature || signature !== expected) {
+  // 타이밍세이프 비교 — timingSafeEqual은 길이가 다르면 throw하므로 길이 체크 선행
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (!signature || sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 

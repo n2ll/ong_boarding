@@ -46,10 +46,11 @@ export async function POST(req: NextRequest) {
   // 대상 행을 먼저 조회해 두 그룹으로 나눠 처리한다 — 쿼리 수는 최대 3회로 고정.
   let fillBranch: { id: number; branch1: string }[] = [];
   let hiredAtIds: number[] = [];
+  let lineTagRows: { id: number; job_id: number; line_experience: string[] }[] = [];
   if (status === "확정인력" || status === "대기자") {
     const { data: rows, error: selErr } = await supabase
       .from("applicants")
-      .select("id, status, hired_at, confirmed_branch, branch1")
+      .select("id, status, hired_at, confirmed_branch, branch1, current_job_id, line_experience")
       .in("id", numIds);
     if (selErr) {
       return NextResponse.json({ error: selErr.message }, { status: 500 });
@@ -61,6 +62,14 @@ export async function POST(req: NextRequest) {
       hiredAtIds = (rows ?? [])
         .filter((r) => r.status !== "확정인력" && !r.hired_at)
         .map((r) => r.id as number);
+      // 라인 경험 자동 태깅 대상 — 확정으로 '전환'되는 행 중 진행 공고가 있는 행 (§6.2: 벤치는 라인 단위, 수기 태깅 금지)
+      lineTagRows = (rows ?? [])
+        .filter((r) => r.status !== "확정인력" && typeof r.current_job_id === "number")
+        .map((r) => ({
+          id: r.id as number,
+          job_id: r.current_job_id as number,
+          line_experience: (r.line_experience as string[] | null) ?? [],
+        }));
     }
   }
 
@@ -92,6 +101,26 @@ export async function POST(req: NextRequest) {
       .update({ confirmed_branch: branch1 })
       .eq("id", fid);
     if (fbErr) console.error("[bulk-status] confirmed_branch fill failed", fid, fbErr);
+  }
+
+  // 라인 경험 자동 태깅 — 확정 전환 행에 진행 공고 제목을 append (중복·시스템 공고 제외, non-fatal)
+  if (lineTagRows.length > 0) {
+    const jobIds = [...new Set(lineTagRows.map((r) => r.job_id))];
+    const { data: jobRows } = await supabase.from("jobs").select("id, title").in("id", jobIds);
+    const titleById = new Map<number, string>();
+    for (const j of jobRows ?? []) {
+      const t = ((j.title as string | null) ?? "").trim();
+      if (t && !t.startsWith("__")) titleById.set(j.id as number, t);
+    }
+    for (const row of lineTagRows) {
+      const title = titleById.get(row.job_id);
+      if (!title || row.line_experience.includes(title)) continue;
+      const { error: leErr } = await supabase
+        .from("applicants")
+        .update({ line_experience: [...row.line_experience, title] })
+        .eq("id", row.id);
+      if (leErr) console.error("[bulk-status] line_experience append failed", row.id, leErr);
+    }
   }
 
   return NextResponse.json({

@@ -38,21 +38,26 @@ export async function POST(req: NextRequest) {
 
     // 수신자별 치환 — #{이름}, #{맞춤링크}(무로그인 pull 페이지 /p/[token]).
     // 기존엔 치환 없이 원문 그대로 발송돼 '#{이름}님' 문자가 나갔다.
+    // 지원자 정보는 치환 여부와 무관하게 항상 로드 — 수신거부(sms_opt_out_at) 가드용.
     const needsFill = text.includes("#{이름}") || text.includes("#{맞춤링크}");
-    const infoById = new Map<number, { name: string | null; access_token: string | null }>();
-    if (needsFill) {
+    const infoById = new Map<
+      number,
+      { name: string | null; access_token: string | null; sms_opt_out_at: string | null }
+    >();
+    {
       const ids = recipients
         .map((r) => r.applicant_id)
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("applicants")
-          .select("id, name, access_token")
+          .select("id, name, access_token, sms_opt_out_at")
           .in("id", ids);
         for (const row of rows ?? []) {
           infoById.set(row.id as number, {
             name: (row.name as string | null) ?? null,
             access_token: (row.access_token as string | null) ?? null,
+            sms_opt_out_at: (row.sms_opt_out_at as string | null) ?? null,
           });
         }
       }
@@ -70,9 +75,16 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      const info = typeof r.applicant_id === "number" ? infoById.get(r.applicant_id) : undefined;
+
+      // 수신거부 하드 가드 — '그만' 답장 등으로 sms_opt_out_at이 기록된 지원자는 영구 제외.
+      if (info?.sms_opt_out_at) {
+        results.push({ phone, success: false, error: "수신거부(발송 제외)" });
+        continue;
+      }
+
       let personalText = text;
       if (needsFill) {
-        const info = typeof r.applicant_id === "number" ? infoById.get(r.applicant_id) : undefined;
         personalText = personalText.replace(/#\{이름\}/g, info?.name?.trim() || "고객");
         if (personalText.includes("#{맞춤링크}")) {
           if (!info?.access_token) {
@@ -102,6 +114,16 @@ export async function POST(req: NextRequest) {
           solapi_msg_id: sent.messageId || null,
           message_type: "sms",
         });
+
+        // ping 발송 이벤트 — 응답률(ping_reply/ping_sent)·응답속도의 분모. 지원자 연결 발송만.
+        if (typeof r.applicant_id === "number") {
+          const { error: evErr } = await supabase.from("pool_events").insert({
+            applicant_id: r.applicant_id,
+            event_type: "ping_sent",
+            meta: { source: "bulk", has_link: personalText.includes("/p/") },
+          });
+          if (evErr) console.error("[bulk-send] pool_events ping_sent failed", evErr);
+        }
       }
 
       await new Promise((r) => setTimeout(r, 150));

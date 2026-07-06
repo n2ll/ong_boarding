@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SosLedgerCard } from "@/components/SosLedgerCard";
 
 interface UrgentItem {
   id: string;
@@ -393,7 +394,10 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* 4행: 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
+      {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비 — 내부 기록 전용) */}
+      <SosLedgerCard />
+
+      {/* 5행: 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
         <div className="flex items-center justify-between mb-5">
           <div>

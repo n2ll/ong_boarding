@@ -97,12 +97,27 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     });
 
   // 열람 이벤트 — 신선도 근거 (실패해도 응답은 정상)
-  const { error: evErr } = await supabase.from("pool_events").insert({
-    applicant_id: applicant.id,
-    event_type: "link_view",
-    meta: { jobs_shown: list.length },
-  });
-  if (evErr) console.error("[pool GET] link_view insert failed", evErr);
+  // 새로고침마다 열람 수가 부풀지 않게 같은 지원자의 link_view가 최근 30분 내 있으면 기록 생략 (파일럿 KPI 열람률 보호).
+  // 인덱스: pool_events_applicant_created_idx(applicant_id, created_at DESC)가 applicant_id 등치 + created_at 범위를
+  // 커버하고 event_type은 잔여 필터로 처리됨 — 지원자당 이벤트 수가 적어 별도 인덱스 불필요.
+  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: recentView, error: dupErr } = await supabase
+    .from("pool_events")
+    .select("id")
+    .eq("applicant_id", applicant.id)
+    .eq("event_type", "link_view")
+    .gt("created_at", since)
+    .limit(1)
+    .maybeSingle();
+  if (dupErr) console.error("[pool GET] link_view dedupe check failed", dupErr);
+  if (!recentView) {
+    const { error: evErr } = await supabase.from("pool_events").insert({
+      applicant_id: applicant.id,
+      event_type: "link_view",
+      meta: { jobs_shown: list.length },
+    });
+    if (evErr) console.error("[pool GET] link_view insert failed", evErr);
+  }
 
   return NextResponse.json({
     name: applicant.name,

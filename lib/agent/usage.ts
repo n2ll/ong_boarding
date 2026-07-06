@@ -26,6 +26,7 @@ export type UsagePurpose =
   | "exploration"
   | "active"
   | "triage"
+  | "availability"
   | "job_generate"
   | "job_extract";
 
