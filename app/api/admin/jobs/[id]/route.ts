@@ -26,6 +26,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "status",
   "recruit_mode",
   "site_manager_id",
+  "work_period",
+  "closes_at",
 ]);
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -105,6 +107,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
   }
   if (update.pay_type === "") update.pay_type = null;
+  if (
+    typeof update.work_period === "string" &&
+    update.work_period !== "" &&
+    !["하루", "단기", "정기"].includes(update.work_period)
+  ) {
+    return NextResponse.json({ error: "work_period 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (update.work_period === "") update.work_period = null;
 
   // 마감 처리 — closed로 바뀌면 closed_at 자동 기록, 재개 시 해제
   if (update.status === "closed") {

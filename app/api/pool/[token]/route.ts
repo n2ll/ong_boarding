@@ -49,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   // 활성 실공고 (시스템 더미 공고 제외)
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at")
+    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at")
     .eq("status", "active")
     .not("title", "like", "\\_\\_%")
     .order("created_at", { ascending: false });
@@ -68,7 +68,10 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
 
   // 맞춤 정렬 — 좌표가 있으면 가까운 순, 없으면 최신 등록순 유지
   const hasGeo = typeof applicant.lat === "number" && typeof applicant.lng === "number";
+  const nowMs = Date.now();
   const list = (jobs ?? [])
+    // 모집 마감시각 경과 공고는 지원자에게 노출하지 않는다 (status와 별개의 자동 마감)
+    .filter((j) => !j.closes_at || new Date(j.closes_at as string).getTime() > nowMs)
     .map((j) => {
       const d =
         hasGeo && typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
@@ -88,6 +91,8 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
         pay_type: j.pay_type,
         pay_amount: j.pay_amount,
         pay_info: j.pay_info,
+        work_period: j.work_period,
+        closes_at: j.closes_at,
         distance_km: d === null ? null : Math.round(d * 10) / 10,
         interested: linkedJobIds.has(j.id as number),
       };
