@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X } from "lucide-react";
+import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
@@ -68,6 +68,10 @@ interface ConversationThreadProps {
   phone: string | null;
   /** 공고별 대화 분리 — 지정 시 해당 공고 컨텍스트의 메시지/단계만 표시 */
   jobId?: number | null;
+  /** 전역 킬스위치 상태 — true면 AI 배지 문구를 바꾸고 수동 발송 차단을 해제 */
+  globalKill?: boolean;
+  /** 수신거부 시각(sms_opt_out_at) — 있으면 헤더에 빨간 배지 표시 */
+  smsOptOutAt?: string | null;
   /** 발송·상태변경 후 부모(목록 등) 갱신용 */
   onChanged?: () => void;
   /** 폴링 주기(ms). 0이면 폴링 안 함 */
@@ -103,6 +107,8 @@ export function ConversationThread({
   applicantName,
   phone,
   jobId = null,
+  globalKill = false,
+  smsOptOutAt = null,
   onChanged,
   pollMs = 12000,
   showHeader = true,
@@ -175,7 +181,8 @@ export function ConversationThread({
   const isPaused = agentStage === "paused";
   const hasActiveFlow = agentStage != null && agentStage !== "abort";
   const isAiEnabled = hasActiveFlow && !isPaused;
-  const canSend = !isAiEnabled;
+  // 전역 킬스위치 중에는 AI가 답하지 않으므로 수동 발송을 열어 교착을 방지한다.
+  const canSend = !isAiEnabled || globalKill;
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
@@ -232,6 +239,52 @@ export function ConversationThread({
       setInputValue("");
       await loadMessages({ silent: true });
       setAgentStage("paused");
+      onChanged?.();
+    } catch {
+      toast.error("문자 발송에 실패했어요");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // §6.5 원자 동작: 발송 성공 후 인계 큐의 'AI 재개'와 동일한 재개 API를 순차 호출.
+  const handleSendAndResume = async () => {
+    if (!inputValue.trim() || sending) return;
+    if (!phone) {
+      toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/messages/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자" }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "문자 발송에 실패했어요");
+        return;
+      }
+      setInputValue("");
+      // 발송은 이미 성공한 시점 — 재개의 네트워크 예외가 바깥 catch의 "발송 실패"로 오표시되지 않게 분리
+      try {
+        const resumeRes = await fetch("/api/admin/agent/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ applicant_id: applicantId, job_id: jobId ?? undefined }),
+        });
+        const resumeJson = await resumeRes.json().catch(() => ({}));
+        if (!resumeRes.ok) {
+          toast.error(resumeJson.error || "발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+        } else {
+          setAgentStage(resumeJson.restored_stage ?? "exploration");
+          toast.success("문자를 보내고 AI 응대를 재개했어요.");
+        }
+      } catch {
+        toast.error("발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+      }
+      await loadMessages({ silent: true });
       onChanged?.();
     } catch {
       toast.error("문자 발송에 실패했어요");
@@ -315,13 +368,18 @@ export function ConversationThread({
       {/* 상태 헤더 + AI 토글 */}
       {showHeader && (
         <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {!hasActiveFlow ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#4A5568] bg-[#EDF2F7] px-3 py-1.5 rounded-lg border border-[#CBD5E0]"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#D69E2E] bg-[#FEFCBF] px-3 py-1.5 rounded-lg border border-[#F6E05E]"><User size={14} /> 수동 개입 중</span>
+            ) : globalKill ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[#B7791F] bg-[#FFFBEB] px-3 py-1.5 rounded-lg border border-[#FAF089]"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
             ) : (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#3182CE] bg-[#EBF8FF] px-3 py-1.5 rounded-lg border border-[#BEE3F8]"><Bot size={14} /> 옹봇 자동 응대 중</span>
+            )}
+            {smsOptOutAt && (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[#C53030] bg-[#FFF5F5] px-3 py-1.5 rounded-lg border border-[#FEB2B2]"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -442,6 +500,18 @@ export function ConversationThread({
               </div>
             </div>
             <button onClick={handleSendMessage} disabled={sending} className="w-[54px] h-[54px] rounded-[14px] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-[#1A202C] animate-spin" /> : <Send size={22} className="text-[#1A202C]" />}</button>
+            {isPaused && (
+              <button
+                onClick={handleSendAndResume}
+                disabled={sending}
+                title="발송 성공 후 AI 자동 응대를 즉시 재개합니다"
+                className="h-[54px] px-3 rounded-[14px] text-[12px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                보내고
+                <br />
+                AI 재개
+              </button>
+            )}
           </div>
           </>
         ) : (

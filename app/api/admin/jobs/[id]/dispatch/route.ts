@@ -19,10 +19,12 @@ import { sendSms } from "@/lib/solapi";
 
 interface Applicant {
   id: number;
+  name: string | null;
   phone: string;
   marketing_consent: boolean | null;
   current_job_id: number | null;
   sms_opt_out_at: string | null;
+  access_token: string | null;
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -77,7 +79,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const aids = candidates.map((c) => c.applicant_id);
   const { data: applicants } = await supabase
     .from("applicants")
-    .select("id, phone, marketing_consent, current_job_id, sms_opt_out_at")
+    .select("id, name, phone, marketing_consent, current_job_id, sms_opt_out_at, access_token")
     .in("id", aids);
   const aMap = new Map<number, Applicant>(
     (applicants ?? []).map((a) => [a.id as number, a as Applicant])
@@ -89,8 +91,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const conflicts: number[] = [];        // 다른 active job에 묶여있어 보류한 applicant
   const sentApplicantIds: number[] = [];
   // 제외 사유별 집계 — 매니저가 "왜 빠졌는지" 바로 알 수 있게
-  const skipReasons = { no_phone: 0, no_consent: 0, opt_out: 0, conflict: 0, send_fail: 0 };
+  const skipReasons = { no_phone: 0, no_consent: 0, opt_out: 0, conflict: 0, no_token: 0, send_fail: 0 };
   const now = new Date().toISOString();
+
+  // 수신자별 치환 — #{이름}, #{맞춤링크} (bulk-send와 동일 규칙)
+  const needsFill = job.body.includes("#{이름}") || job.body.includes("#{맞춤링크}");
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    "https://ong-boarding-pi.vercel.app";
+  const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
 
   for (const c of candidates) {
     const a = aMap.get(c.applicant_id as number);
@@ -119,7 +129,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       continue;
     }
 
-    const result = await sendSms(a.phone, job.body);
+    let personalText = job.body;
+    if (needsFill) {
+      personalText = personalText.replace(/#\{이름\}/g, a.name?.trim() || "고객");
+      if (personalText.includes("#{맞춤링크}")) {
+        if (!a.access_token) {
+          // 링크를 만들 수 없는 수신자에게 깨진 문구를 보내지 않는다.
+          skipped++;
+          skipReasons.no_token++;
+          continue;
+        }
+        personalText = personalText.replace(/#\{맞춤링크\}/g, `${normalizedBase}/p/${a.access_token}`);
+      }
+    }
+
+    const result = await sendSms(a.phone, personalText);
     if (!result.success) {
       console.error("[dispatch] SMS fail", a.id, result.error);
       skipped++;
@@ -147,7 +171,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       applicant_id: a.id,
       applicant_phone: a.phone,
       direction: "outbound",
-      body: job.body,
+      body: personalText,
       status: "sent",
       sent_by: "dispatch",
       solapi_msg_id: result.messageId ?? null,

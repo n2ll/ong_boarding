@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
+import { sourceLabel } from "@/lib/applicant-source";
 
 interface JobRow {
   id: string;
@@ -23,7 +24,8 @@ interface JobRow {
   capacity: number;
   automation: boolean;
   created: string;
-  deadline: string;
+  workPeriod: string | null;
+  closesAt: string | null;
 }
 
 interface ApiJob {
@@ -38,6 +40,8 @@ interface ApiJob {
   capacity: number | null;
   created_at: string;
   closed_at: string | null;
+  work_period: string | null;
+  closes_at: string | null;
   counts: Record<string, number>;
 }
 
@@ -76,11 +80,6 @@ interface PoolApplicant {
   source: string | null;
   current_job_id: number | null;
 }
-
-const CAND_SOURCE_LABEL: Record<string, string> = {
-  danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",
-  manual: "수기", direct: "직접지원", facebook: "페이스북", naver: "네이버",
-};
 
 const SLOT_KEYS = [
   { key: "평일오전", label: "평일 오전" },
@@ -145,8 +144,31 @@ function toJobRow(j: ApiJob): JobRow {
     capacity: j.capacity ?? 0,
     automation: j.status === "active",
     created: fmtDate(j.created_at),
-    deadline: j.closed_at ? fmtDate(j.closed_at) : "상시 모집",
+    workPeriod: j.work_period ?? null,
+    closesAt: j.closes_at ?? null,
   };
+}
+
+// 모집 기간(work_period) 배지 — 하루/단기=노랑, 정기=초록
+const PERIOD_BADGE: Record<string, string> = {
+  하루: "bg-[#FFFBEC] text-[#B7791F] border-[#FAF089]",
+  단기: "bg-[#FFFBEC] text-[#B7791F] border-[#FAF089]",
+  정기: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]",
+};
+
+// 마감시각(closes_at) → "M/D HH시 마감" (로컬=KST)
+function fmtCloses(iso: string): string {
+  const d = new Date(iso);
+  const m = d.getMinutes();
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}시${m ? ` ${m}분` : ""} 마감`;
+}
+
+// ISO → datetime-local 입력값 (로컬 기준)
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export function Jobs() {
@@ -170,7 +192,9 @@ export function Jobs() {
   const [newJobCapacity, setNewJobCapacity] = useState(1);
   const [newJobPayType, setNewJobPayType] = useState("");
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode } | null>(null);
+  const [newJobPeriod, setNewJobPeriod] = useState("");
+  const [newJobClosesAt, setNewJobClosesAt] = useState("");
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -252,7 +276,9 @@ export function Jobs() {
         const reasons = [
           r.conflict ? `다른 공고 진행 중 ${r.conflict}명` : "",
           r.no_consent ? `수신 미동의 ${r.no_consent}명` : "",
+          r.opt_out ? `수신거부 ${r.opt_out}명` : "",
           r.no_phone ? `연락처 없음 ${r.no_phone}명` : "",
+          r.no_token ? `맞춤링크 토큰 없음 ${r.no_token}명` : "",
           r.send_fail ? `발송 실패 ${r.send_fail}명` : "",
         ].filter(Boolean);
         toast.success(`${json.sent}명에게 발송 완료`, {
@@ -448,6 +474,9 @@ export function Jobs() {
           capacity: newJobCapacity,
           pay_type: newJobPayType || null,
           pay_amount: newJobPayAmount === "" ? null : Number(newJobPayAmount),
+          // datetime-local 값은 로컬(KST) 기준 → ISO(UTC)로 변환해 전송. 빈 값이면 미전송.
+          ...(newJobPeriod ? { work_period: newJobPeriod } : {}),
+          ...(newJobClosesAt ? { closes_at: new Date(newJobClosesAt).toISOString() } : {}),
         }),
       });
       const json = await res.json();
@@ -465,6 +494,8 @@ export function Jobs() {
       setNewJobCapacity(1);
       setNewJobPayType("");
       setNewJobPayAmount("");
+      setNewJobPeriod("");
+      setNewJobClosesAt("");
       await loadJobs();
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -485,7 +516,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external" });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "" });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -509,6 +540,8 @@ export function Jobs() {
         payAmount: typeof j.pay_amount === "number" ? j.pay_amount : "",
         aiFacts: j.ai_facts ?? "",
         recruitMode: asRecruitMode(j.recruit_mode),
+        workPeriod: j.work_period ?? "",
+        closesAt: isoToLocalInput(j.closes_at ?? null),
       });
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -548,6 +581,8 @@ export function Jobs() {
           pay_amount: editForm.payAmount === "" ? null : Number(editForm.payAmount),
           ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
+          work_period: editForm.workPeriod || null,
+          closes_at: editForm.closesAt ? new Date(editForm.closesAt).toISOString() : null,
         }),
       });
       const json = await res.json();
@@ -740,7 +775,12 @@ export function Jobs() {
             filteredJobs.map(job => (
               <div key={job.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
-                  <div onClick={() => openCandidates(job)} className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div onClick={() => openCandidates(job)} className="text-[15px] font-bold text-[#1A202C] truncate cursor-pointer hover:underline">{job.title}</div>
+                    {job.workPeriod && PERIOD_BADGE[job.workPeriod] && (
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</span>
                     <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
@@ -773,7 +813,13 @@ export function Jobs() {
 
                 <div className="flex flex-col gap-1 text-[13px] text-[#4A5568]">
                   <div>{job.created} ~</div>
-                  <div className="font-bold text-[#2D3748]">{job.deadline}</div>
+                  {!job.closesAt ? (
+                    <div className="font-bold text-[#2D3748]">상시</div>
+                  ) : new Date(job.closesAt).getTime() <= Date.now() ? (
+                    <span className="w-fit px-1.5 py-0.5 rounded text-[11px] font-bold bg-[#F1F4F8] text-[#718096] border border-[#E2E8F0]">마감됨</span>
+                  ) : (
+                    <div className={`font-bold ${new Date(job.closesAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000 ? "text-[#DD6B20]" : "text-[#2D3748]"}`}>{fmtCloses(job.closesAt)}</div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -815,8 +861,8 @@ export function Jobs() {
                 <div className="flex justify-end gap-1">
                   {job.recruitMode !== "internal" && (
                     <div className="relative">
-                      <button onClick={() => setLinkMenuJobId(linkMenuJobId === job.id ? null : job.id)} className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
-                        <Copy size={16} />
+                      <button onClick={() => setLinkMenuJobId(linkMenuJobId === job.id ? null : job.id)} className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
+                        <Copy size={14} /> 게시 링크
                       </button>
                       {linkMenuJobId === job.id && (
                         <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E2E8F0] rounded-xl shadow-lg py-1 w-[170px]">
@@ -950,7 +996,7 @@ export function Jobs() {
             </div>
 
             <div className="flex items-center justify-between gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <MapPin size={15} className="text-[#A0AEC0]" />
                 <select
                   value={newJobBranchId}
@@ -999,6 +1045,24 @@ export function Jobs() {
                     title="대표 금액(원)"
                   />
                 )}
+                <select
+                  value={newJobPeriod}
+                  onChange={(e) => setNewJobPeriod(e.target.value)}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
+                  title="모집 기간"
+                >
+                  <option value="">기간 미지정</option>
+                  <option value="하루">하루(당일 단기)</option>
+                  <option value="단기">단기(며칠~몇 주)</option>
+                  <option value="정기">정기(상시 라인)</option>
+                </select>
+                <input
+                  type="datetime-local"
+                  value={newJobClosesAt}
+                  onChange={(e) => setNewJobClosesAt(e.target.value)}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
+                  title="모집 마감시각 — 지나면 지원자 페이지에서 자동 마감"
+                />
               </div>
               <div className="flex items-center gap-3">
               <button
@@ -1073,6 +1137,22 @@ export function Jobs() {
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 기간</label>
+                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                      <option value="">미지정</option>
+                      <option value="하루">하루(당일 단기)</option>
+                      <option value="단기">단기(며칠~몇 주)</option>
+                      <option value="정기">정기(상시 라인)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 마감시각</label>
+                    <input type="datetime-local" value={editForm.closesAt} onChange={(e) => setEditForm({ ...editForm, closesAt: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                    <p className="text-[11px] text-[#A0AEC0] mt-1">지나면 지원자 페이지에서 자동 마감</p>
                   </div>
                 </div>
                 <div>
@@ -1176,7 +1256,7 @@ export function Jobs() {
                       <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5">유입 채널</div>
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(channelCounts).sort((a, b) => b[1] - a[1]).map(([src, n]) => (
-                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-[#E2E8F0] text-[#4A5568]">{CAND_SOURCE_LABEL[src] ?? src} {n}</span>
+                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-[#E2E8F0] text-[#4A5568]">{sourceLabel(src)} {n}</span>
                         ))}
                       </div>
                     </div>
@@ -1219,7 +1299,7 @@ export function Jobs() {
                                 <div className="w-9 h-9 rounded-lg bg-[#EDF2F7] text-[#4A5568] flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
                                 <div className="min-w-0">
                                   <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
-                                  <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? (CAND_SOURCE_LABEL[a.source] ?? a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
+                                  <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
                                 </div>
                               </div>
                               {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
@@ -1295,7 +1375,7 @@ export function Jobs() {
                         {p.name ?? `#${p.id}`}
                         {conflict && <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFAF0] text-[#DD6B20] border border-[#FEEBC8]">다른 공고 진행 중</span>}
                       </div>
-                      <div className="text-[11.5px] text-[#718096] truncate">{(p.source ? (CAND_SOURCE_LABEL[p.source] ?? p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
+                      <div className="text-[11.5px] text-[#718096] truncate">{(p.source ? sourceLabel(p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
                     </div>
                   </button>
                 );

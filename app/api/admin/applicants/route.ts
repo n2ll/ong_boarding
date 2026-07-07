@@ -40,6 +40,8 @@ const LIST_COLUMNS = [
   "confirmed_slot", "confirmed_branch", "current_branch", "churned_at",
   "baemin_id", "guide_sent", "onboarding_call_status", "kakao_channel_friend",
   "bname", "sigungu", "sido", "lat", "lng", "geo_precision",
+  // 파일럿 축 — 가용성 필터·수신거부 표시·임포트 구분에 필수 (없으면 UI 필터가 조용히 0명이 된다)
+  "availability", "availability_updated_at", "sms_opt_out_at", "airtable_record_id",
 ].join(", ");
 
 export async function GET(req: NextRequest) {

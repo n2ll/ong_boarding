@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
-import { Search, Plus, X } from "lucide-react";
+import Link from "next/link";
+import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
@@ -21,6 +22,7 @@ interface Applicant {
   branch1?: string | null;
   created_at?: string | null;
   last_message_at?: string | null;
+  sms_opt_out_at?: string | null;
 }
 
 interface ActiveJob {
@@ -122,7 +124,6 @@ export function LiveConsole() {
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<"all" | "intervention" | "confirm">("all");
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
-  const [newMsgModalOpen, setNewMsgModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string }>>({});
@@ -162,6 +163,11 @@ export function LiveConsole() {
   // 확정 대기 큐(온보딩 완료·미확정) SWR.
   const { data: confirmData, mutate: mutateConfirm } = useSWR<{ pending?: ConfirmPending[] }>("/api/admin/confirm/pending");
   const confirmPending = useMemo(() => confirmData?.pending ?? [], [confirmData]);
+
+  // 전역 킬스위치 상태 — 꺼져 있으면 목록 상단 경고 배너 + 스레드 배지·입력창 동작이 바뀐다.
+  // env_forced(AGENT_DISABLED=1)도 토글과 무관하게 항상 중단이므로 함께 '전역 중지'로 취급.
+  const { data: killData } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  const globalKill = killData?.disabled === true || killData?.env_forced === true;
 
   // 발송 미리보기 모달(내용·비용 확인 후 발송) — 첫날규칙/만남장소 공용
   const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: "venue" | "first_day" } | null>(null);
@@ -485,10 +491,21 @@ export function LiveConsole() {
     <div className="flex h-full overflow-hidden bg-white">
       {/* Left Sidebar */}
       <div className="w-[320px] flex-shrink-0 border-r border-[#E2E8F0] flex flex-col bg-[#F7FAFC]">
+        {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
+        {globalKill && (
+          <div className="shrink-0 bg-[#FFFBEB] border-b border-[#F6E05E] px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-[#B7791F] leading-snug">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              AI 전역 응답이 꺼져 있습니다 — 수동 응대만 발송됩니다 (
+              <Link href="/brain" className="underline underline-offset-2">에이전트 두뇌</Link>
+              에서 변경)
+            </span>
+          </div>
+        )}
         <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-4">
-          <button onClick={() => setNewMsgModalOpen(true)} className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2.5 rounded-xl text-[13px] font-bold transition-colors flex items-center justify-center gap-2">
-            <Plus size={16} /> 전체 DB에서 새 문자 보내기
-          </button>
+          <Link href="/pipeline" className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2.5 rounded-xl text-[13px] font-bold transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+            대량 발송은 파이프라인에서 <ArrowRight size={16} />
+          </Link>
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
@@ -716,6 +733,8 @@ export function LiveConsole() {
             applicantName={activeChat.name}
             phone={activeChat.phone}
             jobId={selectedJobId}
+            globalKill={globalKill}
+            smsOptOutAt={activeChat.sms_opt_out_at ?? null}
             onChanged={handleChanged}
             className="flex-1 min-h-0"
           />
@@ -734,24 +753,6 @@ export function LiveConsole() {
             variant="panel"
             onChanged={handleChanged}
           />
-        </div>
-      )}
-
-      {/* New Message Modal */}
-      {newMsgModalOpen && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white w-[500px] rounded-2xl shadow-xl flex flex-col overflow-hidden">
-            <div className="p-5 border-b border-[#E2E8F0] flex justify-between items-center bg-[#F7FAFC]">
-              <h2 className="text-[16px] font-bold text-[#1A202C]">전체 DB 대상 문자 발송</h2>
-              <button onClick={() => setNewMsgModalOpen(false)}><X size={20} className="text-[#A0AEC0]" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="text-[13px] text-[#718096]">대량 발송은 별도 일괄 발송 화면에서 진행됩니다. 개별 발송은 좌측 대화방을 선택해 사용하세요.</div>
-            </div>
-            <div className="p-4 border-t border-[#E2E8F0] bg-white flex justify-end">
-              <button onClick={() => setNewMsgModalOpen(false)} className="bg-[#1A202C] text-white px-5 py-2 rounded-lg text-sm font-bold">닫기</button>
-            </div>
-          </div>
         </div>
       )}
 
