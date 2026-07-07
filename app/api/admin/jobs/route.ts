@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -92,6 +92,8 @@ export async function POST(req: NextRequest) {
     recruit_mode,
     site_manager_id,
     created_by,
+    work_period,
+    closes_at,
   } = body as {
     title?: string;
     body?: string;
@@ -112,6 +114,8 @@ export async function POST(req: NextRequest) {
     recruit_mode?: string;
     site_manager_id?: number | null;
     created_by?: string | null;
+    work_period?: string | null;
+    closes_at?: string | null;
   };
 
   if (!title?.trim() || !jobBody?.trim()) {
@@ -128,6 +132,9 @@ export async function POST(req: NextRequest) {
   }
   if (pay_type && !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(pay_type)) {
     return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (work_period && !["하루", "단기", "정기"].includes(work_period)) {
+    return NextResponse.json({ error: "work_period 값이 잘못되었습니다." }, { status: 400 });
   }
 
   const supabase = createServiceClient();
@@ -170,6 +177,8 @@ export async function POST(req: NextRequest) {
       recruit_mode: recruit_mode ?? "external",
       site_manager_id: site_manager_id ?? null,
       created_by: created_by ?? null,
+      work_period: work_period || null,
+      closes_at: closes_at ?? null,
     })
     .select()
     .single();

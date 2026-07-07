@@ -9,6 +9,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   openchat: "오픈카톡",
   referral: "지인 추천",
   direct: "해당없음",
+  manual: "수기",
+  danggeun_practice: "당근(연습)",
 };
 
 export function sourceLabel(source: string | null | undefined): string {

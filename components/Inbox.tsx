@@ -2,6 +2,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { Inbox as InboxIcon, RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "./ConfirmDialog";
 
 interface PendingMessage {
   id: string;
@@ -27,9 +28,23 @@ export function Inbox() {
   const messages = data?.data ?? [];
   const loading = isLoading && messages.length === 0;
   const [busyId, setBusyId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const classify = async (msg: PendingMessage, action: "baemin" | "other") => {
     if (busyId) return;
+    // 배민 분류는 등록 즉시 AI 스크리닝 문자가 나가므로 발송 사실을 확인받는다.
+    if (action === "baemin") {
+      if (!(await confirm({
+        title: `${msg.applicant_phone} — 배민 지원자로 분류할까요?`,
+        description: "지원자로 등록되고 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
+        confirmText: "분류하고 발송",
+      }))) return;
+    } else {
+      if (!(await confirm({
+        title: "기타로 분류할까요?",
+        description: "응대 대상에서 제외 처리됩니다.",
+      }))) return;
+    }
     setBusyId(msg.id);
     try {
       const res = await fetch(`/api/admin/inbox/${msg.id}/classify`, {

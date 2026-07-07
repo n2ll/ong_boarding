@@ -30,6 +30,18 @@ interface AppRow {
   onboarding_call_status?: string | null;
   sigungu?: string | null;
   sido?: string | null;
+  airtable_record_id?: string | null;
+}
+
+interface SosOpenRow {
+  id: number;
+  created_at: string;
+}
+
+interface HeartbeatRow {
+  device_id: string;
+  last_seen_at: string;
+  pending_count: number;
 }
 
 export function Dashboard() {
@@ -38,6 +50,12 @@ export function Dashboard() {
   // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
   const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
+  // 헤더 벨·사이드바 배지와 동일 소스 — 인계 대기(paused)·AI 전역 중단 카운트
+  const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");
+  // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
+  const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
+  // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
+  const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat");
   const rawApps = appsRes?.data ?? [];
   const inboxCount = inboxRes?.data?.length ?? 0;
   // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
@@ -67,19 +85,23 @@ export function Dashboard() {
     [rawApps, scopeBranch]
   );
 
+  // Airtable 일괄 임포트분(airtable_record_id 보유)은 유입 시점이 인입 시각이 아니라
+  // 임포트 시각이므로 '신규 유입(금일)'·14일 추이 집계를 오염시킨다 → 유입 지표에서만 제외
+  const liveApps = useMemo(() => apps.filter((a) => !a.airtable_record_id), [apps]);
+
   const stats = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const by = (s: string) => apps.filter((a) => a.status === s).length;
     return {
-      today: apps.filter((a) => (a.created_at ?? "").slice(0, 10) === todayStr).length,
+      today: liveApps.filter((a) => (a.created_at ?? "").slice(0, 10) === todayStr).length,
       screening: by("스크리닝 중"),
       interview: by("스크리닝 완료"),
       passed: by("확정인력"),
       total: apps.length,
     };
-  }, [apps]);
+  }, [apps, liveApps]);
 
-  // 최근 14일 일별 신규 유입 추이 (created_at 기준, stats.today와 동일하게 UTC 일자 슬라이스)
+  // 최근 14일 일별 신규 유입 추이 (created_at 기준, stats.today와 동일하게 UTC 일자 슬라이스 · 임포트 제외)
   const trend = useMemo(() => {
     const days: { key: string; label: string; 유입: number }[] = [];
     const now = new Date();
@@ -90,12 +112,12 @@ export function Dashboard() {
       days.push({ key, label: `${d.getMonth() + 1}/${d.getDate()}`, 유입: 0 });
     }
     const idx = new Map(days.map((d, i) => [d.key, i]));
-    for (const a of apps) {
+    for (const a of liveApps) {
       const i = idx.get((a.created_at ?? "").slice(0, 10));
       if (i !== undefined) days[i].유입 += 1;
     }
     return days;
-  }, [apps]);
+  }, [liveApps]);
 
   const trend7Sum = useMemo(() => trend.slice(7).reduce((s, d) => s + d.유입, 0), [trend]);
 
@@ -161,17 +183,39 @@ export function Dashboard() {
     return { top, unknownCount: unknown, max: top[0]?.count ?? 1 };
   }, [apps]);
 
+  // 죽은 unread_count 대신 /notifications counts(인계 대기·AI 중단)와 /sos open(진행 중 긴급 건) 기반
+  const notiCounts = notiRes?.counts;
+  const sosOpen = sosRes?.open ?? [];
   const urgent = useMemo(() => {
-    const interventions = apps.filter((a) => (a.unread_count ?? 0) > 0).length;
     const u: UrgentItem[] = [];
+    if (notiCounts?.aiDisabled) {
+      u.push({ id: "ai-off", tone: "red", title: "AI 자동응대가 중단된 상태예요", desc: "전역 응답 스위치가 꺼져 있어 신규 인입에 자동 응대하지 않습니다.", cta: "자동화 현황으로", path: "/automation" });
+    }
+    if (sosOpen.length > 0) {
+      const oldest = Math.min(...sosOpen.map((s) => new Date(s.created_at).getTime()));
+      const min = Math.max(0, Math.floor((nowTick - oldest) / 60_000));
+      const elapsed = min < 60 ? `${min}분` : `${Math.floor(min / 60)}시간`;
+      u.push({ id: "sos", tone: "red", title: `진행 중 긴급 건 ${sosOpen.length}건 · 최장 ${elapsed} 경과`, desc: "결원·증차 긴급 건이 해결 대기 중이에요.", cta: "긴급 건 기록으로", path: "#sos-ledger" });
+    }
     if (inboxCount > 0) {
       u.push({ id: "inbox", tone: "red", title: `미분류 인박스 ${inboxCount}건`, desc: "배민 지원자/기타 분류가 필요한 인입 메시지가 있어요.", cta: "분류하러 가기", path: "/inbox" });
     }
-    if (interventions > 0) {
-      u.push({ id: "live", tone: "amber", title: `수동 개입 필요 ${interventions}건`, desc: "미답장 상태인 지원자 대화가 있어요. 직접 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
+    if ((notiCounts?.interventions ?? 0) > 0) {
+      u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live" });
     }
     return u;
-  }, [apps, inboxCount]);
+  }, [notiCounts, sosOpen, inboxCount, nowTick]);
+
+  // SMS 게이트웨이 상태 칩 — 최신 기기 1건 기준. 10분 무신호 또는 발송 대기 적체 시 경고색.
+  const gateway = useMemo(() => {
+    if (!hbRes) return null; // 첫 로딩 전엔 칩 미노출(깜빡임 방지)
+    const latest = hbRes.data?.[0];
+    if (!latest) return { label: "SMS 게이트웨이 신호 없음", bad: true };
+    const min = Math.floor(Math.max(0, nowTick - new Date(latest.last_seen_at).getTime()) / 60_000);
+    const ago = min < 1 ? "방금" : min < 60 ? `${min}분 전` : `${Math.floor(min / 60)}시간 전`;
+    const pending = latest.pending_count ?? 0;
+    return { label: `SMS 게이트웨이 ${ago} · 대기 ${pending}건`, bad: min > 10 || pending > 0 };
+  }, [hbRes, nowTick]);
 
   if (showSkeleton) return <DashboardSkeleton />;
 
@@ -194,6 +238,16 @@ export function Dashboard() {
               </span>
               <span className="text-white/30">|</span>
               <span>최근 동기화: {syncLabel}</span>
+              {gateway && (
+                <>
+                  <span className="text-white/30">|</span>
+                  {/* SMS 게이트웨이(법인폰) 하트비트 칩 — 인입이 조용한 게 평화인지 장애인지 구분 */}
+                  <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[12px] font-semibold ${gateway.bad ? "bg-[#E53E3E]/15 border-[#E53E3E]/40 text-[#FEB2B2]" : "bg-[#48BB78]/10 border-[#48BB78]/30 text-[#9AE6B4]"}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${gateway.bad ? "bg-[#E53E3E] animate-pulse" : "bg-[#48BB78]"}`}></span>
+                    {gateway.label}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
@@ -230,7 +284,7 @@ export function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><TrendingUp size={15} className="text-[#3182CE]" /> 최근 14일 신규 유입 추이</h2>
-              <div className="text-[12px] text-[#718096] mt-0.5">다채널 인입 지원자의 일별 흐름</div>
+              <div className="text-[12px] text-[#718096] mt-0.5">다채널 인입 지원자의 일별 흐름 · 실시간 인입 기준(임포트 제외)</div>
             </div>
             <div className="text-right">
               <div className="text-[11px] font-bold text-[#A0AEC0]">최근 7일 합계</div>
@@ -274,7 +328,7 @@ export function Dashboard() {
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
                 <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">미분류 인박스·미답장 개입이 발생하면 여기 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">미분류 인박스·인계 대기·긴급 건이 발생하면 여기 표시됩니다.</div>
                 <div className="w-full mt-5 flex flex-col gap-2">
                   {[
                     { label: "파이프라인 점검", path: "/pipeline" },
@@ -294,7 +348,12 @@ export function Dashboard() {
             {urgent.map((item) => (
               <div
                 key={item.id}
-                onClick={() => router.push(item.path)}
+                // '#앵커' 경로는 라우팅 대신 같은 화면의 카드로 스크롤 (긴급 건 → SosLedgerCard)
+                onClick={() =>
+                  item.path.startsWith("#")
+                    ? document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    : router.push(item.path)
+                }
                 className={`p-4 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-[#FEB2B2] bg-[#FFF5F5] hover:border-[#FC8181]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
               >
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${item.tone === "red" ? "bg-white text-[#E53E3E] border-[#FEB2B2]" : "bg-[#F7FAFC] text-[#4A5568] border-[#E2E8F0]"}`}>
@@ -313,7 +372,12 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* 3행: 전환 퍼널(2/3) + 스크리닝·온보딩 현황(1/3) — 2행과 동일 grid로 컬럼 정렬 */}
+      {/* 3행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
+      <div id="sos-ledger" className="scroll-mt-6">
+        <SosLedgerCard />
+      </div>
+
+      {/* 4행: 전환 퍼널(2/3) + 스크리닝·온보딩 현황(1/3) — 2행과 동일 grid로 컬럼 정렬 */}
       <div className="grid grid-cols-3 gap-6 items-stretch">
         {/* 전환 퍼널 (가로형 · 단계 간 전환율 강조) */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="col-span-2 bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
@@ -394,9 +458,6 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비 — 내부 기록 전용) */}
-      <SosLedgerCard />
-
       {/* 5행: 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
         <div className="flex items-center justify-between mb-5">
@@ -459,11 +520,11 @@ function DashboardSkeleton() {
         <Skeleton className="col-span-2 h-[280px] rounded-[16px]" />
         <Skeleton className="h-[280px] rounded-[16px]" />
       </div>
+      <Skeleton className="h-[220px] rounded-[16px]" />
       <div className="grid grid-cols-3 gap-6 items-stretch">
         <Skeleton className="col-span-2 h-[240px] rounded-[16px]" />
         <Skeleton className="h-[240px] rounded-[16px]" />
       </div>
-      <Skeleton className="h-[220px] rounded-[16px]" />
     </div>
   );
 }

@@ -5,20 +5,20 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
-  Activity,
-  BarChart2,
+  // 파일럿 기간 숨김 메뉴의 아이콘 — navItems 복원 시 함께 주석 해제
+  // Activity,
+  // BarChart2,
   MessageSquare,
   Inbox,
-  Brain,
+  // Brain,
   Users,
-  CheckCircle,
+  // CheckCircle,
   Briefcase,
-  Building2,
-  MapPin,
-  LayoutGrid,
-  Shield,
-  Settings,
-  ChevronRight
+  // Building2,
+  // MapPin,
+  // LayoutGrid,
+  // Shield,
+  Settings
 } from "lucide-react";
 import { LogoMark } from "./Logo";
 
@@ -26,7 +26,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [inbox, setInbox] = useState(0);
   const [interventions, setInterventions] = useState(0);
-  const [aiDisabled, setAiDisabled] = useState(false);
+  // const [aiDisabled, setAiDisabled] = useState(false); // 파일럿 기간 숨김('자동화 현황' 배지 전용) — 복원 시 주석 해제
 
   // 헤더 알림과 동일 소스(/notifications)에서 실시간 카운트를 가져와 배지에 반영한다.
   useEffect(() => {
@@ -38,7 +38,7 @@ export function Sidebar() {
         if (!alive) return;
         setInbox(json.counts?.inbox ?? 0);
         setInterventions(json.counts?.interventions ?? 0);
-        setAiDisabled(Boolean(json.counts?.aiDisabled));
+        // setAiDisabled(Boolean(json.counts?.aiDisabled)); // 파일럿 기간 숨김 — 복원 시 주석 해제
       } catch {
         /* 배지 표시용이라 실패 시 0 유지 */
       }
@@ -51,27 +51,29 @@ export function Sidebar() {
     };
   }, []);
 
+  // 파일럿 기간 숨김: 실사용 5탭(대시보드·인재풀/파이프라인·채용공고·실시간 응대·미분류 인박스)+설정만 노출.
+  // 삭제 아님 — 파일럿 종료 후 복원 대비 주석 보존 (아이콘 import·aiDisabled 상태도 함께 복원)
   const navItems = [
     { label: "개요", type: "header" },
     { label: "대시보드", icon: LayoutDashboard, path: "/" },
-    { label: "자동화 현황", icon: Activity, path: "/automation", badge: aiDisabled ? "dot-red" : "dot-green" },
-    { label: "리포트 · 분석", icon: BarChart2, path: "/reports" },
-    
+    // { label: "자동화 현황", icon: Activity, path: "/automation", badge: aiDisabled ? "dot-red" : "dot-green" }, // 파일럿 기간 숨김
+    // { label: "리포트 · 분석", icon: BarChart2, path: "/reports" }, // 파일럿 기간 숨김
+
     { label: "AI 에이전트", type: "header" },
     { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
     { label: "미분류 인박스", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
-    { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
-    
+    // { label: "에이전트 두뇌", icon: Brain, path: "/brain" }, // 파일럿 기간 숨김
+
     { label: "인재 관리", type: "header" },
     { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
-    { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" },
-    
+    // { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" }, // 파일럿 기간 숨김
+
     { label: "채용 운영", type: "header" },
     { label: "채용공고 관리", icon: Briefcase, path: "/jobs" },
-    { label: "화주사 관리", icon: Building2, path: "/clients" },
-    { label: "지점 관리", icon: MapPin, path: "/branches" },
-    { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" },
-    { label: "팀 · 권한", icon: Shield, path: "/team" },
+    // { label: "화주사 관리", icon: Building2, path: "/clients" }, // 파일럿 기간 숨김
+    // { label: "지점 관리", icon: MapPin, path: "/branches" }, // 파일럿 기간 숨김
+    // { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" }, // 파일럿 기간 숨김
+    // { label: "팀 · 권한", icon: Shield, path: "/team" }, // 파일럿 기간 숨김
     { label: "설정", icon: Settings, path: "/settings" },
   ];
 
@@ -125,15 +127,15 @@ export function Sidebar() {
         })}
       </nav>
 
+      {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 동작 없는 화살표는 제거 */}
       <div className="m-3.5 p-3 rounded-xl bg-white/5 flex items-center gap-[11px]">
         <div className="w-[38px] h-[38px] rounded-[10px] bg-[#3C2414] flex items-center justify-center font-bold text-[15px] text-[#FFCB3C] shrink-0">
-          정현
+          옹
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-[14px] leading-tight text-white truncate">정현강</div>
-          <div className="text-[12px] text-white/50 truncate">채용 총괄 · 본사</div>
+          <div className="font-semibold text-[14px] leading-tight text-white truncate">옹고잉 채용팀</div>
+          <div className="text-[12px] text-white/50 truncate">관리자 콘솔</div>
         </div>
-        <ChevronRight size={16} className="text-white/40" />
       </div>
     </aside>
   );

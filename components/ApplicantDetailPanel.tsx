@@ -67,6 +67,7 @@ interface ApplicantFull {
   last_message_at: string | null;
   availability: string | null;
   availability_updated_at: string | null;
+  sms_opt_out_at: string | null;
   access_token: string | null;
 }
 
@@ -397,7 +398,12 @@ export function ApplicantDetailContent({
 
         {/* 기본 정보 */}
         <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-[#F7FAFC]">
-          <h3 className="text-[12px] font-bold text-[#718096] mb-3">기본 정보</h3>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-[12px] font-bold text-[#718096]">기본 정보</h3>
+            {a.sms_opt_out_at && (
+              <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             <InfoCell label="연락처" value={a.phone} />
             <InfoCell label="나이" value={age ? `${age}세` : null} />
@@ -452,7 +458,10 @@ export function ApplicantDetailContent({
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">가용성</span>
+              <span className="text-[11px] font-bold text-[#A0AEC0]">
+                가용성
+                {a.availability_updated_at && <span className="font-medium"> · 갱신: {relTime(a.availability_updated_at)}</span>}
+              </span>
               <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
                 <option value="">미확인</option>
                 {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -545,6 +554,19 @@ export function ApplicantDetailPanel({
   const [tab, setTab] = useState<"detail" | "chat">("detail");
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
 
+  // 전역 킬스위치 — 드로어 대화 탭에서 'AI 응대 중' 오표시·수동 발송 잠금이 남지 않도록
+  // LiveConsole과 동일 판정을 전달 (env 강제 중단 포함)
+  const [globalKill, setGlobalKill] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch("/api/admin/agent/kill-switch")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j) setGlobalKill(j.disabled === true || j.env_forced === true);
+      })
+      .catch(() => {});
+  }, [isOpen]);
+
   useEffect(() => {
     if (isOpen) setTab("detail");
   }, [isOpen, applicantId]);
@@ -611,6 +633,8 @@ export function ApplicantDetailPanel({
                 applicantName={a.name}
                 phone={a.phone}
                 jobId={jobId}
+                smsOptOutAt={a.sms_opt_out_at}
+                globalKill={globalKill}
                 onChanged={() => { reload(); onChanged?.(); }}
                 className="flex-1 min-h-0"
               />

@@ -30,6 +30,10 @@ interface SavedSegment {
   vehicle: "all" | "vehicle" | "walk";
   slots: string[];
   query: string;
+  // v2 확장 — 구버전 저장분은 undefined (하위호환)
+  statuses?: string[];
+  availability?: string[];
+  region?: "all" | "capital";
 }
 
 // Types
@@ -48,6 +52,9 @@ interface CardData {
   agentStage: string | null;
   status: string;
   availability: string | null;
+  availabilityUpdatedAtIso: string | null;
+  smsOptOutAt: string | null;
+  sido: string | null;
   createdAtIso: string | null;
   lastMessageAtIso: string | null;
 }
@@ -134,7 +141,16 @@ function vehicleTag(a: Applicant): string {
   return "도보";
 }
 
-function toCard(a: Applicant): CardData {
+// 수도권 판별 — sido 원문("서울특별시"/"경기도"/"인천광역시" 등) 접두 매칭
+const CAPITAL_SIDO_PREFIXES = ["서울", "경기", "인천"];
+function isCapitalArea(sido: string | null): boolean {
+  return !!sido && CAPITAL_SIDO_PREFIXES.some((p) => sido.startsWith(p));
+}
+
+// 목록 API가 추가로 내려주는 컬럼 — 공용 Applicant 타입엔 아직 없어 로컬 확장으로 소비.
+type ApplicantRow = Applicant & { sms_opt_out_at?: string | null };
+
+function toCard(a: ApplicantRow): CardData {
   const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
   const slot = shortWorkHours(a.confirmed_slot || a.work_hours) || "-";
   return {
@@ -147,11 +163,15 @@ function toCard(a: Applicant): CardData {
     tag: vehicleTag(a),
     region: a.sigungu ?? a.location ?? "-",
     exp: a.experience?.trim() ? a.experience.trim() : "신입",
-    lastActive: relTime(a.last_message_at ?? a.created_at),
+    // created_at 폴백은 '활동'으로 오독됨 — 발신/수신 이력이 없으면 없다고 표기
+    lastActive: a.last_message_at ? relTime(a.last_message_at) : "연락 이력 없음",
     phone: a.phone ?? null,
     agentStage: a.agent_stage ?? null,
     status: a.status,
     availability: a.availability ?? null,
+    availabilityUpdatedAtIso: a.availability_updated_at ?? null,
+    smsOptOutAt: a.sms_opt_out_at ?? null,
+    sido: a.sido ?? null,
     createdAtIso: a.created_at ?? null,
     lastMessageAtIso: a.last_message_at ?? null,
   };
@@ -215,10 +235,17 @@ export function Pipeline() {
   // 진행 단계(status)·가용성 필터 — 적체 트리아지의 핵심 동선 (예: '스크리닝 전'만 격리 → 벌크 처리)
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
   const [availabilityFilter, setAvailabilityFilter] = useState<Set<string>>(new Set());
+  // 지역(sido) 필터 — 수도권(서울/경기/인천) 공급 풀 격리용 칩 1개
+  const [regionFilter, setRegionFilter] = useState<"all" | "capital">("all");
   // 부적합/이탈/기타는 칸반 보드에서 제외되지만, 리스트에서는 토글로 복구·재검토 가능해야 한다.
   const [showExcluded, setShowExcluded] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
   const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected">("recent");
+
+  // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
+  useEffect(() => {
+    setSelectedRows(new Set());
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, query]);
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -245,6 +272,9 @@ export function Pipeline() {
       vehicle: vehicleFilter,
       slots: Array.from(slotFilter),
       query: query.trim(),
+      statuses: Array.from(statusFilter),
+      availability: Array.from(availabilityFilter),
+      region: regionFilter,
     };
     persistSegments([seg, ...segments.filter((s) => s.name !== name)]);
     setSegNameDraft("");
@@ -255,6 +285,9 @@ export function Pipeline() {
     setVehicleFilter(seg.vehicle);
     setSlotFilter(new Set(seg.slots));
     setQuery(seg.query ?? "");
+    setStatusFilter(new Set(seg.statuses ?? []));
+    setAvailabilityFilter(new Set(seg.availability ?? []));
+    setRegionFilter(seg.region ?? "all");
     toast.info(`'${seg.name}' 세그먼트를 적용했어요`);
   };
   const deleteSegment = (id: string) => persistSegments(segments.filter((s) => s.id !== id));
@@ -305,6 +338,9 @@ export function Pipeline() {
 
   const listCards = view === "list" && showExcluded ? [...allCards, ...excludedCards] : allCards;
 
+  // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용(서버가 발송 시 자동 제외)
+  const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
+
   const availableChannels = Array.from(new Set(allCards.map((c) => c.channel))).sort();
   const SLOT_TOKENS = ["평일 오전", "평일 오후", "주말 오전", "주말 오후"];
   const STATUS_TOKENS = ["스크리닝 전", "대기자", "스크리닝 중", "스크리닝 완료", "확정인력"];
@@ -321,7 +357,7 @@ export function Pipeline() {
 
   const activeFilterCount =
     channelFilter.size + slotFilter.size + statusFilter.size + availabilityFilter.size +
-    (vehicleFilter !== "all" ? 1 : 0);
+    (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
@@ -329,6 +365,7 @@ export function Pipeline() {
     setSlotFilter(new Set());
     setStatusFilter(new Set());
     setAvailabilityFilter(new Set());
+    setRegionFilter("all");
   };
 
   const q = query.trim().toLowerCase();
@@ -341,6 +378,7 @@ export function Pipeline() {
     if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
     if (statusFilter.size && !statusFilter.has(c.status)) return false;
     if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
+    if (regionFilter === "capital" && !isCapitalArea(c.sido)) return false;
     return true;
   }).sort((a, b) => {
     const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
@@ -519,7 +557,7 @@ export function Pipeline() {
     setBulkSending(true);
     try {
       let sent = 0;
-      let failed = 0;
+      const failErrors: string[] = [];
       // bulk-send 엔드포인트는 1회 최대 50명 → 50명씩 끊어서 발송
       for (let i = 0; i < recipients.length; i += 50) {
         const chunk = recipients.slice(i, i + 50);
@@ -534,14 +572,21 @@ export function Pipeline() {
           return;
         }
         sent += json.sent ?? 0;
-        failed += json.failed ?? 0;
+        for (const r of (json.results ?? []) as Array<{ success: boolean; error?: string }>) {
+          if (!r.success) failErrors.push(r.error ?? "");
+        }
       }
+      // 서버 results[].error 집계 — 수신거부/링크토큰 없음은 '실패'가 아니라 의도된 제외로 구분 표기
+      const optOut = failErrors.filter((e) => e.includes("수신거부")).length;
+      const noToken = failErrors.filter((e) => e.includes("토큰 없음")).length;
+      const failed = failErrors.length - optOut - noToken;
       const skipped = selectedRows.size - recipients.length;
-      toast.success(
-        `${sent}명 발송 완료` +
-          (failed ? `, ${failed}명 실패` : "") +
-          (skipped ? `, ${skipped}명 연락처 없어 제외` : "")
-      );
+      const parts = [`${sent}명 발송`];
+      if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
+      if (noToken) parts.push(`링크토큰 없음 ${noToken}명 제외`);
+      if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
+      if (failed) parts.push(`실패 ${failed}명`);
+      (sent > 0 ? toast.success : toast.error)(parts.join(" · "));
       setBulkMsgModalOpen(false);
       setSelectedRows(new Set());
       setBulkMsgBody(DEFAULT_BULK_BODY);
@@ -690,6 +735,17 @@ export function Pipeline() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* 지역 — sido 기반, 수도권 공급 풀 격리용 */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">지역</label>
+                    <button
+                      onClick={() => setRegionFilter((v) => (v === "capital" ? "all" : "capital"))}
+                      className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${regionFilter === "capital" ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                    >
+                      수도권(서울/경기/인천)
+                    </button>
                   </div>
 
                   {/* 제외 인원 — 부적합/이탈/기타 (리스트 뷰 한정, 실수 복구·재검토용) */}
@@ -842,10 +898,19 @@ export function Pipeline() {
                                 <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                                 {c.stage}
                               </span>
-                              {c.availability && (
-                                <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
-                                  {c.availability}
-                                </span>
+                              {(c.availability || c.smsOptOutAt) && (
+                                <div className="flex items-center gap-1">
+                                  {c.availability && (
+                                    <span title={c.availabilityUpdatedAtIso ? `갱신 ${relTime(c.availabilityUpdatedAtIso)}` : undefined} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
+                                      {c.availability}
+                                    </span>
+                                  )}
+                                  {c.smsOptOutAt && (
+                                    <span title={`수신거부 ${relTime(c.smsOptOutAt)}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFF5F5] text-[#E53E3E]">
+                                      수신거부
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </td>
@@ -967,6 +1032,11 @@ export function Pipeline() {
               <button onClick={() => setBulkMsgModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-5">
+              {selectedOptOutCount > 0 && (
+                <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12.5px] font-bold text-[#C53030]">
+                  수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
+                </div>
+              )}
               <div>
                 <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 템플릿</label>
                 <select
