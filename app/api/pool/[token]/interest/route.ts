@@ -68,6 +68,22 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     return NextResponse.json({ error: "처리 실패" }, { status: 500 });
   }
 
+  // 1b) 재관심 재부상 — 관심 처리 큐는 agent_stage IS NULL + contacted_at IS NULL로 잡는다.
+  // 매니저가 이미 [컨택 완료](contacted_at 기록)나 [보류](abort)한 뒤 지원자가 다시 관심을 누르면
+  // ignoreDuplicates 때문에 기존 행이 그대로 남아 큐에서 안 보인다. 휴면 상태(stage NULL 또는 abort)인
+  // 후보만 contacted_at를 비우고 abort를 해제해 재부상시킨다. 진행 중(screening/exploration/active)
+  // 후보는 이미 파이프라인에서 처리 중이므로 건드리지 않는다.
+  const { error: resurfaceErr } = await supabase
+    .from("job_candidates")
+    .update({
+      contacted_at: null,
+      agent_stage: null,
+    })
+    .eq("job_id", jobId)
+    .eq("applicant_id", applicant.id)
+    .or("agent_stage.is.null,agent_stage.eq.abort");
+  if (resurfaceErr) console.error("[pool interest] resurface failed", resurfaceErr);
+
   // 2) 가용성 갱신 — 관심 클릭은 '이번 주 일할 의사', '바로 가능' 버튼은 '즉시 투입 가능' 프록시
   const prevAvailability = applicant.availability as string | null;
   const nextAvailability = immediate
