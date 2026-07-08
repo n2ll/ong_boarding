@@ -204,6 +204,8 @@ export function ApplicantDetailContent({
   // 확정 모달: 확정 시점에 슬롯을 함께 받아 confirmed_slot 공백을 방지한다.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmSlots, setConfirmSlots] = useState<string[]>([]);
+  // 인력풀 제외(=status 부적합) 확인 모달 — 모든 공고에서 빠지는 파괴적 액션이라 확인을 받는다.
+  const [excludeOpen, setExcludeOpen] = useState(false);
 
   useEffect(() => {
     setEdit({});
@@ -298,6 +300,13 @@ export function ApplicantDetailContent({
     if (ok) setConfirmOpen(false);
   };
 
+  // 인력풀 제외(commit) — status='부적합'. 지원자를 모든 공고 매칭·발송에서 빼는 person-level 액션.
+  // (특정 공고만 부적합/보류는 공고별 후보 목록에서. 여긴 인력풀 전체 제외 전용.)
+  const commitExclude = async () => {
+    const ok = await patch({ status: "부적합" }, `${a.name}님을 인력풀에서 제외했어요.`);
+    if (ok) setExcludeOpen(false);
+  };
+
   const screening = focusCand?.agent_state?.screening ?? {};
   const onboarding = focusCand?.agent_state?.onboarding ?? {};
   const screeningDone = SCREENING_KEYS.filter((k) => screening[k] === true).length;
@@ -347,7 +356,7 @@ export function ApplicantDetailContent({
               <MessageSquare size={14} /> 맞춤링크
             </button>
             <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
-            <button onClick={() => patch({ status: "부적합" }, `${a.name}님을 부적합 처리했어요.`)} disabled={busy} className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
+            <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
           </div>
         </div>
 
@@ -526,6 +535,25 @@ export function ApplicantDetailContent({
             <AlertDialogCancel className="rounded-xl" disabled={busy}>취소</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy} className="rounded-xl">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} 확정
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 인력풀 제외 모달 — 공고 단위 부적합/보류와 구분. 여긴 사람 전체를 풀에서 뺀다. */}
+      <AlertDialog open={excludeOpen} onOpenChange={setExcludeOpen}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{a.name}님을 인력풀에서 제외</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              이 지원자를 <b>모든 공고 매칭·발송에서 제외</b>합니다 (부적합 처리).
+              {"\n\n"}특정 공고에만 맞지 않는 경우라면, 공고별 후보 목록에서 <b>보류·부적합</b>을 쓰세요 — 지원자는 인력풀에 남아 다른 공고에 계속 후보로 노출됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl" disabled={busy}>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitExclude(); }} disabled={busy} className="rounded-xl bg-[#E53E3E] hover:bg-[#C53030]">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />} 인력풀 제외
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
