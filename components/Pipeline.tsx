@@ -611,13 +611,15 @@ export function Pipeline() {
           if (!r.success) failErrors.push(r.error ?? "");
         }
       }
-      // 서버 results[].error 집계 — 수신거부/링크토큰 없음은 '실패'가 아니라 의도된 제외로 구분 표기
+      // 서버 results[].error 집계 — 수신거부/인력풀 제외/링크토큰 없음은 '실패'가 아니라 의도된 제외로 구분 표기
       const optOut = failErrors.filter((e) => e.includes("수신거부")).length;
+      const poolExcluded = failErrors.filter((e) => e.includes("인력풀 제외")).length;
       const noToken = failErrors.filter((e) => e.includes("토큰 없음")).length;
-      const failed = failErrors.length - optOut - noToken;
+      const failed = failErrors.length - optOut - poolExcluded - noToken;
       const skipped = selectedRows.size - recipients.length;
       const parts = [`${sent}명 발송`];
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
+      if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
       if (noToken) parts.push(`링크토큰 없음 ${noToken}명 제외`);
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
