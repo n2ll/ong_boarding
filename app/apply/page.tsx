@@ -205,7 +205,7 @@ function ApplyForm() {
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-3">
             <LogoMark size={36} />
-            <span className="text-[18px] font-extrabold text-[#1A202C]">옹보딩 배송원 지원</span>
+            <span className="text-[18px] font-extrabold text-[#1A202C]">옹고잉 배송원 지원</span>
           </div>
           <p className="text-[15px] text-[#718096]">아래 항목을 작성해주세요. <span className="text-[#E53E3E]">*</span> 표시는 필수입니다.</p>
         </div>
@@ -215,7 +215,7 @@ function ApplyForm() {
             <div className="text-[12px] font-bold text-[#B7791F] bg-[#FFFBEB] inline-flex items-center px-2 py-0.5 rounded mb-2">지원 공고</div>
             <div className="text-[17px] font-extrabold text-[#1A202C] leading-tight">{job.title}</div>
             <div className="text-[13px] text-[#718096] mt-1">
-              {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹보딩 배송원"}
+              {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹고잉 배송원"}
             </div>
             {!job.recruiting && (
               <div className="mt-2 text-[13px] font-bold text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] rounded-lg px-3 py-2">
