@@ -5,7 +5,6 @@ import { SWRConfig } from "swr";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { Toaster } from "@/components/ui/sonner";
-import { ChatWidget } from "@/components/ChatWidget";
 import { BranchScopeProvider } from "@/lib/branch-scope";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { jsonFetcher } from "@/lib/swr";
@@ -54,7 +53,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </main>
           </div>
           <Toaster position="bottom-right" richColors />
-          <ChatWidget />
         </div>
         </ConfirmProvider>
       </BranchScopeProvider>
