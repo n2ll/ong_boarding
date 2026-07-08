@@ -1043,7 +1043,7 @@ export function Pipeline() {
                 { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },
                 { id: "interview", label: "스크리닝 완료", desc: "온보딩 · 배민ID 수집" },
                 { id: "passed", label: "확정 인력", desc: "슬롯 확정" },
-                { id: "rejected", label: "부적합", desc: "진행 중단" }
+                { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
                 <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-[#E2E8F0] rounded-xl text-left hover:border-[#FFCB3C] hover:bg-[#FFFBEC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
                   <div className="text-[14px] font-bold text-[#1A202C] mb-1">{stage.label}</div>

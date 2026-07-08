@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
+import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, Edit2, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -1339,7 +1339,12 @@ export function Jobs() {
                                   {busy ? <Loader2 size={12} className="animate-spin" /> : <Pause size={12} />} 응대 정지
                                 </button>
                               )}
-                              <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 부적합" }, "부적합 처리했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] px-2 py-1 rounded-md disabled:opacity-50 transition-colors ml-auto">
+                              {/* 공고 단위 결과 — 둘 다 이 공고 후보만 닫고, 지원자는 인력풀에 유지된다(다른 공고엔 여전히 후보).
+                                  인력풀 전체 제외는 지원자 상세의 '인력풀 제외'에서만. */}
+                              <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 보류" }, "이 공고 보류했어요 (인력풀에는 유지)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors ml-auto">
+                                <PauseCircle size={12} /> 보류
+                              </button>
+                              <button onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 공고부적합" }, "이 공고 부적합 처리했어요 (인력풀에는 유지)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
                                 <X size={12} /> 부적합
                               </button>
                             </div>

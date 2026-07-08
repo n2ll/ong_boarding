@@ -129,6 +129,10 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
     // ────────────────────────────────────────────────
     case "abort":
       nextStage = "abort";
+      // 공고 단위 종료 — 이 공고 후보만 닫는다.
+      // applicants.status는 건드리지 않는다: 한 공고에서의 abort가 지원자를 인력풀 전체에서
+      // 빼면 안 된다(예비전력 재활용 원칙 — 다른 공고엔 여전히 후보 가능). '인력풀 제외'는
+      // 매니저의 명시적 person-level 액션(지원자 상세 '인력풀 제외')으로만 일어난다.
       await supabase
         .from("job_candidates")
         .update({
@@ -136,11 +140,12 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           closed_reason: `abort: ${transition.reason}`,
         })
         .eq("id", candidate_id);
-      // applicants.status를 부적합으로
+      // 진행 포인터만 정리 — current_job_id가 이 공고를 가리키고 있었다면 해제(다른 공고 포인터는 유지).
       await supabase
         .from("applicants")
-        .update({ status: "부적합", current_job_id: null })
-        .eq("id", applicant_id);
+        .update({ current_job_id: null })
+        .eq("id", applicant_id)
+        .eq("current_job_id", job_id);
       break;
 
     // ────────────────────────────────────────────────

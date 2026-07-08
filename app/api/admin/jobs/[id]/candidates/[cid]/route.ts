@@ -8,7 +8,9 @@
  *   - closed_reason: string | null
  *
  * paused → 다른 stage 복귀 시 paused_reason 자동 클리어.
- * abort 전이 시 closed_at 자동 기록 + applicants.status='부적합'.
+ * abort 전이 = 공고 단위 종료. closed_at 자동 기록. applicants.status는 건드리지 않는다
+ *   (한 공고 판단이 인력풀 전체 제외로 새면 안 됨 — 재활용 원칙). '인력풀 제외'는 지원자
+ *   상세의 명시적 person-level 액션(PATCH /api/admin/applicants/[id])으로만 일어난다.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -87,7 +89,7 @@ export async function PATCH(
     if (cur.agent_stage === "paused" && stage !== "paused") {
       update.paused_reason = null;
     }
-    // abort 처리
+    // abort 처리 — 공고 단위 종료. applicants.status는 건드리지 않는다(인력풀 유지).
     if (stage === "abort") {
       update.closed_at = now;
       if (typeof body.closed_reason === "string") {
@@ -95,11 +97,15 @@ export async function PATCH(
       } else if (!body.closed_reason) {
         update.closed_reason = "manager: abort";
       }
-      // applicants.status='부적합' + current_job_id=null
-      await supabase
-        .from("applicants")
-        .update({ status: "부적합", current_job_id: null })
-        .eq("id", cur.applicant_id);
+      // 진행 포인터만 정리 — current_job_id가 이 공고를 가리키고 있었다면 해제.
+      const jobId = Number(params.id);
+      if (Number.isFinite(jobId)) {
+        await supabase
+          .from("applicants")
+          .update({ current_job_id: null })
+          .eq("id", cur.applicant_id)
+          .eq("current_job_id", jobId);
+      }
     }
   }
 
