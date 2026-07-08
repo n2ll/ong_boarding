@@ -299,6 +299,41 @@ export function Pipeline() {
   const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
   const [bulkSending, setBulkSending] = useState(false);
 
+  // 옹매니징 '현재 활동 중' 대조 — 벌크 문자 모달이 열릴 때 선택 인원을 1회 조회.
+  // configured=false면 미연동(대조 불가, 발송은 허용), active[]는 현재 활동 중인 인원.
+  type ActiveCheck = { configured: boolean; checked: number; active: { id: number; name: string; reasons: string[] }[] };
+  const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
+  const [activeCheckLoading, setActiveCheckLoading] = useState(false);
+  useEffect(() => {
+    if (!bulkMsgModalOpen) { setActiveCheck(null); return; }
+    const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n)).slice(0, 500);
+    if (ids.length === 0) { setActiveCheck(null); return; }
+    let cancelled = false;
+    setActiveCheckLoading(true);
+    setActiveCheck(null);
+    fetch("/api/admin/ongmanaging/active-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ applicantIds: ids }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json: ActiveCheck) => { if (!cancelled) setActiveCheck(json); })
+      .catch(() => { /* 대조 실패는 발송을 막지 않음 — 서버가 최종 가드 */ })
+      .finally(() => { if (!cancelled) setActiveCheckLoading(false); });
+    return () => { cancelled = true; };
+    // 모달이 열리는 시점의 선택 인원으로 1회만 조회 (열린 뒤 선택 변경은 없음)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkMsgModalOpen]);
+
+  // 활동 중 인원 전원을 발송 대상(selectedRows)에서 제거 — 자동 아님, 매니저 판단으로 실행.
+  const excludeActiveFromSelection = () => {
+    if (!activeCheck || activeCheck.active.length === 0) return;
+    const removeIds = new Set(activeCheck.active.map((a) => String(a.id)));
+    setSelectedRows((prev) => new Set([...prev].filter((id) => !removeIds.has(id))));
+    setActiveCheck((prev) => (prev ? { ...prev, active: [] } : prev));
+    toast.success(`활동 중 ${removeIds.size}명을 발송 대상에서 제외했어요`);
+  };
+
   // 세그먼트 → 공고 타겟 전환: 선택된 지원자를 공고 후보로 일괄 추가
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
   const [addingJobId, setAddingJobId] = useState<number | null>(null);
@@ -1035,6 +1070,56 @@ export function Pipeline() {
               {selectedOptOutCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12.5px] font-bold text-[#C53030]">
                   수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
+                </div>
+              )}
+
+              {/* 옹매니징 현재 활동 중 대조 */}
+              {activeCheckLoading && (
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F7FAFC] border border-[#E2E8F0] text-[12.5px] font-bold text-[#718096]">
+                  <Loader2 size={14} className="animate-spin" /> 옹매니징에서 현재 활동 중인 인원을 확인하고 있어요...
+                </div>
+              )}
+              {!activeCheckLoading && activeCheck && !activeCheck.configured && (
+                <div className="px-4 py-2.5 rounded-xl bg-[#EDF2F7] border border-[#E2E8F0] text-[12.5px] font-bold text-[#718096]">
+                  옹매니징 미연동 — 활동 여부 확인 불가
+                </div>
+              )}
+              {!activeCheckLoading && activeCheck && activeCheck.configured && activeCheck.active.length > 0 && (
+                <div className="rounded-xl bg-[#FFFBEB] border border-[#F6E05E] p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-[13px] font-extrabold text-[#B7791F]">
+                      옹매니징에서 현재 활동 중인 인원 {activeCheck.active.length}명이 포함되어 있어요
+                    </div>
+                    <button
+                      onClick={excludeActiveFromSelection}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold text-white bg-[#DD6B20] hover:bg-[#C05621] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    >
+                      <UserX size={14} /> 활동 중 전원 제외
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeCheck.active.map((p) => {
+                      // 사유가 지난달 정산뿐이면(활성 계약 없음) 판단 여지가 커 배지를 약하게 표시.
+                      const onlySettlement = p.reasons.length > 0 && p.reasons.every((r) => r === "recent_settlement");
+                      return (
+                        <span
+                          key={p.id}
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-bold border ${onlySettlement ? 'bg-white border-[#E2E8F0] text-[#718096]' : 'bg-[#FEFCBF] border-[#F6E05E] text-[#975A16]'}`}
+                        >
+                          {p.name}
+                          {p.reasons.includes("active_contract") && (
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FEEBC8] text-[#C05621]">활성 계약</span>
+                          )}
+                          {p.reasons.includes("recent_settlement") && (
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">지난달 정산</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11.5px] leading-relaxed text-[#B7791F]">
+                    재컨택(구직 안내)이라면 제외하세요. 현재 라인과 시간대가 겹치지 않는 병행 가능 건이라면 유지해도 됩니다 — 발송 목적에 따라 판단하세요.
+                  </p>
                 </div>
               )}
               <div>

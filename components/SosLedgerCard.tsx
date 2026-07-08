@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { motion } from "motion/react";
-import { Siren, Plus, X, Loader2, Save, Trash2, Wallet, ChevronDown, ChevronRight } from "lucide-react";
+import { Siren, Plus, X, Loader2, Save, Trash2, Wallet, ChevronDown, ChevronRight, Briefcase } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
 import { SOS_RESOLUTIONS, COST_CATEGORIES, kstMonth, type SosResolution, type CostCategory } from "@/lib/sos";
@@ -85,6 +86,7 @@ function parseOptInt(s: string): number | null | undefined {
 }
 
 export function SosLedgerCard() {
+  const router = useRouter();
   const confirm = useConfirm();
   const { data: sosRes, mutate: mutateSos } = useSWR<SosRes>("/api/admin/sos");
   const { data: ledgerRes, mutate: mutateLedger } = useSWR<LedgerRes>("/api/admin/cost-ledger");
@@ -144,6 +146,14 @@ export function SosLedgerCard() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // 긴급 건을 공고 등록으로 넘긴다 — 라인·권역·차종을 프리필해 재입력을 없앤다.
+  const handleMakeJob = (r: SosRow) => {
+    const params = new URLSearchParams({ new: "1", sos_id: String(r.id), line: r.line_label, period: "하루" });
+    if (r.region) params.set("region", r.region);
+    if (r.vehicle) params.set("vehicle", r.vehicle);
+    router.push(`/jobs?${params.toString()}`);
   };
 
   const handleResolve = async () => {
@@ -271,6 +281,12 @@ export function SosLedgerCard() {
                 </div>
               </div>
               <span className="text-[11.5px] font-bold text-[#C53030] shrink-0">{elapsedLabel(r.created_at, nowTick)}</span>
+              <button
+                onClick={() => handleMakeJob(r)}
+                className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+              >
+                <Briefcase size={13} /> 공고로 만들기
+              </button>
               <button
                 onClick={() => setResolveForm({ id: r.id, line_label: r.line_label, resolution: "", cost_krw: "", duration_minutes: "", resolution_note: "" })}
                 className="text-[11.5px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"

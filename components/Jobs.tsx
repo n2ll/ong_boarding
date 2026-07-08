@@ -194,6 +194,8 @@ export function Jobs() {
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
   const [newJobPeriod, setNewJobPeriod] = useState("");
   const [newJobClosesAt, setNewJobClosesAt] = useState("");
+  // 긴급 건(SOS)에서 넘어온 공고 — 향후 공고↔긴급건 연결용으로만 보관(등록엔 미사용).
+  const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -381,11 +383,30 @@ export function Jobs() {
     .filter((g) => g.items.length > 0);
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
+  // 긴급 건 카드 '공고로 만들기' → /jobs?new=1&line=&region=&vehicle=&period= 로 진입하면 등록 폼 프리필
   // 헤더 글로벌 검색 → /jobs?q=제목 으로 진입하면 검색어 프리필
   useEffect(() => {
     const newParam = searchParams.get("new");
     const qParam = searchParams.get("q");
     if (newParam === "1") {
+      const line = searchParams.get("line")?.trim() ?? "";
+      const region = searchParams.get("region")?.trim() ?? "";
+      const vehicle = searchParams.get("vehicle")?.trim() ?? "";
+      const period = searchParams.get("period")?.trim() ?? "";
+      const sosId = searchParams.get("sos_id");
+      // 긴급 건에서 넘어온 경우 라인·권역·차종·기간을 등록 폼에 프리필해 재입력을 없앤다.
+      if (line || region || vehicle || period || sosId) {
+        if (line) setPostingTitle(`${line} 긴급 백업`);
+        if (period) setNewJobPeriod(period);
+        if (sosId) setNewJobSosId(sosId);
+        // 권역/차종은 등록 폼에 전용 입력이 없어 본문 초안 첫 줄에 삽입한다.
+        const extra = [region && `권역: ${region}`, vehicle && `차종: ${vehicle}`].filter(Boolean).join(" / ");
+        if (extra || line) {
+          const body = [line && `${line} 긴급 백업 모집`, extra].filter(Boolean).join("\n");
+          setChannelDrafts({ danggeun: body, albamon: body, sms: body });
+          setActiveChannel("albamon");
+        }
+      }
       setAiModalOpen(true);
       router.replace("/jobs");
     } else if (qParam) {
@@ -496,6 +517,7 @@ export function Jobs() {
       setNewJobPayAmount("");
       setNewJobPeriod("");
       setNewJobClosesAt("");
+      setNewJobSosId(null);
       await loadJobs();
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -1063,6 +1085,8 @@ export function Jobs() {
                   className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
                   title="모집 마감시각 — 지나면 지원자 페이지에서 자동 마감"
                 />
+                {/* 긴급 건에서 넘어온 공고 표시 — sos_id는 향후 공고↔긴급건 연결용으로만 보관 */}
+                {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
               <div className="flex items-center gap-3">
               <button
