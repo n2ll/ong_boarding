@@ -65,6 +65,29 @@ export async function POST(req: NextRequest) {
     }
     // 인력풀 제외자는 캠페인 발송 대상이 아니다 — 방어선(선택 UI가 걸러도 백엔드에서 재차 차단).
     const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈"]);
+
+    // 중복 발송 가드 — 최근 10분 내 캠페인(system-bulk) 발송된 지원자는 재발송 스킵.
+    // LMS 도달 지연에 매니저가 "안 왔다"고 재클릭해 같은 사람에게 두 번 나가는 것을 막는다.
+    const DEDUP_WINDOW_MIN = 10;
+    const recentlySent = new Set<number>();
+    {
+      const ids = recipients
+        .map((r) => r.applicant_id)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (ids.length > 0) {
+        const since = new Date(Date.now() - DEDUP_WINDOW_MIN * 60 * 1000).toISOString();
+        const { data: recent } = await supabase
+          .from("messages")
+          .select("applicant_id")
+          .in("applicant_id", ids)
+          .eq("direction", "outbound")
+          .eq("sent_by", "system-bulk")
+          .gt("created_at", since);
+        for (const m of recent ?? []) {
+          if (typeof m.applicant_id === "number") recentlySent.add(m.applicant_id);
+        }
+      }
+    }
     const baseUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.VERCEL_PROJECT_PRODUCTION_URL ||
@@ -88,6 +111,11 @@ export async function POST(req: NextRequest) {
       // 인력풀 제외(부적합/이탈) 하드 가드 — 풀에서 뺀 지원자에겐 캠페인이 나가지 않는다.
       if (info?.status && EXCLUDED_POOL_STATUS.has(info.status)) {
         results.push({ phone, success: false, error: `인력풀 제외(${info.status})` });
+        continue;
+      }
+      // 중복 발송 가드 — 최근 10분 내 캠페인 발송된 지원자는 스킵.
+      if (typeof r.applicant_id === "number" && recentlySent.has(r.applicant_id)) {
+        results.push({ phone, success: false, error: "최근 발송됨(중복 방지)" });
         continue;
       }
 

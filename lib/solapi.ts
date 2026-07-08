@@ -54,6 +54,22 @@ export async function sendSms(
   }
 
   const data = await res.json();
+
+  // SOLAPI는 등록 실패(발신번호 미등록·잔액부족·번호오류 등)에도 HTTP 200을 준다.
+  // 실패 건을 검사하지 않으면 실제로 안 나간 문자가 'sent'로 기록된다 — 실캠페인에서 치명적.
+  const failedList = Array.isArray(data?.failedMessageList) ? data.failedMessageList : [];
+  const registeredFailed = Number(data?.groupInfo?.count?.registeredFailed ?? 0);
+  if (failedList.length > 0 || registeredFailed > 0) {
+    const first = failedList[0] ?? {};
+    const reason = first.statusMessage || first.statusCode || `등록 실패 ${registeredFailed}건`;
+    console.error(
+      "[SOLAPI registration failed]",
+      JSON.stringify(data?.groupInfo?.count ?? {}),
+      JSON.stringify(failedList).slice(0, 300)
+    );
+    return { success: false, error: `발송 등록 실패: ${reason}` };
+  }
+
   // solapi 응답에서 messageId 추출
   const messageId =
     data?.groupInfo?.groupId ||
