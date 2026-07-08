@@ -665,7 +665,6 @@ export function Jobs() {
 
   // 채널별 게시 링크 — source 파라미터로 유입을 게시 채널에 귀속시킨다 (외부 게시 = 이중 인입의 ② 트랙).
   const PUBLISH_CHANNELS: { source: string; label: string }[] = [
-    { source: "danggeun", label: "당근" },
     { source: "albamon", label: "알바몬" },
     { source: "jobkorea", label: "잡코리아" },
     { source: "openchat", label: "오픈카톡(용차방)" },

@@ -49,13 +49,26 @@ function closesLabel(iso: string): string {
   return `${kst.getUTCMonth() + 1}/${kst.getUTCDate()}(${days[kst.getUTCDay()]}) ${ampm} ${h12}시${min ? ` ${min}분` : ""} 마감`;
 }
 
+// 금액 병기 대상 단가 유형 — '혼합'/'협의'는 금액을 붙이면 "협의 5,000원"처럼 모순되므로 제외
+const AMOUNT_PAY_TYPES = new Set(["건당", "일당", "주급", "월급"]);
+
 function payLabel(j: PoolJob): string | null {
-  if (j.pay_type && typeof j.pay_amount === "number") {
+  if (j.pay_type && AMOUNT_PAY_TYPES.has(j.pay_type) && typeof j.pay_amount === "number") {
     return `${j.pay_type} ${j.pay_amount.toLocaleString("ko-KR")}원`;
+  }
+  if (j.pay_type === "혼합" || j.pay_type === "협의") {
+    return j.pay_info || j.pay_type;
   }
   if (j.pay_type) return j.pay_type;
   if (j.pay_info) return j.pay_info;
   return null;
+}
+
+/** 시작일 → 'YYYY-MM-DD'면 'M월 D일'로, 자유 텍스트면 원문 그대로 */
+function startDateLabel(raw: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (!m) return raw;
+  return `${Number(m[2])}월 ${Number(m[3])}일`;
 }
 
 export default function PoolPage() {
@@ -192,7 +205,7 @@ export default function PoolPage() {
     <main className="min-h-screen bg-[#FFFBEC]">
       <div className="max-w-[560px] mx-auto px-5 py-8">
         <header className="mb-6">
-          <div className="text-[14px] font-bold text-[#B7791F] mb-1">옹보딩 · 맞춤 일자리</div>
+          <div className="text-[14px] font-bold text-[#B7791F] mb-1">옹고잉 · 맞춤 일자리</div>
           <h1 className="text-[24px] font-extrabold text-[#1A202C] leading-snug">
             {name ? `${name}님,` : "안녕하세요,"}
             <br />지금 모집 중인 일자리예요
@@ -223,7 +236,7 @@ export default function PoolPage() {
                   <h2 className="mt-2 text-[17px] font-extrabold text-[#718096] leading-snug">{job.title}</h2>
                   {job.interested && (
                     <p className="mt-2 text-[14px] font-bold text-[#38A169]">
-                      ✓ 관심을 접수하셨던 공고예요 — 매니저가 확인했어요.
+                      ✓ 관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.
                     </p>
                   )}
                   <p className="mt-2 text-[14px] text-[#A0AEC0] leading-relaxed">
@@ -291,7 +304,7 @@ export default function PoolPage() {
                   {job.start_date && (
                     <div className="flex gap-2">
                       <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">시작일</dt>
-                      <dd>{job.start_date}</dd>
+                      <dd>{startDateLabel(job.start_date)}</dd>
                     </div>
                   )}
                   <div className="flex gap-2">

@@ -51,12 +51,12 @@ export async function POST(req: NextRequest) {
 function buildMockPosting(prompt: string): MultiPlatformPosting {
   const f = parseRough(prompt);
 
-  const company = f.company || "옹보딩 파트너스";
-  const location = f.location || "서울 성동구 성수동";
-  const pay = f.pay || "시급 11,000원";
-  const schedule = f.schedule || "주 3일 오전 08:00~12:00 (협의 가능)";
-  const role = f.role || "매장 청소 및 정리";
-  const tags = f.tags.length ? f.tags : ["시니어 우대", "주급 지급", "초보 가능", "4대보험"];
+  const company = f.company || "옹고잉";
+  const location = f.location || "";
+  const pay = f.pay || "협의";
+  const schedule = f.schedule || "협의";
+  const role = f.role || "배송";
+  const tags = f.tags.length ? f.tags : ["초보 가능", "주급 지급"];
 
   const title = `[${shortLoc(location)}] ${role} 모집`;
 
