@@ -1,6 +1,6 @@
 import { useState } from "react";
 import useSWR from "swr";
-import { Inbox as InboxIcon, RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning } from "lucide-react";
+import { Inbox as InboxIcon, RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
 
@@ -30,7 +30,7 @@ export function Inbox() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const confirm = useConfirm();
 
-  const classify = async (msg: PendingMessage, action: "baemin" | "other") => {
+  const classify = async (msg: PendingMessage, action: "baemin" | "other" | "ongmanaging") => {
     if (busyId) return;
     // 배민 분류는 등록 즉시 AI 스크리닝 문자가 나가므로 발송 사실을 확인받는다.
     if (action === "baemin") {
@@ -38,6 +38,12 @@ export function Inbox() {
         title: `${msg.applicant_phone} — 배민 지원자로 분류할까요?`,
         description: "지원자로 등록되고 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
         confirmText: "분류하고 발송",
+      }))) return;
+    } else if (action === "ongmanaging") {
+      if (!(await confirm({
+        title: "옹매니징으로 이관할까요?",
+        description: "옹고잉 재직자·기존 계약자 문의로 이관 처리할까요? 응대 대상에서 제외됩니다.",
+        confirmText: "이관 처리",
       }))) return;
     } else {
       if (!(await confirm({
@@ -63,6 +69,8 @@ export function Inbox() {
             ? "배민 지원자로 등록하고 AI 응대를 시작했어요."
             : "배민 지원자로 등록했어요."
         );
+      } else if (action === "ongmanaging") {
+        toast.success("옹매니징 이관 처리됐어요.");
       } else {
         toast.success("기타로 분류해 종결했어요.");
       }
@@ -140,6 +148,13 @@ export function Inbox() {
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
                 >
                   <Ban size={15} /> 기타로 분류
+                </button>
+                <button
+                  onClick={() => classify(msg, "ongmanaging")}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                >
+                  <ArrowRightLeft size={15} /> 옹매니징 이관
                 </button>
                 <button
                   onClick={() => classify(msg, "baemin")}

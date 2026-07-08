@@ -17,6 +17,7 @@ interface Applicant {
   status: string;
   unread_count?: number | null;
   agent_stage?: string | null;
+  availability?: string | null;
   source?: string | null;
   branch?: string | null;
   branch1?: string | null;
@@ -150,8 +151,11 @@ export function LiveConsole() {
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
   const { data: appsData, isLoading: appsLoading, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  // 목록 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status
+  // (3) 미답장(unread>0) — 활성 대화·스크리닝이 아니어도 답장한 재컨택 응답자를 포함.
+  //     이 (3)만으로 잡힌 건은 '풀 응답'(agent_stage 없음)이라 목록에서 별도 라벨로 구분한다.
   const chats = useMemo(
-    () => (appsData?.data ?? []).filter((a) => (a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status)),
+    () => (appsData?.data ?? []).filter((a) => (a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status) || (a.unread_count ?? 0) > 0),
     [appsData]
   );
   const loadingList = appsLoading && chats.length === 0;
@@ -477,14 +481,15 @@ export function LiveConsole() {
       }
       return true;
     })
-    // SLA 정렬: 미답장(개입 필요)을 최상단, 그 안에서는 가장 오래 기다린 순. 그 외는 최근 활동 순.
+    // 정렬: 미답장(unread>0)을 최상단 — 그 안에서는 last_message_at 최신순으로
+    // 새로 온 답장(풀 응답 포함)이 먼저 보이게. 그 외는 최근 활동 순.
     .sort((a, b) => {
       const aInt = (a.unread_count ?? 0) > 0 ? 1 : 0;
       const bInt = (b.unread_count ?? 0) > 0 ? 1 : 0;
       if (aInt !== bInt) return bInt - aInt;
       const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
       const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
-      return aInt === 1 ? at - bt : bt - at;
+      return bt - at;
     });
 
   return (
@@ -636,6 +641,11 @@ export function LiveConsole() {
             const unread = chat.unread_count ?? 0;
             const intervention = unread > 0;
             const src = chat.source ? SOURCE_LABEL[chat.source] ?? chat.source : null;
+            // 활성 대화(agent_stage)가 없는데 답장이 온 재컨택 응답자 = '풀 응답'.
+            // 스크리닝 대화와 구분해 매니저가 스코프 밖 문자를 바로 알아보게 한다.
+            const isPoolResponse = intervention && (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
+            const avail = chat.availability;
+            const availStyle = avail === "휴면" ? "bg-[#EDF2F7] text-[#A0AEC0]" : "bg-[#F0FFF4] text-[#38A169]";
             return (
               <button
                 key={chat.id}
@@ -666,8 +676,15 @@ export function LiveConsole() {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {src && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{src}</span>}
                   {(chat.branch || chat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{chat.branch || chat.branch1}</span>}
+                  {/* 의도 배지: 가용성/수신거부 — 재컨택 응답의 성격을 한눈에 */}
+                  {chat.sms_opt_out_at
+                    ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]">수신거부</span>
+                    : avail && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${availStyle}`}>{avail === "휴면" ? "휴면" : "가능"}</span>}
                   {chat.agent_stage === "paused" && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#4A5568]">수동(OFF)</span>}
-                  {intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#E53E3E]">개입 필요</span>}
+                  {/* 풀 응답: 활성 대화 없이 답장 온 건 — 스크리닝의 '개입 필요'와 구분(노랑) */}
+                  {isPoolResponse
+                    ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">풀 응답</span>
+                    : intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#E53E3E]">개입 필요</span>}
                   {chat.agent_stage && chat.agent_stage !== "paused" && chat.agent_stage !== "abort" && !intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EBF8FF] text-[#3182CE]">AI 응대 중</span>}
                 </div>
               </button>

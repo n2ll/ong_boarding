@@ -1,13 +1,16 @@
 /**
  * POST /api/admin/inbox/[id]/classify
  *
- * body: { action: 'baemin' | 'other' }
+ * body: { action: 'baemin' | 'other' | 'ongmanaging', reason?: string }
  *
  * - 'baemin': triage 재실행해 파싱 → applicants 생성 (source='baemin', status='스크리닝')
  *             + ensureBaeminSystemJob + job_candidates(stage='screening') 생성
  *             + router 호출 (AI 응대 즉시 시작)
  *             + 동일 phone의 다른 pending 메시지도 함께 classification='baemin' + applicant_id 연결
  * - 'other' : classification='other'로만 마킹 (대상 메시지만)
+ * - 'ongmanaging': 옹매니징(옹고잉 재직자·기존 계약자) 문의 이관.
+ *             classification='ongmanaging' 마킹 + raw_payload에 이관 사유·시각 기록.
+ *             새 applicant 생성/AI 발송 없음 ('other'와 동일하되 값·이관 기록으로 구분).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,15 +26,21 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { action } = (await req.json()) as { action?: "baemin" | "other" };
-    if (action !== "baemin" && action !== "other") {
-      return NextResponse.json({ error: "action: 'baemin' or 'other'" }, { status: 400 });
+    const { action, reason } = (await req.json()) as {
+      action?: "baemin" | "other" | "ongmanaging";
+      reason?: string;
+    };
+    if (action !== "baemin" && action !== "other" && action !== "ongmanaging") {
+      return NextResponse.json(
+        { error: "action: 'baemin', 'other' or 'ongmanaging'" },
+        { status: 400 }
+      );
     }
 
     const supabase = createServiceClient();
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
-      .select("id, applicant_phone, body, created_at")
+      .select("id, applicant_phone, body, created_at, raw_payload")
       .eq("id", params.id)
       .single();
     if (msgErr || !msg) {
@@ -44,6 +53,30 @@ export async function POST(
         .update({ classification: "other" })
         .eq("id", msg.id);
       return NextResponse.json({ ok: true, action: "other" });
+    }
+
+    if (action === "ongmanaging") {
+      // 옹매니징 이관: 새 applicant 생성·AI 발송 없이 값만 구분해 마킹.
+      // messages에 메모 컬럼이 없어 이관 사유·시각은 raw_payload(제약 없는 jsonb)에 기록.
+      const prev =
+        msg.raw_payload && typeof msg.raw_payload === "object"
+          ? (msg.raw_payload as Record<string, unknown>)
+          : {};
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      await supabase
+        .from("messages")
+        .update({
+          classification: "ongmanaging",
+          raw_payload: {
+            ...prev,
+            ongmanaging_transfer: {
+              note: `옹매니징 이관 — ${trimmedReason || "옹고잉 재직자·기존 계약자 문의"}`,
+              transferred_at: new Date().toISOString(),
+            },
+          },
+        })
+        .eq("id", msg.id);
+      return NextResponse.json({ ok: true, action: "ongmanaging" });
     }
 
     // action === 'baemin'
