@@ -10,6 +10,30 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/**
+ * 최신성 판정용 '실제 지원/활동 시점' 산출.
+ * Airtable 임포트 인원(airtable_record_id 존재)은 created_at이 임포트일(전원 동일)이라
+ * 무의미하므로, airtable_raw의 실제 제출일('Submitted at'→'제출일')을 우선 사용하고
+ * 없으면 마지막 활동(last_message_at), 그래도 없으면 created_at으로 폴백한다.
+ * 실시간 인입(airtable_record_id 없음)은 created_at이 실제 시점이므로 활동 시점만 반영한다.
+ */
+function effectiveRecencyAt(r: {
+  created_at: string | null;
+  last_message_at?: string | null;
+  airtable_record_id?: string | null;
+  airtable_raw?: Record<string, unknown> | null;
+}): string | null {
+  if (r.airtable_record_id) {
+    const raw = r.airtable_raw || {};
+    const submitted =
+      (raw["Submitted at"] as string | undefined) ||
+      (raw["제출일"] as string | undefined) ||
+      null;
+    return submitted || r.last_message_at || r.created_at || null;
+  }
+  return r.last_message_at || r.created_at || null;
+}
+
 interface RecommendBody {
   posting: string;
   manualAddress?: string;
@@ -68,7 +92,7 @@ export async function POST(req: NextRequest) {
     // applicants(B마트) 중 status가 '확정'/'부적합'이 아니면 모두 풀에 포함
     let activeQuery = supabase
       .from("applicants")
-      .select("id, name, phone, lat, lng, own_vehicle, created_at, sigungu, location, status, birth_date")
+      .select("id, name, phone, lat, lng, own_vehicle, created_at, sigungu, location, status, birth_date, airtable_record_id, airtable_raw, last_message_at")
       .not("status", "in", "(확정,부적합)")
       .not("lat", "is", null);
     if (body.sourceFilter) {
@@ -101,6 +125,12 @@ export async function POST(req: NextRequest) {
         lng: Number(r.lng),
         own_vehicle: r.own_vehicle as string | null,
         created_at: r.created_at as string,
+        recency_at: effectiveRecencyAt({
+          created_at: r.created_at as string | null,
+          last_message_at: r.last_message_at as string | null,
+          airtable_record_id: r.airtable_record_id as string | null,
+          airtable_raw: r.airtable_raw as Record<string, unknown> | null,
+        }),
         sigungu: r.sigungu as string | null,
         location: r.location as string | null,
         birth_date: r.birth_date as string | null,
@@ -114,6 +144,8 @@ export async function POST(req: NextRequest) {
         lng: Number(r.lng),
         own_vehicle: r.own_vehicle as string | null,
         created_at: (r.submitted_at || r.imported_at) as string,
+        // legacy는 submitted_at이 실제 지원 시점. 없으면 imported_at 폴백.
+        recency_at: (r.submitted_at || r.imported_at) as string | null,
         sigungu: r.sigungu as string | null,
         location: r.location as string | null,
         birth_date: r.birth_date as string | null,

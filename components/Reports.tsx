@@ -7,6 +7,8 @@ import { toast } from "sonner";
 interface ApplicantRow {
   status: string;
   created_at: string | null;
+  // Airtable 일괄 임포트분 식별용 — 있으면 유입 시점이 임포트 시각이라 시계열을 오염시킨다.
+  airtable_record_id?: string | null;
 }
 
 interface UsageRow {
@@ -47,7 +49,13 @@ export function Reports() {
   const apps = useMemo(() => appsRes?.data ?? [], [appsRes]);
   const usage = useMemo(() => usageRes?.data ?? [], [usageRes]);
 
-  const rangedApps = useMemo(() => apps.filter((a) => inRange(a.created_at, dateRange)), [apps, dateRange]);
+  // Airtable 일괄 임포트분(airtable_record_id 보유)은 created_at이 실제 제출일이 아니라 임포트 시각이라
+  // created_at 기반 집계를 오염시킨다(임포트 ~390명이 전원 특정 월에 몰림) → 시계열/기간 집계에서 제외.
+  const liveApps = useMemo(() => apps.filter((a) => !a.airtable_record_id), [apps]);
+
+  // 기간(dateRange) 집계는 created_at을 기준으로 필터하므로 임포트분(liveApps)을 먼저 제외해야
+  // '올해/이번 달'에 임포트 시각이 몰려 지원서 접수가 가짜로 급증하는 것을 막는다.
+  const rangedApps = useMemo(() => liveApps.filter((a) => inRange(a.created_at, dateRange)), [liveApps, dateRange]);
 
   const stats = useMemo(() => {
     const by = (s: string) => rangedApps.filter((a) => a.status === s).length;
@@ -67,14 +75,15 @@ export function Reports() {
     ];
   }, [rangedApps]);
 
-  // 추이 차트는 범위와 무관하게 항상 최근 6개월(전체 기준)로 표시
+  // 추이 차트는 dateRange와 무관하게 항상 최근 6개월로 표시.
+  // created_at 기반 시계열이라 임포트분(liveApps로 제외)을 빼야 실제 월별 유입을 반영한다.
   const trend = useMemo(() => {
     const months = lastSixMonths();
     return months.map((m) => {
-      const inMonth = apps.filter((a) => (a.created_at ?? "").slice(0, 7) === m.key);
+      const inMonth = liveApps.filter((a) => (a.created_at ?? "").slice(0, 7) === m.key);
       return { name: m.name, 지원자: inMonth.length, 합격자: inMonth.filter((a) => a.status === "확정인력").length };
     });
-  }, [apps]);
+  }, [liveApps]);
 
   const handleDownload = () => {
     const rows: (string | number)[][] = [
@@ -107,7 +116,7 @@ export function Reports() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">리포트 · 분석</h1>
-          <p className="text-[14px] text-[#718096]">채용 성과와 AI 에이전트의 효율성을 다각도로 분석합니다.</p>
+          <p className="text-[14px] text-[#718096]">채용 성과와 AI 에이전트의 효율성을 다각도로 분석합니다. <span className="text-[#A0AEC0]">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-white border border-[#E2E8F0] rounded-xl px-2 py-1 shadow-sm">
@@ -176,7 +185,8 @@ export function Reports() {
       <div className="grid grid-cols-2 gap-6 mb-6">
         {/* Sourcing Trend Chart */}
         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-[#1A202C] mb-6">월별 지원자 및 합격자 추이</h3>
+          <h3 className="text-[16px] font-bold text-[#1A202C] mb-1">월별 지원자 및 합격자 추이</h3>
+          <p className="text-[12px] text-[#718096] mb-5">실시간 인입 기준(일괄 임포트 제외)</p>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
               <AreaChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
