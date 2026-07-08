@@ -7,6 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SosLedgerCard } from "@/components/SosLedgerCard";
+import { InterestQueueCard } from "@/components/InterestQueueCard";
 
 interface UrgentItem {
   id: string;
@@ -56,6 +57,8 @@ export function Dashboard() {
   const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
   const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat");
+  // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
+  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number }>("/api/admin/interest-queue");
   const rawApps = appsRes?.data ?? [];
   const inboxCount = inboxRes?.data?.length ?? 0;
   // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
@@ -192,6 +195,8 @@ export function Dashboard() {
     () => apps.filter((a) => (a.unread_count ?? 0) > 0 && a.agent_stage !== "paused").length,
     [apps]
   );
+  const interestCount = interestRes?.count ?? 0;
+  const interestImmediate = interestRes?.immediate_count ?? 0;
   const urgent = useMemo(() => {
     const u: UrgentItem[] = [];
     if (notiCounts?.aiDisabled) {
@@ -203,6 +208,16 @@ export function Dashboard() {
       const elapsed = min < 60 ? `${min}분` : `${Math.floor(min / 60)}시간`;
       u.push({ id: "sos", tone: "red", title: `진행 중 긴급 건 ${sosOpen.length}건 · 최장 ${elapsed} 경과`, desc: "결원·증차 긴급 건이 해결 대기 중이에요.", cta: "긴급 건 기록으로", path: "#sos-ledger" });
     }
+    if (interestCount > 0) {
+      u.push({
+        id: "interest-queue",
+        tone: interestImmediate > 0 ? "red" : "amber",
+        title: `관심 표시 처리 대기 ${interestCount}건${interestImmediate > 0 ? ` (바로가능 ${interestImmediate}건)` : ""}`,
+        desc: "맞춤 공고에 관심을 누른 후보가 컨택을 기다리고 있어요.",
+        cta: "관심 표시 처리로",
+        path: "#interest-queue",
+      });
+    }
     if (inboxCount > 0) {
       u.push({ id: "inbox", tone: "red", title: `미분류 인박스 ${inboxCount}건`, desc: "배민 지원자/기타 분류가 필요한 인입 메시지가 있어요.", cta: "분류하러 가기", path: "/inbox" });
     }
@@ -213,7 +228,7 @@ export function Dashboard() {
       u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
     }
     return u;
-  }, [notiCounts, sosOpen, inboxCount, poolReplies, nowTick]);
+  }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, nowTick]);
 
   // SMS 게이트웨이 상태 칩 — 최신 기기 1건 기준. 10분 무신호 또는 발송 대기 적체 시 경고색.
   const gateway = useMemo(() => {
@@ -381,7 +396,10 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* 3행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
+      {/* 3행: 관심 표시 처리 대기 (pull 채널 인입 후보) — '오늘의 할 일' 바로 아래, 긴급 건 기록 위 */}
+      <InterestQueueCard />
+
+      {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
       <div id="sos-ledger" className="scroll-mt-6">
         <SosLedgerCard />
       </div>
