@@ -77,8 +77,20 @@ function channelLabel(source: string | null | undefined): string {
   return CHANNEL_LABEL[source] ?? source;
 }
 
-const DEFAULT_BULK_BODY =
-  "[옹고잉] #{이름}님, 안녕하세요!\n현재 거주하고 계신 인근에 야간 배달 파트너를 긴급 모집 중입니다.\n\n이번 주말(금,토,일) 근무 시 기본 단가의 1.5배를 지급합니다. 관심 있으시다면 본 문자에 답장 주세요!";
+// 재컨택 A안 (2026-07-08 확정, 전체 기본) — 지원 시점을 뭉개 오래된 코호트(대다수 1~2년 전 지원)에도 안전.
+// 치환: #{이름}, #{맞춤링크}(무로그인 pull 페이지). '그만' 수신거부 안내 포함(확정 뉘앙스 금지·정보성 프레임).
+const DEFAULT_BULK_BODY = `[옹고잉] #{이름}님, 안녕하세요. 배송 전문기업 옹고잉입니다.
+
+옹고잉 배송 업무에 관심을 갖고 지원 설문을 남겨주셨던 이력이 있어 연락드립니다. 시간이 좀 지났을 수 있는데요 — 지금 #{이름}님 조건과 맞는 배송 건이 열려 있어 안내드립니다.
+
+아래 링크에서 조건(단가 포함)을 확인하시고, 해볼 만하다 싶으시면 '관심 있음'만 눌러주세요. 담당 매니저가 확인 후 직접 연락드립니다.
+
+#{맞춤링크}
+
+※ 상황이 바뀌셨거나 안내가 필요 없으시면 '그만'이라고 답장 주세요. 이후 안내를 보내지 않습니다.`;
+
+// 재컨택 B안 (최근 6개월 이내 지원 코호트용 — 짧은 버전)
+const RECONTACT_B_BODY = `[옹고잉] #{이름}님, 옹고잉입니다. 얼마 전 남겨주신 배송 지원 설문 보고 연락드려요. 지금 조건 맞는 배송 건이 있어 링크로 안내드립니다. 확인 후 '관심 있음'만 눌러주시면 매니저가 연락드립니다. #{맞춤링크} (안내 중단: '그만' 답장)`;
 
 interface ColumnData {
   id: string;
@@ -1133,8 +1145,8 @@ export function Pipeline() {
                   className="w-full border border-[#E2E8F0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#FFCB3C] bg-white"
                 >
                   <option value="">직접 입력하기</option>
-                  <option value={DEFAULT_BULK_BODY}>[긴급] 야간 파트너 충원 (단가 1.5배)</option>
-                  <option value={"[옹고잉] #{이름}님, 안녕하세요!\n지금 모집 중인 일자리를 모아 보실 수 있는 본인 전용 페이지를 보내드려요.\n\n#{맞춤링크}\n\n마음에 드는 일자리가 있으면 [관심 있어요]를 눌러주세요. 확인 후 연락드리겠습니다!"}>맞춤 공고 링크 안내 (재컨택)</option>
+                  <option value={DEFAULT_BULK_BODY}>재컨택 A안 (전체 기본)</option>
+                  <option value={RECONTACT_B_BODY}>재컨택 B안 (최근 6개월·짧게)</option>
                   <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
                   <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
                 </select>
