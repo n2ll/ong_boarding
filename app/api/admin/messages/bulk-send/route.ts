@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     const needsFill = text.includes("#{이름}") || text.includes("#{맞춤링크}");
     const infoById = new Map<
       number,
-      { name: string | null; access_token: string | null; sms_opt_out_at: string | null }
+      { name: string | null; access_token: string | null; sms_opt_out_at: string | null; status: string | null }
     >();
     {
       const ids = recipients
@@ -51,17 +51,20 @@ export async function POST(req: NextRequest) {
       if (ids.length > 0) {
         const { data: rows } = await supabase
           .from("applicants")
-          .select("id, name, access_token, sms_opt_out_at")
+          .select("id, name, access_token, sms_opt_out_at, status")
           .in("id", ids);
         for (const row of rows ?? []) {
           infoById.set(row.id as number, {
             name: (row.name as string | null) ?? null,
             access_token: (row.access_token as string | null) ?? null,
             sms_opt_out_at: (row.sms_opt_out_at as string | null) ?? null,
+            status: (row.status as string | null) ?? null,
           });
         }
       }
     }
+    // 인력풀 제외자는 캠페인 발송 대상이 아니다 — 방어선(선택 UI가 걸러도 백엔드에서 재차 차단).
+    const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈"]);
     const baseUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.VERCEL_PROJECT_PRODUCTION_URL ||
@@ -80,6 +83,11 @@ export async function POST(req: NextRequest) {
       // 수신거부 하드 가드 — '그만' 답장 등으로 sms_opt_out_at이 기록된 지원자는 영구 제외.
       if (info?.sms_opt_out_at) {
         results.push({ phone, success: false, error: "수신거부(발송 제외)" });
+        continue;
+      }
+      // 인력풀 제외(부적합/이탈) 하드 가드 — 풀에서 뺀 지원자에겐 캠페인이 나가지 않는다.
+      if (info?.status && EXCLUDED_POOL_STATUS.has(info.status)) {
+        results.push({ phone, success: false, error: `인력풀 제외(${info.status})` });
         continue;
       }
 
