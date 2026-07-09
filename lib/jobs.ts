@@ -18,3 +18,22 @@ export function isJobEffectivelyClosed(
   if (closesAt && new Date(closesAt).getTime() <= Date.now()) return true;
   return false;
 }
+
+/**
+ * 시스템 예약 프리픽스.
+ *
+ * `__danggeun_system__`·`__baemin_system__` 등 인입 라우터가 쓰는 더미 공고는 제목이 `__`로 시작한다.
+ * 이 프리픽스로 시작하는 공고는 매니저 목록·pull(/p/[token])·검색에서 숨겨진다. 판정이 클라·서버·pull에
+ * 제각각(startsWith·neq·like)이면 "등록됐는데 목록에서 사라지는" 혼란이 생기므로 이 헬퍼로 단일화한다.
+ */
+export const SYSTEM_JOB_TITLE_PREFIX = "__";
+
+/** 제목이 시스템 예약 프리픽스(`__`)로 시작하면 시스템 공고로 본다(목록·pull·검색에서 숨김 대상). */
+export function isSystemJobTitle(title: string | null | undefined): boolean {
+  return typeof title === "string" && title.startsWith(SYSTEM_JOB_TITLE_PREFIX);
+}
+
+/** 사용자 입력 제목에서 앞쪽 `__`(및 연속된 언더스코어)를 제거한다 — 사용자가 실수로 넣은 예약 프리픽스 방어용. */
+export function stripSystemPrefix(title: string): string {
+  return title.replace(/^_+/, "");
+}

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
+import { isSystemJobTitle } from "@/lib/jobs";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     body: jobBody,
     branch,
     branch_id,
+    client_id,
     slot,
     start_date,
     vehicle_required,
@@ -99,6 +101,7 @@ export async function POST(req: NextRequest) {
     body?: string;
     branch?: string | null;
     branch_id?: number | null;
+    client_id?: number | null;
     slot?: string | null;
     start_date?: string | null;
     vehicle_required?: boolean;
@@ -124,6 +127,13 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  // `__` 프리픽스는 시스템 더미 공고 예약어 — 사용자 공고가 이걸로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보인다.
+  if (isSystemJobTitle(title.trim())) {
+    return NextResponse.json(
+      { error: "공고 제목은 '__'로 시작할 수 없습니다(시스템 예약 프리픽스)." },
+      { status: 400 }
+    );
+  }
   if (slot && !["평일오전", "평일오후", "주말오전", "주말오후"].includes(slot)) {
     return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
   }
@@ -140,8 +150,9 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient();
 
   // branch_id가 오면 지점 이름·소속 화주사를 함께 채워 계층을 일관되게 유지한다.
+  // 지점 없이 화주사(client_id)만 온 경우엔 그 값을 그대로 저장해 화주사 필터에서 유실되지 않게 한다.
   let resolvedBranchName: string | null = branch ?? null;
-  let resolvedClientId: number | null = null;
+  let resolvedClientId: number | null = typeof client_id === "number" ? client_id : null;
   if (typeof branch_id === "number") {
     const { data: b } = await supabase
       .from("branches")
