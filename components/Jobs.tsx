@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
 
@@ -22,6 +23,8 @@ interface JobRow {
   candidates: number;
   newCandidates: number;
   confirmed: number;
+  // 진행 중(exploration/screening/onboarding/active) 후보 수 — 마감 시 AI 응대가 멈추는 대상.
+  inProgress: number;
   capacity: number;
   automation: boolean;
   created: string;
@@ -46,6 +49,8 @@ interface ApiJob {
   work_period: string | null;
   closes_at: string | null;
   counts: Record<string, number>;
+  // 매니저 명시 확정(applicants.status='확정인력') 수 — 충원율 게이지의 분자.
+  confirmed_count?: number;
 }
 
 interface ClientOpt { id: number; name: string }
@@ -154,7 +159,11 @@ function toJobRow(j: ApiJob): JobRow {
     recruitMode: asRecruitMode(j.recruit_mode),
     candidates: total,
     newCandidates: j.counts?.["sent"] ?? 0,
-    confirmed: j.counts?.["active"] ?? 0,
+    // 충원율 분자 = 매니저 확정(status='확정인력')만. agent_stage='active'(자동 전이)는 확정이 아니다.
+    // 보드의 '확정 슬롯 분포'(status==='확정인력')와 같은 소스라 두 지표가 어긋나지 않는다.
+    confirmed: j.confirmed_count ?? 0,
+    // 진행 중 후보 = AI가 응대 중인 단계. 마감하면 이들 응대가 멈추므로 마감 확인 모달에서 경고한다.
+    inProgress: ["exploration", "screening", "onboarding", "active"].reduce((a, s) => a + (j.counts?.[s] ?? 0), 0),
     capacity: j.capacity ?? 0,
     automation: j.status === "active",
     created: fmtDate(j.created_at),
@@ -558,7 +567,6 @@ export function Jobs() {
   // 정기 라인 재모집 시 반복 입력을 없앤다. 등록은 기존 POST를 그대로 재사용.
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const duplicateJob = async (job: JobRow) => {
-    setLinkMenuJobId(null);
     setDuplicatingId(job.id);
     try {
       const res = await fetch(`/api/admin/jobs/${job.id}`);
@@ -760,9 +768,22 @@ export function Jobs() {
 
   const handleToggleClose = async (job: JobRow) => {
     const next = job.status === "active" ? "closed" : "active";
-    const ok = next === "closed"
-      ? await confirm({ title: "공고를 마감할까요?", description: `'${job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.`, confirmText: "마감하기" })
-      : await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    let ok: boolean;
+    if (next === "closed") {
+      // 마감하면 dispatch·pull 관심표시가 막히고 AI 자동 응대가 꺼진다.
+      // 진행 중 후보가 있으면 그 응대가 멈추는 걸 명시해 무심코 대화를 끊는 걸 막는다.
+      const warn = job.inProgress > 0
+        ? `\n\n⚠️ 진행 중인 후보 ${job.inProgress}명의 AI 응대가 멈춰요. 나누던 대화가 끊길 수 있어요.`
+        : "";
+      ok = await confirm({
+        title: "공고를 마감할까요?",
+        description: `'${job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.${warn}`,
+        confirmText: "마감하기",
+        destructive: job.inProgress > 0,
+      });
+    } else {
+      ok = await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    }
     if (!ok) return;
     setStatusBusyId(job.id);
     try {
@@ -807,14 +828,12 @@ export function Jobs() {
     { source: "referral", label: "지인 추천" },
     { source: "direct", label: "기타" },
   ];
-  const [linkMenuJobId, setLinkMenuJobId] = useState<string | null>(null);
 
   const copyJobLink = async (job: JobRow, source: string) => {
     const base = typeof window !== "undefined" ? window.location.origin : "";
     const params = new URLSearchParams({ source, job: job.id });
     if (job.branch && job.branch !== "-") params.set("branch", job.branch);
     const url = `${base}/apply?${params.toString()}`;
-    setLinkMenuJobId(null);
     try {
       await navigator.clipboard.writeText(url);
       const label = PUBLISH_CHANNELS.find((c) => c.source === source)?.label ?? source;
@@ -946,7 +965,7 @@ export function Jobs() {
                     const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
                     const done = job.confirmed >= job.capacity;
                     return (
-                      <div className="mt-1 pr-2" title={`확정 ${job.confirmed}명 / 정원 ${job.capacity}명`}>
+                      <div className="mt-1 pr-2" title={`매니저 확정 ${job.confirmed}명 / 정원 ${job.capacity}명 (확정인력으로 지정된 후보 기준)`}>
                         <div className="flex items-center justify-between text-[11px] font-bold mb-0.5">
                           <span className="text-[#718096]">충원율</span>
                           <span className={done ? "text-[#38A169]" : "text-[#4A5568]"}>{job.confirmed}/{job.capacity}{done && " ✓"}</span>
@@ -1017,21 +1036,22 @@ export function Jobs() {
 
                 <div className="flex justify-end gap-1">
                   {job.recruitMode !== "internal" && (
-                    <div className="relative">
-                      <button onClick={() => setLinkMenuJobId(linkMenuJobId === job.id ? null : job.id)} className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
-                        <Copy size={14} /> 게시 링크
-                      </button>
-                      {linkMenuJobId === job.id && (
-                        <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E2E8F0] rounded-xl shadow-lg py-1 w-[170px]">
-                          <div className="px-3 py-1.5 text-[11px] font-bold text-[#A0AEC0]">게시 채널 선택</div>
-                          {PUBLISH_CHANNELS.map((ch) => (
-                            <button key={ch.source} onClick={() => copyJobLink(job, ch.source)} className="w-full text-left px-3 py-2 text-[12.5px] font-semibold text-[#4A5568] hover:bg-[#F7FAFC]">
-                              {ch.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    // shadcn(Radix) DropdownMenu — 바깥 클릭·ESC 닫기·충돌 회피 포지셔닝·포털 렌더(행 잘림 방지)를 위임.
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
+                          <Copy size={14} /> 게시 링크
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-[170px] rounded-xl border-[#E2E8F0]">
+                        <DropdownMenuLabel className="text-[11px] font-bold text-[#A0AEC0]">게시 채널 선택</DropdownMenuLabel>
+                        {PUBLISH_CHANNELS.map((ch) => (
+                          <DropdownMenuItem key={ch.source} onSelect={() => copyJobLink(job, ch.source)} className="text-[12.5px] font-semibold text-[#4A5568]">
+                            {ch.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                   <button
                     onClick={() => duplicateJob(job)}
@@ -1552,7 +1572,7 @@ export function Jobs() {
                     {/* 확정 슬롯 분포 */}
                     {hasConfirmedSlot && (
                       <div>
-                        <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5">확정 슬롯 분포</div>
+                        <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
                         <div className="grid grid-cols-4 gap-1.5">
                           {slotFill.map((s) => (
                             <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-[#F0FFF4] border border-[#C6F6D5]" : "bg-white border border-[#E2E8F0]"}`}>

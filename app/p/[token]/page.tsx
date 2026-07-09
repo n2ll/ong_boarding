@@ -53,13 +53,17 @@ function closesLabel(iso: string): string {
 const AMOUNT_PAY_TYPES = new Set(["건당", "일당", "주급", "월급"]);
 
 function payLabel(j: PoolJob): string | null {
-  if (j.pay_type && AMOUNT_PAY_TYPES.has(j.pay_type) && typeof j.pay_amount === "number") {
-    return `${j.pay_type} ${j.pay_amount.toLocaleString("ko-KR")}원`;
+  if (j.pay_type && AMOUNT_PAY_TYPES.has(j.pay_type)) {
+    // 금액이 있으면 '건당 3,000원'. 없으면 단위만('건당')은 무의미하므로 pay_info로 폴백,
+    // 그것도 없으면 급여 행 자체를 숨긴다(null) — 시니어에게 '급여: 건당' 같은 표기 혼란 방지.
+    if (typeof j.pay_amount === "number") {
+      return `${j.pay_type} ${j.pay_amount.toLocaleString("ko-KR")}원`;
+    }
+    return j.pay_info || null;
   }
   if (j.pay_type === "혼합" || j.pay_type === "협의") {
     return j.pay_info || j.pay_type;
   }
-  if (j.pay_type) return j.pay_type;
   if (j.pay_info) return j.pay_info;
   return null;
 }
