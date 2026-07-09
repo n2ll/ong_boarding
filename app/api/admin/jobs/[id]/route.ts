@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -138,6 +139,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   } else if (update.branch_id === null) {
     update.client_id = null;
+  }
+
+  // 상차지 주소가 바뀌었고 좌표를 함께 안 넘겼으면 지오코딩 (거리 정렬 근거). 주소를 비우면 좌표도 클리어.
+  if (typeof update.pickup_address === "string" && update.pickup_address.trim() && update.pickup_lat === undefined) {
+    const { geo } = await geocodeAddressWithFallback(update.pickup_address);
+    if (geo) {
+      update.pickup_lat = geo.lat;
+      update.pickup_lng = geo.lng;
+    }
+  } else if (update.pickup_address === null || update.pickup_address === "") {
+    update.pickup_lat = null;
+    update.pickup_lng = null;
   }
 
   const { data, error } = await supabase
