@@ -47,10 +47,14 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   }
 
   // 활성 실공고 (시스템 더미 공고 제외)
+  // recruit_mode 게이팅: pull(/p/[token])은 인재풀 전용 채널이므로 internal·both만 노출한다.
+  // external(공개 모집)은 게시 링크로만 유통 — 인재풀 전체에 새어나가면 안 된다(Jobs.tsx '게시 링크' 규칙과 대칭).
+  // recruit_mode는 DB NOT NULL DEFAULT 'external' — null은 발생하지 않지만, 안전 방향(비공개)으로 in-필터가 null을 자동 제외한다.
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
     .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at")
     .eq("status", "active")
+    .in("recruit_mode", ["internal", "both"])
     .not("title", "like", "\\_\\_%")
     .order("created_at", { ascending: false });
 

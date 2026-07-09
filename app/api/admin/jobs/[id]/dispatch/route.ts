@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
 
 interface Applicant {
   id: number;
@@ -45,13 +46,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // 공고 로드
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, body, status")
+    .select("id, body, status, closes_at")
     .eq("id", jobId)
     .single();
   if (jobErr || !job) {
     return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
   }
-  if (job.status !== "active") {
+  // 마감시각이 지난 공고는 status='active'라도 실질 마감 — 발송을 막는다(목록 배지와 일치).
+  if (isJobEffectivelyClosed(job.status, job.closes_at as string | null)) {
     return NextResponse.json({ error: "활성 공고만 발송 가능합니다." }, { status: 400 });
   }
 

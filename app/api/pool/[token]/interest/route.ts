@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +45,16 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at")
+    .select("id, title, status, closes_at, recruit_mode")
     .eq("id", jobId)
     .maybeSingle();
+  // pull 노출 대상(internal·both)이 아니면 접근 거부 — GET에서 안 보이는 공고에 관심 표시가 새는 걸 막는다.
+  const pullExposed = job?.recruit_mode === "internal" || job?.recruit_mode === "both";
   const closed =
     !job ||
-    job.status !== "active" ||
+    !pullExposed ||
     String(job.title).startsWith("__") ||
-    (job.closes_at && new Date(job.closes_at as string).getTime() <= Date.now());
+    isJobEffectivelyClosed(job.status as string | null, job.closes_at as string | null);
   if (closed) {
     return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
   }
