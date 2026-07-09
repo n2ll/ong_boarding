@@ -572,14 +572,17 @@ export function ApplicantDetailPanel({
   applicantId,
   jobId = null,
   onChanged,
+  initialTab = "detail",
 }: {
   isOpen: boolean;
   onClose: () => void;
   applicantId: number | null;
   jobId?: number | null;
   onChanged?: () => void;
+  /** 열 때 처음 보여줄 탭 — 답장 대기 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
+  initialTab?: "detail" | "chat";
 }) {
-  const [tab, setTab] = useState<"detail" | "chat">("detail");
+  const [tab, setTab] = useState<"detail" | "chat">(initialTab);
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
 
   // 전역 킬스위치 — 드로어 대화 탭에서 'AI 응대 중' 오표시·수동 발송 잠금이 남지 않도록
@@ -596,8 +599,8 @@ export function ApplicantDetailPanel({
   }, [isOpen]);
 
   useEffect(() => {
-    if (isOpen) setTab("detail");
-  }, [isOpen, applicantId]);
+    if (isOpen) setTab(initialTab);
+  }, [isOpen, applicantId, initialTab]);
 
   if (!isOpen || applicantId == null) return null;
 
