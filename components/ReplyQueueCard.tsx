@@ -27,6 +27,12 @@ interface AppRow {
   last_message_at?: string | null;
   created_at?: string | null;
   sms_opt_out_at?: string | null;
+  current_job_id?: number | null;
+}
+
+interface JobLite {
+  id: number;
+  title: string;
 }
 
 interface Preview {
@@ -45,11 +51,19 @@ function agoLabel(iso: string | null | undefined, now: number): string {
   return `${Math.floor(h / 24)}일 전`;
 }
 
-export function ReplyQueueCard() {
+// initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
+export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null } = {}) {
   const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
+  // 공고 제목 매핑용 — Jobs 탭과 동일 SWR 키라 중복 호출을 dedup. 실패해도 필터만 미노출.
+  const { data: jobsRes } = useSWR<{ jobs?: JobLite[] }>("/api/admin/jobs?status=all");
+  const jobTitleById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const j of jobsRes?.jobs ?? []) m.set(j.id, j.title);
+    return m;
+  }, [jobsRes]);
 
   // 미응답 inbound가 있는 지원자 = unread_count>0. 최근 수신 순으로.
-  const items = useMemo(() => {
+  const allItems = useMemo(() => {
     const rows = data?.data ?? [];
     return rows
       .filter((a) => (a.unread_count ?? 0) > 0)
@@ -59,6 +73,26 @@ export function ReplyQueueCard() {
         return bt - at;
       });
   }, [data]);
+
+  // 공고별 필터 — 진행 중 공고 포인터(current_job_id) 기준. 큐에 등장하는 공고들로 옵션 구성.
+  const [jobFilter, setJobFilter] = useState<number | "all">(initialJobId ?? "all");
+  useEffect(() => {
+    if (initialJobId != null) setJobFilter(initialJobId);
+  }, [initialJobId]);
+  const jobOptions = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const it of allItems) {
+      const jid = it.current_job_id;
+      if (typeof jid === "number" && !m.has(jid)) m.set(jid, jobTitleById.get(jid) ?? `공고 #${jid}`);
+    }
+    return Array.from(m, ([id, title]) => ({ id, title }));
+  }, [allItems, jobTitleById]);
+  // 선택 공고가 큐에서 사라지면 전체로 되돌린다.
+  useEffect(() => {
+    if (jobFilter !== "all" && !jobOptions.some((o) => o.id === jobFilter)) setJobFilter("all");
+  }, [jobFilter, jobOptions]);
+
+  const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.current_job_id === jobFilter);
 
   const count = items.length;
   // 미착수 = 매니저가 아직 개입 안 함(paused 아님). '오늘의 할 일'의 poolReplies와 동일 관점.
@@ -114,6 +148,20 @@ export function ReplyQueueCard() {
           <div className="text-[12px] text-[#718096] mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
+          {jobOptions.length > 1 && (
+            <select
+              value={jobFilter === "all" ? "all" : String(jobFilter)}
+              onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+              className="max-w-[180px] text-[12px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1 outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40"
+              title="진행 중 공고별로 답장 대기를 필터링합니다"
+            >
+              <option value="all">전체 공고</option>
+              {jobOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.title}</option>
+              ))}
+            </select>
+          )}
           {untouchedCount > 0 && (
             <span className="flex items-center gap-1 text-[12px] font-bold text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] px-2.5 py-1 rounded-full">
               미착수 {untouchedCount}건

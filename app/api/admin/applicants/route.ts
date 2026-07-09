@@ -44,6 +44,8 @@ const LIST_COLUMNS = [
   "availability", "availability_updated_at", "sms_opt_out_at", "airtable_record_id",
   // 재컨택 선별 정확도 — 발송가능 판정(맞춤링크 토큰)·원지원 신선도 정렬/코호트 필터
   "access_token", "applied_at",
+  // 답장 큐 공고별 필터 — 진행 중 공고 포인터
+  "current_job_id",
 ].join(", ");
 
 export async function GET(req: NextRequest) {

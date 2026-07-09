@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { motion } from "motion/react";
 import { Heart, Zap, Phone, Loader2, ExternalLink, Check, XCircle, Send, X } from "lucide-react";
@@ -68,13 +68,31 @@ function prefillContactBody(name: string | null, jobTitle: string): string {
   return `[옹고잉] ${n}님, ${jobPart}관심 주셔서 감사합니다. 담당 매니저가 곧 연락드릴게요. 통화 편하신 시간대 있으면 이 번호로 답장 주세요!`;
 }
 
-export function InterestQueueCard() {
+// initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
+export function InterestQueueCard({ initialJobId }: { initialJobId?: number | null } = {}) {
   const confirm = useConfirm();
   const { data, mutate, error } = useSWR<QueueRes>("/api/admin/interest-queue");
 
-  const items = data?.items ?? [];
-  const count = data?.count ?? 0;
-  const immediateCount = data?.immediate_count ?? 0;
+  const allItems = data?.items ?? [];
+
+  // 공고별 필터 — 여러 급구 동시 진행 시 어느 공고 소속인지 구분. 큐에 등장하는 공고들로 옵션 구성.
+  const [jobFilter, setJobFilter] = useState<number | "all">(initialJobId ?? "all");
+  useEffect(() => {
+    if (initialJobId != null) setJobFilter(initialJobId);
+  }, [initialJobId]);
+  const jobOptions = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const it of allItems) if (!m.has(it.job_id)) m.set(it.job_id, it.job_title || `공고 #${it.job_id}`);
+    return Array.from(m, ([id, title]) => ({ id, title }));
+  }, [allItems]);
+  // 선택한 공고가 큐에서 사라지면(모두 처리됨) 자동으로 전체로 되돌린다.
+  useEffect(() => {
+    if (jobFilter !== "all" && !jobOptions.some((o) => o.id === jobFilter)) setJobFilter("all");
+  }, [jobFilter, jobOptions]);
+
+  const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.job_id === jobFilter);
+  const count = items.length;
+  const immediateCount = items.filter((it) => it.immediate).length;
 
   // '관심 표시 상대시각'이 화면에 머무는 동안 갱신되도록 1분 틱 (SosLedgerCard 경과 라벨과 동일 패턴)
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -192,6 +210,20 @@ export function InterestQueueCard() {
           <div className="text-[12px] text-[#718096] mt-0.5">맞춤 공고에 관심을 누른 후보 · 상세 확인 후 컨택/보류로 처리</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
+          {jobOptions.length > 1 && (
+            <select
+              value={jobFilter === "all" ? "all" : String(jobFilter)}
+              onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+              className="max-w-[180px] text-[12px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1 outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40"
+              title="공고별로 관심 표시를 필터링합니다"
+            >
+              <option value="all">전체 공고</option>
+              {jobOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.title}</option>
+              ))}
+            </select>
+          )}
           {immediateCount > 0 && (
             <span className="flex items-center gap-1 text-[12px] font-bold text-[#276749] bg-[#F0FFF4] border border-[#9AE6B4] px-2.5 py-1 rounded-full">
               <Zap size={12} /> 바로가능 {immediateCount}건
