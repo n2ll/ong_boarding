@@ -8,6 +8,7 @@ import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SosLedgerCard } from "@/components/SosLedgerCard";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
+import { ReplyQueueCard } from "@/components/ReplyQueueCard";
 
 interface UrgentItem {
   id: string;
@@ -225,7 +226,7 @@ export function Dashboard() {
       u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live" });
     }
     if (poolReplies > 0) {
-      u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "실시간 응대로", path: "/live" });
+      u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "답장 대기 처리로", path: "#reply-queue" });
     }
     return u;
   }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, nowTick]);
@@ -396,8 +397,12 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* 3행: 관심 표시 처리 대기 (pull 채널 인입 후보) — '오늘의 할 일' 바로 아래, 긴급 건 기록 위 */}
-      <InterestQueueCard />
+      {/* 3행: 재컨택 파일럿 응답 큐 — 관심 표시(pull 클릭)와 답장 대기(문자 답장)를 대칭 병렬 배치.
+          '오늘의 할 일' 바로 아래, 긴급 건 기록 위. */}
+      <div className="grid grid-cols-2 gap-6 items-start">
+        <InterestQueueCard />
+        <ReplyQueueCard />
+      </div>
 
       {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
       <div id="sos-ledger" className="scroll-mt-6">
