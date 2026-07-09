@@ -33,7 +33,7 @@ interface SavedSegment {
   // v2 확장 — 구버전 저장분은 undefined (하위호환)
   statuses?: string[];
   availability?: string[];
-  region?: "all" | "capital";
+  region?: "all" | "capital" | "seoul";
 }
 
 // Types
@@ -63,6 +63,8 @@ interface CardData {
   accessToken: string | null;
   appliedAtIso: string | null;
   geoPrecision: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 const STAGE_KO: Record<string, string> = {
@@ -172,6 +174,21 @@ const CAPITAL_SIDO_PREFIXES = ["서울", "경기", "인천"];
 function isCapitalArea(sido: string | null): boolean {
   return !!sido && CAPITAL_SIDO_PREFIXES.some((p) => sido.startsWith(p));
 }
+// 서울 판별 — sido 원문("서울특별시" 등) 접두 매칭
+function isSeoul(sido: string | null): boolean {
+  return !!sido && sido.startsWith("서울");
+}
+
+// 두 좌표 간 거리(km) — 하버사인 (pool route와 동일 공식)
+function distKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLng = (lng2 - lng1) * rad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 // 6개월 경계 — 원지원 코호트 필터/템플릿 판단용
 const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
@@ -235,6 +252,8 @@ function toCard(a: ApplicantRow): CardData {
     accessToken: a.access_token ?? null,
     appliedAtIso: a.applied_at ?? null,
     geoPrecision: a.geo_precision ?? null,
+    lat: a.lat ?? null,
+    lng: a.lng ?? null,
   };
 }
 
@@ -307,8 +326,8 @@ export function Pipeline() {
   // 진행 단계(status)·가용성 필터 — 적체 트리아지의 핵심 동선 (예: '스크리닝 전'만 격리 → 벌크 처리)
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
   const [availabilityFilter, setAvailabilityFilter] = useState<Set<string>>(new Set());
-  // 지역(sido) 필터 — 수도권(서울/경기/인천) 공급 풀 격리용 칩 1개
-  const [regionFilter, setRegionFilter] = useState<"all" | "capital">("all");
+  // 지역(sido) 필터 — 전체/수도권(서울·경기·인천)/서울 3상태 세그먼트
+  const [regionFilter, setRegionFilter] = useState<"all" | "capital" | "seoul">("all");
   // 부적합/이탈/기타는 칸반 보드에서 제외되지만, 리스트에서는 토글로 복구·재검토 가능해야 한다.
   const [showExcluded, setShowExcluded] = useState(false);
   // 원지원 6개월 이내 코호트 필터 — 재컨택 B안(짧은 템플릿) 대상 격리용
@@ -320,7 +339,9 @@ export function Pipeline() {
   // 최근 14일 재컨택 제외 필터 — 켜면 해당 기간 내 ping_sent 이력이 있는 인원을 리스트에서 제외(중복 재컨택 방지)
   const [excludeRecentPing, setExcludeRecentPing] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
-  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old">("recent");
+  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old" | "distance">("recent");
+  // 거리 기준 공고 — 선택 공고 상차지(pickup_lat/lng) 기준 근거리순 정렬용. null이면 미선택.
+  const [distanceJobId, setDistanceJobId] = useState<number | null>(null);
   // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
@@ -328,10 +349,25 @@ export function Pipeline() {
   // 지원자별 마지막 재컨택(ping_sent) 시각(ISO) — '재컨택 N일 전' 배지/제외 필터용 (디바운스 배치 조회)
   const [lastPingById, setLastPingById] = useState<Record<number, string>>({});
 
+  // 거리 기준 공고 옵션 — 상차지 좌표(pickup_lat/lng)가 있는 활성 공고만. 좌표 없는 공고는 거리 계산 불가라 제외.
+  const distanceJobs = useMemo(
+    () => visibleJobs.filter((j) => typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"),
+    [visibleJobs]
+  );
+  // 선택된 거리 기준 공고의 상차지 좌표 — 없으면 거리 정렬 비활성(카드 뒤로).
+  const distanceJobCoords = useMemo(() => {
+    if (distanceJobId === null) return null;
+    const j = distanceJobs.find((x) => x.id === distanceJobId);
+    return j && typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
+      ? { lat: j.pickup_lat, lng: j.pickup_lng }
+      : null;
+  }, [distanceJobId, distanceJobs]);
+
   // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
+  // 거리 기준 공고 변경도 정렬 순서를 바꿔 '상위 N'의 대상이 달라지므로 함께 초기화한다.
   useEffect(() => {
     setSelectedRows(new Set());
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, sortMode, query]);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, sortMode, distanceJobId, query]);
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -520,6 +556,7 @@ export function Pipeline() {
     if (statusFilter.size && !statusFilter.has(c.status)) return false;
     if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
     if (regionFilter === "capital" && !isCapitalArea(c.sido)) return false;
+    if (regionFilter === "seoul" && !isSeoul(c.sido)) return false;
     if (recentAppliedOnly && !(c.appliedAtIso && new Date(c.appliedAtIso).getTime() >= sixMonthsAgo)) return false;
     if (geoConfirmedOnly && !(c.geoPrecision === "exact" || c.geoPrecision === "approx")) return false;
     return true;
@@ -536,12 +573,29 @@ export function Pipeline() {
     }
     return true;
   });
+  // 카드별 상차지 거리(km) — 거리 정렬 + 카드 배지 공용. 거리모드+공고좌표+카드좌표 모두 있을 때만 산출.
+  const distByCardId: Record<string, number> = {};
+  if (sortMode === "distance" && distanceJobCoords) {
+    for (const c of postFilteredCards) {
+      if (typeof c.lat === "number" && typeof c.lng === "number") {
+        distByCardId[c.id] = distKm(c.lat, c.lng, distanceJobCoords.lat, distanceJobCoords.lng);
+      }
+    }
+  }
   const filteredCards = postFilteredCards.sort((a, b) => {
     const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
     const lastMsg = (c: typeof a) => (c.lastMessageAtIso ? new Date(c.lastMessageAtIso).getTime() : 0);
     // 원지원일 정렬 — null은 항상 뒤로 밀어 코호트 상단이 유효값으로 채워지게.
     const applied = (c: typeof a) => (c.appliedAtIso ? new Date(c.appliedAtIso).getTime() : null);
     switch (sortMode) {
+      case "distance": {                                             // 상차지 근거리순 (좌표 없음/공고 미선택은 뒤)
+        const av = distByCardId[a.id], bv = distByCardId[b.id];
+        const aok = av !== undefined, bok = bv !== undefined;
+        if (!aok && !bok) return 0;
+        if (!aok) return 1;
+        if (!bok) return -1;
+        return av - bv;
+      }
       case "oldest": return created(a) - created(b);
       case "active": return lastMsg(b) - lastMsg(a);                 // 최근 활동순 (무활동은 뒤)
       case "neglected": return lastMsg(a) - lastMsg(b);              // 방치 오래된 순 (무활동=0 → 최상단)
@@ -896,10 +950,25 @@ export function Pipeline() {
 
           {view === "list" && (
             <select
+              value={distanceJobId === null ? "" : String(distanceJobId)}
+              onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
+              className={`px-3 py-2.5 bg-white border rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-[#DD6B20] ring-1 ring-[#DD6B20]" : "border-[#E2E8F0]"}`}
+              title="거리 기준 공고 — 상차지 좌표가 있는 활성 공고만 선택할 수 있어요"
+            >
+              <option value="">거리 기준 공고 선택…</option>
+              {distanceJobs.map((j) => (
+                <option key={j.id} value={String(j.id)}>{j.title}</option>
+              ))}
+              {distanceJobs.length === 0 && <option value="" disabled>상차지 좌표가 있는 공고가 없어요</option>}
+            </select>
+          )}
+
+          {view === "list" && (
+            <select
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-              className="px-3 py-2.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer"
-              title="리스트 정렬"
+              className={`px-3 py-2.5 bg-white border rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-[#DD6B20] ring-1 ring-[#DD6B20]" : "border-[#E2E8F0]"}`}
+              title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
             >
               <option value="recent">최근 등록순</option>
               <option value="oldest">오래된 등록순</option>
@@ -907,6 +976,7 @@ export function Pipeline() {
               <option value="neglected">방치 오래된 순</option>
               <option value="applied_recent">원지원 최신순</option>
               <option value="applied_old">원지원 오래된순</option>
+              <option value="distance">공고 상차지 거리순</option>
             </select>
           )}
 
@@ -995,15 +1065,16 @@ export function Pipeline() {
                     </div>
                   </div>
 
-                  {/* 지역 — sido 기반, 수도권 공급 풀 격리용 */}
+                  {/* 지역 — sido 기반, 전체/수도권/서울 3상태. 서울만 좁혀 근거리 재컨택 대상을 격리. */}
                   <div>
                     <label className="block text-[12px] font-bold text-[#4A5568] mb-2">지역</label>
-                    <button
-                      onClick={() => setRegionFilter((v) => (v === "capital" ? "all" : "capital"))}
-                      className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${regionFilter === "capital" ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
-                    >
-                      수도권(서울/경기/인천)
-                    </button>
+                    <div className="flex bg-white border border-[#E2E8F0] rounded-lg p-1">
+                      {([["all", "전체"], ["capital", "수도권(서울·경기·인천)"], ["seoul", "서울"]] as const).map(([val, label]) => (
+                        <button key={val} onClick={() => setRegionFilter(val)} className={`px-3 py-1.5 rounded-md text-[12.5px] font-bold transition-colors ${regionFilter === val ? 'bg-[#1A202C] text-white' : 'text-[#718096] hover:text-[#4A5568]'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* 제외 인원 — 부적합/이탈/기타 (리스트 뷰 한정, 실수 복구·재검토용) */}
@@ -1165,6 +1236,10 @@ export function Pipeline() {
                 <p className="-mt-2 mb-4 text-[11.5px] text-[#A0AEC0]">발송은 1회 최대 50명 — 50명 초과 시 자동으로 50명씩 나눠 발송됩니다.</p>
               )}
 
+              {sortMode === "distance" && distanceJobId === null && (
+                <p className="-mt-2 mb-4 text-[11.5px] font-semibold text-[#DD6B20]">거리순 정렬을 쓰려면 상단에서 &lsquo;거리 기준 공고&rsquo;를 선택하세요. 선택 전에는 기본 순서로 표시됩니다.</p>
+              )}
+
               {/* Data Table */}
               <div className="border border-[#E2E8F0] rounded-[16px] overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
@@ -1190,6 +1265,9 @@ export function Pipeline() {
                       const isActive = activeSet.has(Number(c.id));
                       const appliedLabel = appliedMonth(c.appliedAtIso);
                       const recontactLbl = recontactLabel(lastPingById[Number(c.id)]);
+                      // 거리 정렬 활성 시에만 상차지 거리 표기. 좌표 없으면 undefined → 표기 생략.
+                      const distVal = distByCardId[c.id];
+                      const distLabel = distVal !== undefined ? `${distVal.toFixed(1)}km` : null;
                       return (
                         <tr
                           key={c.id}
@@ -1274,7 +1352,14 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
-                              <span className="text-[13px] font-medium text-[#4A5568]">{c.region}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[13px] font-medium text-[#4A5568]">{c.region}</span>
+                                {distLabel && (
+                                  <span title="선택 공고 상차지까지 직선 거리" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
+                                    {distLabel}
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-[11.5px] text-[#718096]">{c.slot}</span>
                             </div>
                           </td>
