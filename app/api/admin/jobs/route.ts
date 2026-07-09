@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
 import { isSystemJobTitle } from "@/lib/jobs";
+import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -176,6 +177,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 상차지 주소가 있고 좌표가 안 넘어왔으면 지오코딩 — 파이프라인 거리 정렬의 근거.
+  let resolvedPickupLat = typeof pickup_lat === "number" ? pickup_lat : null;
+  let resolvedPickupLng = typeof pickup_lng === "number" ? pickup_lng : null;
+  if (pickup_address && resolvedPickupLat === null && resolvedPickupLng === null) {
+    const { geo } = await geocodeAddressWithFallback(String(pickup_address));
+    if (geo) {
+      resolvedPickupLat = geo.lat;
+      resolvedPickupLng = geo.lng;
+    }
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -188,8 +200,8 @@ export async function POST(req: NextRequest) {
       start_date: start_date ?? null,
       vehicle_required: vehicle_required ?? true,
       pickup_address: pickup_address ?? null,
-      pickup_lat: pickup_lat ?? null,
-      pickup_lng: pickup_lng ?? null,
+      pickup_lat: resolvedPickupLat,
+      pickup_lng: resolvedPickupLng,
       pay_info: pay_info ?? null,
       policy_notes: policy_notes ?? null,
       pay_type: pay_type ?? null,
