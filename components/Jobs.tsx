@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { sourceLabel } from "@/lib/applicant-source";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
 
 interface JobRow {
   id: string;
@@ -26,6 +27,8 @@ interface JobRow {
   created: string;
   workPeriod: string | null;
   closesAt: string | null;
+  // status='active'라도 closes_at이 지났으면 실질 마감 — 배지·AI 현황·통계를 이걸로 판단(마감 텍스트와 일치).
+  effectivelyClosed: boolean;
 }
 
 interface ApiJob {
@@ -52,6 +55,7 @@ interface JobCand {
   id: number;
   applicant_id: number;
   agent_stage: string | null;
+  closed_reason: string | null;
   sent_at: string | null;
   applicants: {
     id: number;
@@ -111,6 +115,16 @@ const STAGE_COLOR: Record<string, string> = {
   abort: "bg-[#FFF5F5] text-[#E53E3E]",
 };
 
+// abort(공고 단위 종료) 카드의 결과 구분 — closed_reason으로 '보류'·'공고부적합'·그 외 '중단'을 색·라벨로 나눈다.
+// 모두 인력풀은 유지된다(재활용 원칙). '보류'는 되살릴 여지, '부적합'은 이 공고 부적격, 그 외는 AI abort 등.
+type ClosedKind = { label: string; badge: string };
+function closedKind(closedReason: string | null | undefined): ClosedKind {
+  const r = closedReason ?? "";
+  if (r.includes("보류")) return { label: "보류", badge: "bg-[#EDF2F7] text-[#718096]" };
+  if (r.includes("부적합")) return { label: "공고부적합", badge: "bg-[#FFF5F5] text-[#E53E3E]" };
+  return { label: "중단", badge: "bg-[#FFFAF0] text-[#DD6B20]" };
+}
+
 type RecruitMode = "external" | "internal" | "both";
 const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
   external: { label: "공개 모집", desc: "지원 폼·광고로 새 지원자 모집", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
@@ -146,6 +160,7 @@ function toJobRow(j: ApiJob): JobRow {
     created: fmtDate(j.created_at),
     workPeriod: j.work_period ?? null,
     closesAt: j.closes_at ?? null,
+    effectivelyClosed: isJobEffectivelyClosed(j.status, j.closes_at),
   };
 }
 
@@ -254,6 +269,19 @@ export function Jobs() {
     } finally {
       setCandBusyId(null);
     }
+  };
+
+  // 종료(abort) 카드 되돌리기 — 잘못 누른 '보류'·'부적합'을 진행 단계(탐색)로 복원.
+  // exploration으로 되돌리면 API가 closed_at·closed_reason을 클리어한다. applicants.status는 건드리지 않는다(인력풀 유지).
+  const resumeCandidate = async (c: JobCand) => {
+    const name = c.applicants?.name ?? `#${c.applicant_id}`;
+    const ok = await confirm({
+      title: "이 공고에 다시 올릴까요?",
+      description: `'${name}'님을 이 공고 후보로 되살립니다(탐색 단계). 인력풀 상태는 그대로예요.`,
+      confirmText: "재개하기",
+    });
+    if (!ok) return;
+    await patchCandidate(c.id, { agent_stage: "exploration" }, "이 공고 후보로 되살렸어요");
   };
 
   // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
@@ -694,8 +722,8 @@ export function Jobs() {
       <div className="grid grid-cols-4 gap-5 mb-8">
         {[
           { label: "전체 공고", value: jobs.length, unit: "건" },
-          { label: "진행 중인 공고", value: jobs.filter(j => j.status === 'active').length, unit: "건", highlight: true },
-          { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => j.status === 'active').length : 0, unit: "건", color: "text-[#3182CE]" },
+          { label: "진행 중인 공고", value: jobs.filter(j => !j.effectivelyClosed).length, unit: "건", highlight: true },
+          { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => !j.effectivelyClosed).length : 0, unit: "건", color: "text-[#3182CE]" },
           { label: "신규 지원자(미시작)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-[#38A169]" }
         ].map((stat, i) => (
           <div key={i} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex flex-col justify-between">
@@ -855,7 +883,7 @@ export function Jobs() {
                       <Link href="/brain" title="에이전트 두뇌에서 전역 AI 상태를 관리하세요" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-[#FFF5F5] text-[#E53E3E] border border-[#FED7D7] w-fit">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E]"></span> 전역 중지됨
                       </Link>
-                    ) : job.status === 'active' ? (
+                    ) : !job.effectivelyClosed ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-[#EBF8FF] text-[#3182CE] border border-[#BEE3F8] w-fit">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#3182CE]"></span> 자동 응대 중
                       </span>
@@ -868,7 +896,7 @@ export function Jobs() {
                 </div>
 
                 <div>
-                  {job.status === 'active' ? (
+                  {!job.effectivelyClosed ? (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]">
                       <Play size={12} className="fill-current" /> 진행 중
                     </span>
@@ -1325,10 +1353,24 @@ export function Jobs() {
                                   <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
                                 </div>
                               </div>
-                              {stage && <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>}
+                              {/* 종료 카드는 결과(보류/공고부적합/중단)를 closed_reason으로 구분해 배지로 보여준다. */}
+                              {stage && (
+                                isClosed ? (
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
+                                ) : (
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-[#EDF2F7] text-[#4A5568]"}`}>{STAGE_KO[stage] ?? stage}</span>
+                                )
+                              )}
                             </div>
                           </button>
-                          {!isClosed && (
+                          {isClosed ? (
+                            <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
+                              {/* 되돌리기 — 잘못 종료한 카드를 이 공고 후보로 복원(확인 모달). 인력풀은 건드리지 않는다. */}
+                              <button onClick={() => resumeCandidate(c)} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                                {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 재개
+                              </button>
+                            </div>
+                          ) : (
                             <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
                               {isPaused ? (
                                 <button onClick={() => patchCandidate(c.id, { agent_stage: "screening" }, "AI 응대를 재개했어요")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">

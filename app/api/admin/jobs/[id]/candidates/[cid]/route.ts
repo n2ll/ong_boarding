@@ -89,6 +89,12 @@ export async function PATCH(
     if (cur.agent_stage === "paused" && stage !== "paused") {
       update.paused_reason = null;
     }
+    // 재개 — abort(공고 단위 종료)에서 진행 단계로 되돌릴 때 마감 흔적을 지운다.
+    // applicants.status는 건드리지 않는다(인력풀은 애초에 abort에서도 유지됨 — 재활용 원칙).
+    if (cur.agent_stage === "abort" && stage !== "abort") {
+      update.closed_at = null;
+      update.closed_reason = null;
+    }
     // abort 처리 — 공고 단위 종료. applicants.status는 건드리지 않는다(인력풀 유지).
     if (stage === "abort") {
       update.closed_at = now;
