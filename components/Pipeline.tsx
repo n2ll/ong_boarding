@@ -293,7 +293,7 @@ export function Pipeline() {
   const loadApplicants = () => { void mutateApplicants(); };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
-  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null }> }>("/api/admin/jobs?status=active");
+  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
   const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null })), [visibleJobs]);
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
@@ -340,7 +340,7 @@ export function Pipeline() {
   const [excludeRecentPing, setExcludeRecentPing] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
   const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old" | "distance">("recent");
-  // 거리 기준 공고 — 선택 공고 상차지(pickup_lat/lng) 기준 근거리순 정렬용. null이면 미선택.
+  // 거리 기준 공고 — 선택 공고의 상차지·마지막경유지 중 가까운 쪽 기준 근거리순 정렬용. null이면 미선택.
   const [distanceJobId, setDistanceJobId] = useState<number | null>(null);
   // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
   const [topN, setTopN] = useState(50);
@@ -349,18 +349,30 @@ export function Pipeline() {
   // 지원자별 마지막 재컨택(ping_sent) 시각(ISO) — '재컨택 N일 전' 배지/제외 필터용 (디바운스 배치 조회)
   const [lastPingById, setLastPingById] = useState<Record<number, string>>({});
 
-  // 거리 기준 공고 옵션 — 상차지 좌표(pickup_lat/lng)가 있는 활성 공고만. 좌표 없는 공고는 거리 계산 불가라 제외.
+  // 거리 기준 공고 옵션 — 상차지(pickup) 또는 마지막 경유지(dropoff) 좌표가 있는 활성 공고. 둘 다 없으면 거리 계산 불가라 제외.
   const distanceJobs = useMemo(
-    () => visibleJobs.filter((j) => typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"),
+    () =>
+      visibleJobs.filter(
+        (j) =>
+          (typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number") ||
+          (typeof j.dropoff_lat === "number" && typeof j.dropoff_lng === "number")
+      ),
     [visibleJobs]
   );
-  // 선택된 거리 기준 공고의 상차지 좌표 — 없으면 거리 정렬 비활성(카드 뒤로).
+  // 선택된 거리 기준 공고의 양 끝점(상차지·마지막경유지) 좌표 — 존재하는 것만 담는다. 둘 다 없으면 null(거리 정렬 비활성).
   const distanceJobCoords = useMemo(() => {
     if (distanceJobId === null) return null;
     const j = distanceJobs.find((x) => x.id === distanceJobId);
-    return j && typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
-      ? { lat: j.pickup_lat, lng: j.pickup_lng }
-      : null;
+    if (!j) return null;
+    const pickup =
+      typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
+        ? { lat: j.pickup_lat, lng: j.pickup_lng }
+        : null;
+    const dropoff =
+      typeof j.dropoff_lat === "number" && typeof j.dropoff_lng === "number"
+        ? { lat: j.dropoff_lat, lng: j.dropoff_lng }
+        : null;
+    return pickup || dropoff ? { pickup, dropoff } : null;
   }, [distanceJobId, distanceJobs]);
 
   // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
@@ -573,13 +585,24 @@ export function Pipeline() {
     }
     return true;
   });
-  // 카드별 상차지 거리(km) — 거리 정렬 + 카드 배지 공용. 거리모드+공고좌표+카드좌표 모두 있을 때만 산출.
+  // 카드별 거리(km) — 후보↔{상차지, 마지막경유지} 중 '가까운 쪽'을 순위 근거로 쓴다(어느 끝이든 가까우면 상위).
+  //   distByCardId: 정렬 키 = min(상차지 거리, 마지막경유지 거리) (존재하는 끝만).
+  //   distDetailByCardId: 배지용 개별 거리(둘 중 있는 것만). 거리모드+공고좌표+카드좌표 모두 있을 때만 산출.
   const distByCardId: Record<string, number> = {};
+  const distDetailByCardId: Record<string, { pickup: number | null; dropoff: number | null }> = {};
   if (sortMode === "distance" && distanceJobCoords) {
     for (const c of postFilteredCards) {
-      if (typeof c.lat === "number" && typeof c.lng === "number") {
-        distByCardId[c.id] = distKm(c.lat, c.lng, distanceJobCoords.lat, distanceJobCoords.lng);
-      }
+      if (typeof c.lat !== "number" || typeof c.lng !== "number") continue;
+      const pickup = distanceJobCoords.pickup
+        ? distKm(c.lat, c.lng, distanceJobCoords.pickup.lat, distanceJobCoords.pickup.lng)
+        : null;
+      const dropoff = distanceJobCoords.dropoff
+        ? distKm(c.lat, c.lng, distanceJobCoords.dropoff.lat, distanceJobCoords.dropoff.lng)
+        : null;
+      const both = [pickup, dropoff].filter((d): d is number => d !== null);
+      if (both.length === 0) continue;
+      distByCardId[c.id] = Math.min(...both);
+      distDetailByCardId[c.id] = { pickup, dropoff };
     }
   }
   const filteredCards = postFilteredCards.sort((a, b) => {
@@ -588,7 +611,7 @@ export function Pipeline() {
     // 원지원일 정렬 — null은 항상 뒤로 밀어 코호트 상단이 유효값으로 채워지게.
     const applied = (c: typeof a) => (c.appliedAtIso ? new Date(c.appliedAtIso).getTime() : null);
     switch (sortMode) {
-      case "distance": {                                             // 상차지 근거리순 (좌표 없음/공고 미선택은 뒤)
+      case "distance": {                                             // 근거리순 = min(상차지, 마지막경유지) (좌표 없음/공고 미선택은 뒤)
         const av = distByCardId[a.id], bv = distByCardId[b.id];
         const aok = av !== undefined, bok = bv !== undefined;
         if (!aok && !bok) return 0;
@@ -953,13 +976,13 @@ export function Pipeline() {
               value={distanceJobId === null ? "" : String(distanceJobId)}
               onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
               className={`px-3 py-2.5 bg-white border rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-[#DD6B20] ring-1 ring-[#DD6B20]" : "border-[#E2E8F0]"}`}
-              title="거리 기준 공고 — 상차지 좌표가 있는 활성 공고만 선택할 수 있어요"
+              title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
             >
               <option value="">거리 기준 공고 선택…</option>
               {distanceJobs.map((j) => (
                 <option key={j.id} value={String(j.id)}>{j.title}</option>
               ))}
-              {distanceJobs.length === 0 && <option value="" disabled>상차지 좌표가 있는 공고가 없어요</option>}
+              {distanceJobs.length === 0 && <option value="" disabled>상차지·마지막경유지 좌표가 있는 공고가 없어요</option>}
             </select>
           )}
 
@@ -976,7 +999,7 @@ export function Pipeline() {
               <option value="neglected">방치 오래된 순</option>
               <option value="applied_recent">원지원 최신순</option>
               <option value="applied_old">원지원 오래된순</option>
-              <option value="distance">공고 상차지 거리순</option>
+              <option value="distance">공고 근거리순(상차지·종료지점)</option>
             </select>
           )}
 
@@ -1265,9 +1288,17 @@ export function Pipeline() {
                       const isActive = activeSet.has(Number(c.id));
                       const appliedLabel = appliedMonth(c.appliedAtIso);
                       const recontactLbl = recontactLabel(lastPingById[Number(c.id)]);
-                      // 거리 정렬 활성 시에만 상차지 거리 표기. 좌표 없으면 undefined → 표기 생략.
+                      // 거리 정렬 활성 시에만 거리 표기. 상차지·마지막경유지 둘 다 있으면 '상차 12/종료 4km', 하나면 그 값만. 좌표 없으면 생략.
                       const distVal = distByCardId[c.id];
-                      const distLabel = distVal !== undefined ? `${distVal.toFixed(1)}km` : null;
+                      const distDetail = distDetailByCardId[c.id];
+                      const distLabel =
+                        distVal === undefined || !distDetail
+                          ? null
+                          : distDetail.pickup !== null && distDetail.dropoff !== null
+                            ? `상차 ${distDetail.pickup.toFixed(0)}/종료 ${distDetail.dropoff.toFixed(0)}km`
+                            : distDetail.pickup !== null
+                              ? `상차 ${distDetail.pickup.toFixed(1)}km`
+                              : `종료 ${(distDetail.dropoff ?? distVal).toFixed(1)}km`;
                       return (
                         <tr
                           key={c.id}
@@ -1355,7 +1386,7 @@ export function Pipeline() {
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[13px] font-medium text-[#4A5568]">{c.region}</span>
                                 {distLabel && (
-                                  <span title="선택 공고 상차지까지 직선 거리" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
+                                  <span title="선택 공고 상차지·마지막경유지까지 직선 거리(가까운 쪽 기준 정렬)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
                                     {distLabel}
                                   </span>
                                 )}
