@@ -41,25 +41,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
   }
 
-  // 공고별 후보 카운트(stage 별) 조회 — 한 번의 쿼리로
+  // 공고별 후보 카운트(stage 별) 조회 — 한 번의 쿼리로.
+  // 충원율은 매니저 명시 확정(applicants.status='확정인력')만 센다 — agent_stage='active'는 자동 전이라
+  // '확정'이 아니다(확정은 매니저 판단, transitions.ts 참조). confirmed_count로 별도 집계해 게이지와
+  // 보드의 '확정 슬롯 분포'가 같은 소스를 쓰게 한다.
   const jobIds = (jobs ?? []).map((j) => j.id);
   const stageCounts: Record<number, Record<string, number>> = {};
+  const confirmedCounts: Record<number, number> = {};
   if (jobIds.length > 0) {
     const { data: cands } = await supabase
       .from("job_candidates")
-      .select("job_id, agent_stage")
+      .select("job_id, agent_stage, applicants:applicant_id ( status )")
       .in("job_id", jobIds);
     for (const c of cands ?? []) {
       const jid = c.job_id as number;
       const stage = (c.agent_stage as string | null) ?? "sent";
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
+      // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
+      const rel = (c as { applicants?: { status?: string | null } | { status?: string | null }[] | null }).applicants;
+      const status = Array.isArray(rel) ? rel[0]?.status : rel?.status;
+      if (status === "확정인력") confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
     }
   }
 
   const enriched = (jobs ?? []).map((j) => ({
     ...j,
     counts: stageCounts[j.id] ?? {},
+    confirmed_count: confirmedCounts[j.id] ?? 0,
   }));
 
   return NextResponse.json({ jobs: enriched });
