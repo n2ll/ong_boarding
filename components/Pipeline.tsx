@@ -27,7 +27,7 @@ interface SavedSegment {
   id: string;
   name: string;
   channels: string[];
-  vehicle: "all" | "vehicle" | "walk";
+  vehicle: "all" | "vehicle" | "walk" | "unknown";
   slots: string[];
   query: string;
   // v2 확장 — 구버전 저장분은 undefined (하위호환)
@@ -37,6 +37,8 @@ interface SavedSegment {
 }
 
 // Types
+type VehicleClass = "확정" | "도보" | "미확인";
+
 interface CardData {
   id: string;
   name: string;
@@ -45,6 +47,7 @@ interface CardData {
   branch: string;
   slot: string;
   tag: string;
+  vehicleClass: VehicleClass;
   region: string;
   exp: string;
   lastActive: string;
@@ -57,6 +60,9 @@ interface CardData {
   sido: string | null;
   createdAtIso: string | null;
   lastMessageAtIso: string | null;
+  accessToken: string | null;
+  appliedAtIso: string | null;
+  geoPrecision: string | null;
 }
 
 const STAGE_KO: Record<string, string> = {
@@ -153,14 +159,41 @@ function vehicleTag(a: Applicant): string {
   return "도보";
 }
 
+// 자차 3값 판정 — own_vehicle 원문 기준. 빈값/미지정/null은 '미확인'(발송 판단 시 누수 방지).
+function vehicleClassOf(a: Applicant): VehicleClass {
+  const v = a.own_vehicle?.trim();
+  if (v === "있음" || v === "네" || v === "예") return "확정";
+  if (v === "없음" || v === "아니오") return "도보";
+  return "미확인";
+}
+
 // 수도권 판별 — sido 원문("서울특별시"/"경기도"/"인천광역시" 등) 접두 매칭
 const CAPITAL_SIDO_PREFIXES = ["서울", "경기", "인천"];
 function isCapitalArea(sido: string | null): boolean {
   return !!sido && CAPITAL_SIDO_PREFIXES.some((p) => sido.startsWith(p));
 }
 
+// 6개월 경계 — 원지원 코호트 필터/템플릿 판단용
+const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
+
+// 발송 가능 여부 판정 — 연락처·맞춤링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
+function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
+  if (!c.phone) return { sendable: false, reason: "연락처 없음" };
+  if (!c.accessToken) return { sendable: false, reason: "맞춤링크 없음" };
+  if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
+  return { sendable: true, reason: null };
+}
+
+// 원지원일 표기 — 'YYYY-MM' (연락 이력 relTime과 구분)
+function appliedMonth(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 // 목록 API가 추가로 내려주는 컬럼 — 공용 Applicant 타입엔 아직 없어 로컬 확장으로 소비.
-type ApplicantRow = Applicant & { sms_opt_out_at?: string | null };
+type ApplicantRow = Applicant & { sms_opt_out_at?: string | null; access_token?: string | null; applied_at?: string | null };
 
 function toCard(a: ApplicantRow): CardData {
   const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
@@ -173,6 +206,7 @@ function toCard(a: ApplicantRow): CardData {
     branch,
     slot,
     tag: vehicleTag(a),
+    vehicleClass: vehicleClassOf(a),
     region: a.sigungu ?? a.location ?? "-",
     exp: a.experience?.trim() ? a.experience.trim() : "신입",
     // created_at 폴백은 '활동'으로 오독됨 — 발신/수신 이력이 없으면 없다고 표기
@@ -186,6 +220,9 @@ function toCard(a: ApplicantRow): CardData {
     sido: a.sido ?? null,
     createdAtIso: a.created_at ?? null,
     lastMessageAtIso: a.last_message_at ?? null,
+    accessToken: a.access_token ?? null,
+    appliedAtIso: a.applied_at ?? null,
+    geoPrecision: a.geo_precision ?? null,
   };
 }
 
@@ -242,7 +279,7 @@ export function Pipeline() {
     if (v === "map" || v === "kanban" || v === "list") setView(v);
   }, [searchParams]);
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
-  const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk">("all");
+  const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk" | "unknown">("all");
   const [slotFilter, setSlotFilter] = useState<Set<string>>(new Set());
   // 진행 단계(status)·가용성 필터 — 적체 트리아지의 핵심 동선 (예: '스크리닝 전'만 격리 → 벌크 처리)
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
@@ -251,13 +288,23 @@ export function Pipeline() {
   const [regionFilter, setRegionFilter] = useState<"all" | "capital">("all");
   // 부적합/이탈/기타는 칸반 보드에서 제외되지만, 리스트에서는 토글로 복구·재검토 가능해야 한다.
   const [showExcluded, setShowExcluded] = useState(false);
+  // 원지원 6개월 이내 코호트 필터 — 재컨택 B안(짧은 템플릿) 대상 격리용
+  const [recentAppliedOnly, setRecentAppliedOnly] = useState(false);
+  // 주소 확정(지오코딩) 필터 — geo_precision in exact/approx (지도·경로 매칭 신뢰 인원)
+  const [geoConfirmedOnly, setGeoConfirmedOnly] = useState(false);
+  // 옹매니징 활동 중 제외 필터 — 켜면 현재 활동 중(activeSet) 인원을 리스트에서 제외
+  const [excludeActive, setExcludeActive] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
-  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected">("recent");
+  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old">("recent");
+  // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
+  const [topN, setTopN] = useState(50);
+  // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
+  const [activeSet, setActiveSet] = useState<Set<number>>(new Set());
 
   // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
   useEffect(() => {
     setSelectedRows(new Set());
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, query]);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, sortMode, query]);
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -404,7 +451,8 @@ export function Pipeline() {
 
   const activeFilterCount =
     channelFilter.size + slotFilter.size + statusFilter.size + availabilityFilter.size +
-    (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0);
+    (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0) +
+    (recentAppliedOnly ? 1 : 0) + (geoConfirmedOnly ? 1 : 0) + (excludeActive ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
@@ -413,30 +461,85 @@ export function Pipeline() {
     setStatusFilter(new Set());
     setAvailabilityFilter(new Set());
     setRegionFilter("all");
+    setRecentAppliedOnly(false);
+    setGeoConfirmedOnly(false);
+    setExcludeActive(false);
   };
 
   const q = query.trim().toLowerCase();
-  const filteredCards = listCards.filter((c) => {
+  const sixMonthsAgo = Date.now() - SIX_MONTHS_MS;
+  // 활동중 제외를 뺀 '기준' 필터 — active-check 입력을 이 집합으로 잡아야 activeSet↔filteredCards 순환(무한 재조회)을 피한다.
+  const baseFilteredCards = listCards.filter((c) => {
     if (!matchesBranchScope(c.branch, scopeBranch)) return false;
     if (q && ![c.name, c.phone ?? "", c.branch, c.region, c.channel, c.tag].some((v) => v.toLowerCase().includes(q))) return false;
     if (channelFilter.size && !channelFilter.has(c.channel)) return false;
-    if (vehicleFilter === "walk" && c.tag !== "도보") return false;
-    if (vehicleFilter === "vehicle" && c.tag === "도보") return false;
+    if (vehicleFilter === "vehicle" && c.vehicleClass !== "확정") return false;
+    if (vehicleFilter === "walk" && c.vehicleClass !== "도보") return false;
+    if (vehicleFilter === "unknown" && c.vehicleClass !== "미확인") return false;
     if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
     if (statusFilter.size && !statusFilter.has(c.status)) return false;
     if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
     if (regionFilter === "capital" && !isCapitalArea(c.sido)) return false;
+    if (recentAppliedOnly && !(c.appliedAtIso && new Date(c.appliedAtIso).getTime() >= sixMonthsAgo)) return false;
+    if (geoConfirmedOnly && !(c.geoPrecision === "exact" || c.geoPrecision === "approx")) return false;
     return true;
-  }).sort((a, b) => {
+  });
+  // active-check 입력 — 활동중 제외 필터와 무관한 기준 집합으로 잡아 순환을 방지.
+  const visibleIdsKey = baseFilteredCards.slice(0, 500).map((c) => c.id).join(",");
+  const filteredCards = (excludeActive ? baseFilteredCards.filter((c) => !activeSet.has(Number(c.id))) : baseFilteredCards).sort((a, b) => {
     const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
     const lastMsg = (c: typeof a) => (c.lastMessageAtIso ? new Date(c.lastMessageAtIso).getTime() : 0);
+    // 원지원일 정렬 — null은 항상 뒤로 밀어 코호트 상단이 유효값으로 채워지게.
+    const applied = (c: typeof a) => (c.appliedAtIso ? new Date(c.appliedAtIso).getTime() : null);
     switch (sortMode) {
       case "oldest": return created(a) - created(b);
       case "active": return lastMsg(b) - lastMsg(a);                 // 최근 활동순 (무활동은 뒤)
       case "neglected": return lastMsg(a) - lastMsg(b);              // 방치 오래된 순 (무활동=0 → 최상단)
+      case "applied_recent": {                                       // 원지원 최신순 (null은 뒤)
+        const av = applied(a), bv = applied(b);
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return bv - av;
+      }
+      case "applied_old": {                                          // 원지원 오래된순 (null은 뒤)
+        const av = applied(a), bv = applied(b);
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return av - bv;
+      }
       default: return created(b) - created(a);                       // 최근 등록순 (API 기본 순서와 동일)
     }
   });
+
+  // 발송 가능 인원 수 — 리스트 상단 이중 카운트("발송가능 N / 표시 M")
+  const sendableCount = filteredCards.filter((c) => sendableOf(c).sendable).length;
+
+  // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
+  // 발송 모달 로직과 별개(중복 조회 허용). 실패는 조용히 무시(서버가 최종 가드).
+  useEffect(() => {
+    if (view !== "list") return;
+    const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
+    if (ids.length === 0) { setActiveSet(new Set()); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetch("/api/admin/ongmanaging/active-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicantIds: ids }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((json: ActiveCheck) => {
+          if (cancelled) return;
+          if (json.configured) setActiveSet(new Set(json.active.map((a) => a.id)));
+          else setActiveSet(new Set());
+        })
+        .catch(() => { /* 대조 실패는 표시/발송을 막지 않음 */ });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey, view]);
 
   // 지도 뷰용 — 원본 지원자에 지점 스코프 + 검색어 필터 적용
   const mapApplicants: MapApplicant[] = rawApplicants
@@ -535,6 +638,15 @@ export function Pipeline() {
     else setSelectedRows(new Set(filteredCards.map(c => c.id)));
   };
 
+  // 현재 정렬 순서 상단에서 '발송 가능한' N명만 골라 선택 — 재컨택 배치 발송 진입 단축.
+  const selectTopN = () => {
+    const n = Math.max(1, Math.floor(topN) || 0);
+    const ids = filteredCards.filter((c) => sendableOf(c).sendable).slice(0, n).map((c) => c.id);
+    if (ids.length === 0) return toast.error("발송 가능한 인원이 없어요.");
+    setSelectedRows(new Set(ids));
+    toast.success(`발송 가능한 상위 ${ids.length}명을 선택했어요.`);
+  };
+
   const handleBulkStageChange = async (stageName: string) => {
     setBulkStageModalOpen(false);
     const status = BULK_LABEL_TO_STATUS[stageName];
@@ -587,7 +699,8 @@ export function Pipeline() {
     const text = bulkMsgBody.trim();
     if (!text) return toast.error("메시지 내용을 입력해주세요.");
 
-    const selected = allCards.filter((c) => selectedRows.has(c.id) && c.phone);
+    // 발송 대상 = 현재 화면 표시분(filteredCards)과 선택의 교집합 — 화면에 없는 인원 오발송 방지.
+    const selected = filteredCards.filter((c) => selectedRows.has(c.id) && c.phone);
     const recipients = selected.map((c) => ({
       phone: c.phone as string,
       applicant_id: Number(c.id),
@@ -700,6 +813,8 @@ export function Pipeline() {
               <option value="oldest">오래된 등록순</option>
               <option value="active">최근 활동순</option>
               <option value="neglected">방치 오래된 순</option>
+              <option value="applied_recent">원지원 최신순</option>
+              <option value="applied_old">원지원 오래된순</option>
             </select>
           )}
 
@@ -735,7 +850,7 @@ export function Pipeline() {
                   <div>
                     <label className="block text-[12px] font-bold text-[#4A5568] mb-2">이동수단</label>
                     <div className="flex bg-white border border-[#E2E8F0] rounded-lg p-1">
-                      {([["all", "전체"], ["vehicle", "차량 보유"], ["walk", "도보"]] as const).map(([val, label]) => (
+                      {([["all", "전체"], ["vehicle", "차량 보유"], ["walk", "도보"], ["unknown", "미확인"]] as const).map(([val, label]) => (
                         <button key={val} onClick={() => setVehicleFilter(val)} className={`px-3 py-1.5 rounded-md text-[12.5px] font-bold transition-colors ${vehicleFilter === val ? 'bg-[#1A202C] text-white' : 'text-[#718096] hover:text-[#4A5568]'}`}>
                           {label}
                         </button>
@@ -810,6 +925,34 @@ export function Pipeline() {
                       부적합·이탈 표시 {showExcluded ? "ON" : "OFF"}
                     </button>
                   </div>
+
+                  {/* 발송·코호트 — 재컨택 대상 정밀화(원지원 코호트/주소 확정/활동중 제외) */}
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">발송·코호트</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        onClick={() => setRecentAppliedOnly((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${recentAppliedOnly ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="원지원일이 6개월 이내인 인원만 표시합니다"
+                      >
+                        원지원 6개월 이내
+                      </button>
+                      <button
+                        onClick={() => setGeoConfirmedOnly((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${geoConfirmedOnly ? 'bg-[#1A202C] border-[#1A202C] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="지오코딩으로 주소가 확정(exact·approx)된 인원만 표시합니다"
+                      >
+                        주소 확정
+                      </button>
+                      <button
+                        onClick={() => setExcludeActive((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${excludeActive ? 'bg-[#DD6B20] border-[#DD6B20] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="옹매니징에서 현재 활동 중인 인원을 리스트에서 제외합니다"
+                      >
+                        활동중 제외
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* 저장된 세그먼트 (필터 프리셋) */}
@@ -837,7 +980,7 @@ export function Pipeline() {
                 </div>
 
                 <div className="flex items-center gap-3 pt-1">
-                  <span className="text-[12.5px] font-bold text-[#4A5568]">{filteredCards.length}명 표시 중</span>
+                  <span className="text-[12.5px] font-bold text-[#4A5568]">발송가능 {sendableCount} / 표시 {filteredCards.length}명</span>
                   {activeFilterCount > 0 && (
                     <button onClick={resetFilters} className="text-[12.5px] font-bold text-[#E53E3E] hover:underline">필터 초기화</button>
                   )}
@@ -894,6 +1037,35 @@ export function Pipeline() {
                 )}
               </AnimatePresence>
 
+              {/* 리스트 카운트 + 상위 N명 선택 — 발송 가능 인원 이중 카운트, 배치 발송 진입 단축 */}
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <span className="text-[13px] font-bold text-[#4A5568]">
+                  발송가능 <span className="text-[#38A169]">{sendableCount}</span> / 표시 {filteredCards.length}명
+                </span>
+                <div className="flex-1" />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    value={topN}
+                    onChange={(e) => setTopN(Number(e.target.value))}
+                    className="w-[64px] px-2 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm"
+                    title="선택할 상위 인원 수"
+                  />
+                  <button
+                    onClick={selectTopN}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    title="현재 정렬 순서 상단에서 발송 가능한 N명을 선택합니다"
+                  >
+                    <Check size={15} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명 선택
+                  </button>
+                </div>
+              </div>
+
+              {topN > 50 && (
+                <p className="-mt-2 mb-4 text-[11.5px] text-[#A0AEC0]">발송은 1회 최대 50명 — 50명 초과 시 자동으로 50명씩 나눠 발송됩니다.</p>
+              )}
+
               {/* Data Table */}
               <div className="border border-[#E2E8F0] rounded-[16px] overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
@@ -915,6 +1087,9 @@ export function Pipeline() {
                   <tbody>
                     {filteredCards.map(c => {
                       const isSelected = selectedRows.has(c.id);
+                      const send = sendableOf(c);
+                      const isActive = activeSet.has(Number(c.id));
+                      const appliedLabel = appliedMonth(c.appliedAtIso);
                       return (
                         <tr
                           key={c.id}
@@ -949,16 +1124,31 @@ export function Pipeline() {
                                 <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                                 {c.stage}
                               </span>
-                              {(c.availability || c.smsOptOutAt) && (
-                                <div className="flex items-center gap-1">
+                              {(c.availability || c.smsOptOutAt || isActive || c.vehicleClass === '미확인' || (!send.sendable && !c.smsOptOutAt)) && (
+                                <div className="flex flex-wrap items-center gap-1">
                                   {c.availability && (
                                     <span title={c.availabilityUpdatedAtIso ? `갱신 ${relTime(c.availabilityUpdatedAtIso)}` : undefined} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
                                       {c.availability}
                                     </span>
                                   )}
+                                  {isActive && (
+                                    <span title="옹매니징에서 현재 활동 중" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]">
+                                      활동중
+                                    </span>
+                                  )}
+                                  {c.vehicleClass === '미확인' && (
+                                    <span title="자차 보유 여부 미확인" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFAF0] text-[#DD6B20]">
+                                      차량 미확인
+                                    </span>
+                                  )}
                                   {c.smsOptOutAt && (
                                     <span title={`수신거부 ${relTime(c.smsOptOutAt)}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFF5F5] text-[#E53E3E]">
                                       수신거부
+                                    </span>
+                                  )}
+                                  {!send.sendable && !c.smsOptOutAt && send.reason && (
+                                    <span title="문자 발송 불가" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">
+                                      {send.reason}
                                     </span>
                                   )}
                                 </div>
@@ -983,8 +1173,13 @@ export function Pipeline() {
                               <span className="text-[11.5px] text-[#718096]">{c.slot}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-[12.5px] text-[#A0AEC0]">
-                            {c.lastActive}
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[12.5px] text-[#A0AEC0]">{c.lastActive}</span>
+                              {appliedLabel && (
+                                <span className="text-[11px] text-[#A0AEC0]">지원 {appliedLabel}</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

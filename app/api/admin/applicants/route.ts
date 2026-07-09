@@ -42,6 +42,8 @@ const LIST_COLUMNS = [
   "bname", "sigungu", "sido", "lat", "lng", "geo_precision",
   // 파일럿 축 — 가용성 필터·수신거부 표시·임포트 구분에 필수 (없으면 UI 필터가 조용히 0명이 된다)
   "availability", "availability_updated_at", "sms_opt_out_at", "airtable_record_id",
+  // 재컨택 선별 정확도 — 발송가능 판정(맞춤링크 토큰)·원지원 신선도 정렬/코호트 필터
+  "access_token", "applied_at",
 ].join(", ");
 
 export async function GET(req: NextRequest) {
