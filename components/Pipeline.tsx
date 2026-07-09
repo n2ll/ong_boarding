@@ -175,6 +175,8 @@ function isCapitalArea(sido: string | null): boolean {
 
 // 6개월 경계 — 원지원 코호트 필터/템플릿 판단용
 const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
+// 14일 경계 — '최근 재컨택 제외' 필터 기준
+const FOURTEEN_DAYS_MS = 1000 * 60 * 60 * 24 * 14;
 
 // 발송 가능 여부 판정 — 연락처·맞춤링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
@@ -182,6 +184,16 @@ function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   if (!c.accessToken) return { sendable: false, reason: "맞춤링크 없음" };
   if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
   return { sendable: true, reason: null };
+}
+
+// 마지막 재컨택 경과 표기 — '재컨택 오늘/N일 전' (일 단위, 배지용). ping_sent 이력 없으면 null.
+function recontactLabel(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const days = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "재컨택 오늘";
+  return `재컨택 ${days}일 전`;
 }
 
 // 원지원일 표기 — 'YYYY-MM' (연락 이력 relTime과 구분)
@@ -272,11 +284,22 @@ export function Pipeline() {
 
   // 헤더 글로벌 검색에서 ?q= 로 진입하면 검색어 프리필.
   // 대시보드 '지도에서 보기'에서 ?view=map 으로 진입하면 지도 분포 뷰로 시작.
+  // 공고 등록 성공 후 '이 조건으로 대상 선별' CTA(SOS→공고→선별 브릿지)에서
+  //   ?region=capital&vehicle=vehicle&status=..&recent=1 로 진입하면 해당 필터를 프리필한다.
   useEffect(() => {
     const q = searchParams.get("q");
     if (q) setQuery(q);
     const v = searchParams.get("view");
     if (v === "map" || v === "kanban" || v === "list") setView(v);
+    const region = searchParams.get("region");
+    if (region === "capital") setRegionFilter("capital");
+    const vehicle = searchParams.get("vehicle");
+    if (vehicle === "vehicle" || vehicle === "walk" || vehicle === "unknown") setVehicleFilter(vehicle);
+    const status = searchParams.get("status");
+    if (status) setStatusFilter(new Set(status.split(",").map((s) => s.trim()).filter(Boolean)));
+    if (searchParams.get("recent") === "1") setRecentAppliedOnly(true);
+    // 필터 프리필로 진입했으면 고급 필터 패널을 열어 무엇이 적용됐는지 보이게 한다.
+    if (region || vehicle || status || searchParams.get("recent")) setShowFilters(true);
   }, [searchParams]);
   const [channelFilter, setChannelFilter] = useState<Set<string>>(new Set());
   const [vehicleFilter, setVehicleFilter] = useState<"all" | "vehicle" | "walk" | "unknown">("all");
@@ -294,17 +317,21 @@ export function Pipeline() {
   const [geoConfirmedOnly, setGeoConfirmedOnly] = useState(false);
   // 옹매니징 활동 중 제외 필터 — 켜면 현재 활동 중(activeSet) 인원을 리스트에서 제외
   const [excludeActive, setExcludeActive] = useState(false);
+  // 최근 14일 재컨택 제외 필터 — 켜면 해당 기간 내 ping_sent 이력이 있는 인원을 리스트에서 제외(중복 재컨택 방지)
+  const [excludeRecentPing, setExcludeRecentPing] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
   const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old">("recent");
   // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
   const [activeSet, setActiveSet] = useState<Set<number>>(new Set());
+  // 지원자별 마지막 재컨택(ping_sent) 시각(ISO) — '재컨택 N일 전' 배지/제외 필터용 (디바운스 배치 조회)
+  const [lastPingById, setLastPingById] = useState<Record<number, string>>({});
 
   // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
   useEffect(() => {
     setSelectedRows(new Set());
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, sortMode, query]);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, sortMode, query]);
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -435,6 +462,17 @@ export function Pipeline() {
   // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용(서버가 발송 시 자동 제외)
   const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
 
+  // 템플릿↔코호트 정합성 — B안(최근 6개월용)을 골랐는데 선택 대상에 원지원 6개월 초과자가 섞였으면 경고(발송은 막지 않음).
+  const bBodySelected = bulkMsgBody.trim() === RECONTACT_B_BODY.trim();
+  const bCohortMismatchCount = bBodySelected
+    ? listCards.filter((c) => {
+        if (!selectedRows.has(c.id)) return false;
+        // appliedAtIso가 없으면(원지원일 미상) 최신 코호트로 볼 수 없어 초과 취급.
+        if (!c.appliedAtIso) return true;
+        return Date.now() - new Date(c.appliedAtIso).getTime() > SIX_MONTHS_MS;
+      }).length
+    : 0;
+
   const availableChannels = Array.from(new Set(allCards.map((c) => c.channel))).sort();
   const SLOT_TOKENS = ["평일 오전", "평일 오후", "주말 오전", "주말 오후"];
   const STATUS_TOKENS = ["스크리닝 전", "대기자", "스크리닝 중", "스크리닝 완료", "확정인력"];
@@ -452,7 +490,8 @@ export function Pipeline() {
   const activeFilterCount =
     channelFilter.size + slotFilter.size + statusFilter.size + availabilityFilter.size +
     (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0) +
-    (recentAppliedOnly ? 1 : 0) + (geoConfirmedOnly ? 1 : 0) + (excludeActive ? 1 : 0);
+    (recentAppliedOnly ? 1 : 0) + (geoConfirmedOnly ? 1 : 0) + (excludeActive ? 1 : 0) +
+    (excludeRecentPing ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
@@ -464,6 +503,7 @@ export function Pipeline() {
     setRecentAppliedOnly(false);
     setGeoConfirmedOnly(false);
     setExcludeActive(false);
+    setExcludeRecentPing(false);
   };
 
   const q = query.trim().toLowerCase();
@@ -484,9 +524,19 @@ export function Pipeline() {
     if (geoConfirmedOnly && !(c.geoPrecision === "exact" || c.geoPrecision === "approx")) return false;
     return true;
   });
-  // active-check 입력 — 활동중 제외 필터와 무관한 기준 집합으로 잡아 순환을 방지.
+  // active-check·last-ping 입력 — 활동중/재컨택 제외 필터와 무관한 기준 집합으로 잡아 순환(무한 재조회)을 방지.
   const visibleIdsKey = baseFilteredCards.slice(0, 500).map((c) => c.id).join(",");
-  const filteredCards = (excludeActive ? baseFilteredCards.filter((c) => !activeSet.has(Number(c.id))) : baseFilteredCards).sort((a, b) => {
+  // 활동중 제외 + 최근 14일 재컨택 제외를 순차 적용 — 둘 다 baseFilteredCards 이후 단계라 조회 입력에 영향 없음.
+  const pingCutoff = Date.now() - FOURTEEN_DAYS_MS;
+  const postFilteredCards = baseFilteredCards.filter((c) => {
+    if (excludeActive && activeSet.has(Number(c.id))) return false;
+    if (excludeRecentPing) {
+      const last = lastPingById[Number(c.id)];
+      if (last && new Date(last).getTime() >= pingCutoff) return false;
+    }
+    return true;
+  });
+  const filteredCards = postFilteredCards.sort((a, b) => {
     const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
     const lastMsg = (c: typeof a) => (c.lastMessageAtIso ? new Date(c.lastMessageAtIso).getTime() : 0);
     // 원지원일 정렬 — null은 항상 뒤로 밀어 코호트 상단이 유효값으로 채워지게.
@@ -536,6 +586,29 @@ export function Pipeline() {
           else setActiveSet(new Set());
         })
         .catch(() => { /* 대조 실패는 표시/발송을 막지 않음 */ });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey, view]);
+
+  // 리스트 레벨 마지막 재컨택(ping_sent) 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
+  // '재컨택 N일 전' 배지와 '최근 14일 재컨택 제외' 필터의 근거. 실패는 조용히 무시(배지는 부가정보).
+  useEffect(() => {
+    if (view !== "list") return;
+    const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
+    if (ids.length === 0) { setLastPingById({}); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetch("/api/admin/pool-events/last-ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicantIds: ids }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((json: { lastPingById?: Record<number, string> }) => {
+          if (!cancelled) setLastPingById(json.lastPingById ?? {});
+        })
+        .catch(() => { /* 배지/제외는 부가정보 — 실패해도 리스트는 보여준다 */ });
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -718,18 +791,31 @@ export function Pipeline() {
     try {
       let sent = 0;
       const failErrors: string[] = [];
-      // bulk-send 엔드포인트는 1회 최대 50명 → 50명씩 끊어서 발송
+      // 청크 실패 집계 — 실패한 청크 대상 인원 수(chunkFailed)로 부분 발송을 가시화.
+      let chunkFailed = 0;
+      let chunkErrorMsg: string | null = null;
+      // bulk-send 엔드포인트는 1회 최대 50명 → 50명씩 끊어서 발송.
+      // 한 청크가 실패해도 return하지 않고 continue로 나머지 청크를 계속 발송한다
+      // (재시도 시 이미 나간 앞 청크의 재발송 위험 회피 — 서버 10분 중복 가드와 별개).
       for (let i = 0; i < recipients.length; i += 50) {
         const chunk = recipients.slice(i, i + 50);
-        const res = await fetch("/api/admin/messages/bulk-send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ recipients: chunk, body: text }),
-        });
-        const json = await res.json();
+        let res: Response;
+        try {
+          res = await fetch("/api/admin/messages/bulk-send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recipients: chunk, body: text }),
+          });
+        } catch {
+          chunkFailed += chunk.length;
+          chunkErrorMsg = chunkErrorMsg ?? "네트워크 오류";
+          continue;
+        }
+        const json = await res.json().catch(() => null);
         if (!res.ok) {
-          toast.error(json.error || "발송에 실패했어요");
-          return;
+          chunkFailed += chunk.length;
+          chunkErrorMsg = chunkErrorMsg ?? (json?.error || "발송 실패");
+          continue;
         }
         sent += json.sent ?? 0;
         for (const r of (json.results ?? []) as Array<{ success: boolean; error?: string }>) {
@@ -750,7 +836,13 @@ export function Pipeline() {
       if (noToken) parts.push(`링크토큰 없음 ${noToken}명 제외`);
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
+      // 청크 단위 실패는 개별 결과가 없어 대상 인원 수를 '미시도'로 별도 표기(부분 발송 가시화).
+      if (chunkFailed) parts.push(`미시도 ${chunkFailed}명${chunkErrorMsg ? ` (${chunkErrorMsg})` : ""}`);
+      // 하나라도 나갔으면 성공 토스트(부분 발송이라도 진행분을 인지), 전부 실패면 에러 토스트.
       (sent > 0 ? toast.success : toast.error)(parts.join(" · "));
+      // 청크 실패가 있으면 모달을 열어두고 선택 유지 — 재시도 판단을 매니저에게 남긴다
+      // (서버 10분 중복 가드가 이미 나간 인원의 재발송을 막음).
+      if (chunkFailed > 0) return;
       setBulkMsgModalOpen(false);
       setSelectedRows(new Set());
       setBulkMsgBody(DEFAULT_BULK_BODY);
@@ -951,6 +1043,13 @@ export function Pipeline() {
                       >
                         활동중 제외
                       </button>
+                      <button
+                        onClick={() => setExcludeRecentPing((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${excludeRecentPing ? 'bg-[#DD6B20] border-[#DD6B20] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="최근 14일 내 재컨택(문자) 발송 이력이 있는 인원을 리스트에서 제외합니다"
+                      >
+                        최근 14일 재컨택 제외
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1090,6 +1189,7 @@ export function Pipeline() {
                       const send = sendableOf(c);
                       const isActive = activeSet.has(Number(c.id));
                       const appliedLabel = appliedMonth(c.appliedAtIso);
+                      const recontactLbl = recontactLabel(lastPingById[Number(c.id)]);
                       return (
                         <tr
                           key={c.id}
@@ -1124,11 +1224,16 @@ export function Pipeline() {
                                 <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                                 {c.stage}
                               </span>
-                              {(c.availability || c.smsOptOutAt || isActive || c.vehicleClass === '미확인' || (!send.sendable && !c.smsOptOutAt)) && (
+                              {(c.availability || c.smsOptOutAt || isActive || recontactLbl || c.vehicleClass === '미확인' || (!send.sendable && !c.smsOptOutAt)) && (
                                 <div className="flex flex-wrap items-center gap-1">
                                   {c.availability && (
                                     <span title={c.availabilityUpdatedAtIso ? `갱신 ${relTime(c.availabilityUpdatedAtIso)}` : undefined} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
                                       {c.availability}
+                                    </span>
+                                  )}
+                                  {recontactLbl && (
+                                    <span title={`마지막 재컨택 ${relTime(lastPingById[Number(c.id)])}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
+                                      {recontactLbl}
                                     </span>
                                   )}
                                   {isActive && (
@@ -1281,6 +1386,13 @@ export function Pipeline() {
               {selectedOptOutCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12.5px] font-bold text-[#C53030]">
                   수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
+                </div>
+              )}
+
+              {/* 템플릿↔코호트 경고 — B안(최근 6개월용)에 원지원 6개월 초과자가 섞임(발송은 막지 않음, 인지용) */}
+              {bCohortMismatchCount > 0 && (
+                <div className="px-4 py-2.5 rounded-xl bg-[#FFFBEB] border border-[#F6E05E] text-[12.5px] font-bold text-[#B7791F]">
+                  ⚠️ B안은 최근 6개월 코호트용 — 현재 대상 중 {bCohortMismatchCount}명이 6개월 초과(원지원일 미상 포함)예요. A안 사용을 검토하세요.
                 </div>
               )}
 

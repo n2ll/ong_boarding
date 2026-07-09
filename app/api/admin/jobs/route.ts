@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
     created_by,
     work_period,
     closes_at,
+    sos_request_id,
   } = body as {
     title?: string;
     body?: string;
@@ -128,6 +129,7 @@ export async function POST(req: NextRequest) {
     created_by?: string | null;
     work_period?: string | null;
     closes_at?: string | null;
+    sos_request_id?: number | null;
   };
 
   if (!title?.trim() || !jobBody?.trim()) {
@@ -199,6 +201,8 @@ export async function POST(req: NextRequest) {
       created_by: created_by ?? null,
       work_period: work_period || null,
       closes_at: closes_at ?? null,
+      // 긴급 건(SOS)에서 파생된 공고면 그 id를 보관 — 파생 관계 영속(자동 해결 연동은 범위 밖).
+      sos_request_id: typeof sos_request_id === "number" ? sos_request_id : null,
     })
     .select()
     .single();

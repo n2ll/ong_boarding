@@ -200,6 +200,17 @@ function nowLocalInput(): string {
   return isoToLocalInput(new Date().toISOString());
 }
 
+// 긴급 건 권역/차종(자유 텍스트) → 파이프라인 필터 파라미터 매핑.
+//   region: 수도권 키워드(서울/경기/인천 + 주요 서울 구)가 있으면 capital, 아니면 미전달(파이프라인 지역 필터는 capital 1칩뿐).
+//   vehicle: 차종 값이 있으면 배송 라인 백업이므로 차량 보유(vehicle)로 좁힌다.
+const CAPITAL_KEYWORDS = ["서울", "경기", "인천", "강서", "강남", "강동", "강북", "송파", "마포", "영등포", "부천", "고양", "성남", "수원"];
+function sosToPipelineParams(region: string | null, vehicle: string | null): URLSearchParams {
+  const p = new URLSearchParams();
+  if (region && CAPITAL_KEYWORDS.some((k) => region.includes(k))) p.set("region", "capital");
+  if (vehicle && vehicle.trim()) p.set("vehicle", "vehicle");
+  return p;
+}
+
 export function Jobs() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -234,8 +245,10 @@ export function Jobs() {
   const [newJobPolicyNotes, setNewJobPolicyNotes] = useState("");
   const [newJobAiFacts, setNewJobAiFacts] = useState("");
   const [newJobExtraOpen, setNewJobExtraOpen] = useState(false);
-  // 긴급 건(SOS)에서 넘어온 공고 — 향후 공고↔긴급건 연결용으로만 보관(등록엔 미사용).
+  // 긴급 건(SOS)에서 넘어온 공고 — 등록 시 sos_request_id로 저장 + 등록 후 '대상 선별' CTA용 권역/차종 보관.
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
+  const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
+  const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -452,6 +465,9 @@ export function Jobs() {
         if (line) setPostingTitle(`${line} 긴급 백업`);
         if (period) setNewJobPeriod(period);
         if (sosId) setNewJobSosId(sosId);
+        // 등록 후 '대상 선별' CTA에서 파이프라인 필터로 매핑하기 위해 권역/차종 원문을 보관.
+        if (region) setNewJobSosRegion(region);
+        if (vehicle) setNewJobSosVehicle(vehicle);
         // 권역/차종은 등록 폼에 전용 입력이 없어 본문 초안 첫 줄에 삽입한다.
         const extra = [region && `권역: ${region}`, vehicle && `차종: ${vehicle}`].filter(Boolean).join(" / ");
         if (extra || line) {
@@ -561,6 +577,8 @@ export function Jobs() {
     setNewJobAiFacts("");
     setNewJobExtraOpen(false);
     setNewJobSosId(null);
+    setNewJobSosRegion(null);
+    setNewJobSosVehicle(null);
   };
 
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
@@ -617,6 +635,8 @@ export function Jobs() {
       toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
       return;
     }
+    // resetNewJobForm()이 SOS 상태를 지우기 전에, 등록 후 CTA용으로 스냅샷을 잡아둔다.
+    const sosSnapshot = { id: newJobSosId, region: newJobSosRegion, vehicle: newJobSosVehicle };
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
@@ -625,6 +645,8 @@ export function Jobs() {
         body: JSON.stringify({
           title,
           body,
+          // 긴급 건에서 파생된 공고면 sos_request_id로 연결 저장(자동 해결 연동은 범위 밖).
+          ...(newJobSosId && /^\d+$/.test(newJobSosId) ? { sos_request_id: Number(newJobSosId) } : {}),
           // 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 막는다(지점 선택 시 서버가 소속 화주사로 역채움).
           branch_id: newJobBranchId === "" ? null : newJobBranchId,
           ...(newJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
@@ -649,7 +671,21 @@ export function Jobs() {
         toast.error(json.error || "공고 등록에 실패했어요");
         return;
       }
-      toast.success("새 공고가 등록되었어요.");
+      // 긴급 건에서 파생된 공고면 '이 조건으로 대상 선별' CTA를 붙여 탭 이동 단절을 없앤다(SOS→공고→선별 브릿지).
+      if (sosSnapshot.id) {
+        const params = sosToPipelineParams(sosSnapshot.region, sosSnapshot.vehicle);
+        params.set("status", "스크리닝 전");
+        toast.success("새 공고가 등록되었어요.", {
+          description: "이 조건에 맞는 인력풀에서 재컨택 대상을 선별하세요.",
+          action: {
+            label: "이 조건으로 대상 선별 →",
+            onClick: () => router.push(`/pipeline?${params.toString()}`),
+          },
+          duration: 8000,
+        });
+      } else {
+        toast.success("새 공고가 등록되었어요.");
+      }
       setAiModalOpen(false);
       resetNewJobForm();
       await loadJobs();
