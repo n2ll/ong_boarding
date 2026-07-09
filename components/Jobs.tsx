@@ -239,6 +239,8 @@ export function Jobs() {
   const [newJobSlot, setNewJobSlot] = useState("");
   const [newJobStartDate, setNewJobStartDate] = useState("");
   const [newJobPickupAddress, setNewJobPickupAddress] = useState("");
+  // 마지막 경유지(배송 종료 지점) — 상차지와 함께 후보↔공고 거리 정렬(가까운 쪽 기준)에 쓰인다.
+  const [newJobDropoffAddress, setNewJobDropoffAddress] = useState("");
   const [newJobVehicleRequired, setNewJobVehicleRequired] = useState(true);
   // AI 응대 근거(급여·정책) — 등록 단계에서 접이식으로 함께 입력해 편집 모달 2단계 강제를 없앤다.
   const [newJobPayInfo, setNewJobPayInfo] = useState("");
@@ -249,7 +251,7 @@ export function Jobs() {
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string } | null>(null);
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -571,6 +573,7 @@ export function Jobs() {
     setNewJobSlot("");
     setNewJobStartDate("");
     setNewJobPickupAddress("");
+    setNewJobDropoffAddress("");
     setNewJobVehicleRequired(true);
     setNewJobPayInfo("");
     setNewJobPolicyNotes("");
@@ -610,11 +613,12 @@ export function Jobs() {
       setNewJobSlot(j.slot ?? "");
       setNewJobStartDate(j.start_date ?? "");
       setNewJobPickupAddress(j.pickup_address ?? "");
+      setNewJobDropoffAddress(j.dropoff_address ?? "");
       setNewJobVehicleRequired(j.vehicle_required !== false);
       setNewJobPayInfo(j.pay_info ?? "");
       setNewJobPolicyNotes(j.policy_notes ?? "");
       setNewJobAiFacts(j.ai_facts ?? "");
-      if (j.pay_info || j.policy_notes || j.ai_facts || j.slot || j.start_date || j.pickup_address) setNewJobExtraOpen(true);
+      if (j.pay_info || j.policy_notes || j.ai_facts || j.slot || j.start_date || j.pickup_address || j.dropoff_address) setNewJobExtraOpen(true);
       setAiModalOpen(true);
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -661,6 +665,7 @@ export function Jobs() {
           slot: newJobSlot || null,
           start_date: newJobStartDate || null,
           pickup_address: newJobPickupAddress.trim() || null,
+          dropoff_address: newJobDropoffAddress.trim() || null,
           // datetime-local 값은 로컬(KST) 기준 → ISO(UTC)로 변환해 전송. 빈 값이면 미전송.
           ...(newJobPeriod ? { work_period: newJobPeriod } : {}),
           ...(newJobClosesAt ? { closes_at: new Date(newJobClosesAt).toISOString() } : {}),
@@ -708,7 +713,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "" });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "" });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -737,6 +742,7 @@ export function Jobs() {
         slot: j.slot ?? "",
         startDate: j.start_date ?? "",
         pickupAddress: j.pickup_address ?? "",
+        dropoffAddress: j.dropoff_address ?? "",
       });
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -785,6 +791,7 @@ export function Jobs() {
           slot: editForm.slot || null,
           start_date: editForm.startDate || null,
           pickup_address: editForm.pickupAddress.trim() || null,
+          dropoff_address: editForm.dropoffAddress.trim() || null,
         }),
       });
       const json = await res.json();
@@ -1264,6 +1271,16 @@ export function Jobs() {
                           className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
                         />
                       </div>
+                      <div>
+                        <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">마지막 경유지(배송 종료 지점)</label>
+                        <input
+                          type="text"
+                          value={newJobDropoffAddress}
+                          onChange={(e) => setNewJobDropoffAddress(e.target.value)}
+                          placeholder="예: 하남 미사강변도시 일대"
+                          className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                        />
+                      </div>
                       <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 — 채우면 단가·정책 문의를 AI가 직접 안내해 인계가 줄어듭니다</div>
                         <div>
@@ -1499,6 +1516,10 @@ export function Jobs() {
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">집결지</label>
                   <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">마지막 경유지(배송 종료 지점)</label>
+                  <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>

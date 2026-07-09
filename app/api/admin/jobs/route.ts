@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -95,6 +95,9 @@ export async function POST(req: NextRequest) {
     pickup_address,
     pickup_lat,
     pickup_lng,
+    dropoff_address,
+    dropoff_lat,
+    dropoff_lng,
     pay_info,
     policy_notes,
     pay_type,
@@ -119,6 +122,9 @@ export async function POST(req: NextRequest) {
     pickup_address?: string | null;
     pickup_lat?: number | null;
     pickup_lng?: number | null;
+    dropoff_address?: string | null;
+    dropoff_lat?: number | null;
+    dropoff_lng?: number | null;
     pay_info?: string | null;
     policy_notes?: string | null;
     pay_type?: string | null;
@@ -188,6 +194,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 마지막 경유지(배송 종료 지점) 주소가 있고 좌표가 안 넘어왔으면 지오코딩 — 거리 정렬은 상차지·마지막경유지 중 가까운 쪽 기준.
+  let resolvedDropoffLat = typeof dropoff_lat === "number" ? dropoff_lat : null;
+  let resolvedDropoffLng = typeof dropoff_lng === "number" ? dropoff_lng : null;
+  if (dropoff_address && resolvedDropoffLat === null && resolvedDropoffLng === null) {
+    const { geo } = await geocodeAddressWithFallback(String(dropoff_address));
+    if (geo) {
+      resolvedDropoffLat = geo.lat;
+      resolvedDropoffLng = geo.lng;
+    }
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -202,6 +219,9 @@ export async function POST(req: NextRequest) {
       pickup_address: pickup_address ?? null,
       pickup_lat: resolvedPickupLat,
       pickup_lng: resolvedPickupLng,
+      dropoff_address: dropoff_address ?? null,
+      dropoff_lat: resolvedDropoffLat,
+      dropoff_lng: resolvedDropoffLng,
       pay_info: pay_info ?? null,
       policy_notes: policy_notes ?? null,
       pay_type: pay_type ?? null,

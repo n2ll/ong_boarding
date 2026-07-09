@@ -18,6 +18,9 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "pickup_address",
   "pickup_lat",
   "pickup_lng",
+  "dropoff_address",
+  "dropoff_lat",
+  "dropoff_lng",
   "pay_info",
   "policy_notes",
   "pay_type",
@@ -151,6 +154,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } else if (update.pickup_address === null || update.pickup_address === "") {
     update.pickup_lat = null;
     update.pickup_lng = null;
+  }
+
+  // 마지막 경유지(배송 종료 지점) 주소도 상차지와 동일 패턴 — 변경 시 지오코딩, 비우면 좌표 클리어. 거리 정렬은 둘 중 가까운 쪽 기준.
+  if (typeof update.dropoff_address === "string" && update.dropoff_address.trim() && update.dropoff_lat === undefined) {
+    const { geo } = await geocodeAddressWithFallback(update.dropoff_address);
+    if (geo) {
+      update.dropoff_lat = geo.lat;
+      update.dropoff_lng = geo.lng;
+    }
+  } else if (update.dropoff_address === null || update.dropoff_address === "") {
+    update.dropoff_lat = null;
+    update.dropoff_lng = null;
   }
 
   const { data, error } = await supabase
