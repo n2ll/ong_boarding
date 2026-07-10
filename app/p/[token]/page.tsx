@@ -285,7 +285,11 @@ export default function PoolPage() {
                     </span>
                   )}
                 </div>
-                <h2 className="mt-2 text-[18px] font-extrabold text-[#1A202C] leading-snug">{job.title}</h2>
+                {/* 제목의 끝 '(…원)'은 아래 급여 행과 중복이라 표시에서 제거(불필요한 글자↓).
+                    '(7/23~8/24)' 같은 날짜 괄호는 원으로 안 끝나 유지된다. */}
+                <h2 className="mt-2 text-[18px] font-extrabold text-[#1A202C] leading-snug">
+                  {job.title.replace(/\s*\([^)]*원\)\s*$/, "")}
+                </h2>
                 <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-[#4A5568]">
                   {pay && (
                     <div className="flex gap-2">
@@ -318,22 +322,20 @@ export default function PoolPage() {
                 </dl>
 
                 {job.body && (
-                  <div className="mt-3 border-t border-[#EDF2F7] pt-3">
-                    <p
-                      className={`text-[15px] text-[#4A5568] leading-relaxed whitespace-pre-line ${
-                        expandedIds.has(job.id) ? "" : "line-clamp-4"
-                      }`}
-                    >
-                      {job.body}
-                    </p>
-                    {job.body.split("\n").length > 4 && (
-                      <button
-                        onClick={() => toggleExpanded(job.id)}
-                        className="mt-1 py-1 text-[15px] font-bold text-[#B7791F]"
-                      >
-                        {expandedIds.has(job.id) ? "접기 ▲" : "자세한 내용 보기 ▼"}
-                      </button>
+                  <div className="mt-3 border-t border-[#EDF2F7] pt-2">
+                    {/* 본문은 기본 접힘 — 위 요약(급여·시작일·차량)이 스캔 단위. 프로즈가 요약과 겹쳐
+                        기본 노출하면 글자만 많아지고 3개 비교가 어렵다. 원하는 사람만 펼쳐 본다. */}
+                    {expandedIds.has(job.id) && (
+                      <p className="mt-1 text-[15px] text-[#4A5568] leading-relaxed whitespace-pre-line">
+                        {job.body}
+                      </p>
                     )}
+                    <button
+                      onClick={() => toggleExpanded(job.id)}
+                      className="py-1.5 text-[15px] font-bold text-[#B7791F]"
+                    >
+                      {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
+                    </button>
                   </div>
                 )}
 
