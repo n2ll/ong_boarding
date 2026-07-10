@@ -13,6 +13,10 @@ interface BulkSendBody {
   recipients: Recipient[];
   body: string;
   subject?: string;
+  // 발송 목적 태그(선택) — ping_sent meta에 기록해 발송 이력을 추적 (예: 'waitlist' 대기 안내).
+  purpose?: string;
+  // purpose와 연관된 공고 id(선택) — 예: '공고 관심자 선택'으로 고른 대기 안내 대상의 공고.
+  job_id?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -22,6 +26,10 @@ export async function POST(req: NextRequest) {
     // LMS 제목 — 미지정 시 SOLAPI가 본문 첫 문장을 제목으로 자동 생성해 인사말이 중복 노출된다.
     const subject = (data.subject || "옹고잉 채용 안내").trim();
     const recipients = Array.isArray(data.recipients) ? data.recipients : [];
+    // 발송 목적 태그 — ping_sent meta 기록용(예: waitlist). 임의 문자열 유입 대비 길이 제한.
+    const purpose = typeof data.purpose === "string" ? data.purpose.trim().slice(0, 40) : "";
+    const purposeJobId =
+      typeof data.job_id === "number" && Number.isFinite(data.job_id) ? data.job_id : null;
 
     if (!text) {
       return NextResponse.json({ error: "메시지 내용이 비어있습니다." }, { status: 400 });
@@ -155,11 +163,17 @@ export async function POST(req: NextRequest) {
         });
 
         // ping 발송 이벤트 — 응답률(ping_reply/ping_sent)·응답속도의 분모. 지원자 연결 발송만.
+        // purpose/job_id가 오면 meta에 함께 기록 — 대기 안내(waitlist) 등 발송 이력 추적.
         if (typeof r.applicant_id === "number") {
           const { error: evErr } = await supabase.from("pool_events").insert({
             applicant_id: r.applicant_id,
             event_type: "ping_sent",
-            meta: { source: "bulk", has_link: personalText.includes("/p/") },
+            meta: {
+              source: "bulk",
+              has_link: personalText.includes("/p/"),
+              ...(purpose ? { purpose } : {}),
+              ...(purposeJobId !== null ? { job_id: purposeJobId } : {}),
+            },
           });
           if (evErr) console.error("[bulk-send] pool_events ping_sent failed", evErr);
         }
