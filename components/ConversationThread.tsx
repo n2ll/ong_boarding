@@ -29,6 +29,38 @@ interface JobLabel {
   branch: string | null;
 }
 
+/** 재컨택 맥락 이벤트(pool_events) — 스레드에 인라인 시스템 칩으로 병합 표시 */
+interface PoolEvent {
+  id: number;
+  event_type: string;
+  job_id: number | null;
+  meta: Record<string, unknown> | null;
+  created_at: string;
+}
+
+/** 이벤트 → 시스템 칩 라벨. 관심클릭은 공고명(jobsMap 재사용, 없으면 #N)·바로가능 표기. */
+function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): string {
+  const meta = (ev.meta ?? {}) as { immediate?: unknown; to?: unknown };
+  switch (ev.event_type) {
+    case "ping_sent":
+      return "⚡ 재컨택 문자 발송";
+    case "link_view":
+      return "👀 맞춤 공고 열람";
+    case "interest_click": {
+      const title = ev.job_id != null ? jobsMap[ev.job_id]?.title?.trim() : undefined;
+      const name = title || (ev.job_id != null ? `공고 #${ev.job_id}` : "공고");
+      const immediate = meta.immediate === true || meta.immediate === "true";
+      return `⭐ '${name}' 관심 클릭${immediate ? " · 바로 가능" : ""}`;
+    }
+    case "availability_set":
+      return typeof meta.to === "string" && meta.to ? `🕐 가용성 → ${meta.to}` : "🕐 가용성 변경";
+    case "opt_out_set":
+      return "🚫 수신거부 등록";
+    default:
+      return ev.event_type;
+  }
+}
+
 /** 공고 라벨 칩에 쓸 짧은 텍스트 — 지점명 우선, 없으면 제목 앞부분. */
 function jobChipLabel(j: JobLabel): string {
   if (j.branch && j.branch.trim()) return j.branch.trim();
@@ -99,20 +131,21 @@ interface ConversationThreadProps {
 
 // 매니저가 인계 건에 자주 쓰는 답변 스니펫 — 클릭 시 입력창에 삽입(검토 후 발송).
 // 실제 매니저 수동 응답(반복 패턴)을 인계 카테고리에 맞춰 정리한 것.
+// 치환자: #{이름} · #{공고명} · #{지점} · #{맞춤링크} — bulk-send의 #{...} 문법과 통일.
+// 삽입 시 치환값이 없으면 토큰을 그대로 남기고 노랑 토스트로 경고한다(무단 제거 금지).
 // ⚠️ 확정 뉘앙스 금지: "확정/배정 완료"처럼 근무가 확정됐다는 의미를 주는 문구는 두지 않는다.
-function quickTemplates(name: string): { label: string; text: string }[] {
-  const n = (name || "지원자").trim();
-  return [
-    { label: "확인 후 안내", text: `${n}님, 문의 주신 부분은 담당 매니저가 확인 후 정확히 안내드릴게요!` },
-    { label: "통화 연결", text: `${n}님, 안녕하세요. 옹보딩입니다. 통화 가능하신 시간을 알려주시면 담당자가 연락드리겠습니다.` },
-    { label: "순차 연락", text: `${n}님, 확인 감사합니다! 담당 매니저가 순차적으로 연락드릴 예정이에요. 조금만 기다려 주세요.` },
-    { label: "대기 안내", text: `${n}님, 현재 지원이 많아 즉시 배정이 어려운 상황이에요. 자리가 생기면 가장 먼저 연락드리겠습니다!` },
-    { label: "스크리닝 확인", text: `${n}님, 몇 가지만 확인 부탁드릴게요!\n- 배송에 쓰실 자차를 보유하고 계신가요?\n- 본인 명의로 정산 받으시는 데 문제 없으실까요?\n- 공휴일에도 업무 가능하실까요?` },
-    { label: "온보딩 절차", text: `${n}님, 업무 진행을 위한 안내드릴게요. 영상 교육 수료 후 회신 부탁드립니다.\n1. 배민 커넥트 앱 설치 후 가입\n2. 가입 시 안전보건교육 영상(2시간) 시청\n3. 교육 수료 후 앱 아이디 회신` },
-    { label: "서류 요청", text: `${n}님, 지원 감사합니다. 진행을 위해 신분증 사진 1장 회신 부탁드립니다.` },
-    { label: "감사 인사", text: `${n}님, 문의 주셔서 감사합니다. 추가로 궁금하신 점 있으면 편하게 말씀해주세요.` },
-  ];
-}
+const QUICK_TEMPLATES: { label: string; text: string }[] = [
+  { label: "확인 후 안내", text: `#{이름}님, 문의 주신 부분은 담당 매니저가 확인 후 정확히 안내드릴게요!` },
+  { label: "통화 연결", text: `#{이름}님, 안녕하세요. 옹보딩입니다. 통화 가능하신 시간을 알려주시면 담당자가 연락드리겠습니다.` },
+  { label: "순차 연락", text: `#{이름}님, 확인 감사합니다! 담당 매니저가 순차적으로 연락드릴 예정이에요. 조금만 기다려 주세요.` },
+  { label: "대기 안내", text: `#{이름}님, 현재 지원이 많아 즉시 배정이 어려운 상황이에요. 자리가 생기면 가장 먼저 연락드리겠습니다!` },
+  { label: "관심 대기 안내", text: `[옹고잉] #{이름}님, '#{공고명}' 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요!` },
+  { label: "맞춤링크 안내", text: `#{이름}님, 지금 모집 중인 공고를 본인 전용 페이지에서 모아 보실 수 있어요. 편하실 때 확인해보세요!\n#{맞춤링크}` },
+  { label: "스크리닝 확인", text: `#{이름}님, 몇 가지만 확인 부탁드릴게요!\n- 배송에 쓰실 자차를 보유하고 계신가요?\n- 본인 명의로 정산 받으시는 데 문제 없으실까요?\n- 공휴일에도 업무 가능하실까요?` },
+  { label: "온보딩 절차", text: `#{이름}님, 업무 진행을 위한 안내드릴게요. 영상 교육 수료 후 회신 부탁드립니다.\n1. 배민 커넥트 앱 설치 후 가입\n2. 가입 시 안전보건교육 영상(2시간) 시청\n3. 교육 수료 후 앱 아이디 회신` },
+  { label: "서류 요청", text: `#{이름}님, 지원 감사합니다. 진행을 위해 신분증 사진 1장 회신 부탁드립니다.` },
+  { label: "감사 인사", text: `#{이름}님, 문의 주셔서 감사합니다. 추가로 궁금하신 점 있으면 편하게 말씀해주세요.` },
+];
 
 /**
  * 지원자별 SMS 대화 스레드(말풍선 + AI 초안 검수 + 입력창)를 self-contained하게 렌더.
@@ -131,6 +164,8 @@ export function ConversationThread({
   className = "",
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
+  const [events, setEvents] = useState<PoolEvent[]>([]);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [jobsMap, setJobsMap] = useState<Record<number, JobLabel>>({});
   const [agentStage, setAgentStage] = useState<string | null>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
@@ -152,6 +187,8 @@ export function ConversationThread({
         const res = await fetch(`/api/admin/messages/${applicantId}${jobQS}`);
         const json = await res.json();
         setMessages((json.messages ?? []) as ApiMessage[]);
+        setEvents((json.events ?? []) as PoolEvent[]);
+        setAccessToken((json.access_token as string | null) ?? null);
         setJobsMap((json.jobs ?? {}) as Record<number, JobLabel>);
         setAgentStage(json.agent_stage ?? null);
       } catch {
@@ -219,6 +256,58 @@ export function ConversationThread({
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
   const showJobChips = jobId == null && Object.keys(jobsMap).length > 1;
+
+  // 재컨택 이벤트 노이즈 억제 — 같은 타입(+같은 공고) 연속은 마지막 것만 남긴다
+  // (link_view 반복 열람 등). 서버가 created_at 오름차순으로 내려준다.
+  const dedupedEvents: PoolEvent[] = [];
+  for (const ev of events) {
+    const last = dedupedEvents[dedupedEvents.length - 1];
+    if (last && last.event_type === ev.event_type && last.job_id === ev.job_id) {
+      dedupedEvents[dedupedEvents.length - 1] = ev;
+    } else {
+      dedupedEvents.push(ev);
+    }
+  }
+
+  // 말풍선 + 재컨택 이벤트 칩을 created_at 시간순으로 병합한 타임라인.
+  // 매니저가 "이 '네'가 무엇에 대한 답인지"를 스레드 안에서 바로 대조할 수 있게 한다.
+  type TimelineItem = { kind: "msg"; msg: ApiMessage } | { kind: "event"; ev: PoolEvent };
+  const timeline: TimelineItem[] = [
+    ...messages.map((msg): TimelineItem => ({ kind: "msg", msg })),
+    ...dedupedEvents.map((ev): TimelineItem => ({ kind: "event", ev })),
+  ].sort((a, b) => {
+    const at = new Date(a.kind === "msg" ? a.msg.created_at : a.ev.created_at).getTime();
+    const bt = new Date(b.kind === "msg" ? b.msg.created_at : b.ev.created_at).getTime();
+    return at - bt; // 안정 정렬 — 동시각이면 메시지가 이벤트보다 먼저
+  });
+
+  // 빠른 템플릿 변수 치환 — #{이름}/#{공고명}/#{지점}/#{맞춤링크}(bulk-send 문법 통일).
+  // 값이 없는 변수는 토큰을 그대로 남기고 목록으로 돌려줘 경고 토스트의 근거로 쓴다.
+  const fillTemplateVars = (text: string): { filled: string; unresolved: string[] } => {
+    const job = jobId != null ? jobsMap[jobId] : undefined;
+    const values: Record<string, string | null> = {
+      "#{이름}": (applicantName || "지원자").trim() || "지원자",
+      "#{공고명}": job?.title?.trim() || null,
+      "#{지점}": job?.branch?.trim() || null,
+      "#{맞춤링크}": accessToken ? `${window.location.origin}/p/${accessToken}` : null,
+    };
+    let filled = text;
+    const unresolved: string[] = [];
+    for (const [token, value] of Object.entries(values)) {
+      if (!filled.includes(token)) continue;
+      if (value) filled = filled.split(token).join(value);
+      else unresolved.push(token);
+    }
+    return { filled, unresolved };
+  };
+
+  const insertTemplate = (text: string) => {
+    const { filled, unresolved } = fillTemplateVars(text);
+    setInputValue((prev) => (prev.trim() ? prev + "\n" + filled : filled));
+    if (unresolved.length > 0) {
+      toast.warning(`'${unresolved.join("', '")}' 치환값이 없어요 — 확인 후 발송하세요`);
+    }
+  };
 
   const handleToggleAi = async (checked: boolean) => {
     if (!hasActiveFlow) {
@@ -489,14 +578,35 @@ export function ConversationThread({
       {/* 메시지 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
         {loadingMsgs && <div className="text-[13px] text-[#A0AEC0] text-center py-8">대화 내역 불러오는 중…</div>}
-        {!loadingMsgs && messages.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 주고받은 메시지가 없어요</div>}
+        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 주고받은 메시지가 없어요</div>}
 
-        {messages.map((msg, idx) => {
+        {timeline.map((item, idx) => {
+          const createdAt = item.kind === "msg" ? item.msg.created_at : item.ev.created_at;
+          // 일자 구분선 — 이전 항목(메시지·이벤트)과 날짜가 바뀌는 지점마다 삽입 (첫 항목 포함)
+          const prevItem = idx > 0 ? timeline[idx - 1] : null;
+          const prevAt = prevItem ? (prevItem.kind === "msg" ? prevItem.msg.created_at : prevItem.ev.created_at) : null;
+          const showDateDivider = !prevAt || new Date(prevAt).toDateString() !== new Date(createdAt).toDateString();
+
+          // 재컨택 이벤트 — 말풍선 사이 중앙 정렬 시스템 칩(일자 구분선과 같은 톤, 더 작게)
+          if (item.kind === "event") {
+            const ev = item.ev;
+            return (
+              <Fragment key={`ev-${ev.id}`}>
+                {showDateDivider && (
+                  <div className="flex justify-center mb-2"><div className="bg-[#E2E8F0] text-[#718096] text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
+                )}
+                <div className="flex justify-center -my-2">
+                  <div className="bg-[#E2E8F0] text-[#718096] text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                    {poolEventLabel(ev, jobsMap)} · {fmtTime(createdAt)}
+                  </div>
+                </div>
+              </Fragment>
+            );
+          }
+
+          const msg = item.msg;
           const isInbound = msg.direction === "inbound";
           const sender = isInbound ? "user" : "ai";
-          // 일자 구분선 — 이전 메시지와 날짜가 바뀌는 지점마다 삽입 (첫 메시지 포함)
-          const prevMsg = idx > 0 ? messages[idx - 1] : null;
-          const showDateDivider = !prevMsg || new Date(prevMsg.created_at).toDateString() !== new Date(msg.created_at).toDateString();
           return (
             <Fragment key={msg.id}>
             {showDateDivider && (
@@ -567,10 +677,10 @@ export function ConversationThread({
         {canSend ? (
           <>
           <div className="flex gap-1.5 flex-wrap mb-2.5">
-            {quickTemplates(applicantName).map((t) => (
+            {QUICK_TEMPLATES.map((t) => (
               <button
                 key={t.label}
-                onClick={() => setInputValue((prev) => (prev.trim() ? prev + "\n" + t.text : t.text))}
+                onClick={() => insertTemplate(t.text)}
                 className="text-[11.5px] font-bold text-[#4A5568] bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] px-2.5 py-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
                 title={t.text}
               >

@@ -93,7 +93,63 @@ export async function GET(
     };
   });
 
-  return NextResponse.json({ applicant, candidates });
+  // 재컨택 반응 요약(B2) — 상세 패널 '재컨택 반응' 카드용. 최근 90일 pool_events 기반.
+  // 별도 API 없이 상세 GET에 얹는다(이미 여러 조인을 하는 라우트 — 기존 패턴 재사용).
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: poolEvents, error: poolEvErr } = await supabase
+    .from("pool_events")
+    .select("event_type, job_id, meta, created_at")
+    .eq("applicant_id", id)
+    .in("event_type", ["ping_sent", "link_view", "interest_click"])
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (poolEvErr) console.error("[applicant GET] pool_events fetch failed", poolEvErr);
+
+  let lastPingAt: string | null = null;
+  let lastLinkViewAt: string | null = null;
+  const interestByJob = new Map<number, { immediate: boolean; clicked_at: string }>();
+  for (const ev of poolEvents ?? []) {
+    const type = ev.event_type as string;
+    if (type === "ping_sent") {
+      if (!lastPingAt) lastPingAt = ev.created_at as string;
+    } else if (type === "link_view") {
+      if (!lastLinkViewAt) lastLinkViewAt = ev.created_at as string;
+    } else if (type === "interest_click" && typeof ev.job_id === "number" && !interestByJob.has(ev.job_id)) {
+      const meta = ev.meta as { immediate?: unknown } | null;
+      interestByJob.set(ev.job_id, {
+        immediate: meta?.immediate === true || meta?.immediate === "true",
+        clicked_at: ev.created_at as string,
+      });
+    }
+  }
+
+  // 관심 공고 제목 — 후보 목록(candidates)에 이미 있으면 재사용, 없는 것만 1회 보충 조회.
+  const titleByJobId = new Map<number, string | null>();
+  for (const c of candidates) titleByJobId.set(c.job_id as number, c.job_title);
+  const missingJobIds = [...interestByJob.keys()].filter((jid) => !titleByJobId.has(jid));
+  if (missingJobIds.length > 0) {
+    const { data: jobRows } = await supabase.from("jobs").select("id, title").in("id", missingJobIds);
+    for (const j of jobRows ?? []) titleByJobId.set(j.id as number, (j.title as string | null) ?? null);
+  }
+  const interestJobs = [...interestByJob.entries()]
+    .map(([job_id, v]) => ({
+      job_id,
+      title: titleByJobId.get(job_id) ?? null,
+      immediate: v.immediate,
+      clicked_at: v.clicked_at,
+    }))
+    .sort((a, b) => Date.parse(b.clicked_at) - Date.parse(a.clicked_at));
+
+  return NextResponse.json({
+    applicant,
+    candidates,
+    recontact: {
+      last_ping_at: lastPingAt,
+      last_link_view_at: lastLinkViewAt,
+      interest_jobs: interestJobs,
+    },
+  });
 }
 
 // 매니저가 수정 가능한 모든 컬럼 (시스템 컬럼: id/created_at/churned_at/last_message_at/
