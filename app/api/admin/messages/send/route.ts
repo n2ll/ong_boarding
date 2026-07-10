@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
+import { COPILOT_DRAFT_MARKER } from "@/lib/agent/kill-switch";
 
 // AI/시스템 자동 발송에 쓰는 sent_by 라벨 — 이 값들 이외는 모두 '매니저 수동 발송'으로 본다.
 // 매니저 발송이면 AI 응답 충돌을 막기 위해 자동으로 paused 단계로 전이한다.
@@ -61,9 +62,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 코파일럿 초안 승인 여부 — 초안 reasoning의 마커로 판정.
+    // 코파일럿 모드에서는 발송 주체가 매니저(승인)여도 대화는 계속 'AI 초안 → 매니저 승인' 루프에
+    // 있어야 하므로 아래 자동 pause 전이를 건너뛴다(전이하면 다음 인입부터 초안이 안 생긴다).
+    let isCopilotDraftApproval = false;
+    if (draft_id) {
+      const { data: d } = await supabase
+        .from("message_drafts")
+        .select("reasoning")
+        .eq("id", draft_id)
+        .maybeSingle();
+      isCopilotDraftApproval = ((d?.reasoning as string | null) ?? "").startsWith(COPILOT_DRAFT_MARKER);
+    }
+
     // 매니저 수동 발송이면 AI 자동 응답을 끄기 위해 paused로 전이.
     // 매니저와 AI가 같은 후보에게 동시에 응답하는 충돌 방지.
-    const isManagerSend = !AGENT_OR_SYSTEM_SENT_BY.has(sent_by ?? "");
+    const isManagerSend = !AGENT_OR_SYSTEM_SENT_BY.has(sent_by ?? "") && !isCopilotDraftApproval;
     if (isManagerSend && applicant_id) {
       // 전이 대상 후보: 발송된 공고(job_id)의 후보를 우선, 없으면 최신 활성 후보로 폴백.
       let jc: { id: number; agent_stage: string | null; agent_state: unknown } | null = null;

@@ -8,6 +8,9 @@
  * 3) Claude 호출 (stage.process)
  * 4) 응답 발송 (SOLAPI)
  * 5) transitions.applyTransition() — 단계 전이 + 자동 발송 + state 저장
+ *
+ * 전역 모드(kill-switch 3단): off면 1) 이전에 즉시 종료, draft(코파일럿)면 3)까지만 실행하고
+ * 4)·5) 대신 message_drafts에 초안만 INSERT — 매니저 승인 시 기존 초안 발송 경로가 처리.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -18,7 +21,7 @@ import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
 import { activeStage } from "./stages/active";
 import { recordUsage, toMessageTokens, type UsagePurpose } from "./usage";
-import { isAgentDisabled } from "./kill-switch";
+import { getAgentMode, COPILOT_DRAFT_MARKER, type AgentMode } from "./kill-switch";
 import type {
   AgentState,
   ApplicantContext,
@@ -28,6 +31,7 @@ import type {
   Stage,
   StageContext,
   StageName,
+  StageTransition,
 } from "./types";
 
 const STAGES: Record<Exclude<StageName, "paused" | "abort">, Stage> = {
@@ -56,6 +60,8 @@ export interface RunAgentResult {
   ok: boolean;
   skipped?: string;            // 스킵 사유
   reply_sent?: boolean;
+  /** 코파일럿(draft) 모드에서 message_drafts에 초안을 만들었는지 */
+  draft_created?: boolean;
   next_stage?: StageName | null;
   auto_sent_messages?: number;
   reasoning?: string;
@@ -81,17 +87,32 @@ function detectConfirmationNuance(text: string): string | null {
   return null;
 }
 
+// 전이 판단을 사람이 읽을 한 줄 라벨로 — auto_sent reasoning 보관과 코파일럿 초안 요약에 공용.
+function transitionLabelOf(transition: StageTransition): string {
+  return transition.kind === "advance"
+    ? `→ ${transition.to} (${transition.reason})`
+    : transition.kind === "pause"
+    ? `⏸ pause: ${transition.reason}`
+    : transition.kind === "abort"
+    ? `⛔ abort: ${transition.reason}`
+    : "";
+}
+
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
   const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at } = input;
 
-  // 전역 일시중지 스위치 — 켜져 있으면 어떤 단계든 상관없이 즉시 종료.
-  if (!simulate && (await isAgentDisabled(supabase))) {
+  // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
+  // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
+  const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase);
+  if (mode === "off") {
     return { ok: true, skipped: "agent kill-switch ON — global pause" };
   }
+  const draftMode = mode === "draft";
 
   // 답장 텀 — 인입 시각으로부터 REPLY_DELAY_MS 후를 목표로 대기.
   // 이미 지났으면 즉시 진행. simulate(연습 빙의)는 매니저 테스트라 텀 없이 즉시.
-  if (!simulate && received_at) {
+  // draft 모드도 즉시 — 발송이 없으니 '바로 답장' 느낌을 피할 이유가 없다.
+  if (!simulate && !draftMode && received_at) {
     const target = new Date(received_at).getTime() + REPLY_DELAY_MS;
     const wait = Math.min(MAX_REPLY_SLEEP_MS, target - Date.now());
     if (wait > 0) {
@@ -140,7 +161,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     stageName === "onboarding" || stageName === "active" ? "스크리닝 완료"
     : stageName === "screening" ? "스크리닝 중"
     : null;
-  if (expectedStatus) {
+  // draft(코파일럿) 모드에서는 상태 변경 부수효과 0 — 동기화도 건너뛴다.
+  if (expectedStatus && !draftMode) {
     const applicantId = (jc.applicants as { id?: number } | null)?.id;
     if (applicantId) {
       await supabase
@@ -241,7 +263,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   }
 
   // stage가 applicants 행에 patch할 필드를 실어보냈으면 적용 (예: onboarding의 baemin_id 추출값)
-  if (result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
+  // draft(코파일럿) 모드에서는 applicants 변경 부수효과 0 — 건너뛴다.
+  if (!draftMode && result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
     const { error: patchErr } = await supabase
       .from("applicants")
       .update(result.applicant_patch)
@@ -251,17 +274,68 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   // 확정 뉘앙스 금지 결정적 가드 — AI가 확정/배정/출근 지시 문구를 만들면 발송하지 않고
   // pause로 전환(매니저 인계 큐 + Slack). stay/advance 무관하게 우선 적용.
-  if (result.reply_text) {
-    const hit = detectConfirmationNuance(result.reply_text);
-    if (hit) {
-      console.warn(`[router] 확정 뉘앙스 감지 → 발송 보류 + pause: "${hit}"`);
-      result.transition = {
-        kind: "pause",
-        reason: `확정 뉘앙스 문구 감지("${hit}") — 발송 보류, 매니저 확인 필요`,
-        suggestedAction: "AI가 확정/배정/출근 지시 뉘앙스 문구를 생성해 자동 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
-      };
-    }
+  // draft 모드에서도 동일 검사 — 걸리면 초안을 need_info로 강등해 매니저 수정을 유도한다.
+  const nuanceHit = result.reply_text ? detectConfirmationNuance(result.reply_text) : null;
+  if (nuanceHit) {
+    console.warn(`[router] 확정 뉘앙스 감지 → 발송 보류 + pause: "${nuanceHit}"`);
+    result.transition = {
+      kind: "pause",
+      reason: `확정 뉘앙스 문구 감지("${nuanceHit}") — 발송 보류, 매니저 확인 필요`,
+      suggestedAction: "AI가 확정/배정/출근 지시 뉘앙스 문구를 생성해 자동 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
+    };
   }
+
+  // ─── 코파일럿(draft) 모드 분기 ───────────────────────────────────────
+  // 여기서부터의 부수효과(SOLAPI 발송·messages INSERT·applyTransition의 stage 전이/
+  // 자동 안내 발송/Slack 인계 알림/state 저장)를 전부 건너뛰고 message_drafts INSERT만 한다.
+  // 매니저가 초안 카드에서 승인하면 기존 경로(/api/admin/messages/send + draft_id)가 발송·기록한다.
+  // 실패해도 조용히 스킵(로그만) — 인입 파이프라인은 절대 죽이지 않는다.
+  if (draftMode) {
+    let draftCreated = false;
+    try {
+      if (result.reply_text) {
+        // 같은 inbound에 대한 미처리 초안이 이미 있으면 중복 생성 방지(웹훅 재전송 대비)
+        const { data: dup } = await supabase
+          .from("message_drafts")
+          .select("id")
+          .eq("inbound_message_id", inbound_message_id)
+          .in("status", ["pending", "need_info"])
+          .limit(1);
+        if (!dup || dup.length === 0) {
+          const label = transitionLabelOf(result.transition);
+          // meta 컬럼이 없어 reasoning 앞머리에 마커+단계·전이 제안 요약을 붙인다.
+          const headerParts = [COPILOT_DRAFT_MARKER, `[단계: ${stageName}]`];
+          if (job?.title && !job.title.startsWith("__")) headerParts.push(`[공고: ${job.title}]`);
+          if (label) headerParts.push(`[제안: ${label}]`);
+          const { error: draftErr } = await supabase.from("message_drafts").insert({
+            applicant_id: applicant.id,
+            applicant_phone: applicant.phone,
+            inbound_message_id,
+            draft_text: result.reply_text,
+            reasoning: `${headerParts.join(" ")}\n${result.reasoning ?? ""}`,
+            // 확정 뉘앙스가 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
+            missing_info: nuanceHit
+              ? `확정 뉘앙스 문구 감지("${nuanceHit}") — 확정은 매니저가 합니다. 내용 수정 후 발송하세요.`
+              : null,
+            status: nuanceHit ? "need_info" : "pending",
+          });
+          if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
+          else draftCreated = true;
+        }
+      }
+    } catch (e) {
+      console.error("[router] copilot draft skipped (fail-safe)", e);
+    }
+    return {
+      ok: true,
+      reply_sent: false,
+      draft_created: draftCreated,
+      next_stage: null,
+      auto_sent_messages: 0,
+      reasoning: result.reasoning,
+    };
+  }
+  // ────────────────────────────────────────────────────────────────────
 
   // 4) 응답 발송 (simulate=true면 SOLAPI 건너뛰고 DB만 기록)
   // advance 전이 시엔 transitions.ts가 안내 묶음(SCREENING_ANNOUNCE/GUIDE 등)을 자동 발송하므로
@@ -316,14 +390,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       // AI 응답의 reasoning + transition을 message_drafts에 status='auto_sent'로 보관.
       // 매니저가 UI에서 메시지별로 왜 그렇게 답했는지 사후 조회할 수 있게 한다.
       if (outboundId) {
-        const transitionLabel =
-          result.transition.kind === "advance"
-            ? `→ ${result.transition.to} (${result.transition.reason})`
-            : result.transition.kind === "pause"
-            ? `⏸ pause: ${result.transition.reason}`
-            : result.transition.kind === "abort"
-            ? `⛔ abort: ${result.transition.reason}`
-            : "";
+        const transitionLabel = transitionLabelOf(result.transition);
         const reasoningWithTransition = transitionLabel
           ? `[${transitionLabel}]\n${result.reasoning ?? ""}`
           : (result.reasoning ?? "");

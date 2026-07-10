@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
-import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp } from "lucide-react";
+import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
@@ -148,44 +148,52 @@ export function AgentBrain() {
   const setPersonaField = <K extends keyof PersonaForm>(key: K, value: PersonaForm[K]) =>
     setPersona((prev) => ({ ...prev, [key]: value }));
 
-  // 전역 AI 응답 스위치 (kill-switch). killDisabled=true 면 AI 전역 중단.
-  // 전역 AI 스위치도 SWR로 로드 후 로컬 상태에 시드(토글은 로컬 갱신). kill-switch 키는 자동화 탭과 공유.
-  const { data: killApi, isLoading: killLoading } = useSWR<{ disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch");
-  const [killDisabled, setKillDisabled] = useState(false);
+  // 전역 AI 응답 모드 (kill-switch 3단): auto=자동 응대 / draft=코파일럿(초안만) / off=완전 중지.
+  // SWR로 로드 후 로컬 상태에 시드(전환은 로컬 갱신). kill-switch 키는 자동화 탭과 공유.
+  type KillMode = "auto" | "draft" | "off";
+  const { data: killApi, isLoading: killLoading } = useSWR<{ mode?: KillMode; disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch");
+  const [killMode, setKillMode] = useState<KillMode>("auto");
   const [killEnvForced, setKillEnvForced] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
   const [killUpdatedAt, setKillUpdatedAt] = useState<string | null>(null);
   useEffect(() => {
     if (killApi) {
-      setKillDisabled(!!killApi.disabled);
+      setKillMode(killApi.mode ?? (killApi.disabled ? "off" : "auto"));
       setKillEnvForced(!!killApi.env_forced);
       setKillUpdatedAt(killApi.updated_at ?? null);
     }
   }, [killApi]);
+  const killDisabled = killMode === "off";
 
-  const handleToggleKillSwitch = async () => {
-    if (killBusy || killEnvForced) return;
-    const next = !killDisabled; // next=true 면 AI 중단으로 전환
-    const ok = next
-      ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
-      : await confirm({ title: "AI 전역 응답을 재개할까요?", description: "이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)", confirmText: "재개하기" });
+  const handleChangeKillMode = async (next: KillMode) => {
+    if (killBusy || killEnvForced || next === killMode) return;
+    const ok =
+      next === "off"
+        ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
+        : next === "draft"
+        ? await confirm({ title: "코파일럿 모드로 전환할까요?", description: "AI가 답장 초안을 만들지만 발송은 매니저 승인 후에만 됩니다. (단계 전이·자동 안내 발송도 함께 멈춥니다)", confirmText: "코파일럿 전환" })
+        : await confirm({ title: "AI 전역 응답을 재개할까요?", description: "이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)", confirmText: "재개하기" });
     if (!ok) return;
     setKillBusy(true);
     try {
       const res = await fetch("/api/admin/agent/kill-switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ disabled: next }),
+        body: JSON.stringify({ mode: next }),
       });
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "변경에 실패했어요");
         return;
       }
-      setKillDisabled(next);
+      setKillMode(next);
       setKillUpdatedAt(new Date().toISOString());
       toast.success(
-        next ? "AI 전역 응답을 중단했어요." : "AI 전역 응답을 재개했어요. (5초 이내 반영)"
+        next === "off"
+          ? "AI 전역 응답을 중단했어요."
+          : next === "draft"
+          ? "코파일럿 모드로 전환했어요. AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다. (5초 이내 반영)"
+          : "AI 전역 응답을 재개했어요. (5초 이내 반영)"
       );
     } catch {
       toast.error("변경에 실패했어요");
@@ -845,52 +853,76 @@ export function AgentBrain() {
 
           {activeTab === 'advanced' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              {/* 전역 AI 응답 스위치 (실데이터 연동) */}
-              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-[#FFF5F5] border-[#FEB2B2]' : 'bg-white border-[#E2E8F0]'}`}>
-                <div className="flex items-start justify-between gap-6">
-                  <div className="flex items-start gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${killDisabled ? 'bg-[#FED7D7]' : 'bg-[#F0FFF4]'}`}>
-                      <Power size={20} className={killDisabled ? 'text-[#E53E3E]' : 'text-[#38A169]'} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-[18px] font-extrabold text-[#1A202C]">AI 전역 응답</h2>
-                        {killLoading ? (
-                          <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded-full">확인 중…</span>
-                        ) : (
-                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${killDisabled ? 'text-[#C53030] bg-[#FED7D7]' : 'text-[#276749] bg-[#C6F6D5]'}`}>
-                            {killDisabled ? '중단됨' : '작동 중'}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[13px] text-[#718096] mt-1 max-w-[440px]">
-                        끄면 모든 지원자 메시지에 AI가 자동 응답하지 않고 매니저가 직접 응대합니다. 켜면 이후 들어오는 메시지부터 자동 응답이 재개됩니다.
-                      </p>
-                      {!killLoading && killUpdatedAt && (
-                        <p className="text-[12px] text-[#A0AEC0] mt-2">
-                          마지막 변경: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
-                        </p>
-                      )}
-                      {killEnvForced && (
-                        <p className="text-[12px] font-bold text-[#C05621] mt-2 flex items-center gap-1.5">
-                          <AlertTriangle size={13} /> 환경변수 AGENT_DISABLED=1 이 설정돼 있어, 이 토글과 무관하게 항상 중단됩니다.
-                        </p>
-                      )}
-                    </div>
+              {/* 전역 AI 응답 모드 (실데이터 연동) — 자동 응대 / 코파일럿(초안만) / 완전 중지 */}
+              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-[#FFF5F5] border-[#FEB2B2]' : killMode === 'draft' && !killEnvForced ? 'bg-[#FAF5FF] border-[#D6BCFA]' : 'bg-white border-[#E2E8F0]'}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${killDisabled || killEnvForced ? 'bg-[#FED7D7]' : killMode === 'draft' ? 'bg-[#E9D8FD]' : 'bg-[#F0FFF4]'}`}>
+                    {killMode === 'draft' && !killEnvForced ? (
+                      <Zap size={20} className="text-[#6B46C1]" />
+                    ) : (
+                      <Power size={20} className={killDisabled || killEnvForced ? 'text-[#E53E3E]' : 'text-[#38A169]'} />
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={!killDisabled}
-                    onClick={handleToggleKillSwitch}
-                    disabled={killLoading || killBusy || killEnvForced}
-                    title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : (killDisabled ? "AI 전역 응답 켜기" : "AI 전역 응답 끄기")}
-                    className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${!killDisabled && !killEnvForced ? 'bg-[#38A169]' : 'bg-[#CBD5E0]'}`}
-                  >
-                    <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition-transform ${!killDisabled && !killEnvForced ? 'translate-x-6' : 'translate-x-1'}`}>
-                      {killBusy && <Loader2 size={12} className="animate-spin text-[#718096]" />}
-                    </span>
-                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-[18px] font-extrabold text-[#1A202C]">AI 전역 응답</h2>
+                      {killLoading ? (
+                        <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded-full">확인 중…</span>
+                      ) : (
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${killDisabled || killEnvForced ? 'text-[#C53030] bg-[#FED7D7]' : killMode === 'draft' ? 'text-[#553C9A] bg-[#E9D8FD]' : 'text-[#276749] bg-[#C6F6D5]'}`}>
+                          {killEnvForced ? '중단됨 (환경변수)' : killDisabled ? '중단됨' : killMode === 'draft' ? '코파일럿' : '작동 중'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[13px] text-[#718096] mt-1 max-w-[560px]">
+                      인입되는 모든 지원자 메시지에 대한 AI 동작 방식을 전역으로 결정합니다.
+                    </p>
+
+                    {/* 3단 세그먼트 */}
+                    <div role="radiogroup" aria-label="AI 전역 응답 모드" className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-[640px]">
+                      {([
+                        { id: 'auto' as const, label: '자동 응대', desc: 'AI가 답장을 직접 발송하고 단계도 진행합니다.', icon: <Bot size={15} />, activeCls: 'border-[#38A169] bg-[#F0FFF4] ring-1 ring-[#38A169]', dotCls: 'text-[#276749]' },
+                        { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-[#805AD5] bg-[#FAF5FF] ring-1 ring-[#805AD5]', dotCls: 'text-[#553C9A]' },
+                        { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-[#E53E3E] bg-[#FFF5F5] ring-1 ring-[#E53E3E]', dotCls: 'text-[#C53030]' },
+                      ]).map((opt) => {
+                        const active = killMode === opt.id && !killEnvForced;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => handleChangeKillMode(opt.id)}
+                            disabled={killLoading || killBusy || killEnvForced}
+                            title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : opt.desc}
+                            className={`text-left rounded-xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-[#E2E8F0] bg-white hover:border-[#CBD5E0]'}`}
+                          >
+                            <div className={`flex items-center gap-1.5 text-[13px] font-extrabold ${active ? opt.dotCls : 'text-[#4A5568]'}`}>
+                              {opt.icon} {opt.label}
+                              {killBusy && killMode !== opt.id && <span className="sr-only">변경 중</span>}
+                            </div>
+                            <div className="text-[11.5px] text-[#718096] mt-1 leading-snug">{opt.desc}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {!killLoading && killUpdatedAt && (
+                      <p className="text-[12px] text-[#A0AEC0] mt-3">
+                        마지막 변경: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
+                      </p>
+                    )}
+                    {killEnvForced && (
+                      <p className="text-[12px] font-bold text-[#C05621] mt-2 flex items-center gap-1.5">
+                        <AlertTriangle size={13} /> 환경변수 AGENT_DISABLED=1 이 설정돼 있어, 이 설정과 무관하게 항상 중단됩니다.
+                      </p>
+                    )}
+                    {killBusy && (
+                      <p className="text-[12px] font-bold text-[#718096] mt-2 flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> 변경 중…
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
