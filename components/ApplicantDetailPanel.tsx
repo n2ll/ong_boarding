@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
 import { ConversationThread } from "./ConversationThread";
+import { useConfirm } from "./ConfirmDialog";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -198,6 +199,7 @@ export function ApplicantDetailContent({
   const reload = externalReload ?? local.reload;
   const loading = externalDetail !== undefined ? false : local.loading;
 
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Partial<ApplicantFull>>({});
   const [dirty, setDirty] = useState(false);
@@ -307,6 +309,30 @@ export function ApplicantDetailContent({
     if (ok) setExcludeOpen(false);
   };
 
+  // 수신거부 수동 등록/해제 — sms_opt_out_at 토글 (실시간 응대 스레드 헤더와 동일 동작)
+  const toggleOptOut = async () => {
+    const registering = !a.sms_opt_out_at;
+    const ok = await confirm(
+      registering
+        ? {
+            title: `${a.name}님을 수신거부로 등록할까요?`,
+            description: "캠페인 발송이 영구 중단됩니다. 수동 문자는 계속 보낼 수 있어요.",
+            confirmText: "수신거부 등록",
+            destructive: true,
+          }
+        : {
+            title: `${a.name}님 수신거부를 해제할까요?`,
+            description: "다시 캠페인 발송 대상에 포함됩니다.",
+            confirmText: "해제",
+          }
+    );
+    if (!ok) return;
+    await patch(
+      { sms_opt_out_at: registering ? new Date().toISOString() : null },
+      registering ? "수신거부로 등록했어요. 캠페인 발송에서 제외됩니다." : "수신거부를 해제했어요."
+    );
+  };
+
   const screening = focusCand?.agent_state?.screening ?? {};
   const onboarding = focusCand?.agent_state?.onboarding ?? {};
   const screeningDone = SCREENING_KEYS.filter((k) => screening[k] === true).length;
@@ -409,8 +435,27 @@ export function ApplicantDetailContent({
         <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-[#F7FAFC]">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h3 className="text-[12px] font-bold text-[#718096]">기본 정보</h3>
-            {a.sms_opt_out_at && (
-              <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
+            {a.sms_opt_out_at ? (
+              <div className="flex items-center gap-1.5">
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
+                <button
+                  onClick={toggleOptOut}
+                  disabled={busy}
+                  title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
+                  className="px-2 py-0.5 rounded-md text-[11px] font-bold text-[#4A5568] bg-white hover:bg-[#EDF2F7] border border-[#E2E8F0] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                >
+                  해제
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={toggleOptOut}
+                disabled={busy}
+                title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
+                className="px-2 py-0.5 rounded-md text-[11px] font-bold text-[#C53030] bg-white hover:bg-[#FFF5F5] border border-[#FEB2B2] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                수신거부 등록
+              </button>
             )}
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">

@@ -16,7 +16,9 @@ const AGENT_OR_SYSTEM_SENT_BY = new Set([
 
 export async function POST(req: NextRequest) {
   try {
-    const { applicant_id, phone, body, sent_by, draft_id, draft_was_edited } = await req.json();
+    const { applicant_id, phone, body, sent_by, draft_id, draft_was_edited, job_id } = await req.json();
+    // 매니저 답장의 공고 컨텍스트 — 스레드 job_id 필터·인계 큐 매칭이 어긋나지 않게 함께 저장.
+    const jobId: number | null = typeof job_id === "number" && Number.isFinite(job_id) ? job_id : null;
 
     if (!phone || !body) {
       return NextResponse.json(
@@ -46,6 +48,7 @@ export async function POST(req: NextRequest) {
         status: "sent",
         sent_by: sent_by || "관리자",
         solapi_msg_id: result.messageId || null,
+        job_id: jobId,
       })
       .select()
       .single();
@@ -62,16 +65,35 @@ export async function POST(req: NextRequest) {
     // 매니저와 AI가 같은 후보에게 동시에 응답하는 충돌 방지.
     const isManagerSend = !AGENT_OR_SYSTEM_SENT_BY.has(sent_by ?? "");
     if (isManagerSend && applicant_id) {
-      const { data: jc } = await supabase
-        .from("job_candidates")
-        .select("id, agent_stage, agent_state")
-        .eq("applicant_id", applicant_id)
-        .not("agent_stage", "is", null)
-        .neq("agent_stage", "paused")
-        .neq("agent_stage", "abort")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // 전이 대상 후보: 발송된 공고(job_id)의 후보를 우선, 없으면 최신 활성 후보로 폴백.
+      let jc: { id: number; agent_stage: string | null; agent_state: unknown } | null = null;
+      if (jobId != null) {
+        const { data } = await supabase
+          .from("job_candidates")
+          .select("id, agent_stage, agent_state")
+          .eq("applicant_id", applicant_id)
+          .eq("job_id", jobId)
+          .not("agent_stage", "is", null)
+          .neq("agent_stage", "paused")
+          .neq("agent_stage", "abort")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        jc = data;
+      }
+      if (!jc) {
+        const { data } = await supabase
+          .from("job_candidates")
+          .select("id, agent_stage, agent_state")
+          .eq("applicant_id", applicant_id)
+          .not("agent_stage", "is", null)
+          .neq("agent_stage", "paused")
+          .neq("agent_stage", "abort")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        jc = data;
+      }
       if (jc) {
         const prevState = (jc.agent_state ?? {}) as Record<string, unknown>;
         const prevMeta = (prevState.meta ?? {}) as Record<string, unknown>;

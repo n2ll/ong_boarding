@@ -121,13 +121,21 @@ function relTime(iso: string | null | undefined): string {
 
 const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
+// 목록 기본 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status (3) 미열람 답장(unread>0)
+function isBaseChat(a: Applicant): boolean {
+  return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status) || (a.unread_count ?? 0) > 0;
+}
+
+// 풀 응답자(agent_stage 없음)가 스레드 열람(unread 리셋) 후에도 목록에 남는 기간
+const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
+
 export function LiveConsole() {
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<"all" | "intervention" | "confirm">("all");
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
-  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string }>>({});
+  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string; last_inbound_at?: string | null }>>({});
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
@@ -151,14 +159,36 @@ export function LiveConsole() {
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
   const { data: appsData, isLoading: appsLoading, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
-  // 목록 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status
-  // (3) 미답장(unread>0) — 활성 대화·스크리닝이 아니어도 답장한 재컨택 응답자를 포함.
-  //     이 (3)만으로 잡힌 건은 '풀 응답'(agent_stage 없음)이라 목록에서 별도 라벨로 구분한다.
-  const chats = useMemo(
-    () => (appsData?.data ?? []).filter((a) => (a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status) || (a.unread_count ?? 0) > 0),
+  // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
+  // 풀 응답자가 열람으로 unread가 리셋돼도 '마지막 inbound' 판별이 가능하게 살짝 넓게 잡는다.
+  const previewTargets = useMemo(
+    () =>
+      (appsData?.data ?? []).filter(
+        (a) => isBaseChat(a) || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
+      ),
     [appsData]
   );
+  // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음' —
+  // 풀 응답자(agent_stage 없음)가 스레드를 열람해 unread가 0이 돼도 목록에서 사라지지 않는다.
+  // 기본 조건 외로 잡힌 건은 '풀 응답'이라 목록에서 별도 라벨로 구분한다.
+  const chats = useMemo(
+    () =>
+      previewTargets.filter((a) => {
+        if (isBaseChat(a)) return true;
+        const li = previewById[a.id]?.last_inbound_at;
+        return !!li && Date.now() - new Date(li).getTime() < RECENT_INBOUND_MS;
+      }),
+    [previewTargets, previewById]
+  );
   const loadingList = appsLoading && chats.length === 0;
+
+  // 미답 판정(A2): '마지막 메시지가 inbound(지원자 답장)' 기준 — 스레드 열람 시 서버가
+  // unread_count를 0으로 리셋하므로 unread는 보조 신호로만 쓴다(둘 중 하나면 미답).
+  const isUnanswered = useCallback(
+    (c: Applicant) => previewById[c.id]?.direction === "inbound" || (c.unread_count ?? 0) > 0,
+    [previewById]
+  );
+  const unansweredCount = useMemo(() => chats.filter(isUnanswered).length, [chats, isUnanswered]);
 
   // 인계 큐도 SWR로 캐시.
   const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs");
@@ -190,14 +220,12 @@ export function LiveConsole() {
     void mutateConfirm();
   }, [mutateApps, mutateHandoffs, mutateConfirm]);
 
-  // 첫 선택 자동 지정.
-  useEffect(() => {
-    setSelectedChatId((prev) => prev ?? (chats[0]?.id ?? null));
-  }, [chats]);
+  // 첫 대화 자동 선택은 하지 않는다 — 선택(열람) 시 서버가 unread를 리셋해
+  // 탭 진입만으로 미답 신호가 지워지는 부작용이 있었다. 선택 전에는 빈 상태 안내를 보여준다.
 
   // 활성 대화 subset의 마지막 메시지 미리보기를 가볍게 조회(목록이 갱신될 때).
   useEffect(() => {
-    const ids = chats.map((c) => c.id);
+    const ids = previewTargets.map((c) => c.id);
     if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -212,7 +240,7 @@ export function LiveConsole() {
       }
     })();
     return () => { cancelled = true; };
-  }, [chats]);
+  }, [previewTargets]);
 
   // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
   // PII 없는 "changed" 신호만 broadcast → 받으면 디바운스 후 목록·인계 큐를 재조회한다.
@@ -473,19 +501,26 @@ export function LiveConsole() {
 
   const visibleChats = chats
     .filter((c) => {
-      if (search.trim() && !c.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
+      const q = search.trim().toLowerCase();
+      if (q) {
+        const nameHit = c.name.toLowerCase().includes(q);
+        // 숫자 3자리 이상이면 전화번호(숫자열) 부분일치도 함께 검색
+        const qDigits = q.replace(/\D/g, "");
+        const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
+        if (!nameHit && !phoneHit) return false;
+      }
       if (stageFilter !== "all") {
         if (stageFilter === "paused") return c.agent_stage === "paused";
-        if (stageFilter === "intervention") return (c.unread_count ?? 0) > 0;
+        if (stageFilter === "intervention") return isUnanswered(c);
         return c.agent_stage === stageFilter;
       }
       return true;
     })
-    // 정렬: 미답장(unread>0)을 최상단 — 그 안에서는 last_message_at 최신순으로
+    // 정렬: 미답(마지막 메시지=inbound)을 최상단 — 그 안에서는 last_message_at 최신순으로
     // 새로 온 답장(풀 응답 포함)이 먼저 보이게. 그 외는 최근 활동 순.
     .sort((a, b) => {
-      const aInt = (a.unread_count ?? 0) > 0 ? 1 : 0;
-      const bInt = (b.unread_count ?? 0) > 0 ? 1 : 0;
+      const aInt = isUnanswered(a) ? 1 : 0;
+      const bInt = isUnanswered(b) ? 1 : 0;
       if (aInt !== bInt) return bInt - aInt;
       const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
       const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
@@ -514,7 +549,7 @@ export function LiveConsole() {
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="지원자명 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
           </div>
           <div className="flex gap-1.5">
             <button onClick={() => setActiveTab("all")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
@@ -526,11 +561,15 @@ export function LiveConsole() {
             <div className="flex gap-1 flex-wrap">
               {[
                 { id: "all", label: "전체" },
+                { id: "intervention", label: "미답" },
                 { id: "screening", label: "스크리닝" },
                 { id: "onboarding", label: "온보딩" },
                 { id: "paused", label: "수동" },
               ].map((f) => (
-                <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{f.label}</button>
+                <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>
+                  {f.label}
+                  {f.id === "intervention" && unansweredCount > 0 && <span className={`ml-1 ${stageFilter === f.id ? "opacity-60" : "text-[#E53E3E]"}`}>{unansweredCount}</span>}
+                </button>
               ))}
             </div>
           ) : activeTab === "intervention" ? (
@@ -639,7 +678,7 @@ export function LiveConsole() {
           {visibleChats.map((chat, idx) => {
             const pal = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
             const unread = chat.unread_count ?? 0;
-            const intervention = unread > 0;
+            const intervention = isUnanswered(chat);
             const src = chat.source ? SOURCE_LABEL[chat.source] ?? chat.source : null;
             // 활성 대화(agent_stage)가 없는데 답장이 온 재컨택 응답자 = '풀 응답'.
             // 스크리닝 대화와 구분해 매니저가 스코프 밖 문자를 바로 알아보게 한다.
@@ -757,7 +796,7 @@ export function LiveConsole() {
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-[#EEF1F5] text-[#A0AEC0] text-sm">대화를 선택하세요</div>
+        <div className="flex-1 flex items-center justify-center bg-[#EEF1F5] text-[#A0AEC0] text-sm">좌측에서 대화를 선택하세요</div>
       )}
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}

@@ -6,7 +6,8 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 /**
  * 답장 대기 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
- * 미응답 inbound가 있는 지원자(unread_count>0)를 카드로 나열해, 가장 hot한 신호가 흩어지지 않게 모은다.
+ * 미답 지원자('마지막 메시지가 inbound' 또는 unread_count>0)를 카드로 나열해,
+ * 가장 hot한 신호가 흩어지지 않게 모은다. (열람만으로는 큐에서 빠지지 않는다)
  * 카드에서 대화 스레드를 바로 열어(상세 드로어의 대화 탭) 매니저가 즉시 수동 응대할 수 있다.
  *
  * 데이터는 새 엔드포인트 없이 /api/admin/applicants(파이프라인·대시보드와 동일 SWR 키라 dedup)를
@@ -39,7 +40,11 @@ interface Preview {
   body: string;
   direction: string;
   created_at: string;
+  last_inbound_at?: string | null;
 }
+
+// 열람(unread 리셋) 후에도 미답 건을 잃지 않도록 미리보기 조회 대상을 잡는 기간
+const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
 function agoLabel(iso: string | null | undefined, now: number): string {
   if (!iso) return "-";
@@ -62,17 +67,50 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
     return m;
   }, [jobsRes]);
 
-  // 미응답 inbound가 있는 지원자 = unread_count>0. 최근 수신 순으로.
-  const allItems = useMemo(() => {
+  // 미리보기 조회 대상: unread>0 또는 최근 14일 내 inbound(last_message_at은 inbound 수신 시각).
+  // 대화 열람 시 서버가 unread를 리셋하므로, 열람만 하고 답장하지 않은 건을 놓치지 않게 넓게 잡는다.
+  const previewTargets = useMemo(() => {
     const rows = data?.data ?? [];
-    return rows
-      .filter((a) => (a.unread_count ?? 0) > 0)
+    return rows.filter(
+      (a) => (a.unread_count ?? 0) > 0 || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
+    );
+  }, [data]);
+
+  // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
+  const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
+  const idsKey = previewTargets.map((a) => a.id).join(",");
+  useEffect(() => {
+    if (!idsKey) {
+      setPreviewById({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/messages/preview?ids=${idsKey}`);
+        if (res.ok && !cancelled) {
+          const json = await res.json();
+          setPreviewById(json.previews ?? {});
+        }
+      } catch {
+        /* 미리보기는 부가정보 — 실패해도 큐 자체는 보여준다 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [idsKey]);
+
+  // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound' — unread_count는 보조 신호.
+  const allItems = useMemo(() => {
+    return previewTargets
+      .filter((a) => previewById[a.id]?.direction === "inbound" || (a.unread_count ?? 0) > 0)
       .sort((a, b) => {
         const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
         const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
         return bt - at;
       });
-  }, [data]);
+  }, [previewTargets, previewById]);
 
   // 공고별 필터 — 진행 중 공고 포인터(current_job_id) 기준. 큐에 등장하는 공고들로 옵션 구성.
   const [jobFilter, setJobFilter] = useState<number | "all">(initialJobId ?? "all");
@@ -104,31 +142,6 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
     const t = setInterval(() => setNowTick(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
-
-  // 마지막 메시지 미리보기 — 큐에 있는 지원자에 한해서만 가볍게 조회.
-  const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
-  const idsKey = items.map((a) => a.id).join(",");
-  useEffect(() => {
-    if (!idsKey) {
-      setPreviewById({});
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/admin/messages/preview?ids=${idsKey}`);
-        if (res.ok && !cancelled) {
-          const json = await res.json();
-          setPreviewById(json.previews ?? {});
-        }
-      } catch {
-        /* 미리보기는 부가정보 — 실패해도 큐 자체는 보여준다 */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [idsKey]);
 
   const [detailId, setDetailId] = useState<number | null>(null);
 
