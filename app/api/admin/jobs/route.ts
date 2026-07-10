@@ -49,10 +49,11 @@ export async function GET(req: NextRequest) {
   const jobIds = (jobs ?? []).map((j) => j.id);
   const stageCounts: Record<number, Record<string, number>> = {};
   const confirmedCounts: Record<number, number> = {};
+  const unreadTotals: Record<number, number> = {};
   if (jobIds.length > 0) {
     const { data: cands } = await supabase
       .from("job_candidates")
-      .select("job_id, agent_stage, applicants:applicant_id ( status )")
+      .select("job_id, agent_stage, applicants:applicant_id ( status, unread_count )")
       .in("job_id", jobIds);
     for (const c of cands ?? []) {
       const jid = c.job_id as number;
@@ -60,9 +61,35 @@ export async function GET(req: NextRequest) {
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
-      const rel = (c as { applicants?: { status?: string | null } | { status?: string | null }[] | null }).applicants;
-      const status = Array.isArray(rel) ? rel[0]?.status : rel?.status;
-      if (status === "확정인력") confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
+      const rel = (c as { applicants?: { status?: string | null; unread_count?: number | null } | { status?: string | null; unread_count?: number | null }[] | null }).applicants;
+      const a = Array.isArray(rel) ? rel[0] : rel;
+      if (a?.status === "확정인력") confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
+      // 후보 미읽음 답장 합산 — 목록 행 '답장 N' 칩(수동 응대 필요 신호)의 근거.
+      if (typeof a?.unread_count === "number" && a.unread_count > 0) {
+        unreadTotals[jid] = (unreadTotals[jid] ?? 0) + a.unread_count;
+      }
+    }
+  }
+
+  // 공고별 관심 표시(interest_click) 인원수 — pull 채널 반응 현황. 같은 지원자의 중복 클릭은 1명으로 센다.
+  const interestCounts: Record<number, number> = {};
+  if (jobIds.length > 0) {
+    const { data: clicks } = await supabase
+      .from("pool_events")
+      .select("applicant_id, job_id")
+      .eq("event_type", "interest_click")
+      .in("job_id", jobIds)
+      // supabase 기본 1000행 절단 방지(pool-events/summary와 동일 상한).
+      .limit(5000);
+    const seen = new Set<string>();
+    for (const ev of clicks ?? []) {
+      const jid = ev.job_id as number | null;
+      const aid = ev.applicant_id as number | null;
+      if (typeof jid !== "number" || typeof aid !== "number") continue;
+      const key = `${jid}:${aid}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      interestCounts[jid] = (interestCounts[jid] ?? 0) + 1;
     }
   }
 
@@ -70,6 +97,8 @@ export async function GET(req: NextRequest) {
     ...j,
     counts: stageCounts[j.id] ?? {},
     confirmed_count: confirmedCounts[j.id] ?? 0,
+    interest_count: interestCounts[j.id] ?? 0,
+    unread_total: unreadTotals[j.id] ?? 0,
   }));
 
   return NextResponse.json({ jobs: enriched });

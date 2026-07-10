@@ -32,6 +32,10 @@ interface JobRow {
   closesAt: string | null;
   // status='active'라도 closes_at이 지났으면 실질 마감 — 배지·AI 현황·통계를 이걸로 판단(마감 텍스트와 일치).
   effectivelyClosed: boolean;
+  // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
+  interestCount: number;
+  // 후보 미읽음 답장 합계 — 행 '답장 N' 칩(수동 응대 필요 신호).
+  unreadTotal: number;
 }
 
 interface ApiJob {
@@ -51,6 +55,9 @@ interface ApiJob {
   counts: Record<string, number>;
   // 매니저 명시 확정(applicants.status='확정인력') 수 — 충원율 게이지의 분자.
   confirmed_count?: number;
+  // pull '관심 있음' 클릭 인원(distinct)과 후보 미읽음 답장 합계 — 행 반응 현황 칩.
+  interest_count?: number;
+  unread_total?: number;
 }
 
 interface ClientOpt { id: number; name: string }
@@ -62,6 +69,8 @@ interface JobCand {
   agent_stage: string | null;
   closed_reason: string | null;
   sent_at: string | null;
+  // 공고(상차지·마지막 경유지 중 가까운 쪽)와의 거리 — API가 haversine으로 계산해 내려준다.
+  distance_km?: number | null;
   applicants: {
     id: number;
     name: string;
@@ -73,6 +82,8 @@ interface JobCand {
     source: string | null;
     confirmed_slot: string | null;
     confirmed_branch: string | null;
+    availability: string | null;
+    applied_at: string | null;
     last_message_at: string | null;
     unread_count: number | null;
   } | null;
@@ -97,8 +108,9 @@ const SLOT_KEYS = [
   { key: "주말오후", label: "주말 오후" },
 ];
 
-// 단계 그룹 표시 순서
-const STAGE_ORDER = ["exploration", "screening", "onboarding", "active", "paused", "abort"];
+// 단계 그룹 표시 순서 — 'interest'는 agent_stage NULL(관심 표시·AI 응대 시작 전)의 가상 키.
+// 관심자가 'AI 탐색 중'으로 오표기되지 않게 exploration과 분리해 최상단에 둔다.
+const STAGE_ORDER = ["interest", "exploration", "screening", "onboarding", "active", "paused", "abort"];
 
 function slotMatch(confirmed: string | null | undefined, key: string): boolean {
   if (!confirmed) return false;
@@ -108,10 +120,12 @@ function slotMatch(confirmed: string | null | undefined, key: string): boolean {
 }
 
 const STAGE_KO: Record<string, string> = {
+  interest: "관심 표시",
   exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
   active: "활성", paused: "수동", abort: "중단",
 };
 const STAGE_COLOR: Record<string, string> = {
+  interest: "bg-[#FEEBC8] text-[#DD6B20]",
   exploration: "bg-[#EDF2F7] text-[#4A5568]",
   screening: "bg-[#FEFCBF] text-[#D69E2E]",
   onboarding: "bg-[#FAF5FF] text-[#805AD5]",
@@ -119,6 +133,33 @@ const STAGE_COLOR: Record<string, string> = {
   paused: "bg-[#EDF2F7] text-[#718096]",
   abort: "bg-[#FFF5F5] text-[#E53E3E]",
 };
+
+// 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
+function availabilityRank(v: string | null | undefined): number {
+  if (v === "즉시가능") return 0;
+  if (v === "이번주가능") return 1;
+  return 2;
+}
+
+// ISO → "YYYY-MM" — 후보 카드 메타의 '지원 2026-06' 표기.
+function fmtYM(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// 저장 응답의 좌표 유무로 지오코딩 성공/실패를 토스트에 병기 — 주소를 넣었는데 좌표가 null이면
+// 거리 정렬·거리 메타가 동작하지 않으므로 실패를 저장 시점에 바로 알린다.
+function geocodeResultNote(
+  job: { pickup_lat?: number | null; dropoff_lat?: number | null } | null | undefined,
+  pickupAddress: string,
+  dropoffAddress: string
+): string | undefined {
+  if (!job) return undefined;
+  const parts: string[] = [];
+  if (pickupAddress.trim()) parts.push(typeof job.pickup_lat === "number" ? "상차지 좌표 ✓" : "상차지 좌표 실패");
+  if (dropoffAddress.trim()) parts.push(typeof job.dropoff_lat === "number" ? "경유지 좌표 ✓" : "경유지 좌표 실패");
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
 
 // abort(공고 단위 종료) 카드의 결과 구분 — closed_reason으로 '보류'·'공고부적합'·그 외 '중단'을 색·라벨로 나눈다.
 // 모두 인력풀은 유지된다(재활용 원칙). '보류'는 되살릴 여지, '부적합'은 이 공고 부적격, 그 외는 AI abort 등.
@@ -158,6 +199,8 @@ function toJobRow(j: ApiJob): JobRow {
     status: j.status === "active" ? "active" : "closed",
     recruitMode: asRecruitMode(j.recruit_mode),
     candidates: total,
+    // "sent"는 agent_stage NULL의 집계 키(관심 표시·미발송 등 AI 응대 시작 전).
+    // 키를 바꾸면 jobs/[id] GET·Recommendations 등 다른 소비처가 깨져 키는 유지하고 라벨만 정합.
     newCandidates: j.counts?.["sent"] ?? 0,
     // 충원율 분자 = 매니저 확정(status='확정인력')만. agent_stage='active'(자동 전이)는 확정이 아니다.
     // 보드의 '확정 슬롯 분포'(status==='확정인력')와 같은 소스라 두 지표가 어긋나지 않는다.
@@ -170,6 +213,8 @@ function toJobRow(j: ApiJob): JobRow {
     workPeriod: j.work_period ?? null,
     closesAt: j.closes_at ?? null,
     effectivelyClosed: isJobEffectivelyClosed(j.status, j.closes_at),
+    interestCount: j.interest_count ?? 0,
+    unreadTotal: j.unread_total ?? 0,
   };
 }
 
@@ -262,6 +307,8 @@ export function Jobs() {
   const [candPanel, setCandPanel] = useState<{ jobId: number; title: string } | null>(null);
   const [candidates, setCandidates] = useState<JobCand[]>([]);
   const [candLoading, setCandLoading] = useState(false);
+  // 보드 정렬 — 추천순(즉시가능 → 거리 → 지원일) / 최신순(API 순서 = created_at desc).
+  const [candSort, setCandSort] = useState<"recommended" | "recent">("recommended");
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
   const [candBusyId, setCandBusyId] = useState<number | null>(null);
   const [dispatching, setDispatching] = useState(false);
@@ -428,9 +475,19 @@ export function Jobs() {
     return true;
   });
 
-  // 공고별 요약 집계 (단계/채널/확정 슬롯)
+  // 전화번호 복사 — 킬스위치 중 수동 응대(직접 전화·문자)의 최소 동선.
+  const copyPhone = async (phone: string) => {
+    try {
+      await navigator.clipboard.writeText(phone);
+      toast.success("전화번호를 복사했어요");
+    } catch {
+      toast.error("복사에 실패했어요");
+    }
+  };
+
+  // 공고별 요약 집계 (단계/채널/확정 슬롯) — agent_stage NULL은 'interest'(관심 표시)로 분리(오표기 방지).
   const stageCounts = candidates.reduce<Record<string, number>>((acc, c) => {
-    const s = c.agent_stage ?? "exploration";
+    const s = c.agent_stage ?? "interest";
     acc[s] = (acc[s] ?? 0) + 1;
     return acc;
   }, {});
@@ -446,8 +503,22 @@ export function Jobs() {
     count: confirmedCands.filter((c) => slotMatch(c.applicants?.confirmed_slot || c.applicants?.work_hours, s.key)).length,
   }));
   const hasConfirmedSlot = slotFill.some((s) => s.count > 0);
+  // 추천순 = 즉시가능 > 이번주가능 > 그 외 → 공고 거리 asc(없으면 뒤) → 원지원일 desc. 최신순 = API 순서 유지.
+  const sortedCandidates = useMemo(() => {
+    if (candSort === "recent") return candidates;
+    return [...candidates].sort((x, y) => {
+      const ar = availabilityRank(x.applicants?.availability) - availabilityRank(y.applicants?.availability);
+      if (ar !== 0) return ar;
+      const dx = typeof x.distance_km === "number" ? x.distance_km : Infinity;
+      const dy = typeof y.distance_km === "number" ? y.distance_km : Infinity;
+      if (dx !== dy) return dx - dy;
+      const tx = x.applicants?.applied_at ? Date.parse(x.applicants.applied_at) : 0;
+      const ty = y.applicants?.applied_at ? Date.parse(y.applicants.applied_at) : 0;
+      return ty - tx;
+    });
+  }, [candidates, candSort]);
   const stageGroups = STAGE_ORDER
-    .map((stage) => ({ stage, items: candidates.filter((c) => (c.agent_stage ?? "exploration") === stage) }))
+    .map((stage) => ({ stage, items: sortedCandidates.filter((c) => (c.agent_stage ?? "interest") === stage) }))
     .filter((g) => g.items.length > 0);
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
@@ -676,12 +747,14 @@ export function Jobs() {
         toast.error(json.error || "공고 등록에 실패했어요");
         return;
       }
+      // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
+      const geoNote = geocodeResultNote(json.job, newJobPickupAddress, newJobDropoffAddress);
       // 긴급 건에서 파생된 공고면 '이 조건으로 대상 선별' CTA를 붙여 탭 이동 단절을 없앤다(SOS→공고→선별 브릿지).
       if (sosSnapshot.id) {
         const params = sosToPipelineParams(sosSnapshot.region, sosSnapshot.vehicle);
         params.set("status", "스크리닝 전");
         toast.success("새 공고가 등록되었어요.", {
-          description: "이 조건에 맞는 인력풀에서 재컨택 대상을 선별하세요.",
+          description: [geoNote, "이 조건에 맞는 인력풀에서 재컨택 대상을 선별하세요."].filter(Boolean).join(" · "),
           action: {
             label: "이 조건으로 대상 선별 →",
             onClick: () => router.push(`/pipeline?${params.toString()}`),
@@ -689,7 +762,7 @@ export function Jobs() {
           duration: 8000,
         });
       } else {
-        toast.success("새 공고가 등록되었어요.");
+        toast.success("새 공고가 등록되었어요.", geoNote ? { description: geoNote } : undefined);
       }
       setAiModalOpen(false);
       resetNewJobForm();
@@ -703,7 +776,9 @@ export function Jobs() {
 
   const q = query.trim();
   const filteredJobs = jobs.filter(job => {
-    if (activeTab !== 'all' && job.status !== activeTab) return false;
+    // 탭은 실질 마감(effectivelyClosed) 기준 — 마감시각이 지난 공고는 status='active'여도 '마감됨' 탭으로(행 상태 pill과 일치).
+    if (activeTab === 'active' && job.effectivelyClosed) return false;
+    if (activeTab === 'closed' && !job.effectivelyClosed) return false;
     if (clientFilter !== "" && job.clientId !== clientFilter) return false;
     if (branchFilter !== "" && job.branchId !== branchFilter) return false;
     if (q && !(job.title.includes(q) || job.branch.includes(q))) return false;
@@ -799,7 +874,9 @@ export function Jobs() {
         toast.error(json.error || "수정에 실패했어요");
         return;
       }
-      toast.success("공고를 수정했어요.");
+      // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
+      const geoNote = geocodeResultNote(json.job, editForm.pickupAddress, editForm.dropoffAddress);
+      toast.success("공고를 수정했어요.", geoNote ? { description: geoNote } : undefined);
       setEditForm(null);
       await loadJobs();
     } catch {
@@ -894,7 +971,7 @@ export function Jobs() {
           { label: "전체 공고", value: jobs.length, unit: "건" },
           { label: "진행 중인 공고", value: jobs.filter(j => !j.effectivelyClosed).length, unit: "건", highlight: true },
           { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => !j.effectivelyClosed).length : 0, unit: "건", color: "text-[#3182CE]" },
-          { label: "신규 지원자(미시작)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-[#38A169]" }
+          { label: "응대 시작 전(관심·미발송)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-[#38A169]" }
         ].map((stat, i) => (
           <div key={i} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex flex-col justify-between">
             <div className="text-[13px] font-bold text-[#718096] mb-2">{stat.label}</div>
@@ -922,13 +999,13 @@ export function Jobs() {
               onClick={() => setActiveTab('active')}
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'active' ? 'bg-[#1A202C] text-white' : 'bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
             >
-              진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.status === 'active').length}</span>
+              진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => !j.effectivelyClosed).length}</span>
             </button>
             <button
               onClick={() => setActiveTab('closed')}
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'closed' ? 'bg-[#1A202C] text-white' : 'bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
             >
-              마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.status === 'closed').length}</span>
+              마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.effectivelyClosed).length}</span>
             </button>
           </div>
 
@@ -1044,7 +1121,20 @@ export function Jobs() {
                 <div className="flex items-center gap-4">
                   <button onClick={() => openCandidates(job)} className="flex flex-col items-start group/cand">
                     <div className="text-[13px] text-[#718096] flex items-center gap-1 group-hover/cand:text-[#3182CE]">총 지원자 <ChevronRight size={13} className="opacity-0 group-hover/cand:opacity-100 transition-opacity" /></div>
-                    <div className="text-[15px] font-extrabold text-[#1A202C] group-hover/cand:text-[#3182CE]">{job.candidates}명 {job.newCandidates > 0 && <span className="text-[12px] font-bold text-[#D69E2E] ml-1">+{job.newCandidates}</span>}</div>
+                    <div className="text-[15px] font-extrabold text-[#1A202C] group-hover/cand:text-[#3182CE]">{job.candidates}명 {job.newCandidates > 0 && <span className="text-[12px] font-bold text-[#D69E2E] ml-1" title="관심 표시·미발송 등 AI 응대 시작 전">+{job.newCandidates}</span>}</div>
+                    {/* 반응 현황 — 관심 클릭 인원(초록)·미읽음 답장(빨강). 클릭하면 후보 보드가 열린다. */}
+                    {(job.interestCount > 0 || job.unreadTotal > 0) && (
+                      <div className="flex items-center gap-1 mt-1">
+                        {job.interestCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title="pull 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
+                        )}
+                        {job.unreadTotal > 0 && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#FFF5F5] text-[#E53E3E] border border-[#FED7D7]" title="후보 미읽음 답장 합계 — 수동 응대 필요">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E]" /> 답장 {job.unreadTotal}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </button>
                   <div className="w-px h-8 bg-[#E2E8F0]"></div>
                   <div className="flex flex-col gap-1">
@@ -1067,9 +1157,21 @@ export function Jobs() {
 
                 <div>
                   {!job.effectivelyClosed ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]">
-                      <Play size={12} className="fill-current" /> 진행 중
-                    </span>
+                    job.capacity > 0 && job.confirmed >= job.capacity ? (
+                      // 충원 완료(확정≥정원) — 바로 마감으로 잇는 CTA. 기존 확인 모달(handleToggleClose)을 그대로 탄다.
+                      <button
+                        onClick={() => handleToggleClose(job)}
+                        disabled={statusBusyId === job.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#38A169] text-white hover:bg-[#2F855A] disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38A169]"
+                        title={`매니저 확정 ${job.confirmed}명으로 정원(${job.capacity}명)이 찼어요 — 마감하면 발송·관심 접수·AI 응대가 멈춥니다`}
+                      >
+                        {statusBusyId === job.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} 충원 완료 — 마감하기
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]">
+                        <Play size={12} className="fill-current" /> 진행 중
+                      </span>
+                    )
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#F1F4F8] text-[#718096] border border-[#E2E8F0]">
                       <Pause size={12} className="fill-current" /> 마감됨
@@ -1409,6 +1511,12 @@ export function Jobs() {
                 {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
               <div className="flex items-center gap-3">
+              {/* 하루/단기인데 마감시각이 비면(특히 복제 시 마감시각은 비워짐) 상시 게시로 남는 함정 — 등록 전 힌트. */}
+              {channelDrafts && (newJobPeriod === "하루" || newJobPeriod === "단기") && !newJobClosesAt && (
+                <span className="text-[11.5px] font-bold text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                  마감시각 미설정 — 상시 게시됩니다
+                </span>
+              )}
               <button
                 onClick={() => { setAiModalOpen(false); resetNewJobForm(); }}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
@@ -1592,14 +1700,22 @@ export function Jobs() {
                   <UserPlus size={15} /> 인재풀에서 후보 추가
                 </button>
                 {unsentCount > 0 && (
-                  <button
-                    onClick={dispatchUnsent}
-                    disabled={dispatching}
-                    className="mt-3 w-full flex items-center justify-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-                  >
-                    {dispatching ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-                    미발송 {unsentCount}명에게 스크리닝 문자 발송
-                  </button>
+                  <>
+                    {/* 킬스위치 ON이어도 발송 자체는 막지 않는다 — 다만 답장에 AI가 응대하지 않음을 발송 전에 알린다. */}
+                    {!aiGlobalOn && (
+                      <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-bold text-[#B7791F]">
+                        전역 AI 중지 중 — 답장은 수동 응대해야 해요
+                      </div>
+                    )}
+                    <button
+                      onClick={dispatchUnsent}
+                      disabled={dispatching}
+                      className="mt-3 w-full flex items-center justify-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    >
+                      {dispatching ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                      미발송 {unsentCount}명에게 스크리닝 문자 발송
+                    </button>
+                  </>
                 )}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1643,6 +1759,27 @@ export function Jobs() {
                   </div>
                 )}
 
+                {/* 정렬 토글 — 그룹 내 카드 순서에 적용. 추천순은 즉시가능·거리·지원일로 컨택 우선순위를 만든다. */}
+                {!candLoading && candidates.length > 0 && (
+                  <div className="flex items-center gap-1.5 px-0.5">
+                    <span className="text-[11px] font-bold text-[#A0AEC0] mr-0.5">정렬</span>
+                    <button
+                      onClick={() => setCandSort("recommended")}
+                      title="즉시가능 → 공고와 가까운 순 → 지원일 최신순"
+                      className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${candSort === "recommended" ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}
+                    >
+                      추천순
+                    </button>
+                    <button
+                      onClick={() => setCandSort("recent")}
+                      title="후보 추가 최신순"
+                      className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${candSort === "recent" ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}
+                    >
+                      최신순
+                    </button>
+                  </div>
+                )}
+
                 {stageGroups.map((group) => (
                   <div key={group.stage} className="space-y-2">
                     <div className="flex items-center gap-2 px-0.5">
@@ -1657,6 +1794,13 @@ export function Jobs() {
                       const busy = candBusyId === c.id;
                       const isPaused = stage === "paused";
                       const isClosed = stage === "abort";
+                      const phone = a?.phone ?? null;
+                      // 우선순위 메타 — 가용성 · 공고 거리 · 원지원일. 없는 값은 생략(추천순 정렬 근거와 동일 소스).
+                      const metaLine = [
+                        a?.availability,
+                        typeof c.distance_km === "number" ? `${c.distance_km.toFixed(1)}km` : null,
+                        a?.applied_at ? `지원 ${fmtYM(a.applied_at)}` : null,
+                      ].filter(Boolean).join(" · ");
                       return (
                         <div key={c.id} className="bg-white border border-[#E2E8F0] rounded-xl p-3.5 hover:border-[#CBD5E0] transition-all">
                           <button onClick={() => setSelectedApplicantId(c.applicant_id)} className="w-full text-left">
@@ -1666,6 +1810,7 @@ export function Jobs() {
                                 <div className="min-w-0">
                                   <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{a?.name ?? `#${c.applicant_id}`} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
                                   <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
+                                  {metaLine && <div className="text-[11px] text-[#A0AEC0] truncate">{metaLine}</div>}
                                 </div>
                               </div>
                               {/* 종료 카드는 결과(보류/공고부적합/중단)를 closed_reason으로 구분해 배지로 보여준다. */}
@@ -1678,6 +1823,19 @@ export function Jobs() {
                               )}
                             </div>
                           </button>
+                          {/* 전화번호 + 복사 — 카드 본문 버튼(상세 열기)과 분리해 중첩 버튼을 피한다. 수동 응대 동선. */}
+                          {phone && (
+                            <div className="flex items-center gap-1 mt-2 text-[11.5px] font-semibold text-[#4A5568]">
+                              <span className="font-mono">{phone}</span>
+                              <button
+                                onClick={() => copyPhone(phone)}
+                                className="p-1 rounded-md text-[#A0AEC0] hover:text-[#4A5568] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                                title="전화번호 복사"
+                              >
+                                <Copy size={12} />
+                              </button>
+                            </div>
+                          )}
                           {isClosed ? (
                             <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8]">
                               {/* 되돌리기 — 잘못 종료한 카드를 이 공고 후보로 복원(확인 모달). 인력풀은 건드리지 않는다. */}
