@@ -716,14 +716,19 @@ export function ApplicantDetailPanel({
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
 
   // 전역 킬스위치 — 드로어 대화 탭에서 'AI 응대 중' 오표시·수동 발송 잠금이 남지 않도록
-  // LiveConsole과 동일 판정을 전달 (env 강제 중단 포함)
+  // LiveConsole과 동일 판정을 전달 (env 강제 중단 포함). 코파일럿(draft) 모드도 함께 전달.
   const [globalKill, setGlobalKill] = useState(false);
+  const [copilotMode, setCopilotMode] = useState(false);
   useEffect(() => {
     if (!isOpen) return;
     fetch("/api/admin/agent/kill-switch")
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
-        if (j) setGlobalKill(j.disabled === true || j.env_forced === true);
+        if (j) {
+          const kill = j.disabled === true || j.env_forced === true;
+          setGlobalKill(kill);
+          setCopilotMode(!kill && j.mode === "draft");
+        }
       })
       .catch(() => {});
   }, [isOpen]);
@@ -796,6 +801,7 @@ export function ApplicantDetailPanel({
                 jobId={jobId}
                 smsOptOutAt={a.sms_opt_out_at}
                 globalKill={globalKill}
+                copilotMode={copilotMode}
                 onChanged={() => { reload(); onChanged?.(); }}
                 className="flex-1 min-h-0"
               />

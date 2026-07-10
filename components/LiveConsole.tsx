@@ -135,7 +135,7 @@ export function LiveConsole() {
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
-  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string; last_inbound_at?: string | null }>>({});
+  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string; last_inbound_at?: string | null; pending_draft?: boolean }>>({});
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
@@ -200,8 +200,10 @@ export function LiveConsole() {
 
   // 전역 킬스위치 상태 — 꺼져 있으면 목록 상단 경고 배너 + 스레드 배지·입력창 동작이 바뀐다.
   // env_forced(AGENT_DISABLED=1)도 토글과 무관하게 항상 중단이므로 함께 '전역 중지'로 취급.
-  const { data: killData } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  // mode='draft'(코파일럿)는 AI가 초안만 만드는 상태 — 별도 배너·배지로 안내한다.
+  const { data: killData } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
+  const copilotMode = !globalKill && killData?.mode === "draft";
 
   // 발송 미리보기 모달(내용·비용 확인 후 발송) — 첫날규칙/만남장소 공용
   const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: "venue" | "first_day" } | null>(null);
@@ -542,6 +544,16 @@ export function LiveConsole() {
             </span>
           </div>
         )}
+        {copilotMode && (
+          <div className="shrink-0 bg-[#FAF5FF] border-b border-[#D6BCFA] px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-[#553C9A] leading-snug">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              코파일럿 모드 — AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다 (
+              <Link href="/brain" className="underline underline-offset-2">에이전트 두뇌</Link>
+              에서 변경)
+            </span>
+          </div>
+        )}
         <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-4">
           <Link href="/pipeline" className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2.5 rounded-xl text-[13px] font-bold transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
             대량 발송은 파이프라인에서 <ArrowRight size={16} />
@@ -720,6 +732,8 @@ export function LiveConsole() {
                     ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]">수신거부</span>
                     : avail && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${availStyle}`}>{avail === "휴면" ? "휴면" : "가능"}</span>}
                   {chat.agent_stage === "paused" && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#4A5568]">수동(OFF)</span>}
+                  {/* 미처리 AI 초안 대기 — 코파일럿 모드에서 승인이 필요한 대화를 목록에서 바로 식별 */}
+                  {previewById[chat.id]?.pending_draft && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]">⚡ 초안 대기</span>}
                   {/* 풀 응답: 활성 대화 없이 답장 온 건 — 스크리닝의 '개입 필요'와 구분(노랑) */}
                   {isPoolResponse
                     ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">풀 응답</span>
@@ -790,6 +804,7 @@ export function LiveConsole() {
             phone={activeChat.phone}
             jobId={selectedJobId}
             globalKill={globalKill}
+            copilotMode={copilotMode}
             smsOptOutAt={activeChat.sms_opt_out_at ?? null}
             onChanged={handleChanged}
             className="flex-1 min-h-0"

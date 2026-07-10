@@ -99,6 +99,9 @@ function fmtDateDivider(iso: string): string {
   }
 }
 
+// 코파일럿 초안 판정 마커 — reasoning 앞에 붙는다(lib/agent/kill-switch.ts COPILOT_DRAFT_MARKER와 동일 문자열).
+const COPILOT_MARKER = "[코파일럿]";
+
 function getByteLength(str: string) {
   let b = 0;
   for (let i = 0; i < str.length; i++) {
@@ -118,6 +121,8 @@ interface ConversationThreadProps {
   jobId?: number | null;
   /** 전역 킬스위치 상태 — true면 AI 배지 문구를 바꾸고 수동 발송 차단을 해제 */
   globalKill?: boolean;
+  /** 전역 코파일럿(초안만) 모드 — true면 AI가 발송하지 않으므로 수동 발송을 열고 배지 문구를 바꾼다 */
+  copilotMode?: boolean;
   /** 수신거부 시각(sms_opt_out_at) — 있으면 헤더에 빨간 배지 표시 */
   smsOptOutAt?: string | null;
   /** 발송·상태변경 후 부모(목록 등) 갱신용 */
@@ -157,6 +162,7 @@ export function ConversationThread({
   phone,
   jobId = null,
   globalKill = false,
+  copilotMode = false,
   smsOptOutAt = null,
   onChanged,
   pollMs = 12000,
@@ -250,8 +256,8 @@ export function ConversationThread({
   const isPaused = agentStage === "paused";
   const hasActiveFlow = agentStage != null && agentStage !== "abort";
   const isAiEnabled = hasActiveFlow && !isPaused;
-  // 전역 킬스위치 중에는 AI가 답하지 않으므로 수동 발송을 열어 교착을 방지한다.
-  const canSend = !isAiEnabled || globalKill;
+  // 전역 킬스위치·코파일럿 중에는 AI가 직접 발송하지 않으므로 수동 발송을 열어 교착을 방지한다.
+  const canSend = !isAiEnabled || globalKill || copilotMode;
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
@@ -446,10 +452,12 @@ export function ConversationThread({
         return;
       }
       toast.success("AI 초안을 검수해 발송했어요.");
+      // 코파일럿 초안 승인은 서버가 pause 전이를 건너뛴다(초안 루프 유지) — UI 상태도 맞춘다.
+      const wasCopilot = (pendingDraft.reasoning ?? "").startsWith(COPILOT_MARKER);
       setPendingDraft(null);
       setDraftText("");
       await loadMessages({ silent: true });
-      setAgentStage("paused");
+      if (!wasCopilot) setAgentStage("paused");
       onChanged?.();
     } catch {
       toast.error("발송에 실패했어요");
@@ -525,6 +533,11 @@ export function ConversationThread({
   const currentBytes = getByteLength(inputValue);
   const isLMS = currentBytes > 90;
 
+  const isCopilotDraft = (pendingDraft?.reasoning ?? "").startsWith(COPILOT_MARKER);
+  const draftReasoningDisplay = isCopilotDraft
+    ? (pendingDraft?.reasoning ?? "").slice(COPILOT_MARKER.length).trimStart()
+    : pendingDraft?.reasoning ?? null;
+
   return (
     <div className={`flex flex-col bg-[#EEF1F5] min-w-0 min-h-0 ${className}`}>
       {/* 상태 헤더 + AI 토글 */}
@@ -537,6 +550,8 @@ export function ConversationThread({
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#D69E2E] bg-[#FEFCBF] px-3 py-1.5 rounded-lg border border-[#F6E05E]"><User size={14} /> 수동 개입 중</span>
             ) : globalKill ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#B7791F] bg-[#FFFBEB] px-3 py-1.5 rounded-lg border border-[#FAF089]"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
+            ) : copilotMode ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[#553C9A] bg-[#FAF5FF] px-3 py-1.5 rounded-lg border border-[#D6BCFA]"><Wand2 size={14} /> 코파일럿 — AI 초안만, 발송은 매니저 승인</span>
             ) : (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#3182CE] bg-[#EBF8FF] px-3 py-1.5 rounded-lg border border-[#BEE3F8]"><Bot size={14} /> 옹봇 자동 응대 중</span>
             )}
@@ -638,7 +653,7 @@ export function ConversationThread({
           <div className="border border-[#9F7AEA] bg-[#FAF5FF] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#6B46C1]">
-                <Wand2 size={16} /> 옹봇이 제안한 답변 초안
+                <Wand2 size={16} /> {isCopilotDraft ? "⚡ 코파일럿 초안" : "옹봇이 제안한 답변 초안"}
                 {pendingDraft.status === "need_info" && (
                   <span className="text-[11px] font-bold bg-[#FFFAF0] text-[#C05621] border border-[#FBD38D] px-2 py-0.5 rounded-md">정보 부족 · 매니저 확인</span>
                 )}
@@ -657,9 +672,9 @@ export function ConversationThread({
               rows={3}
               className="w-full bg-white border border-[#E2E8F0] rounded-xl p-3 text-[14px] leading-relaxed text-[#2D3748] focus:outline-none focus:border-[#9F7AEA] focus:ring-1 focus:ring-[#9F7AEA] resize-none"
             />
-            {pendingDraft.reasoning && (
+            {draftReasoningDisplay && (
               <div className="mt-2 text-[11.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#805AD5]">판단 근거:</b> {pendingDraft.reasoning}
+                <b className="text-[#805AD5]">판단 근거:</b> {draftReasoningDisplay}
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">

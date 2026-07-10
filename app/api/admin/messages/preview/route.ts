@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   }
 
   // applicant_id별 최신 1건 + 최신 inbound 시각 (정렬이 desc이므로 처음 만난 것이 최신)
-  const previews: Record<number, { body: string; direction: string; created_at: string; last_inbound_at: string | null }> = {};
+  const previews: Record<number, { body: string; direction: string; created_at: string; last_inbound_at: string | null; pending_draft: boolean }> = {};
   for (const m of data ?? []) {
     const aid = m.applicant_id as number | null;
     if (aid == null) continue;
@@ -46,10 +46,27 @@ export async function GET(req: NextRequest) {
         direction: (m.direction as string) ?? "",
         created_at: (m.created_at as string) ?? "",
         last_inbound_at: null,
+        pending_draft: false,
       };
     }
     if (previews[aid].last_inbound_at == null && m.direction === "inbound") {
       previews[aid].last_inbound_at = (m.created_at as string) ?? null;
+    }
+  }
+
+  // 미처리 AI 초안(pending/need_info) 보유 여부 — 목록의 '초안 대기' 배지용(코파일럿 모드 포함).
+  // 부가정보이므로 실패해도 미리보기 자체는 내려준다.
+  const { data: drafts, error: draftErr } = await supabase
+    .from("message_drafts")
+    .select("applicant_id")
+    .in("applicant_id", ids)
+    .in("status", ["pending", "need_info"]);
+  if (draftErr) {
+    console.error("[messages preview] drafts query failed", draftErr);
+  } else {
+    for (const d of drafts ?? []) {
+      const aid = d.applicant_id as number | null;
+      if (aid != null && previews[aid]) previews[aid].pending_draft = true;
     }
   }
 
