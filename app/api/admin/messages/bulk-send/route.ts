@@ -12,12 +12,15 @@ interface Recipient {
 interface BulkSendBody {
   recipients: Recipient[];
   body: string;
+  subject?: string;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const data = (await req.json()) as BulkSendBody;
     const text = (data.body || "").trim();
+    // LMS 제목 — 미지정 시 SOLAPI가 본문 첫 문장을 제목으로 자동 생성해 인사말이 중복 노출된다.
+    const subject = (data.subject || "옹고잉 채용 안내").trim();
     const recipients = Array.isArray(data.recipients) ? data.recipients : [];
 
     if (!text) {
@@ -132,7 +135,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const sent = await sendSms(phone, personalText);
+      const sent = await sendSms(phone, personalText, subject);
       results.push({
         phone,
         success: sent.success,

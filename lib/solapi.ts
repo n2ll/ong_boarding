@@ -30,12 +30,15 @@ function getAuthHeader() {
 
 export async function sendSms(
   to: string,
-  text: string
+  text: string,
+  subject?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (isSmsDryRun()) {
     console.warn(`[SMS DRY-RUN] 발송 생략 (SMS_DRY_RUN) to=${to} text="${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
     return { success: true, messageId: "dry-run" };
   }
+  // subject: LMS 제목. 미지정 시 SOLAPI가 본문 첫 문장을 제목으로 자동 생성해 인사말이
+  // 제목·본문에 중복 노출된다 → 캠페인 발송은 명시적 제목을 넣어 중복을 막는다.
   const res = await fetch(SOLAPI_URL, {
     method: "POST",
     headers: {
@@ -43,7 +46,7 @@ export async function sendSms(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      messages: [{ to, from: FROM_NUMBER, text }],
+      messages: [{ to, from: FROM_NUMBER, text, ...(subject ? { subject } : {}) }],
     }),
   });
 
