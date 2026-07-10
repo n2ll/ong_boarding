@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef } from "react";
 import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
+import { useConfirm } from "./ConfirmDialog";
 
 interface PendingDraft {
   id: string;
@@ -48,6 +49,21 @@ function fmtDateLabel(iso: string): string {
     return new Date(iso).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
   } catch {
     return "";
+  }
+}
+
+/** 일자 구분선 라벨 — 오늘/어제는 상대 라벨, 그 외는 날짜 전체. */
+function fmtDateDivider(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+    if (diffDays === 0) return "오늘";
+    if (diffDays === 1) return "어제";
+    return fmtDateLabel(iso);
+  } catch {
+    return fmtDateLabel(iso);
   }
 }
 
@@ -123,6 +139,8 @@ export function ConversationThread({
   const [pendingDraft, setPendingDraft] = useState<PendingDraft | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftBusy, setDraftBusy] = useState(false);
+  const [optOutBusy, setOptOutBusy] = useState(false);
+  const confirm = useConfirm();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const jobQS = jobId != null ? `?job_id=${jobId}` : "";
@@ -173,9 +191,23 @@ export function ConversationThread({
     return () => clearInterval(t);
   }, [pollMs, loadMessages, loadDraft]);
 
-  // 새 메시지 도착 시 맨 아래로 스크롤
+  // 스크롤: 최초 로드는 '마지막 지원자(inbound) 메시지' 위치로 — 무엇에 답해야 하는지 바로 보이게.
+  // inbound가 없으면 기존처럼 맨 아래. 이후 새 메시지 도착 시에는 맨 아래로.
+  const didInitialScrollRef = useRef(false);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el || messages.length === 0) return;
+    if (!didInitialScrollRef.current) {
+      didInitialScrollRef.current = true;
+      const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound");
+      const target = lastInbound ? el.querySelector<HTMLElement>(`[data-msg-id="${lastInbound.id}"]`) : null;
+      if (target) {
+        el.scrollTop = Math.max(0, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 24);
+        return;
+      }
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
   const isPaused = agentStage === "paused";
@@ -228,7 +260,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자" }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자", job_id: jobId ?? undefined }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -259,7 +291,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자" }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자", job_id: jobId ?? undefined }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -314,6 +346,7 @@ export function ConversationThread({
           phone,
           body,
           sent_by: "관리자",
+          job_id: jobId ?? undefined,
           draft_id: pendingDraft.id,
           draft_was_edited: body !== (pendingDraft.draft_text ?? ""),
         }),
@@ -333,6 +366,46 @@ export function ConversationThread({
       toast.error("발송에 실패했어요");
     } finally {
       setDraftBusy(false);
+    }
+  };
+
+  // 수신거부 수동 등록/해제 — sms_opt_out_at 토글. 확인 모달 후 PATCH, 부모 갱신으로 배지 반영.
+  const handleToggleOptOut = async () => {
+    if (optOutBusy) return;
+    const registering = !smsOptOutAt;
+    const ok = await confirm(
+      registering
+        ? {
+            title: `${applicantName}님을 수신거부로 등록할까요?`,
+            description: "캠페인 발송이 영구 중단됩니다. 수동 문자는 계속 보낼 수 있어요.",
+            confirmText: "수신거부 등록",
+            destructive: true,
+          }
+        : {
+            title: `${applicantName}님 수신거부를 해제할까요?`,
+            description: "다시 캠페인 발송 대상에 포함됩니다.",
+            confirmText: "해제",
+          }
+    );
+    if (!ok) return;
+    setOptOutBusy(true);
+    try {
+      const res = await fetch(`/api/admin/applicants/${applicantId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sms_opt_out_at: registering ? new Date().toISOString() : null }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || "수신거부 변경에 실패했어요");
+        return;
+      }
+      toast.success(registering ? "수신거부로 등록했어요. 캠페인 발송에서 제외됩니다." : "수신거부를 해제했어요.");
+      onChanged?.();
+    } catch {
+      toast.error("수신거부 변경에 실패했어요");
+    } finally {
+      setOptOutBusy(false);
     }
   };
 
@@ -378,8 +451,27 @@ export function ConversationThread({
             ) : (
               <span className="flex items-center gap-1.5 text-xs font-bold text-[#3182CE] bg-[#EBF8FF] px-3 py-1.5 rounded-lg border border-[#BEE3F8]"><Bot size={14} /> 옹봇 자동 응대 중</span>
             )}
-            {smsOptOutAt && (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#C53030] bg-[#FFF5F5] px-3 py-1.5 rounded-lg border border-[#FEB2B2]"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
+            {smsOptOutAt ? (
+              <>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-[#C53030] bg-[#FFF5F5] px-3 py-1.5 rounded-lg border border-[#FEB2B2]"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
+                <button
+                  onClick={handleToggleOptOut}
+                  disabled={optOutBusy}
+                  title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
+                  className="text-[11.5px] font-bold text-[#4A5568] bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                >
+                  해제
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleToggleOptOut}
+                disabled={optOutBusy}
+                title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
+                className="flex items-center gap-1 text-[11.5px] font-bold text-[#C53030] bg-white hover:bg-[#FFF5F5] border border-[#FEB2B2] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                <Ban size={12} /> 수신거부 등록
+              </button>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -398,15 +490,19 @@ export function ConversationThread({
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
         {loadingMsgs && <div className="text-[13px] text-[#A0AEC0] text-center py-8">대화 내역 불러오는 중…</div>}
         {!loadingMsgs && messages.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 주고받은 메시지가 없어요</div>}
-        {!loadingMsgs && messages.length > 0 && (
-          <div className="flex justify-center mb-2"><div className="bg-[#E2E8F0] text-[#718096] text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateLabel(messages[0].created_at)}</div></div>
-        )}
 
         {messages.map((msg, idx) => {
           const isInbound = msg.direction === "inbound";
           const sender = isInbound ? "user" : "ai";
+          // 일자 구분선 — 이전 메시지와 날짜가 바뀌는 지점마다 삽입 (첫 메시지 포함)
+          const prevMsg = idx > 0 ? messages[idx - 1] : null;
+          const showDateDivider = !prevMsg || new Date(prevMsg.created_at).toDateString() !== new Date(msg.created_at).toDateString();
           return (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.2) }} key={msg.id} className={`flex gap-3 ${sender === "user" ? "justify-end" : "justify-start"}`}>
+            <Fragment key={msg.id}>
+            {showDateDivider && (
+              <div className="flex justify-center mb-2"><div className="bg-[#E2E8F0] text-[#718096] text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(msg.created_at)}</div></div>
+            )}
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.2) }} data-msg-id={msg.id} className={`flex gap-3 ${sender === "user" ? "justify-end" : "justify-start"}`}>
               {sender === "ai" && <div className="w-9 h-9 rounded-full bg-[#FFCB3C] flex items-center justify-center shrink-0 border border-[#E0B500]"><Bot size={18} className="text-[#1A202C]" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
                 {sender === "ai" && <span className="text-[11.5px] font-bold text-[#718096] ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
@@ -421,6 +517,7 @@ export function ConversationThread({
                 <span className="text-[11px] text-[#A0AEC0] mx-1">{fmtTime(msg.created_at)}</span>
               </div>
             </motion.div>
+            </Fragment>
           );
         })}
       </div>

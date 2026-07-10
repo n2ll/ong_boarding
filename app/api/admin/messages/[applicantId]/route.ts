@@ -34,6 +34,8 @@ export async function GET(
     let messages;
     let error;
 
+    // job_id 필터는 NULL도 함께 통과시킨다 — 캠페인 핑·과거 수동 발송 등 job_id 없는
+    // 메시지가 공고 탭에서 사라져 "매니저 답장이 안 보이는" 문제 방지.
     if (applicant?.phone) {
       let q = supabase
         .from("messages")
@@ -41,7 +43,7 @@ export async function GET(
         .or(`applicant_id.eq.${applicantId},applicant_phone.eq.${applicant.phone}`)
         .order("created_at", { ascending: true });
       if (jobIdFilter !== null && Number.isFinite(jobIdFilter)) {
-        q = q.eq("job_id", jobIdFilter);
+        q = q.or(`job_id.eq.${jobIdFilter},job_id.is.null`);
       }
       const result = await q;
       messages = result.data;
@@ -53,7 +55,7 @@ export async function GET(
         .eq("applicant_id", applicantId)
         .order("created_at", { ascending: true });
       if (jobIdFilter !== null && Number.isFinite(jobIdFilter)) {
-        q = q.eq("job_id", jobIdFilter);
+        q = q.or(`job_id.eq.${jobIdFilter},job_id.is.null`);
       }
       const result = await q;
       messages = result.data;
