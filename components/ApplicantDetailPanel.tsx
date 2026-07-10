@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle,
-  Briefcase, Building2, MapPin, CalendarClock, Save, UserCheck, Clock, Sparkles,
+  Briefcase, Building2, MapPin, CalendarClock, Save, UserCheck, Clock, Sparkles, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -72,9 +72,31 @@ interface ApplicantFull {
   access_token: string | null;
 }
 
+// 재컨택 반응 요약(B2) — 상세 GET이 pool_events(최근 90일)로 계산해 내려준다.
+interface RecontactInterestJob {
+  job_id: number;
+  title: string | null;
+  immediate: boolean;
+  clicked_at: string;
+}
+
+interface RecontactSummary {
+  last_ping_at: string | null;
+  last_link_view_at: string | null;
+  interest_jobs: RecontactInterestJob[];
+}
+
 interface Detail {
   applicant: ApplicantFull;
   candidates: CandidateLink[];
+  recontact?: RecontactSummary | null;
+}
+
+/** 관심 공고 배지용 제목 축약 */
+function shortJobTitle(title: string | null, jobId: number): string {
+  const t = (title ?? "").trim();
+  if (!t) return `공고 #${jobId}`;
+  return t.length > 12 ? t.slice(0, 12) + "…" : t;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -333,6 +355,22 @@ export function ApplicantDetailContent({
     );
   };
 
+  // 관심 공고 배지 클릭 → 대기 안내 문구 클립보드 복사 (확정 뉘앙스 금지 — '먼저 안내' 수준).
+  const copyInterestReply = async (ij: RecontactInterestJob) => {
+    const jobTitle = (ij.title ?? "").trim() || `공고 #${ij.job_id}`;
+    const text = `[옹고잉] ${a.name}님, '${jobTitle}' 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요!`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("대기 안내 문구를 복사했어요. 스레드에 붙여넣어 발송하세요.");
+    } catch {
+      toast.error("복사에 실패했어요");
+    }
+  };
+
+  const recontact = detail.recontact ?? null;
+  const hasRecontact =
+    !!recontact && (!!recontact.last_ping_at || !!recontact.last_link_view_at || recontact.interest_jobs.length > 0);
+
   const screening = focusCand?.agent_state?.screening ?? {};
   const onboarding = focusCand?.agent_state?.onboarding ?? {};
   const screeningDone = SCREENING_KEYS.filter((k) => screening[k] === true).length;
@@ -385,6 +423,53 @@ export function ApplicantDetailContent({
             <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
           </div>
         </div>
+
+        {/* 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
+        {hasRecontact && recontact && (
+          <div className="rounded-xl border border-[#BEE3F8] bg-[#EBF8FF] p-3.5 space-y-2.5">
+            <h3 className="text-[12.5px] font-extrabold text-[#2B6CB0] flex items-center gap-1.5">
+              <Zap size={14} /> 재컨택 반응
+            </h3>
+            <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">마지막 발송</span>
+                <span className="text-[12.5px] font-semibold text-[#1A202C]" title={recontact.last_ping_at ?? undefined}>
+                  {recontact.last_ping_at ? relTime(recontact.last_ping_at) : "없음"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">링크 열람</span>
+                <span className="text-[12.5px] font-semibold text-[#1A202C]" title={recontact.last_link_view_at ?? undefined}>
+                  {recontact.last_link_view_at ? relTime(recontact.last_link_view_at) : "미열람"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">마지막 답장</span>
+                <span className="text-[12.5px] font-semibold text-[#1A202C]" title={a.last_message_at ?? undefined}>
+                  {a.last_message_at ? relTime(a.last_message_at) : "없음"}
+                </span>
+              </div>
+            </div>
+            {recontact.interest_jobs.length > 0 && (
+              <div>
+                <span className="text-[11px] font-bold text-[#A0AEC0]">관심 클릭 공고 · 클릭 시 대기 안내 문구 복사</span>
+                <div className="flex gap-1.5 flex-wrap mt-1.5">
+                  {recontact.interest_jobs.map((ij) => (
+                    <button
+                      key={ij.job_id}
+                      onClick={() => copyInterestReply(ij)}
+                      title={`${ij.title ?? `공고 #${ij.job_id}`} — 관심 클릭 ${relTime(ij.clicked_at)} · 대기 안내 문구를 클립보드에 복사`}
+                      className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-white border border-[#BEE3F8] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    >
+                      ⭐ {shortJobTitle(ij.title, ij.job_id)}
+                      {ij.immediate && <span className="ml-1 text-[#2F855A]">· 바로가능</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 지원 공고 목록 */}
         {!isPurePool && (
