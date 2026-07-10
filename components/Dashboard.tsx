@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SosLedgerCard } from "@/components/SosLedgerCard";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard } from "@/components/ReplyQueueCard";
+import { CampaignStatsCard } from "@/components/CampaignStatsCard";
 
 interface UrgentItem {
   id: string;
@@ -403,6 +404,10 @@ export function Dashboard() {
         <InterestQueueCard />
         <ReplyQueueCard />
       </div>
+
+      {/* 재컨택 캠페인 현황 — 발송 코호트의 열람/관심/답장 퍼널. 발송 이력 없으면 카드 스스로 숨김.
+          관심/답장 큐 아래·긴급 건 기록 위 배치(퍼널에서 처리 큐로 앵커 이동). */}
+      <CampaignStatsCard />
 
       {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
       <div id="sos-ledger" className="scroll-mt-6">

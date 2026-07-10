@@ -14,11 +14,18 @@ import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
-function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number } {
+function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number; bytes: number } {
   let bytes = 0;
   for (let i = 0; i < text.length; i++) bytes += text.charCodeAt(i) > 0x7f ? 2 : 1;
   const sms_type = bytes <= 90 ? "SMS" : "LMS";
-  return { sms_type, cost_krw: sms_type === "SMS" ? 20 : 33 };
+  return { sms_type, cost_krw: sms_type === "SMS" ? 20 : 33, bytes };
+}
+
+// 비용 추정용 대표 샘플 치환 — 치환자 원문이 아니라 실제 발송 길이 기준으로 계산해야 SMS/LMS 판정이 맞다.
+// 링크는 실제 발송 URL(base + /p/ + UUID 36자)과 같은 길이의 더미, 이름은 한글 3자.
+const SAMPLE_PULL_LINK = "https://ong-boarding-pi.vercel.app/p/00000000-0000-0000-0000-000000000000";
+function fillSampleVars(text: string): string {
+  return text.replace(/#\{이름\}/g, "홍길동").replace(/#\{맞춤링크\}/g, SAMPLE_PULL_LINK);
 }
 
 const SEGMENTS_KEY = "ong_pipeline_segments";
@@ -38,6 +45,25 @@ interface SavedSegment {
 
 // Types
 type VehicleClass = "확정" | "도보" | "미확인";
+
+// pool_events 반응 요약 — /api/admin/pool-events/summary 응답의 지원자별 항목.
+// 반응 배지(열람/관심/답장)·'재컨택 N일 전' 배지·'반응 있음' 필터·'반응 최신순' 정렬의 근거.
+interface PoolEventSummary {
+  last_ping_at: string | null;
+  last_link_view_at: string | null;
+  last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
+  last_reply_at: string | null;
+}
+
+// 반응 시각 max — '반응 최신순' 정렬 키. 반응(열람/관심/답장) 없으면 null(정렬 시 뒤).
+function lastReactionAt(s: PoolEventSummary | undefined): number | null {
+  if (!s) return null;
+  const ts = [s.last_link_view_at, s.last_interest?.at ?? null, s.last_reply_at]
+    .filter((v): v is string => !!v)
+    .map((v) => new Date(v).getTime())
+    .filter((t) => !Number.isNaN(t));
+  return ts.length ? Math.max(...ts) : null;
+}
 
 interface CardData {
   id: string;
@@ -101,6 +127,10 @@ const RECONTACT_B_BODY = `[옹고잉] #{이름}님, 안녕하세요. 얼마 전 
 #{맞춤링크}
 
 궁금하면 답장 주세요. (중단: '그만')`;
+
+// 관심 대기 안내 (사후관리) — '관심 있음'을 눌렀지만 자리가 부족해 바로 배정 안내를 못 하는 인원용.
+// 확정 뉘앙스 금지 — '먼저 연락드릴게요'까지만, 배정·확정을 약속하지 않는다.
+const WAITLIST_BODY = `#{이름}님, 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요! (안내 중단: '그만' 회신)`;
 
 interface ColumnData {
   id: string;
@@ -340,16 +370,26 @@ export function Pipeline() {
   const [excludeActive, setExcludeActive] = useState(false);
   // 최근 14일 재컨택 제외 필터 — 켜면 해당 기간 내 ping_sent 이력이 있는 인원을 리스트에서 제외(중복 재컨택 방지)
   const [excludeRecentPing, setExcludeRecentPing] = useState(false);
+  // 반응 있음 필터 — 열람/관심/답장 중 1건이라도 있는 인원만 (summaryById 의존 → base 이후 단계 적용, 순환 방지)
+  const [reactionOnly, setReactionOnly] = useState(false);
+  // 수신거부만 필터 — sms_opt_out_at 있는 카드만 (컴플라이언스 확인용, 카드 자체 속성이라 base 단계 적용)
+  const [optOutOnly, setOptOutOnly] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
-  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old" | "distance">("recent");
+  const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old" | "distance" | "reaction_recent">("recent");
   // 거리 기준 공고 — 선택 공고의 상차지·마지막경유지 중 가까운 쪽 기준 근거리순 정렬용. null이면 미선택.
   const [distanceJobId, setDistanceJobId] = useState<number | null>(null);
   // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
   const [activeSet, setActiveSet] = useState<Set<number>>(new Set());
-  // 지원자별 마지막 재컨택(ping_sent) 시각(ISO) — '재컨택 N일 전' 배지/제외 필터용 (디바운스 배치 조회)
-  const [lastPingById, setLastPingById] = useState<Record<number, string>>({});
+  // 지원자별 pool_events 반응 요약 — 반응 배지·'재컨택 N일 전' 배지·반응 필터/정렬의 근거 (디바운스 배치 조회)
+  const [summaryById, setSummaryById] = useState<Record<number, PoolEventSummary>>({});
+  // 벌크 발송 성공 후 요약 재조회 트리거 — 방금 나간 ping_sent가 '14일 제외' 필터에 바로 반영되게.
+  const [summaryVersion, setSummaryVersion] = useState(0);
+  // '공고 관심자 선택'으로 고른 공고 id — 대기 안내 프리셋 발송 시 purpose='waitlist'와 함께 서버로 전달.
+  // 선택이 통째로 바뀌는 동선(필터 변경·상위 N·전체 토글 등)에서는 초기화(개별 해제는 유지).
+  const [waitlistJobId, setWaitlistJobId] = useState<number | null>(null);
+  const [interestPickLoading, setInterestPickLoading] = useState(false);
 
   // 거리 기준 공고 옵션 — 상차지(pickup) 또는 마지막 경유지(dropoff) 좌표가 있는 활성 공고. 둘 다 없으면 거리 계산 불가라 제외.
   const distanceJobs = useMemo(
@@ -381,7 +421,8 @@ export function Pipeline() {
   // 거리 기준 공고 변경도 정렬 순서를 바꿔 '상위 N'의 대상이 달라지므로 함께 초기화한다.
   useEffect(() => {
     setSelectedRows(new Set());
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, sortMode, distanceJobId, query]);
+    setWaitlistJobId(null);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, optOutOnly, sortMode, distanceJobId, query]);
 
   // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -492,6 +533,7 @@ export function Pipeline() {
       toast.success(`${json.added ?? ids.length}명을 공고 후보로 추가했어요. (이미 추가된 인원은 제외)`);
       setJobPickerOpen(false);
       setSelectedRows(new Set());
+      setWaitlistJobId(null);
     } catch {
       toast.error("공고 후보 추가에 실패했어요");
     } finally {
@@ -541,7 +583,7 @@ export function Pipeline() {
     channelFilter.size + slotFilter.size + statusFilter.size + availabilityFilter.size +
     (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0) +
     (recentAppliedOnly ? 1 : 0) + (geoConfirmedOnly ? 1 : 0) + (excludeActive ? 1 : 0) +
-    (excludeRecentPing ? 1 : 0);
+    (excludeRecentPing ? 1 : 0) + (reactionOnly ? 1 : 0) + (optOutOnly ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
@@ -554,6 +596,8 @@ export function Pipeline() {
     setGeoConfirmedOnly(false);
     setExcludeActive(false);
     setExcludeRecentPing(false);
+    setReactionOnly(false);
+    setOptOutOnly(false);
   };
 
   const q = query.trim().toLowerCase();
@@ -573,18 +617,23 @@ export function Pipeline() {
     if (regionFilter === "seoul" && !isSeoul(c.sido)) return false;
     if (recentAppliedOnly && !(c.appliedAtIso && new Date(c.appliedAtIso).getTime() >= sixMonthsAgo)) return false;
     if (geoConfirmedOnly && !(c.geoPrecision === "exact" || c.geoPrecision === "approx")) return false;
+    // 수신거부만 — 카드 자체 속성이라 base 단계 적용 가능(조회 입력 순환 없음)
+    if (optOutOnly && !c.smsOptOutAt) return false;
     return true;
   });
   // active-check·last-ping 입력 — 활동중/재컨택 제외 필터와 무관한 기준 집합으로 잡아 순환(무한 재조회)을 방지.
   const visibleIdsKey = baseFilteredCards.slice(0, 500).map((c) => c.id).join(",");
-  // 활동중 제외 + 최근 14일 재컨택 제외를 순차 적용 — 둘 다 baseFilteredCards 이후 단계라 조회 입력에 영향 없음.
+  // 활동중 제외 + 최근 14일 재컨택 제외 + 반응 있음을 순차 적용 — 셋 다 조회 결과(activeSet/summaryById)에
+  // 의존하므로 baseFilteredCards 이후 단계여야 조회 입력(visibleIdsKey) 순환이 없다.
   const pingCutoff = Date.now() - FOURTEEN_DAYS_MS;
   const postFilteredCards = baseFilteredCards.filter((c) => {
     if (excludeActive && activeSet.has(Number(c.id))) return false;
+    const summary = summaryById[Number(c.id)];
     if (excludeRecentPing) {
-      const last = lastPingById[Number(c.id)];
+      const last = summary?.last_ping_at;
       if (last && new Date(last).getTime() >= pingCutoff) return false;
     }
+    if (reactionOnly && lastReactionAt(summary) === null) return false;
     return true;
   });
   // 카드별 거리(km) — 후보↔{상차지, 마지막경유지} 중 '가까운 쪽'을 순위 근거로 쓴다(어느 끝이든 가까우면 상위).
@@ -638,12 +687,25 @@ export function Pipeline() {
         if (bv === null) return -1;
         return av - bv;
       }
+      case "reaction_recent": {                                      // 반응 최신순 = max(열람, 관심, 답장) desc (반응 없음은 뒤)
+        const av = lastReactionAt(summaryById[Number(a.id)]);
+        const bv = lastReactionAt(summaryById[Number(b.id)]);
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return bv - av;
+      }
       default: return created(b) - created(a);                       // 최근 등록순 (API 기본 순서와 동일)
     }
   });
 
   // 발송 가능 인원 수 — 리스트 상단 이중 카운트("발송가능 N / 표시 M")
   const sendableCount = filteredCards.filter((c) => sendableOf(c).sendable).length;
+
+  // 발송 모달 실제 수신 대상 — 화면 표시(filteredCards) ∩ 선택 ∩ 연락처 보유. handleBulkSend의 발송 대상과 동일 기준.
+  // selectedRows.size 그대로 쓰면 필터로 화면에서 빠진 인원까지 세어 인원·비용이 부풀려진다.
+  const modalRecipientCount = filteredCards.filter((c) => selectedRows.has(c.id) && c.phone).length;
+  const modalExcludedCount = selectedRows.size - modalRecipientCount;
 
   // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
   // 발송 모달 로직과 별개(중복 조회 허용). 실패는 조용히 무시(서버가 최종 가드).
@@ -670,28 +732,29 @@ export function Pipeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleIdsKey, view]);
 
-  // 리스트 레벨 마지막 재컨택(ping_sent) 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
-  // '재컨택 N일 전' 배지와 '최근 14일 재컨택 제외' 필터의 근거. 실패는 조용히 무시(배지는 부가정보).
+  // 리스트 레벨 pool_events 반응 요약 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
+  // '재컨택 N일 전'·반응 배지와 '최근 14일 재컨택 제외'·'반응 있음' 필터, '반응 최신순' 정렬의 근거.
+  // 실패는 조용히 무시(배지/필터는 부가정보). summaryVersion은 벌크 발송 직후 재조회 트리거.
   useEffect(() => {
     if (view !== "list") return;
     const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
-    if (ids.length === 0) { setLastPingById({}); return; }
+    if (ids.length === 0) { setSummaryById({}); return; }
     let cancelled = false;
     const timer = setTimeout(() => {
-      fetch("/api/admin/pool-events/last-ping", {
+      fetch("/api/admin/pool-events/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ applicantIds: ids }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((json: { lastPingById?: Record<number, string> }) => {
-          if (!cancelled) setLastPingById(json.lastPingById ?? {});
+        .then((json: { summaryById?: Record<number, PoolEventSummary> }) => {
+          if (!cancelled) setSummaryById(json.summaryById ?? {});
         })
         .catch(() => { /* 배지/제외는 부가정보 — 실패해도 리스트는 보여준다 */ });
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, view]);
+  }, [visibleIdsKey, view, summaryVersion]);
 
   // 지도 뷰용 — 원본 지원자에 지점 스코프 + 검색어 필터 적용
   const mapApplicants: MapApplicant[] = rawApplicants
@@ -731,6 +794,7 @@ export function Pipeline() {
   const handleColumnBulkMessage = (column: ColumnData) => {
     if (column.cards.length === 0) return toast.error("이 단계에 지원자가 없어요.");
     setSelectedRows(new Set(column.cards.map((c) => c.id)));
+    setWaitlistJobId(null);
     setBulkMsgModalOpen(true);
   };
 
@@ -788,6 +852,7 @@ export function Pipeline() {
   const toggleAll = () => {
     if (selectedRows.size === filteredCards.length) setSelectedRows(new Set());
     else setSelectedRows(new Set(filteredCards.map(c => c.id)));
+    setWaitlistJobId(null);
   };
 
   // 현재 정렬 순서 상단에서 '발송 가능한' N명만 골라 선택 — 재컨택 배치 발송 진입 단축.
@@ -796,7 +861,41 @@ export function Pipeline() {
     const ids = filteredCards.filter((c) => sendableOf(c).sendable).slice(0, n).map((c) => c.id);
     if (ids.length === 0) return toast.error("발송 가능한 인원이 없어요.");
     setSelectedRows(new Set(ids));
+    setWaitlistJobId(null);
     toast.success(`발송 가능한 상위 ${ids.length}명을 선택했어요.`);
+  };
+
+  // 공고 관심자 원클릭 선택 — 해당 공고에 interest_click을 남긴 지원자 중 확정인력을 제외하고
+  // 현재 화면(filteredCards)에 있는 인원만 선택. '관심 대기 안내' 사후관리 발송의 진입 동선.
+  const selectJobInterested = async (jobId: number) => {
+    if (interestPickLoading) return;
+    setInterestPickLoading(true);
+    try {
+      const res = await fetch(`/api/admin/pool-events/interested?job_id=${jobId}`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error || "관심자 조회에 실패했어요");
+        return;
+      }
+      const interestedIds: number[] = Array.isArray(json?.applicantIds) ? json.applicantIds : [];
+      if (interestedIds.length === 0) return toast.info("이 공고에 관심을 표시한 인원이 아직 없어요.");
+      const interestedSet = new Set(interestedIds.map(String));
+      // 확정인력은 이미 배정 판단이 끝난 인원 — 대기 안내 대상에서 제외.
+      const eligible = filteredCards.filter((c) => interestedSet.has(c.id) && c.status !== "확정인력");
+      if (eligible.length === 0) {
+        return toast.info(`관심자 ${interestedIds.length}명이 모두 확정인력이거나 현재 필터 밖이에요.`);
+      }
+      setSelectedRows(new Set(eligible.map((c) => c.id)));
+      setWaitlistJobId(jobId);
+      const excluded = interestedIds.length - eligible.length;
+      toast.success(
+        `공고 관심자 ${eligible.length}명을 선택했어요.${excluded > 0 ? ` (확정인력·필터 제외 ${excluded}명)` : ""}`
+      );
+    } catch {
+      toast.error("관심자 조회에 실패했어요");
+    } finally {
+      setInterestPickLoading(false);
+    }
   };
 
   const handleBulkStageChange = async (stageName: string) => {
@@ -844,6 +943,7 @@ export function Pipeline() {
     // 성공/실패와 무관하게 서버 상태 기준으로 목록 재동기화 (칸반 드래그 롤백 패턴과 동일)
     loadApplicants();
     setSelectedRows(new Set());
+    setWaitlistJobId(null);
   };
 
   const handleBulkSend = async () => {
@@ -859,7 +959,10 @@ export function Pipeline() {
     }));
     if (recipients.length === 0) return toast.error("발송 가능한 연락처가 없어요.");
 
-    const est = estimateSmsCost(text);
+    // 대기 안내 프리셋이면 purpose='waitlist'(+ 공고 관심자 선택으로 고른 공고 id)를 실어 발송 이력을 남긴다.
+    const isWaitlist = text === WAITLIST_BODY.trim();
+    // 비용은 치환자 원문이 아닌 대표 샘플 치환 후 기준 — SMS/LMS 판정 오차 방지.
+    const est = estimateSmsCost(fillSampleVars(text));
     if (!(await confirm({
       title: `${recipients.length}명에게 문자를 발송할까요?`,
       description: `실제 SMS가 즉시 발송됩니다. 되돌릴 수 없어요.\n예상 비용: ${est.sms_type} · 약 ${(est.cost_krw * recipients.length).toLocaleString()}원 (1인 ${est.cost_krw}원 × ${recipients.length}명)`,
@@ -883,7 +986,13 @@ export function Pipeline() {
           res = await fetch("/api/admin/messages/bulk-send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ recipients: chunk, body: text }),
+            body: JSON.stringify({
+              recipients: chunk,
+              body: text,
+              ...(isWaitlist
+                ? { purpose: "waitlist", ...(waitlistJobId !== null ? { job_id: waitlistJobId } : {}) }
+                : {}),
+            }),
           });
         } catch {
           chunkFailed += chunk.length;
@@ -919,11 +1028,22 @@ export function Pipeline() {
       if (chunkFailed) parts.push(`미시도 ${chunkFailed}명${chunkErrorMsg ? ` (${chunkErrorMsg})` : ""}`);
       // 하나라도 나갔으면 성공 토스트(부분 발송이라도 진행분을 인지), 전부 실패면 에러 토스트.
       (sent > 0 ? toast.success : toast.error)(parts.join(" · "));
+      if (sent > 0) {
+        // 방금 나간 ping_sent가 배지·'14일 제외' 필터에 바로 반영되게 요약 재조회.
+        setSummaryVersion((v) => v + 1);
+        // '14일 제외'가 꺼져 있으면 켜기를 제안 — 자동으로 켜지 않고 매니저가 결정(액션 버튼).
+        if (!excludeRecentPing) {
+          toast.info("방금 발송한 인원이 리스트에 그대로 남아 있어요. 중복 재컨택을 막으려면 '최근 14일 재컨택 제외'를 켜세요.", {
+            action: { label: "14일 제외 켜기", onClick: () => setExcludeRecentPing(true) },
+          });
+        }
+      }
       // 청크 실패가 있으면 모달을 열어두고 선택 유지 — 재시도 판단을 매니저에게 남긴다
       // (서버 10분 중복 가드가 이미 나간 인원의 재발송을 막음).
       if (chunkFailed > 0) return;
       setBulkMsgModalOpen(false);
       setSelectedRows(new Set());
+      setWaitlistJobId(null);
       setBulkMsgBody(DEFAULT_BULK_BODY);
     } catch {
       toast.error("발송에 실패했어요");
@@ -966,7 +1086,13 @@ export function Pipeline() {
 
           <div className="w-px h-6 bg-[#E2E8F0] mx-2"></div>
 
-          <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-bold border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-[#FFFBEC] border-[#FFCB3C] text-[#B8860B]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}>
+          {/* 고급 필터는 리스트 뷰 전용 — 칸반·지도에는 적용되지 않아 비활성(오조작으로 '걸었다고 착각' 방지) */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            disabled={view !== "list"}
+            title={view !== "list" ? "고급 필터는 리스트 뷰 전용이에요" : undefined}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${view !== "list" ? 'bg-[#F7FAFC] border-[#E2E8F0] text-[#A0AEC0] cursor-not-allowed' : showFilters || activeFilterCount > 0 ? 'bg-[#FFFBEC] border-[#FFCB3C] text-[#B8860B]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC]'}`}
+          >
             <Filter size={16} /> 고급 필터
             {activeFilterCount > 0 && <span className="bg-[#FFCB3C] text-[#1A202C] text-[11px] font-extrabold px-1.5 py-0.5 rounded-full leading-none">{activeFilterCount}</span>}
           </button>
@@ -1001,6 +1127,7 @@ export function Pipeline() {
               <option value="neglected">방치 오래된 순</option>
               <option value="applied_recent">원지원 최신순</option>
               <option value="applied_old">원지원 오래된순</option>
+              <option value="reaction_recent">반응 최신순(열람·관심·답장)</option>
               <option value="distance">공고 근거리순(상차지·종료지점)</option>
             </select>
           )}
@@ -1011,9 +1138,9 @@ export function Pipeline() {
           </div>
         </div>
 
-        {/* Advanced Filters Panel */}
+        {/* Advanced Filters Panel — 리스트 뷰 전용(칸반·지도 전환 시 숨김, 상태는 유지) */}
         <AnimatePresence>
-          {showFilters && (
+          {showFilters && view === "list" && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="bg-white border-b border-[#E2E8F0] shrink-0 overflow-hidden">
               <div className="px-8 py-5 bg-[#F7FAFC] flex flex-col gap-4">
                 <div className="flex flex-wrap gap-8">
@@ -1146,6 +1273,20 @@ export function Pipeline() {
                       >
                         최근 14일 재컨택 제외
                       </button>
+                      <button
+                        onClick={() => setReactionOnly((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${reactionOnly ? 'bg-[#38A169] border-[#38A169] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="맞춤링크 열람·관심 클릭·답장 중 1건이라도 있는 인원만 표시합니다"
+                      >
+                        반응 있음(열람/관심/답장)
+                      </button>
+                      <button
+                        onClick={() => setOptOutOnly((v) => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${optOutOnly ? 'bg-[#E53E3E] border-[#E53E3E] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
+                        title="수신거부('그만' 회신 등) 처리된 인원만 표시합니다 — 컴플라이언스 확인용"
+                      >
+                        수신거부만
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1225,7 +1366,7 @@ export function Pipeline() {
 
                     <div className="flex-1" />
 
-                    <button className="bg-transparent hover:bg-white/10 text-white/70 hover:text-white rounded-lg p-2 transition-colors" onClick={() => setSelectedRows(new Set())}>
+                    <button className="bg-transparent hover:bg-white/10 text-white/70 hover:text-white rounded-lg p-2 transition-colors" onClick={() => { setSelectedRows(new Set()); setWaitlistJobId(null); }}>
                       <X size={20} />
                     </button>
                   </motion.div>
@@ -1237,7 +1378,24 @@ export function Pipeline() {
                 <span className="text-[13px] font-bold text-[#4A5568]">
                   발송가능 <span className="text-[#38A169]">{sendableCount}</span> / 표시 {filteredCards.length}명
                 </span>
+                {/* '수신거부만' 필터 ON — 컴플라이언스 확인용 카운트 (표시분 전원이 수신거부) */}
+                {optOutOnly && (
+                  <span className="text-[13px] font-bold text-[#E53E3E]">수신거부 {filteredCards.length}명</span>
+                )}
                 <div className="flex-1" />
+                {/* 공고 관심자 원클릭 선택 — 관심 표시 인원(확정인력 제외)을 선택해 '관심 대기 안내'로 잇는 사후관리 동선 */}
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) void selectJobInterested(Number(e.target.value)); }}
+                  disabled={interestPickLoading || activeJobs.length === 0}
+                  className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="공고를 고르면 그 공고에 '관심 있음'을 누른 인원(확정인력 제외)이 선택됩니다"
+                >
+                  <option value="">{interestPickLoading ? "관심자 조회 중…" : "공고 관심자 선택…"}</option>
+                  {activeJobs.map((j) => (
+                    <option key={j.id} value={String(j.id)}>#{j.id} {j.title}</option>
+                  ))}
+                </select>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
@@ -1289,7 +1447,31 @@ export function Pipeline() {
                       const send = sendableOf(c);
                       const isActive = activeSet.has(Number(c.id));
                       const appliedLabel = appliedMonth(c.appliedAtIso);
-                      const recontactLbl = recontactLabel(lastPingById[Number(c.id)]);
+                      const summary = summaryById[Number(c.id)] as PoolEventSummary | undefined;
+                      const recontactLbl = recontactLabel(summary?.last_ping_at);
+                      // 반응 배지 — 과밀 방지: 가장 강한 신호 1개만 (관심 > 답장 > 열람).
+                      let reactionBadge: { label: string; cls: string; title: string } | null = null;
+                      if (summary?.last_interest) {
+                        const it = summary.last_interest;
+                        const jobTitle = it.job_id !== null ? activeJobs.find((j) => j.id === it.job_id)?.title : undefined;
+                        reactionBadge = {
+                          label: `${it.immediate ? "⚡ " : ""}관심${it.job_id !== null ? ` #${it.job_id}` : ""}`,
+                          cls: "bg-[#F0FFF4] text-[#38A169]",
+                          title: `공고${it.job_id !== null ? ` #${it.job_id}` : ""}${jobTitle ? ` ${jobTitle}` : ""} 관심 표시 ${relTime(it.at)}${it.immediate ? " · 즉시 가능 응답" : ""}`,
+                        };
+                      } else if (summary?.last_reply_at) {
+                        reactionBadge = {
+                          label: "답장 옴",
+                          cls: "bg-[#BEE3F8] text-[#2C5282]",
+                          title: `마지막 답장 ${relTime(summary.last_reply_at)}`,
+                        };
+                      } else if (summary?.last_link_view_at) {
+                        reactionBadge = {
+                          label: `열람 ${relTime(summary.last_link_view_at)}`,
+                          cls: "bg-[#EDF2F7] text-[#718096]",
+                          title: "맞춤링크(맞춤 공고 페이지) 열람",
+                        };
+                      }
                       // 거리 정렬 활성 시에만 거리 표기. 상차지·마지막경유지 둘 다 있으면 '상차 12/종료 4km', 하나면 그 값만. 좌표 없으면 생략.
                       const distVal = distByCardId[c.id];
                       const distDetail = distDetailByCardId[c.id];
@@ -1335,15 +1517,20 @@ export function Pipeline() {
                                 <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                                 {c.stage}
                               </span>
-                              {(c.availability || c.smsOptOutAt || isActive || recontactLbl || c.vehicleClass === '미확인' || (!send.sendable && !c.smsOptOutAt)) && (
+                              {(c.availability || c.smsOptOutAt || isActive || recontactLbl || reactionBadge || c.vehicleClass === '미확인' || (!send.sendable && !c.smsOptOutAt)) && (
                                 <div className="flex flex-wrap items-center gap-1">
+                                  {reactionBadge && (
+                                    <span title={reactionBadge.title} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${reactionBadge.cls}`}>
+                                      {reactionBadge.label}
+                                    </span>
+                                  )}
                                   {c.availability && (
                                     <span title={c.availabilityUpdatedAtIso ? `갱신 ${relTime(c.availabilityUpdatedAtIso)}` : undefined} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${c.availability === '휴면' ? 'bg-[#EDF2F7] text-[#A0AEC0]' : 'bg-[#F0FFF4] text-[#38A169]'}`}>
                                       {c.availability}
                                     </span>
                                   )}
                                   {recontactLbl && (
-                                    <span title={`마지막 재컨택 ${relTime(lastPingById[Number(c.id)])}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
+                                    <span title={`마지막 재컨택 ${relTime(summary?.last_ping_at ?? null)}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
                                       {recontactLbl}
                                     </span>
                                   )}
@@ -1496,11 +1683,17 @@ export function Pipeline() {
             <div className="p-5 border-b border-[#E2E8F0] bg-[#F7FAFC] flex justify-between items-center">
               <div>
                 <h2 className="text-[16px] font-bold text-[#1A202C]">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
-                <div className="text-[12.5px] text-[#718096] mt-0.5">총 {selectedRows.size}명에게 일괄 발송됩니다. (연락처 없는 인원은 자동 제외)</div>
+                <div className="text-[12.5px] text-[#718096] mt-0.5">실제 발송 대상 {modalRecipientCount}명에게 일괄 발송됩니다.</div>
               </div>
               <button onClick={() => setBulkMsgModalOpen(false)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-5">
+              {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
+              {modalExcludedCount > 0 && (
+                <div className="px-4 py-2.5 rounded-xl bg-[#FFFAF0] border border-[#FBD38D] text-[12.5px] font-bold text-[#C05621]">
+                  선택 {selectedRows.size}명 중 {modalExcludedCount}명은 현재 필터에서 벗어났거나 연락처가 없어 제외됩니다.
+                </div>
+              )}
               {selectedOptOutCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12.5px] font-bold text-[#C53030]">
                   수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
@@ -1572,6 +1765,7 @@ export function Pipeline() {
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>재컨택 A안 (전체 기본)</option>
                   <option value={RECONTACT_B_BODY}>재컨택 B안 (최근 6개월·짧게)</option>
+                  <option value={WAITLIST_BODY}>관심 대기 안내 (사후관리)</option>
                   <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
                   <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
                 </select>
@@ -1587,7 +1781,18 @@ export function Pipeline() {
               </div>
             </div>
             <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">
-              <span className="text-[13px] font-bold text-[#718096]">예상 비용: {(() => { const c = estimateSmsCost(bulkMsgBody); return `${c.sms_type} · 약 ${(c.cost_krw * selectedRows.size).toLocaleString()}원 (1인 ${c.cost_krw}원 × ${selectedRows.size}명)`; })()}</span>
+              {/* 비용은 대표 샘플(이름 3자·실제 길이 더미 링크) 치환 후 기준 × 실제 수신자 수 */}
+              {(() => {
+                const est = estimateSmsCost(fillSampleVars(bulkMsgBody));
+                return (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[13px] font-bold text-[#718096]">예상 비용: {est.sms_type} · 약 {(est.cost_krw * modalRecipientCount).toLocaleString()}원 (1인 {est.cost_krw}원 × {modalRecipientCount}명)</span>
+                    {Math.abs(est.bytes - 90) <= 10 && (
+                      <span className="text-[11.5px] font-semibold text-[#DD6B20]">치환 후 약 {est.bytes}바이트 — 90바이트 경계라 이름 길이에 따라 LMS로 넘어갈 수 있어요.</span>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="flex gap-2">
                 <button onClick={() => setBulkMsgModalOpen(false)} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0]">취소</button>
                 <button onClick={handleBulkSend} disabled={bulkSending} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
