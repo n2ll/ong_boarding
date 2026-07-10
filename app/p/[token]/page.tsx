@@ -326,9 +326,17 @@ export default function PoolPage() {
                     {/* 본문은 기본 접힘 — 위 요약(급여·시작일·차량)이 스캔 단위. 프로즈가 요약과 겹쳐
                         기본 노출하면 글자만 많아지고 3개 비교가 어렵다. 원하는 사람만 펼쳐 본다. */}
                     {expandedIds.has(job.id) && (
-                      <p className="mt-1 text-[15px] text-[#4A5568] leading-relaxed whitespace-pre-line">
-                        {job.body}
-                      </p>
+                      <div className="mt-1 text-[15px] text-[#4A5568] leading-relaxed">
+                        {/* 업무 관련 주요 내용(■ 항목 = 운임·요일·시간·차량 등)은 볼드로 강조 */}
+                        {job.body.split("\n").map((line, i) => (
+                          <p
+                            key={i}
+                            className={line.trimStart().startsWith("■") ? "font-bold text-[#1A202C]" : ""}
+                          >
+                            {line || " "}
+                          </p>
+                        ))}
+                      </div>
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
