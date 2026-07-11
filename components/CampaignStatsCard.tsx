@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import useSWR from "swr";
+import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ChevronRight, Megaphone, RefreshCw, Zap } from "lucide-react";
 
@@ -7,7 +8,8 @@ import { ChevronRight, Megaphone, RefreshCw, Zap } from "lucide-react";
  * 재컨택 캠페인 현황 카드 (내부 매니저용).
  * 벌크 ping 발송 코호트(최근 N일 ping_sent)의 반응을 퍼널 한 줄로 보여준다:
  * 발송 → 열람 → 관심 → 답장 (각 카운트 + 발송 대비 비율).
- * '관심'·'답장'은 아래 처리 큐 카드(#interest-queue/#reply-queue)로 앵커 스크롤해 바로 동선을 잇는다.
+ * '관심'·'답장'은 아래 처리 큐 카드(#interest-queue/#reply-queue)로 앵커 스크롤해 바로 동선을 잇고,
+ * '발송'·'열람'은 사람 명단이 있는 파이프라인 캠페인 퍼널 보드(/pipeline?view=funnel)로 이동한다.
  * 발송 이력이 없으면(코호트 0) 카드 자체를 숨긴다. 카드 톤은 InterestQueueCard와 일관.
  */
 
@@ -46,6 +48,7 @@ const scrollToAnchor = (id: string) =>
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
 export function CampaignStatsCard() {
+  const router = useRouter();
   const { data, error, mutate, isValidating } = useSWR<CampaignStatsRes>("/api/admin/campaign-stats");
 
   // '마지막 발송 상대시각' 갱신용 1분 틱 (InterestQueueCard와 동일 패턴)
@@ -113,17 +116,13 @@ export function CampaignStatsCard() {
           return (
             <Fragment key={s.key}>
               {i > 0 && <ChevronRight size={14} className="text-[#CBD5E0] shrink-0 self-center" />}
-              {s.anchor ? (
-                <button
-                  onClick={() => scrollToAnchor(s.anchor!)}
-                  title={`${s.label} 처리 큐로 이동`}
-                  className="flex-1 text-left rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3 hover:border-[#90CDF4] hover:bg-[#EBF8FF] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
-                >
-                  {inner}
-                </button>
-              ) : (
-                <div className="flex-1 rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3">{inner}</div>
-              )}
+              <button
+                onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
+                title={s.anchor ? `${s.label} 처리 큐로 이동` : "캠페인 퍼널 보드(사람 명단)로 이동"}
+                className="flex-1 text-left rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3 hover:border-[#90CDF4] hover:bg-[#EBF8FF] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+              >
+                {inner}
+              </button>
             </Fragment>
           );
         })}

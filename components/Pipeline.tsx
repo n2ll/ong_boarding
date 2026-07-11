@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
 import { useSearchParams } from "next/navigation";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap } from "lucide-react";
 import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -63,6 +63,28 @@ function lastReactionAt(s: PoolEventSummary | undefined): number | null {
     .map((v) => new Date(v).getTime())
     .filter((t) => !Number.isNaN(t));
   return ts.length ? Math.max(...ts) : null;
+}
+
+// 캠페인 퍼널 보드 — /api/admin/campaign-funnel 응답. 코호트(기간 내 ping_sent) 멤버별 최고 단계.
+type FunnelStage = "sent" | "viewed" | "interested" | "replied";
+
+interface FunnelMember {
+  applicant_id: number;
+  name: string | null;
+  sigungu: string | null;
+  availability: string | null;
+  stage: FunnelStage;
+  opted_out: boolean;
+  last_event_at: string | null;
+  interest_job_id: number | null;
+  interest_job_title: string | null;
+  immediate: boolean;
+  unread_count: number;
+}
+
+interface CampaignFunnelRes {
+  window_days: number;
+  members: FunnelMember[];
 }
 
 interface CardData {
@@ -308,7 +330,7 @@ export function Pipeline() {
   const searchParams = useSearchParams();
   const { branch: scopeBranch } = useBranchScope();
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
-  const [view, setView] = useState<"kanban" | "list" | "map">("list");
+  const [view, setView] = useState<"kanban" | "list" | "map" | "funnel">("list");
   const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
 
   // 지원자 목록은 SWR 캐시로 관리 — 탭 재방문 시 즉시 표시 + 대시보드와 중복 호출 dedup.
@@ -329,6 +351,15 @@ export function Pipeline() {
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
   const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null })), [visibleJobs]);
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
+
+  // 캠페인 퍼널 보드 — 퍼널 뷰에서만 조회(조건부 key). 기간(7/14/30일)은 캠페인 코호트 윈도우.
+  const [funnelDays, setFunnelDays] = useState(14);
+  const {
+    data: funnelData,
+    error: funnelError,
+    mutate: mutateFunnel,
+    isValidating: funnelValidating,
+  } = useSWR<CampaignFunnelRes>(view === "funnel" ? `/api/admin/campaign-funnel?days=${funnelDays}` : null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
@@ -341,7 +372,7 @@ export function Pipeline() {
     const q = searchParams.get("q");
     if (q) setQuery(q);
     const v = searchParams.get("view");
-    if (v === "map" || v === "kanban" || v === "list") setView(v);
+    if (v === "map" || v === "kanban" || v === "list" || v === "funnel") setView(v);
     const region = searchParams.get("region");
     if (region === "capital") setRegionFilter("capital");
     const vehicle = searchParams.get("vehicle");
@@ -1082,6 +1113,9 @@ export function Pipeline() {
             <button onClick={() => setView("map")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "map" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
               <MapIcon size={16} /> 지도 분포
             </button>
+            <button onClick={() => setView("funnel")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "funnel" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
+              <Funnel size={16} /> 퍼널
+            </button>
           </div>
 
           <div className="w-px h-6 bg-[#E2E8F0] mx-2"></div>
@@ -1330,7 +1364,7 @@ export function Pipeline() {
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-hidden relative">
-          {loading && <PipelineSkeleton />}
+          {loading && view !== "funnel" && <PipelineSkeleton />}
           {view === "kanban" && (
             <div className="flex gap-6 h-full overflow-x-auto p-8">
               {columns.map((column, idx) => (
@@ -1341,6 +1375,19 @@ export function Pipeline() {
 
           {view === "map" && (
             <PipelineMap applicants={mapApplicants} jobs={mapJobs} />
+          )}
+
+          {view === "funnel" && (
+            <FunnelBoard
+              data={funnelData}
+              error={funnelError}
+              days={funnelDays}
+              onDaysChange={setFunnelDays}
+              onRefresh={() => void mutateFunnel()}
+              isValidating={funnelValidating}
+              query={q}
+              onCardClick={(id) => setSelectedApplicantId(id)}
+            />
           )}
 
           {view === "list" && (
@@ -1806,6 +1853,179 @@ export function Pipeline() {
       )}
 
     </DndProvider>
+  );
+}
+
+// 캠페인 퍼널 보드 — 코호트(기간 내 ping_sent) 멤버를 '최고 단계'별 4컬럼으로 나열.
+// 대시보드 캠페인 카드가 숫자 요약이라면, 이 보드는 사람 명단 — 카드 클릭으로 바로 상세(개별 액션)로 잇는다.
+// 드래그 없음: 단계는 이벤트 사실(열람/관심/답장)이라 매니저가 옮길 수 있는 상태가 아니다.
+const FUNNEL_COLUMN_DEFS: { id: FunnelStage; title: string }[] = [
+  { id: "sent", title: "📤 발송됨" },
+  { id: "viewed", title: "👀 열람" },
+  { id: "interested", title: "⭐ 관심" },
+  { id: "replied", title: "💬 답장" },
+];
+const FUNNEL_STAGE_ORDER: FunnelStage[] = ["sent", "viewed", "interested", "replied"];
+
+// 가용성 배지 톤 — InterestQueueCard와 동일 기준(즉시가능 초록 강조, 이번주가능 연녹, 그 외 회색).
+function funnelAvailabilityBadge(availability: string | null): { label: string; cls: string } {
+  if (availability === "즉시가능")
+    return { label: "즉시가능", cls: "bg-[#F0FFF4] text-[#276749] border-[#9AE6B4]" };
+  if (availability === "이번주가능")
+    return { label: "이번주가능", cls: "bg-[#F0FFF4] text-[#38A169] border-[#C6F6D5]" };
+  if (availability === "휴면")
+    return { label: "휴면", cls: "bg-[#F7FAFC] text-[#A0AEC0] border-[#E2E8F0]" };
+  return { label: availability ?? "미확인", cls: "bg-[#F7FAFC] text-[#A0AEC0] border-[#E2E8F0]" };
+}
+
+interface FunnelBoardProps {
+  data: CampaignFunnelRes | undefined;
+  error: unknown;
+  days: number;
+  onDaysChange: (days: number) => void;
+  onRefresh: () => void;
+  isValidating: boolean;
+  query: string; // 소문자 trim된 검색어 — 이름 매칭만 적용(고급 필터는 이 뷰에 비적용)
+  onCardClick: (applicantId: number) => void;
+}
+
+function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating, query, onCardClick }: FunnelBoardProps) {
+  const members = data?.members ?? [];
+  const visible = query ? members.filter((m) => (m.name ?? "").toLowerCase().includes(query)) : members;
+  const byStage = new Map<FunnelStage, FunnelMember[]>(FUNNEL_COLUMN_DEFS.map((d) => [d.id, []]));
+  for (const m of visible) byStage.get(m.stage)?.push(m);
+  const total = visible.length;
+  // 발송 대비 % = '이 단계 이상 도달' 누적 기준 (열람률 등 — 대시보드 캠페인 카드와 동일 시맨틱)
+  const reachedFrom = (stage: FunnelStage) => {
+    const idx = FUNNEL_STAGE_ORDER.indexOf(stage);
+    return visible.filter((m) => FUNNEL_STAGE_ORDER.indexOf(m.stage) >= idx).length;
+  };
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* 상단 컨트롤 — 코호트 요약 + 기간 셀렉트 + 새로고침 */}
+      <div className="px-8 pt-6 pb-3 flex items-center gap-3 shrink-0 flex-wrap">
+        <span className="text-[13px] font-bold text-[#4A5568]">
+          최근 {data?.window_days ?? days}일 발송 코호트 <span className="text-[#3182CE]">{members.length}명</span>
+          {query && <span className="text-[#A0AEC0] font-semibold"> · 검색 일치 {visible.length}명</span>}
+        </span>
+        <div className="flex-1" />
+        <select
+          value={String(days)}
+          onChange={(e) => onDaysChange(Number(e.target.value))}
+          className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40 shadow-sm cursor-pointer"
+          title="캠페인 코호트 기간 — 이 기간 내 재컨택 발송(ping) 이력이 있는 인원"
+        >
+          <option value="7">최근 7일</option>
+          <option value="14">최근 14일</option>
+          <option value="30">최근 30일</option>
+        </select>
+        <button
+          onClick={onRefresh}
+          title="퍼널 새로고침"
+          className="flex items-center gap-1 text-[12.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+        >
+          <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
+        </button>
+      </div>
+
+      {error ? (
+        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">퍼널 데이터를 불러오지 못했어요.</div>
+      ) : !data ? (
+        <div className="flex-1 flex items-center justify-center text-[13px] text-[#A0AEC0]">
+          <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
+        </div>
+      ) : members.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
+          <div className="text-[14px] font-bold text-[#4A5568]">최근 {data.window_days}일 캠페인 발송이 없어요</div>
+          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 선별해 재컨택 문자를 발송하면 여기에 반응 퍼널이 쌓여요.</div>
+        </div>
+      ) : (
+        <div className="flex gap-6 flex-1 overflow-x-auto px-8 pb-8">
+          {FUNNEL_COLUMN_DEFS.map((col, idx) => {
+            const cards = byStage.get(col.id) ?? [];
+            const reached = reachedFrom(col.id);
+            return (
+              <motion.div
+                key={col.id}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: idx * 0.05 }}
+                className="flex flex-col w-[300px] shrink-0 bg-[#F4F6F9] rounded-[16px] p-4 border border-[#E2E8F0] shadow-sm"
+              >
+                <div className="flex items-center justify-between mb-4 px-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[15px] font-extrabold text-[#1A202C]">{col.title}</h2>
+                    <span className="text-[12px] font-bold text-[#718096] bg-[#E2E8F0] px-2.5 py-0.5 rounded-full">{cards.length}</span>
+                  </div>
+                  {col.id !== "sent" && total > 0 && (
+                    <span
+                      title={`발송 ${total}명 중 이 단계 이상 도달 ${reached}명`}
+                      className="text-[11px] font-bold text-[#718096] bg-white border border-[#E2E8F0] px-2 py-0.5 rounded-full"
+                    >
+                      발송 대비 {Math.round((reached / total) * 100)}%
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 pb-2 scrollbar-custom">
+                  {cards.map((m) => {
+                    const badge = funnelAvailabilityBadge(m.availability);
+                    return (
+                      <button
+                        key={m.applicant_id}
+                        onClick={() => onCardClick(m.applicant_id)}
+                        title="클릭하면 지원자 상세를 엽니다"
+                        className={`w-full text-left bg-white border border-[#E2E8F0] rounded-xl p-3.5 shadow-sm hover:border-[#FFCB3C] hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${m.opted_out ? "opacity-60 grayscale" : ""}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[13.5px] font-bold text-[#1A202C] truncate">{m.name || "이름 미상"}</span>
+                            {m.stage === "replied" && m.unread_count > 0 && (
+                              <span
+                                title={`미읽음 답장 ${m.unread_count}건`}
+                                className="min-w-4 h-4 px-1 rounded-full bg-[#E53E3E] text-white text-[10px] font-bold flex items-center justify-center shrink-0"
+                              >
+                                {m.unread_count}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-[#A0AEC0] shrink-0" title="이 단계 마지막 이벤트 시각">{relTime(m.last_event_at)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          {m.sigungu && (
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{m.sigungu}</span>
+                          )}
+                          <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
+                          {m.opted_out && (
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]">수신거부</span>
+                          )}
+                        </div>
+                        {m.stage === "interested" && m.interest_job_title && (
+                          <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-[#4A5568]">
+                            <span className="font-semibold truncate">{m.interest_job_title}</span>
+                            {m.immediate && (
+                              <span className="flex items-center gap-0.5 text-[#276749] font-bold shrink-0">
+                                <Zap size={11} /> 즉시가능
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {cards.length === 0 && (
+                    <div className="h-[100px] bg-white/40 border-2 border-dashed border-[#CBD5E0] rounded-xl flex items-center justify-center text-[12.5px] font-bold text-[#A0AEC0]">
+                      해당 단계 인원 없음
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
