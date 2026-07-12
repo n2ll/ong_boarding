@@ -95,10 +95,11 @@ export function buildGeneralScreeningAnnouncement(name: string | null): string {
   ].join("\n");
 }
 
-/** 스크리닝 통과 시 인계 마무리 — 배민 앱 가이드 대체. 확정 뉘앙스 없음(연락 예고까지만). */
+/** 스크리닝 통과 시 인계 마무리 — 배민 앱 가이드 대체. 보수적 톤:
+ *  일정을 "잡아드린다" 약속 금지(매니저 확인 후 연락 예고까지만) + 선탑≠투입 확정 명시. */
 export function buildGeneralHandoffText(name: string | null): string {
   const n = name ?? "지원자";
-  return `${n}님, 확인 감사합니다! 담당 매니저가 선탑(동승) 일정을 잡아 연락드릴게요 😊`;
+  return `${n}님, 확인 감사합니다! 말씀 주신 내용은 담당 매니저에게 전달해 둘게요. 매니저가 확인 후 연락드릴 예정이에요 😊 참고로 선탑(동승)은 현장을 미리 보는 단계라, 진행하시더라도 바로 투입 확정은 아니에요.`;
 }
 
 /** prompt_examples category='knowledge' rows를 프롬프트 섹션으로 조립. 비어 있으면 빈 문자열. */
