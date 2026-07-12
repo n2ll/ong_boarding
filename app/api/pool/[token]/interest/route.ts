@@ -5,13 +5,23 @@
  *   1. job_candidates upsert — 매니저 파이프라인/공고 보드에 후보로 노출 (발송은 dispatch에서)
  *   2. availability 갱신 — '즉시가능'이 아니면 '이번주가능'으로 (강한 신호를 약한 신호로 강등하지 않음)
  *   3. pool_events(interest_click / availability_set) 기록 — 신선도·신뢰 점수 근거
- *   4. Slack 알림 — 매니저가 컨택 여부를 결정
+ *   4. 자동 응대(auto-engage) — 전역 3단 모드 준수(off=발송 없음 / draft=수동 유도 / auto=첫 문자
+ *      발송 + screening 진입). 야간(KST 21~08시) 클릭은 engage_queued_at에 예약만 하고
+ *      아침 9시 cron(/api/admin/cron/engage-queued)이 발송한다. 로직은 lib/agent/engage.ts.
+ *   5. Slack 알림 — 자동 응대 결과 병기, 매니저가 후속 처리를 결정
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
+import { getAgentMode } from "@/lib/agent/kill-switch";
+import {
+  engageOutcomeLabel,
+  hasEngageMessage,
+  isNightKst,
+  runInterestEngage,
+} from "@/lib/agent/engage";
 
 export const dynamic = "force-dynamic";
 
@@ -119,12 +129,54 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const { error: evErr } = await supabase.from("pool_events").insert(events);
   if (evErr) console.error("[pool interest] pool_events insert failed", evErr);
 
-  // 4) 매니저 알림 (non-fatal)
-  await sendSlackText(
-    immediate
-      ? `⚡ *바로 시작 가능* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 "바로 시작 가능"이라고 답했어요.\n우선 컨택 후보입니다 — 파이프라인에서 확인해주세요.`
-      : `💡 *맞춤 공고 관심 표시* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`
-  ).catch(() => false);
+  // 4) 자동 응대(auto-engage) — 실패해도 관심 표시(1~3)는 성공 처리, 부가 동작이다 (non-fatal).
+  //    가드·발송·기록은 runInterestEngage(lib/agent/engage.ts)가 담당.
+  let engageNote = "";
+  try {
+    const mode = await getAgentMode(supabase);
+    if (mode === "auto" && isNightKst()) {
+      // 야간(KST 21~08시) 클릭 — 즉시 발송 대신 예약. 아침 9시 cron이 가드 재검사 후 발송.
+      if (await hasEngageMessage(supabase, jobId, applicant.id as number)) {
+        engageNote = "이미 이 공고 안내 문자를 받은 후보 — 중복 발송 방지로 생략.";
+      } else {
+        const { data: queued, error: qErr } = await supabase
+          .from("job_candidates")
+          .update({ engage_queued_at: new Date().toISOString() })
+          .eq("job_id", jobId)
+          .eq("applicant_id", applicant.id)
+          .is("agent_stage", null) // 진행 중 후보에겐 예약하지 않는다
+          .select("id");
+        if (qErr) {
+          console.error(
+            "[pool interest] engage queue failed (docs/migrations/2026-07-jc-engage-queued.sql 적용 확인)",
+            qErr
+          );
+        } else if ((queued?.length ?? 0) > 0) {
+          engageNote = "🌙 야간 클릭 — 내일 아침 9시(KST) AI 첫 문자 발송 예약됨.";
+        } else {
+          engageNote = "이미 진행 중인 후보 — 자동 발송 생략.";
+        }
+      }
+    } else if (mode !== "off") {
+      // 주간 auto 즉시 발송 / draft는 시간대와 무관하게 수동 유도(초안 불가 — 인바운드 없음)
+      const outcome = await runInterestEngage({
+        supabase,
+        jobId,
+        applicantId: applicant.id as number,
+        mode,
+        source: "interest_click",
+      });
+      engageNote = engageOutcomeLabel(outcome);
+    }
+  } catch (e) {
+    console.error("[pool interest] auto-engage failed (non-fatal)", e);
+  }
+
+  // 5) 매니저 알림 (non-fatal) — 자동 응대 결과 병기
+  const baseSlack = immediate
+    ? `⚡ *바로 시작 가능* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 "바로 시작 가능"이라고 답했어요.\n우선 컨택 후보입니다 — 파이프라인에서 확인해주세요.`
+    : `💡 *맞춤 공고 관심 표시* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`;
+  await sendSlackText(engageNote ? `${baseSlack}\n${engageNote}` : baseSlack).catch(() => false);
 
   return NextResponse.json({ success: true });
 }
