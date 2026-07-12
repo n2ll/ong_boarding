@@ -38,6 +38,9 @@ export async function GET(req: NextRequest) {
     .from("job_candidates")
     .select("id, job_id, applicant_id")
     .not("engage_queued_at", "is", null)
+    // 예약 시각이 도달한 건만 처리 — 미래 시각으로 세팅하면 '특정일 아침 시작' 예약이 된다
+    // (예: 주말 유입을 월요일 09:00에). 야간 큐(당일 클릭)는 과거 시각이라 그대로 처리.
+    .lte("engage_queued_at", new Date().toISOString())
     .limit(200);
   if (error) {
     console.error("[engage-queued cron] query error", error);
