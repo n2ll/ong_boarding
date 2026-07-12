@@ -115,9 +115,10 @@ interface CardData {
   lng: number | null;
 }
 
+// 표시 라벨만 실무 언어로 통일(LiveConsole·Jobs·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_KO: Record<string, string> = {
-  exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
-  active: "활성", paused: "수동", abort: "중단",
+  exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
+  active: "활동 중", paused: "수동 응대", abort: "중단",
 };
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -252,7 +253,7 @@ const FOURTEEN_DAYS_MS = 1000 * 60 * 60 * 24 * 14;
 // 발송 가능 여부 판정 — 연락처·맞춤링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   if (!c.phone) return { sendable: false, reason: "연락처 없음" };
-  if (!c.accessToken) return { sendable: false, reason: "맞춤링크 없음" };
+  if (!c.accessToken) return { sendable: false, reason: "맞춤 링크 없음" };
   if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
   return { sendable: true, reason: null };
 }
@@ -1052,7 +1053,7 @@ export function Pipeline() {
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
       if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
       if (recentDup) parts.push(`중복 방지 ${recentDup}명`);
-      if (noToken) parts.push(`링크토큰 없음 ${noToken}명 제외`);
+      if (noToken) parts.push(`맞춤 링크 없음 ${noToken}명 제외`);
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
       // 청크 단위 실패는 개별 결과가 없어 대상 인원 수를 '미시도'로 별도 표기(부분 발송 가시화).
@@ -1091,7 +1092,7 @@ export function Pipeline() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">인재풀 및 파이프라인 관리</h1>
-              <p className="text-[14px] text-[#718096]">수천 명의 대규모 지원자 DB를 여러 채용 단계와 조건에 따라 직관적으로 필터링하고 일괄 관리합니다.</p>
+              <p className="text-[14px] text-[#718096]">조건(지역·차종·가용성)으로 대상을 골라 재컨택 문자를 보내고, 후보의 진행 단계를 관리하는 화면입니다.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={exportCsv} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
@@ -1238,7 +1239,7 @@ export function Pipeline() {
 
                   {/* 가용성 — status(채용 단계)와 별개의 공급 축 */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">가용성</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="가용성 — 지금 일할 수 있는 상태(즉시가능·이번주가능·휴면). 채용 단계와 별개로 관리됩니다">가용성</label>
                     <div className="flex flex-wrap gap-1.5">
                       {AVAILABILITY_TOKENS.map((s) => {
                         const on = availabilityFilter.has(s);
@@ -1277,7 +1278,7 @@ export function Pipeline() {
 
                   {/* 발송·코호트 — 재컨택 대상 정밀화(원지원 코호트/주소 확정/활동중 제외) */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">발송·코호트</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="코호트 — 같은 기간·조건으로 묶은 인원 그룹. 재컨택 문자를 보낼 대상을 좁히는 필터예요">발송·코호트</label>
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         onClick={() => setRecentAppliedOnly((v) => !v)}
@@ -1644,7 +1645,11 @@ export function Pipeline() {
                     {!loading && filteredCards.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-4 py-12 text-center text-[13px] text-[#A0AEC0]">
-                          {query ? `'${query}' 검색 결과가 없어요.` : "표시할 지원자가 없어요."}
+                          {query
+                            ? `'${query}' 검색 결과가 없어요. 이름·전화번호를 다시 확인해 보세요.`
+                            : activeFilterCount > 0
+                              ? "조건에 맞는 지원자가 없어요. 위 '고급 필터'에서 조건을 풀어 보세요."
+                              : "표시할 지원자가 없어요. 지원자가 들어오면 여기에 쌓입니다."}
                         </td>
                       </tr>
                     )}
@@ -1835,7 +1840,7 @@ export function Pipeline() {
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[13px] font-bold text-[#718096]">예상 비용: {est.sms_type} · 약 {(est.cost_krw * modalRecipientCount).toLocaleString()}원 (1인 {est.cost_krw}원 × {modalRecipientCount}명)</span>
                     {Math.abs(est.bytes - 90) <= 10 && (
-                      <span className="text-[11.5px] font-semibold text-[#DD6B20]">치환 후 약 {est.bytes}바이트 — 90바이트 경계라 이름 길이에 따라 LMS로 넘어갈 수 있어요.</span>
+                      <span className="text-[11.5px] font-semibold text-[#DD6B20]">문자 길이가 단문 한도(90바이트)에 걸쳐 있어요 — 수신자 이름 길이에 따라 장문(LMS) 요금으로 나갈 수 있어요.</span>
                     )}
                   </div>
                 );
@@ -1905,7 +1910,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
     <div className="h-full flex flex-col overflow-hidden">
       {/* 상단 컨트롤 — 코호트 요약 + 기간 셀렉트 + 새로고침 */}
       <div className="px-8 pt-6 pb-3 flex items-center gap-3 shrink-0 flex-wrap">
-        <span className="text-[13px] font-bold text-[#4A5568]">
+        <span className="text-[13px] font-bold text-[#4A5568]" title="코호트 — 이 기간 안에 재컨택 문자를 받은 인원 묶음">
           최근 {data?.window_days ?? days}일 발송 코호트 <span className="text-[#3182CE]">{members.length}명</span>
           {query && <span className="text-[#A0AEC0] font-semibold"> · 검색 일치 {visible.length}명</span>}
         </span>
@@ -1914,7 +1919,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
           value={String(days)}
           onChange={(e) => onDaysChange(Number(e.target.value))}
           className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40 shadow-sm cursor-pointer"
-          title="캠페인 코호트 기간 — 이 기간 내 재컨택 발송(ping) 이력이 있는 인원"
+          title="캠페인 코호트 기간 — 이 기간 안에 재컨택 문자를 받은 인원 묶음"
         >
           <option value="7">최근 7일</option>
           <option value="14">최근 14일</option>
@@ -1930,7 +1935,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       </div>
 
       {error ? (
-        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">퍼널 데이터를 불러오지 못했어요.</div>
+        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">퍼널 데이터를 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
       ) : !data ? (
         <div className="flex-1 flex items-center justify-center text-[13px] text-[#A0AEC0]">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…

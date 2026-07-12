@@ -187,13 +187,13 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
       </div>
 
       {error ? (
-        <div className="py-4 text-center text-[13px] text-[#E53E3E]">큐를 불러오지 못했어요.</div>
+        <div className="py-4 text-center text-[13px] text-[#E53E3E]">목록을 불러오지 못했어요. 잠시 후 페이지를 새로고침해 주세요.</div>
       ) : !data ? (
         <div className="py-4 flex items-center justify-center text-[13px] text-[#A0AEC0]">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">답장 대기 중인 지원자가 없어요.</div>
+        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">답장 대기 중인 지원자가 없어요. 재컨택 문자에 답장이 오면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {

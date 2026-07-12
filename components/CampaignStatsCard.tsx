@@ -81,7 +81,7 @@ export function CampaignStatsCard() {
           <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
             <Megaphone size={15} className="text-[#3182CE]" /> 재컨택 캠페인 (최근 {data.window_days}일)
           </h2>
-          <div className="text-[12px] text-[#718096] mt-0.5">
+          <div className="text-[12px] text-[#718096] mt-0.5" title={`코호트 — 최근 ${data.window_days}일 안에 재컨택 문자를 받은 인원 묶음`}>
             발송 코호트 {data.sent}명의 반응 현황
             <span className="text-[#CBD5E0]"> · </span>
             마지막 발송 {agoLabel(data.last_sent_at, nowTick)}

@@ -187,7 +187,7 @@ export function Clients() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">화주사 관리</h1>
-          <p className="text-[14px] text-[#718096]">고객사(화주사) → 지점 → 공고 계층의 최상위 단위입니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
+          <p className="text-[14px] text-[#718096]">화주사(고객사)별로 소속 지점과 공고를 묶어 관리합니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
         </div>
         <button
           onClick={openCreate}

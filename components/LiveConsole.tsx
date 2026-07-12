@@ -93,12 +93,13 @@ function ageStyle(days: number): string {
   return "text-[#718096]";
 }
 
+// 표시 라벨만 실무 언어로 통일(ApplicantDetailPanel·Jobs·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_KO: Record<string, string> = {
-  exploration: "탐색",
+  exploration: "초기 대화",
   screening: "스크리닝",
   onboarding: "온보딩",
   active: "활동 중",
-  paused: "수동 전환",
+  paused: "수동 응대",
   abort: "중단",
 };
 
@@ -656,7 +657,7 @@ export function LiveConsole() {
         {/* 인계 대기 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대기 중인 인계가 없어요</div>}
+            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대기 중인 인계가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
             {visibleHandoffs.map((h) => {
               const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
               return (
@@ -800,7 +801,7 @@ export function LiveConsole() {
                   {chat.sms_opt_out_at
                     ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]">수신거부</span>
                     : avail && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${availStyle}`}>{avail === "휴면" ? "휴면" : "가능"}</span>}
-                  {chat.agent_stage === "paused" && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#4A5568]">수동(OFF)</span>}
+                  {chat.agent_stage === "paused" && <span title="AI 자동 응대가 꺼진 대화 — 매니저가 직접 답장합니다" className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#4A5568]">수동 응대</span>}
                   {/* 미처리 AI 초안 대기 — 코파일럿 모드에서 승인이 필요한 대화를 목록에서 바로 식별 */}
                   {previewById[chat.id]?.pending_draft && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]">⚡ 초안 대기</span>}
                   {/* 풀 응답: 활성 대화 없이 답장 온 건 — 스크리닝의 '개입 필요'와 구분(노랑) */}
@@ -860,7 +861,7 @@ export function LiveConsole() {
                           : selected ? "bg-[#3182CE] text-white" : "bg-[#EBF8FF] text-[#3182CE]"
                       }`}
                     >
-                      {paused ? "수동" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
+                      {paused ? "수동 응대" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
                     </span>
                   </button>
                 );

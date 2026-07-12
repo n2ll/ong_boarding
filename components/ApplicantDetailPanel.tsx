@@ -124,9 +124,10 @@ const ONBOARDING_LABELS: Record<string, string> = {
 };
 const ONBOARDING_KEYS = Object.keys(ONBOARDING_LABELS);
 
+// 표시 라벨만 실무 언어로 통일(LiveConsole·Jobs·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_LABEL: Record<string, string> = {
-  exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
-  active: "활성", paused: "수동", abort: "중단",
+  exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
+  active: "활동 중", paused: "수동 응대", abort: "중단",
 };
 
 const CALL_STATUS_OPTIONS = ["미실시", "통화 완료", "부재중", "예정", "카톡대체"];
@@ -574,7 +575,7 @@ export function ApplicantDetailContent({
           <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
           <button
             onClick={async () => {
-              if (!a.access_token) return toast.error("맞춤 링크 토큰이 없어요.");
+              if (!a.access_token) return toast.error("이 지원자 전용 맞춤 링크가 아직 없어요. 재컨택 문자를 보내면 자동으로 만들어져요.");
               try {
                 await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
                 toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
@@ -583,7 +584,7 @@ export function ApplicantDetailContent({
               }
             }}
             className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
-            title="본인 전용 맞춤 공고 페이지(/p/토큰) 링크 복사"
+            title="이 지원자 전용 맞춤 공고 페이지 링크 복사 — 문자에 붙여 보낼 수 있어요"
           >
             <MessageSquare size={14} /> 맞춤링크
           </button>
