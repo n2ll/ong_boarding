@@ -14,8 +14,9 @@
  */
 
 import { mergeAgentState } from "../checklist";
-import { buildToneGuide } from "../examples";
+import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
+import { buildLineKnowledgeBlock, isGeneralLineJob } from "../general-line";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
   Stage,
@@ -27,7 +28,8 @@ const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-6";
 const MANAGER_NAME = process.env.AGENT_MANAGER_NAME || "홍석범";
 
-const SYSTEM_PROMPT_BODY = `너는 옹고잉(내이루리) 비마트 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.
+// 페르소나 명칭은 공고 종류에 따라 갈린다 — 비마트(기존) / 일반 배송 라인(internal 실공고).
+const systemPromptBody = (roleNoun: string) => `너는 옹고잉(내이루리) ${roleNoun} 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.
 지금은 "탐색(exploration)" 단계 — 지원자가 공고를 보고 문의했거나, 매니저가 후보로 발송한 후 첫 응대 중이다.
 아직 지원의사가 확정되지 않은 상태로, 너의 역할은 **질문에 답하고 정보를 제공하는 것**이지 지원자를 끌고 가는 게 아니다.
 
@@ -102,7 +104,14 @@ async function buildSystemPrompt(
   branchName?: string | null,
   ctx?: StageContext
 ): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}\n\n${await buildToneGuide(branchName)}`;
+  // 일반 라인(internal 공고): 비마트 페르소나 대신 배송 크루 + 공통 FAQ(정산·유류비·과태료·선탑·보험) 주입.
+  // 공통 운영 정보(facts)는 비마트 기준이라 일반 라인에는 주입하지 않는다.
+  const general = isGeneralLineJob(ctx?.job);
+  const knowledgeBlock = general ? buildLineKnowledgeBlock(await loadLineKnowledge()) : "";
+  // 지점 ai_facts도 지원자의 비마트 1지망이 아니라 이 공고의 지점 기준으로만.
+  const toneBranch = general ? ctx?.job?.branch ?? null : branchName;
+  const tone = await buildToneGuide(toneBranch, { includeCommonFacts: !general });
+  return `${systemPromptBody(general ? "배송 크루" : "비마트 배송원")}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}${knowledgeBlock}\n\n${tone}`;
 }
 
 interface ExplorationToolInput {

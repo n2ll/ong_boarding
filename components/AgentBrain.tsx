@@ -29,10 +29,11 @@ interface PromptExample {
   body: string;
 }
 
-type KbCategory = "facts" | "system_message" | "conversation";
+type KbCategory = "facts" | "knowledge" | "system_message" | "conversation";
 
 const KB_CATEGORIES: { key: KbCategory; label: string; hint: string }[] = [
   { key: "facts", label: "운영 정보", hint: "지점·시급·정책 등 AI가 사실로 인용하는 정보. 여기 없는 사실은 추측하지 않고 매니저에게 넘깁니다." },
+  { key: "knowledge", label: "일반 라인 FAQ", hint: "일반 배송 라인(내부 인재풀 공고) 전용 공식 답변 — 정산·유류비·과태료·선탑·보험 등. 비마트 공고 응대에는 주입되지 않습니다." },
   { key: "system_message", label: "자동 발송 문구", hint: "시스템이 자동 발송하는 고정 문구. 제목(키)은 바꾸지 말고 본문만 다듬으세요. {{이름}} 등 치환자 사용 가능." },
   { key: "conversation", label: "대화 예시", hint: "옹봇의 말투를 잡아주는 대화 예시. 프롬프트에 함께 주입됩니다." },
 ];
@@ -73,6 +74,7 @@ const DEFAULT_PERSONA: PersonaForm = {
 const CATEGORY_LABEL: Record<string, string> = {
   conversation: "대화 예시",
   facts: "운영 정보",
+  knowledge: "일반 라인 FAQ",
   system_message: "자동 발송 문구",
 };
 
@@ -755,7 +757,7 @@ export function AgentBrain() {
                           <input
                             value={kbForm.title}
                             onChange={(e) => setKbForm({ ...kbForm, title: e.target.value })}
-                            placeholder={kbForm.category === "facts" ? "예: 강북미아" : kbForm.category === "system_message" ? "예: danggeun_start" : "예: 시급 문의 응대"}
+                            placeholder={kbForm.category === "facts" ? "예: 강북미아" : kbForm.category === "knowledge" ? "예: 정산·지급일" : kbForm.category === "system_message" ? "예: danggeun_start" : "예: 시급 문의 응대"}
                             className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
                           />
                         </div>
@@ -765,7 +767,7 @@ export function AgentBrain() {
                             value={kbForm.body}
                             onChange={(e) => setKbForm({ ...kbForm, body: e.target.value })}
                             rows={kbForm.category === "facts" ? 3 : 5}
-                            placeholder={kbForm.category === "facts" ? "시급 15,000~20,000원, 토일 08:00-16:00, 픽업 서울 강북구..." : "발송될 문구를 입력하세요. {{이름}}, {{지점}}, {{지원폼주소}} 등 치환자 사용 가능."}
+                            placeholder={kbForm.category === "facts" ? "시급 15,000~20,000원, 토일 08:00-16:00, 픽업 서울 강북구..." : kbForm.category === "knowledge" ? "지원자 질문에 AI가 그대로 인용할 공식 답변을 입력하세요. 예: 급여는 익월 5일에 지급돼요..." : "발송될 문구를 입력하세요. {{이름}}, {{지점}}, {{지원폼주소}} 등 치환자 사용 가능."}
                             className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none"
                           />
                         </div>

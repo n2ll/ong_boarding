@@ -20,6 +20,12 @@ import {
   buildFirstDayRules,
   buildVenueGuideText,
 } from "@/lib/agent/transitions";
+import {
+  buildGeneralHandoffText,
+  buildGeneralScreeningAnnouncement,
+  GENERAL_SCREENING_AUTO_TRUE,
+  isGeneralLineJob,
+} from "@/lib/agent/general-line";
 import { mergeAgentState } from "@/lib/agent/checklist";
 import { createServiceClient } from "@/lib/supabase";
 import type {
@@ -85,33 +91,46 @@ export async function POST(req: NextRequest) {
   let auto_messages_preview: string[] = [];
 
   // (1) 단계 전이 시 자동 발송 + 자동 true 체크리스트
+  const generalLine = isGeneralLineJob(payload.job);
   if (result.transition.kind === "advance") {
     if (result.transition.to === "screening") {
-      auto_messages_preview = [buildScreeningAnnouncement(name)];
+      auto_messages_preview = [
+        generalLine ? buildGeneralScreeningAnnouncement(name) : buildScreeningAnnouncement(name),
+      ];
 
       // exploration → screening: 안내 항목 + 조건부 항목 자동 true
       const job = payload.job;
       const slot = job?.slot ?? "";
-      const screeningAuto: Record<string, boolean> = {
-        프로모션_종료가능성_안내: true,
-        정산주기_안내: true,
-        업무시간_체계_이해: true,
-      };
-      if (job && job.vehicle_required === false) {
+      const screeningAuto: Record<string, boolean> = generalLine
+        ? { ...(GENERAL_SCREENING_AUTO_TRUE as Record<string, boolean>) }
+        : {
+            프로모션_종료가능성_안내: true,
+            정산주기_안내: true,
+            업무시간_체계_이해: true,
+          };
+      if (!generalLine && job && job.vehicle_required === false) {
         screeningAuto.자차_재확인 = true;
       }
-      if (!slot.includes("주말")) {
+      if (!generalLine && !slot.includes("주말")) {
         screeningAuto.공휴일_업무여부_확인 = true;
       }
       result.state_update = mergeAgentState(result.state_update, {
         screening: screeningAuto,
       });
     } else if (result.transition.to === "onboarding") {
-      auto_messages_preview = [buildOnboardingGuideText(name)];
-      // screening → onboarding: 앱설치 교육 안내 발송됨 자동 true
-      result.state_update = mergeAgentState(result.state_update, {
-        onboarding: { 앱설치_교육_안내발송됨: true },
-      });
+      if (generalLine) {
+        // 일반 라인: 배민 앱 가이드 대신 선탑 인계 마무리 + paused 전환 (transitions와 동일)
+        auto_messages_preview = [
+          buildGeneralHandoffText(name),
+          "ℹ️ 일반 라인 — 이후 매니저 인계(paused)로 전환되고 Slack에 수집 요약이 발송됩니다.",
+        ];
+      } else {
+        auto_messages_preview = [buildOnboardingGuideText(name)];
+        // screening → onboarding: 앱설치 교육 안내 발송됨 자동 true
+        result.state_update = mergeAgentState(result.state_update, {
+          onboarding: { 앱설치_교육_안내발송됨: true },
+        });
+      }
     } else if (result.transition.to === "active") {
       auto_messages_preview = [buildFirstDayRules(name)];
     }

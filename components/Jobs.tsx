@@ -135,6 +135,20 @@ const STAGE_COLOR: Record<string, string> = {
   abort: "bg-[#FFF5F5] text-[#E53E3E]",
 };
 
+// 공고 마감 안내 문구 — #{이름}/#{맞춤링크}는 bulk-send가 수신자별 치환, #{공고명}은 발송 시점에 치환.
+// 맞춤링크(/p/[token])가 활성 공고를 자동으로 보여주므로 타 공고 안내는 링크 하나로 끝난다.
+// '결원이 생기면 먼저 안내'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙).
+const JOB_CLOSED_NOTICE = `#{이름}님, '#{공고명}' 관심 가져주셔서 감사합니다. 이 공고는 충원이 완료됐어요. 지금 모집 중인 다른 공고는 여기서 보실 수 있어요: #{맞춤링크}
+결원이 생기면 이 번호로 먼저 안내드릴게요!`;
+
+// 마감 안내 발송 대상(미선발 관심자) — interested API(detail=1)가 수신거부·확정인력·기수신자 등을 걸러 내려준다.
+interface CloseNotifyTarget {
+  id: number;
+  name: string | null;
+  phone: string;
+  access_token: string;
+}
+
 // 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
 function availabilityRank(v: string | null | undefined): number {
   if (v === "즉시가능") return 0;
@@ -301,6 +315,9 @@ export function Jobs() {
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
+  const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
+  const [closing, setClosing] = useState(false);
   // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
   const [aiGlobalOn, setAiGlobalOn] = useState(true);
 
@@ -888,41 +905,137 @@ export function Jobs() {
   };
 
   const handleToggleClose = async (job: JobRow) => {
-    const next = job.status === "active" ? "closed" : "active";
-    let ok: boolean;
-    if (next === "closed") {
-      // 마감하면 dispatch·pull 관심표시가 막히고 AI 자동 응대가 꺼진다.
-      // 진행 중 후보가 있으면 그 응대가 멈추는 걸 명시해 무심코 대화를 끊는 걸 막는다.
-      const warn = job.inProgress > 0
-        ? `\n\n⚠️ 진행 중인 후보 ${job.inProgress}명의 AI 응대가 멈춰요. 나누던 대화가 끊길 수 있어요.`
-        : "";
-      ok = await confirm({
-        title: "공고를 마감할까요?",
-        description: `'${job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.${warn}`,
-        confirmText: "마감하기",
-        destructive: job.inProgress > 0,
-      });
-    } else {
-      ok = await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    if (job.status === "active") {
+      // 마감 확인은 전용 모달 — 마감이 "떨어진 분들이 아무 연락도 못 받는" 순간이 되지 않게
+      // 미선발 관심자 안내 발송 체크박스(기본 ON)와 문구 미리보기를 함께 보여준다.
+      setCloseModal({ job, targets: [], loading: true, send: true });
+      try {
+        const res = await fetch(`/api/admin/pool-events/interested?job_id=${job.id}&detail=1`);
+        const json = await res.json();
+        const targets: CloseNotifyTarget[] = res.ok && Array.isArray(json?.targets) ? json.targets : [];
+        // 조회 중 모달이 닫혔거나 다른 공고로 바뀌었으면 반영하지 않는다.
+        setCloseModal((prev) => (prev && prev.job.id === job.id ? { ...prev, targets, loading: false } : prev));
+      } catch {
+        // 대상 조회 실패 — 체크박스 없이 마감만 가능(발송은 부가 동작).
+        setCloseModal((prev) => (prev && prev.job.id === job.id ? { ...prev, targets: [], loading: false } : prev));
+      }
+      return;
     }
+    // 재개(closed → active)는 기존 확인 다이얼로그 유지.
+    const ok = await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
     if (!ok) return;
     setStatusBusyId(job.id);
     try {
       const res = await fetch(`/api/admin/jobs/${job.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ status: "active" }),
       });
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "변경에 실패했어요");
         return;
       }
-      toast.success(next === "closed" ? "공고를 마감했어요." : "공고를 다시 진행합니다.");
+      toast.success("공고를 다시 진행합니다.");
+      // 결원 우선 안내 연결고리 — 마감/충원 안내(waitlist_notice)를 받은 대기자 수를 힌트로 알린다.
+      try {
+        const r = await fetch(`/api/admin/pool-events/interested?job_id=${job.id}&detail=1`);
+        const j = await r.json();
+        const n = r.ok && typeof j?.waitlistNotifiedCount === "number" ? j.waitlistNotifiedCount : 0;
+        if (n > 0) {
+          toast.info(`이 공고 대기자 ${n}명 — 파이프라인에서 '공고 관심자 선택'으로 우선 안내할 수 있어요.`);
+        }
+      } catch {
+        /* 힌트 조회 실패는 재개 흐름에 영향 없음 */
+      }
       await loadJobs();
     } catch {
       toast.error("변경에 실패했어요");
     } finally {
+      setStatusBusyId(null);
+    }
+  };
+
+  // 미선발 관심자 마감 안내 발송 — bulk-send 재사용(수신거부·인력풀 제외·10분 중복 가드 공유).
+  // purpose='job_closed'로 보내면 서버가 pool_events(waitlist_notice, trigger:'job_closed')를 남겨
+  // 이후 '결원 시 우선 안내' 대상 역조회의 근거가 된다.
+  const sendCloseNotices = async (job: JobRow, targets: CloseNotifyTarget[]) => {
+    const body = JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
+    let sent = 0;
+    const failErrors: string[] = [];
+    let chunkFailed = 0;
+    // bulk-send 1회 상한 50명 → 청크 발송. 한 청크가 실패해도 나머지는 계속(서버 중복 가드가 재발송 방지).
+    for (let i = 0; i < targets.length; i += 50) {
+      const chunk = targets.slice(i, i + 50);
+      try {
+        const res = await fetch("/api/admin/messages/bulk-send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipients: chunk.map((t) => ({ phone: t.phone, applicant_id: t.id })),
+            body,
+            purpose: "job_closed",
+            job_id: Number(job.id),
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          chunkFailed += chunk.length;
+          continue;
+        }
+        sent += typeof json?.sent === "number" ? json.sent : 0;
+        for (const r of (json?.results ?? []) as Array<{ success: boolean; error?: string }>) {
+          if (!r.success) failErrors.push(r.error ?? "");
+        }
+      } catch {
+        chunkFailed += chunk.length;
+      }
+    }
+    // 결과 구분 보고 — 가드에 걸린 인원(수신거부·인력풀 제외·중복 방지·토큰 없음)은 '실패'가 아니라 의도된 제외.
+    const guarded = failErrors.filter((e) =>
+      e.includes("수신거부") || e.includes("인력풀 제외") || e.includes("중복 방지") || e.includes("토큰 없음")
+    ).length;
+    const failed = failErrors.length - guarded + chunkFailed;
+    const parts = [`${sent}명 발송`];
+    if (guarded) parts.push(`가드 제외 ${guarded}명`);
+    if (failed) parts.push(`실패 ${failed}명`);
+    (sent > 0 ? toast.success : toast.error)(
+      `마감 안내: ${parts.join(" · ")}`,
+      sent === 0
+        ? { description: "발송은 실패했지만 공고 마감은 완료됐어요." }
+        : failed > 0
+          ? { description: "실패분은 파이프라인 캠페인 발송으로 다시 보낼 수 있어요." }
+          : undefined
+    );
+  };
+
+  // 마감 확정 — 마감(PATCH)이 성공해야만 안내 발송하고, 발송 실패는 마감에 영향 없음(발송은 부가 동작).
+  const confirmClose = async () => {
+    if (!closeModal || closing) return;
+    const { job, targets, send } = closeModal;
+    setClosing(true);
+    setStatusBusyId(job.id);
+    try {
+      const res = await fetch(`/api/admin/jobs/${job.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "closed" }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "변경에 실패했어요");
+        return;
+      }
+      setCloseModal(null);
+      toast.success("공고를 마감했어요.");
+      await loadJobs();
+      if (send && targets.length > 0) {
+        await sendCloseNotices(job, targets);
+      }
+    } catch {
+      toast.error("변경에 실패했어요");
+    } finally {
+      setClosing(false);
       setStatusBusyId(null);
     }
   };
@@ -1669,6 +1782,64 @@ export function Jobs() {
               <button onClick={() => setEditForm(null)} disabled={editSaving} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
               <button onClick={handleEditSave} disabled={editSaving || editLoading} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 flex items-center gap-2">
                 {editSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 공고 마감 확인 모달 — 미선발 관심자 안내 발송 옵션 포함 */}
+      {closeModal && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !closing && setCloseModal(null)}>
+          <div className="bg-white w-full max-w-[480px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-7 pt-6 pb-2">
+              <h2 className="text-[18px] font-extrabold text-[#1A202C]">공고를 마감할까요?</h2>
+              <p className="text-[13.5px] text-[#718096] mt-2 leading-relaxed">
+                {`'${closeModal.job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.`}
+              </p>
+              {/* 마감하면 dispatch·pull 관심표시가 막히고 AI 자동 응대가 꺼진다 — 진행 중 후보 경고(E2-2). */}
+              {closeModal.job.inProgress > 0 && (
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFF5F5] border border-[#FED7D7] text-[12.5px] font-bold text-[#E53E3E]">
+                  ⚠️ 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대가 멈춰요. 나누던 대화가 끊길 수 있어요.
+                </div>
+              )}
+              {closeModal.loading ? (
+                <div className="mt-4 flex items-center gap-2 text-[12.5px] text-[#A0AEC0]">
+                  <Loader2 size={14} className="animate-spin" /> 미선발 관심자 확인 중…
+                </div>
+              ) : closeModal.targets.length > 0 ? (
+                <div className="mt-4">
+                  <label className="flex items-center gap-2 text-[13.5px] font-bold text-[#2D3748] cursor-pointer" title="이 공고에 관심을 표시했거나 진행 중이었지만 확정되지 않은 인원(수신거부·기수신자 제외)">
+                    <input
+                      type="checkbox"
+                      checked={closeModal.send}
+                      onChange={(e) => setCloseModal({ ...closeModal, send: e.target.checked })}
+                      className="accent-[#FFCB3C]"
+                    />
+                    미선발 관심자 {closeModal.targets.length}명에게 안내 문자 발송
+                  </label>
+                  {closeModal.send && (
+                    <>
+                      <div className="mt-2 px-3 py-2.5 rounded-lg bg-[#F7FAFC] border border-[#E2E8F0] text-[11.5px] text-[#718096] leading-relaxed whitespace-pre-line">
+                        {JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(closeModal.job.title))}
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-[#A0AEC0]">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-7 py-5">
+              <button onClick={() => setCloseModal(null)} disabled={closing} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button
+                onClick={confirmClose}
+                disabled={closing || closeModal.loading}
+                className={`px-6 py-2.5 rounded-xl text-[14px] font-bold text-white disabled:opacity-60 flex items-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${closeModal.job.inProgress > 0 ? "bg-[#E53E3E] hover:bg-[#C53030]" : "bg-[#1A202C] hover:bg-[#2D3748]"}`}
+              >
+                {closing ? <Loader2 size={16} className="animate-spin" /> : <Pause size={16} />}
+                {!closeModal.loading && closeModal.send && closeModal.targets.length > 0
+                  ? `마감 + ${closeModal.targets.length}명 안내 발송`
+                  : "마감하기"}
               </button>
             </div>
           </div>

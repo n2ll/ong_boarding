@@ -63,6 +63,13 @@ export interface AgentState {
       summary?: string | null;
       suggested_action?: string | null;
     };
+    /** 일반 라인(internal 공고) 스크리닝 수집값 — 차종·시작 가능일·선탑 가능 시간대·법인차 렌트 희망 */
+    general_screening?: {
+      차종?: string;
+      시작가능일?: string;
+      선탑_가능시간?: string;
+      법인차_렌트_희망?: boolean;
+    };
     [k: string]: unknown;
   };
 }
@@ -91,6 +98,8 @@ export interface JobContext {
   pay_amount?: number | null;
   /** 공고별 AI 참고 정보 (근무·차량 정책 등 자유 기재) — branches.ai_facts의 공고 레벨 미러. */
   ai_facts?: string | null;
+  /** 모집 방식 (external/internal/both) — internal 실공고는 일반 라인 스크리닝 흐름을 탄다. */
+  recruit_mode?: string | null;
 }
 
 export interface ApplicantContext {

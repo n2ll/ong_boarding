@@ -3,6 +3,8 @@
  *
  * - prompt_examples.category='conversation' : 일반 대화 톤 (모든 stage) — 백엔드 전용, UI 비노출
  * - prompt_examples.category='facts'        : 공통 운영 정보 (전 지점 공통 — 정산·프로모션·업무시간 등)
+ * - prompt_examples.category='knowledge'    : 일반 배송 라인 FAQ — internal 실공고 프롬프트에만 주입
+ *                                             (비마트 흐름과 정산 주기 등이 달라 facts와 분리)
  * - branches.ai_facts                       : 지점별 AI 참고 정보 (자유 텍스트, 지점관리 탭에서 편집)
  *
  * 매니저가 admin UI에서 편집하면 다음 캐시 만료(60초) 이후 자동 반영.
@@ -18,7 +20,7 @@ interface CachedCategory {
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, CachedCategory>();
 
-async function fetchCategory(category: "conversation" | "facts"): Promise<string> {
+async function fetchCategory(category: "conversation" | "facts" | "knowledge"): Promise<string> {
   const cached = cache.get(category);
   if (cached && cached.expiresAt > Date.now()) return cached.text;
 
@@ -104,6 +106,11 @@ export async function loadFacts(): Promise<string> {
   return fetchCategory("facts");
 }
 
+/** 일반 배송 라인 FAQ(category='knowledge') — internal 실공고 프롬프트에서만 사용. */
+export async function loadLineKnowledge(): Promise<string> {
+  return fetchCategory("knowledge");
+}
+
 interface CachedBranchFacts {
   text: string;
   expiresAt: number;
@@ -147,11 +154,17 @@ async function loadBranchAiFacts(branchName: string | null | undefined): Promise
  *
  * @param branchName 지원자의 1지망 지점명 — 그 지점의 ai_facts를 별도 섹션으로 추가.
  *                   비어 있으면 공통 facts만 포함.
+ * @param opts.includeCommonFacts false면 공통 운영 정보(facts) 섹션 생략 —
+ *                   비마트 기준 정산·프로모션 정보라 일반 라인(internal 공고) 프롬프트를 오염시키기 때문.
  */
-export async function buildToneGuide(branchName?: string | null): Promise<string> {
+export async function buildToneGuide(
+  branchName?: string | null,
+  opts?: { includeCommonFacts?: boolean }
+): Promise<string> {
+  const includeCommonFacts = opts?.includeCommonFacts ?? true;
   const [conv, commonFacts, branchFacts, persona] = await Promise.all([
     loadConversationExamples(),
-    loadFacts(),
+    includeCommonFacts ? loadFacts() : Promise.resolve(""),
     loadBranchAiFacts(branchName),
     loadPersonaGuidance(),
   ]);

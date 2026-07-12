@@ -9,9 +9,18 @@
  */
 
 import { emptyScreening, isComplete, mergeAgentState } from "../checklist";
-import { buildToneGuide } from "../examples";
+import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
+import {
+  buildLineKnowledgeBlock,
+  GENERAL_SCREENING_AUTO_TRUE,
+  isGeneralCollectedComplete,
+  isGeneralLineJob,
+  mergeGeneralCollected,
+  readGeneralCollected,
+  type GeneralScreeningCollected,
+} from "../general-line";
 import type {
   Stage,
   StageContext,
@@ -162,16 +171,96 @@ reply_text는 빈 문자열로. transition_reason에 한 줄로 신호를 적어
 ## 출력
 screening_turn tool로만 응답.`;
 
+// ─────────────────────────────────────────────────────────────
+// 일반 배송 라인(internal 실공고 — 도시락 라인 등) 전용 프롬프트.
+// 체크리스트 상태는 기존 7키 구조를 그대로 쓰되(스키마 파장 없음),
+// 항목 의미를 프롬프트 레벨에서 재정의한다. 비마트 전용 4항목은 시스템이 자동 true 처리.
+// ─────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT_BODY_GENERAL = `너는 옹고잉(내이루리) 배송 크루 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.
+지금은 "스크리닝" 단계 — 일반 배송 라인(도시락 등 정기 배송) 공고 지원자에게 1차 확인질문을 진행한다.
+
+⚠️ 이 공고는 비마트/배민커넥트가 아니다. 비마트 지식(프로모션 5천원, 08:00/16:00 배차, 배민 앱 가입,
+건당 매주 정산)을 절대 언급하지 마라. 이 공고의 사실은 [현재 공고]와 아래 FAQ 범위에서만.
+
+## ⚠️ 가장 중요한 원칙 — 확정 뉘앙스 절대 금지
+지원자가 너의 질문에 모두 긍정 응답해도 **그것이 곧 근무 확정/배정을 의미하지 않는다.**
+최종 확정은 매니저가 별도로 진행하며, 이 단계는 단순 **사전 확인**일 뿐이다.
+
+❌ 절대 쓰지 마라: "근무 확정" / "배정됐어요" / "○일부터 출근" / "그럼 시작하겠습니다" / "합격"
+✅ 안내는 "매니저가 연락드려요 / 안내드려요"까지만.
+
+## 확인 항목 (이 순서로, 한 메시지에 1~2개씩 자연스럽게)
+1. **차종 확인** — 지금 운행하시는 차량(차종)이 무엇인지. [현재 공고]의 차량 요건(공고 참고정보·본문)과 대조.
+   → 확인되면 checklist_update의 **자차_재확인: true** (이 키가 '차종 확인' 항목이다) + collected.차종에 차종 기록.
+2. **본인 명의 정산 가능 여부** → checklist_update의 본인명의_정산_문제없음: true
+3. **시작 가능일** — "언제부터 시작 가능하실까요?" (가능일 수집일 뿐, 시작일 확정 아님 — 확정 뉘앙스 금지)
+   → collected.시작가능일에 지원자 답 그대로 기록 (예: "다음 주 월요일부터", "7/20 이후").
+4. **선탑(동승) 가능 요일·시간대** — 실 투입 전 인계 준비용. "선탑(동승 교육) 가능하신 요일·시간대가 어떻게 되세요?"
+   → collected.선탑_가능시간에 기록 (예: "평일 오전", "화·목 가능").
+5. 지원자 질문 모두 응답 → 지원자_질문_해소: true ("더 질문 없어요" 응답 또는 처음부터 질문 없었으면 true 처리)
+
+직전에 시스템이 이미 첫 확인질문(차종·본인명의)을 보냈다면 다시 인사·자기소개하지 말고 답변부터 받아라.
+
+## 판정 규칙
+- **본인 명의 정산 불가** → 이 공고 부적합. transition: "abort" (reason: "본인 명의 정산 불가").
+  정중하게 마무리 인사. (이 공고만 종료 — 인력풀에서는 유지된다)
+- **차종 미달·차량 없음 → 절대 abort 하지 마라.** 대신 법인차 렌트를 안내해라:
+  "법인 차량 렌트를 이용할 수 있는 경우가 있어요. 사용료가 발생하고 유류비는 개인 부담이에요. 원하시면 매니저가 자세히 안내드려요"
+  → 지원자가 관심 있으면 collected.법인차_렌트_희망: true + 자차_재확인: true 로 처리하고 나머지 항목 계속 진행.
+  → 렌트도 원치 않고 진행 의사도 없다고 명확히 하면 그때만 abort (reason: "지원 의사 철회").
+- 선탑이 뭔지 물으면 FAQ의 선탑 설명으로 답해라.
+
+## 마무리 (모든 항목 확인 + 수집 완료 시)
+transition: "advance". 마무리 안내("담당 매니저가 선탑 일정을 잡아 연락드릴게요")는 시스템이 자동 발송한다 —
+네가 reply_text에 마무리 멘트를 쓸 필요 없다. 이후 절차·일정은 매니저가 직접 진행한다.
+
+## 사실 정확성 (엄격)
+- 단가·시간대·근무지 등 **모든 수치/사실은 [현재 공고]에 명시된 것**('대표 단가(명시됨)'·'급여·정산(명시됨)'·
+  '고용·정책(명시됨)'·'공고 참고정보(명시됨)')과 아래 FAQ 범위에서만 답해라. 단가는 "변동될 수 있어요" 한마디를 곁들여라.
+- 정산 시기 질문은 FAQ대로: 익월 5일 지급 + 계약 형태에 따라 세금 공제가 달라 자세한 건 매니저 안내.
+  **조기 정산·선지급은 절대 약속하지 마라.**
+- 공고·FAQ에 없는 정보는 **절대 추측·계산하지 마라.** 모르면 "확인 후 다시 안내드릴게요" + transition: pause.
+
+## 🚨 즉시 pause (매니저 인계) — 다음 신호가 있으면 한 턴이라도 더 응대하지 말고 pause
+**pause를 결정했으면 reply_text는 빈 문자열로 두라.** 시스템이 슬랙으로 알리고 매니저가 직접 응대한다.
+1. **수치/단가 구체 질문** — [현재 공고]에 명시된 값이 있으면 그 값으로 직접 답하라(pause 아님). 없으면 추측하지 말고 pause.
+2. **항의·법적 표현** — "불법", "고소", "신고", "노동청", "지원 취소" 등 한 단어라도 등장하면 즉시 pause.
+3. **반복 재촉 + 짜증 누적** — 같은 질문 2회 이상 재촉, 감정 격화 표현이 보이면 pause.
+4. **계약·세금·보험 세부** — FAQ·공고 명시 범위를 벗어난 세부 질문(공제액 계산, 계약서 조항 등)은 pause.
+transition_reason에 한 줄로 신호를 적어라.
+
+## 체크리스트·수집값 갱신 — 절대 누락 금지
+- **지원자가 확인해 준 항목은 그 턴에 반드시 checklist_update에 true로 넣어라.** 안 넣으면 진행이 영영 멈춘다.
+- 지원자가 말한 차종·시작 가능일·선탑 가능 시간대는 그 턴에 반드시 collected에 기록해라.
+- 이미 true인 항목은 다시 묻지 마라. 묶음 질문에 일괄 긍정이면 해당 항목들 한꺼번에 true.
+- 명시적 부정(본인 명의 불가 등)은 false 유지 + transition: abort/pause.
+
+## 톤
+정중하고 간결하게. 1~3문장. 호칭 "[이름]님" / "선생님". 이모지는 가끔만 😊.
+지원자가 재촉하거나 거리감을 표현하면 즉시 사과하고 그 턴 진행을 멈춰라.
+
+## 출력
+screening_turn tool로만 응답.`;
+
 async function buildSystemPrompt(
   branchName?: string | null,
   ctx?: StageContext
 ): Promise<string> {
-  return `${SYSTEM_PROMPT_BODY}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}\n\n${await buildToneGuide(branchName)}`;
+  const general = isGeneralLineJob(ctx?.job);
+  const body = general ? SYSTEM_PROMPT_BODY_GENERAL : SYSTEM_PROMPT_BODY;
+  const knowledgeBlock = general ? buildLineKnowledgeBlock(await loadLineKnowledge()) : "";
+  // 일반 라인: 공통 운영 정보(facts)는 비마트 기준(정산 주기 등)이라 주입하지 않는다 — FAQ(knowledge)가 대신한다.
+  // 지점 ai_facts도 지원자의 비마트 1지망이 아니라 이 공고의 지점 기준으로만.
+  const toneBranch = general ? ctx?.job?.branch ?? null : branchName;
+  const tone = await buildToneGuide(toneBranch, { includeCommonFacts: !general });
+  return `${body}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}${knowledgeBlock}\n\n${tone}`;
 }
 
 interface ScreeningToolInput {
   reply_text: string;
   checklist_update: Partial<ScreeningChecklist>;
+  /** 일반 라인 전용 — 이번 턴에 수집/갱신된 값만 (TOOL_GENERAL에서만 존재). */
+  collected?: GeneralScreeningCollected;
   transition: "stay" | "advance" | "abort" | "pause";
   transition_reason: string;
   handoff_category?: string;
@@ -225,11 +314,83 @@ const TOOL = {
   },
 };
 
+// 일반 라인(internal 공고) 전용 tool — 관리 항목을 3키로 좁히고 수집값(collected)을 추가.
+// tool 이름은 동일("screening_turn") — tool_choice·응답 파서가 그대로 동작한다.
+const TOOL_GENERAL = {
+  name: "screening_turn",
+  description:
+    "일반 배송 라인 스크리닝 한 턴 처리 — 응답문, 체크리스트 갱신, 수집값, 단계 전이를 한 번에 반환.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      reply_text: {
+        type: "string",
+        description:
+          "지원자에게 보낼 답변. 한국어 1~3문장. 정중·간결. 미확인 항목 1~2개를 자연스럽게 진행.",
+      },
+      checklist_update: {
+        type: "object",
+        description:
+          "이번 턴에 새로 true가 된 항목만 포함. 자차_재확인 = '차종 확인' 항목. 변경 없으면 빈 객체.",
+        properties: {
+          자차_재확인: { type: "boolean" },
+          본인명의_정산_문제없음: { type: "boolean" },
+          지원자_질문_해소: { type: "boolean" },
+        },
+      },
+      collected: {
+        type: "object",
+        description:
+          "이번 턴에 지원자에게서 수집/갱신된 값만. 없으면 빈 객체. 지원자 표현 그대로 짧게.",
+        properties: {
+          차종: { type: "string", description: "지원자 차종 (예: '스타렉스', '레이', '차 없음')" },
+          시작가능일: { type: "string", description: "시작 가능일 (예: '다음 주 월요일부터', '즉시')" },
+          선탑_가능시간: { type: "string", description: "선탑(동승) 가능 요일·시간대 (예: '평일 오전', '화·목')" },
+          법인차_렌트_희망: { type: "boolean", description: "차종 미달/차량 없음 상태에서 법인차 렌트 안내에 관심을 보였으면 true" },
+        },
+      },
+      transition: {
+        type: "string",
+        enum: ["stay", "advance", "abort", "pause"],
+        description:
+          "stay=계속 대화, advance=체크 항목+수집값 모두 완료, abort=본인 명의 정산 불가/지원 의사 철회, pause=매니저 직접 응대 필요",
+      },
+      transition_reason: {
+        type: "string",
+        description: "abort/pause/advance 사유 한 줄. stay면 빈 문자열.",
+      },
+      ...handoffToolProperties,
+      reasoning: {
+        type: "string",
+        description: "이 턴의 의사결정 근거 한 줄 (매니저 검토용).",
+      },
+    },
+    required: ["reply_text", "checklist_update", "transition", "reasoning"],
+  },
+};
+
 function formatChecklist(state: StageContext["state"]): string {
   const cl = { ...emptyScreening(), ...(state.screening ?? {}) };
   return Object.entries(cl)
     .map(([k, v]) => `  ${v ? "✓" : "☐"} ${k}`)
     .join("\n");
+}
+
+// 일반 라인 — AI가 관리하는 3키 + 수집값만 보여준다 (비마트 전용 키는 시스템이 자동 true).
+function formatGeneralChecklist(state: StageContext["state"]): string {
+  const cl = { ...emptyScreening(), ...(state.screening ?? {}) };
+  const collected = readGeneralCollected(state.meta);
+  const flag = (v: boolean) => (v ? "✓" : "☐");
+  return [
+    `  ${flag(cl.자차_재확인)} 자차_재확인 (= 차종 확인)`,
+    `  ${flag(cl.본인명의_정산_문제없음)} 본인명의_정산_문제없음`,
+    `  ${flag(cl.지원자_질문_해소)} 지원자_질문_해소`,
+    "[수집값]",
+    `  차종: ${collected.차종 ?? "(미수집)"}`,
+    `  시작가능일: ${collected.시작가능일 ?? "(미수집)"}`,
+    `  선탑_가능시간: ${collected.선탑_가능시간 ?? "(미수집)"}`,
+    `  법인차_렌트_희망: ${collected.법인차_렌트_희망 ? "예" : "아니오"}`,
+  ].join("\n");
 }
 
 function formatHistory(history: StageContext["history"]): string {
@@ -290,6 +451,8 @@ export const screeningStage: Stage = {
       weekday: "short",
     });
 
+    const general = isGeneralLineJob(ctx.job);
+
     const userContent = `[오늘 날짜] ${todayKST}
 
 [현재 공고]
@@ -299,7 +462,7 @@ ${formatJob(ctx.job)}
 ${formatApplicant(ctx.applicant)}
 ${formatOtherActiveJobs(ctx.otherActiveJobs)}
 [현재 체크리스트 상태]
-${formatChecklist(ctx.state)}
+${general ? formatGeneralChecklist(ctx.state) : formatChecklist(ctx.state)}
 
 [지금까지의 대화]
 ${formatHistory(ctx.history)}
@@ -321,7 +484,7 @@ ${inboundText}
           model: MODEL,
           max_tokens: 1024,
           system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx),
-          tools: [TOOL],
+          tools: [general ? TOOL_GENERAL : TOOL],
           tool_choice: { type: "tool", name: "screening_turn" },
           messages: [{ role: "user", content: userContent }],
         }),
@@ -359,19 +522,34 @@ function countTrueFlags(obj: Record<string, unknown> | undefined): number {
 }
 
 function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult {
+  const general = isGeneralLineJob(ctx.job);
+  // 일반 라인: 비마트 전용 안내 항목은 해당 없음 → 자동 true 오버레이.
+  // (engage 직행 진입은 transitions의 자동 true를 거치지 않으므로 여기서 경로 무관하게 보장)
+  // 수집값(차종·시작가능일·선탑 가능시간·법인차 렌트 희망)은 meta.general_screening에 누적 병합.
+  const collected = general
+    ? mergeGeneralCollected(readGeneralCollected(ctx.state.meta), out.collected)
+    : undefined;
   const state_update = mergeAgentState(ctx.state, {
-    screening: out.checklist_update,
+    screening: general
+      ? { ...GENERAL_SCREENING_AUTO_TRUE, ...out.checklist_update }
+      : out.checklist_update,
     meta: {
       last_run_at: new Date().toISOString(),
       last_reasoning: out.reasoning,
+      ...(general && collected ? { general_screening: collected } : {}),
     },
   });
 
-  // advance 검증: AI가 advance라 했어도 실제 8개 다 차야 허용 (가드)
+  // advance 준비 판정 — 체크리스트 완료 + (일반 라인이면) 수집값(시작가능일·선탑 가능시간)까지.
+  const advanceReady =
+    isComplete(state_update, "screening") &&
+    (!general || isGeneralCollectedComplete(collected ?? {}));
+
+  // advance 검증: AI가 advance라 했어도 실제 조건이 다 차야 허용 (가드)
   let transition: StageResult["transition"];
   switch (out.transition) {
     case "advance":
-      if (isComplete(state_update, "screening")) {
+      if (advanceReady) {
         transition = { kind: "advance", to: "onboarding", reason: out.transition_reason };
       } else {
         // AI가 잘못 판단 — 강제 stay
@@ -395,13 +573,13 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
       break;
   }
 
-  // 자동 advance 가드: abort/pause가 아닌데 8항목이 모두 true면 AI가 stay여도 온보딩으로 전이.
+  // 자동 advance 가드: abort/pause가 아닌데 조건이 모두 찼으면 AI가 stay여도 전이.
   // (마지막 항목이 채워진 턴에서 AI가 advance를 놓쳐 screening에 멈추는 것 방지)
   if (
     out.transition !== "abort" &&
     out.transition !== "pause" &&
     transition.kind !== "advance" &&
-    isComplete(state_update, "screening")
+    advanceReady
   ) {
     transition = { kind: "advance", to: "onboarding", reason: "체크리스트 7항목 완료 — 자동 전이" };
   }
@@ -428,8 +606,8 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
   }
 
   // advance 시: AI 응답("그럼 온보딩 절차로 안내드릴게요" 식) 발송 생략 →
-  // 시스템 자동 GUIDE(앱설치/교육 안내)가 곧바로 발송되며 그게 응답을 겸함.
-  // (exploration → screening 전환과 동일한 패턴)
+  // 시스템 자동 발송(비마트: GUIDE 앱설치·교육 안내 / 일반 라인: 선탑 인계 마무리)이
+  // 곧바로 나가며 그게 응답을 겸함. (exploration → screening 전환과 동일한 패턴)
   const reply_text = transition.kind === "advance" ? null : out.reply_text;
 
   return {
