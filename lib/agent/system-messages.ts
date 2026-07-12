@@ -12,6 +12,7 @@
  *  - 'onboarding_guide'    : 온보딩 진입 시 앱설치·교육 안내
  *  - 'onboarding_reminder' : 온보딩 가이드 발송 후 24h 미회신 시 cron이 보내는 리마인더
  *  - 'first_day_rules'     : 근무 시작(active) 첫 출근 룰 안내
+ *  - 'interest_engage'     : pull '관심 있어요' 자동 응대 첫 문자 ({{이름}}·{{공고명}} 치환)
  *
  * 본문에 {{이름}} placeholder를 쓰면 발송 시 지원자 이름으로 치환됨.
  */
@@ -25,7 +26,8 @@ export type SystemMessageKey =
   | "screening_announce"
   | "onboarding_guide"
   | "onboarding_reminder"
-  | "first_day_rules";
+  | "first_day_rules"
+  | "interest_engage";
 
 /** {{이름}} 등 placeholder 치환 */
 export function fillTemplate(text: string, vars: Record<string, string>): string {
