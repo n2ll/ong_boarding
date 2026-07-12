@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import {
-  X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle,
-  Briefcase, Building2, MapPin, CalendarClock, Save, UserCheck, Clock, Sparkles, Zap,
+  X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle, ChevronDown,
+  Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -49,6 +49,8 @@ interface ApplicantFull {
   source: string | null;
   birth_date: string | null;
   location: string | null;
+  sigungu: string | null;
+  applied_at: string | null;
   own_vehicle: string | null;
   license_type: string | null;
   vehicle_type: string | null;
@@ -197,6 +199,62 @@ function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}일 전`;
 }
 
+// 원지원일 'YYYY-MM' 표기 — Pipeline 코호트 표기와 동일 규칙
+function appliedMonth(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** 핵심 판단 카드 셀 — 값이 없으면 회색 축약(빈 값 나열로 시선 낭비 방지) */
+function KeyCell({ label, value, empty = "미입력", sub, title }: {
+  label: string;
+  value: string | null | undefined;
+  empty?: string;
+  sub?: string;
+  title?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0" title={title}>
+      <span className="text-[11px] font-bold text-[#A0AEC0]">{label}</span>
+      {value ? (
+        <span className="text-[13px] font-semibold text-[#1A202C] truncate">{value}</span>
+      ) : (
+        <span className="text-[12.5px] font-medium text-[#CBD5E0]">{empty}</span>
+      )}
+      {sub && <span className="text-[10.5px] text-[#A0AEC0]">{sub}</span>}
+    </div>
+  );
+}
+
+/** 접이식 섹션 — '훑고 행동' 위계에서 상세는 필요할 때만 펼친다. 접기 상태는 세션 내 유지. */
+function CollapsibleSection({ title, summary, open, onToggle, children }: {
+  title: string;
+  summary?: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-[#E2E8F0] bg-white">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+      >
+        <span className="text-[12.5px] font-extrabold text-[#1A202C]">{title}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          {summary && <span className="text-[11.5px] font-bold text-[#A0AEC0] truncate">{summary}</span>}
+          <ChevronDown size={14} className={`text-[#A0AEC0] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+      {open && <div className="px-3.5 pb-3.5 border-t border-[#EDF2F7] pt-3">{children}</div>}
+    </div>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // 상세 본문 (LiveConsole 우측 패널 + 드로어 공용)
 // ──────────────────────────────────────────────────────────────────────────
@@ -230,10 +288,13 @@ export function ApplicantDetailContent({
   const [confirmSlots, setConfirmSlots] = useState<string[]>([]);
   // 인력풀 제외(=status 부적합) 확인 모달 — 모든 공고에서 빠지는 파괴적 액션이라 확인을 받는다.
   const [excludeOpen, setExcludeOpen] = useState(false);
+  // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
+  const [sectionOpen, setSectionOpen] = useState<Partial<Record<"jobs" | "profile" | "manage", boolean>>>({});
 
   useEffect(() => {
     setEdit({});
     setDirty(false);
+    setSectionOpen({});
   }, [applicantId]);
 
   if (loading && !detail) {
@@ -378,8 +439,30 @@ export function ApplicantDetailContent({
 
   const telHref = a.phone ? `tel:${a.phone.replace(/[^0-9+]/g, "")}` : undefined;
 
+  // 접이식 기본값 — 지원 공고: 진행 중(중단 제외) 후보가 있으면 펼침 / 온보딩·확정: 스크리닝 완료·확정인력이면 펼침.
+  // 토글 전(undefined)까지만 기본값을 따르고, 한 번 토글하면 세션 내 유지된다.
+  const jobsOpen = sectionOpen.jobs ?? cands.some((c) => c.agent_stage != null && c.agent_stage !== "abort");
+  const profileOpen = sectionOpen.profile ?? false;
+  const manageOpen = sectionOpen.manage ?? (a.status === "스크리닝 완료" || a.status === "확정인력");
+  const toggleSection = (key: "jobs" | "profile" | "manage", cur: boolean) =>
+    setSectionOpen((p) => ({ ...p, [key]: !cur }));
+
+  // 상세 정보 — 값 있는 필드만 그리드로, 빈 필드는 회색 한 줄로 축약(빈 값 나열로 스크롤 낭비 방지)
+  const profileFields: { label: string; value: string | null }[] = [
+    { label: "연락처", value: a.phone },
+    { label: "나이", value: age != null ? `${age}세` : null },
+    { label: "이동수단", value: a.own_vehicle },
+    { label: "면허", value: a.license_type },
+    { label: "경력", value: a.experience },
+    { label: "희망 근무", value: a.work_hours },
+    { label: "희망 지점", value: a.branch1 },
+    { label: "거주 지역", value: a.location },
+  ];
+  const filledProfile = profileFields.filter((f) => f.value);
+  const emptyProfile = profileFields.filter((f) => !f.value);
+
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 @container">
       {/* panel 헤더 (LiveConsole 우측용) */}
       {variant === "panel" && (
         <div className="h-[60px] shrink-0 border-b border-[#E2E8F0] px-5 flex items-center justify-between">
@@ -390,41 +473,37 @@ export function ApplicantDetailContent({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-5 min-h-0">
-        {/* 풀/공고 구분 + 액션 */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            {isPurePool ? (
-              <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EDF2F7] text-[#4A5568]">순수 인재풀</span>
+      {/* 상단 고정 — 스크롤 없이 항상 보이는 '훑고 행동' 블록 (①신원 ②재컨택 ③핵심 판단 ④액션) */}
+      <div className="shrink-0 px-5 pt-4 pb-4 space-y-3 border-b border-[#E2E8F0]">
+        {/* ① 이름·나이·전화·지역 — 드로어는 자체 헤더가 같은 정보를 담당 */}
+        {variant === "panel" && (
+          <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+            <span className="text-[15px] font-extrabold text-[#1A202C]">{a.name}</span>
+            {age != null && <span className="text-[12px] font-semibold text-[#718096]">{age}세</span>}
+            {telHref ? (
+              <a href={telHref} className="text-[12.5px] font-bold text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">{a.phone}</a>
             ) : (
-              <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#3182CE]">공고 지원자 · {cands.length}건</span>
+              <span className="text-[12px] text-[#A0AEC0]">연락처 없음</span>
             )}
-            {a.source && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{SOURCE_LABEL[a.source] ?? a.source}</span>}
-            {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FAF5FF] text-[#805AD5]">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
+            {a.sigungu && <span className="text-[12px] text-[#718096] flex items-center gap-0.5"><MapPin size={11} /> {a.sigungu}</span>}
           </div>
-          <div className="flex gap-2">
-            <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
-            <button
-              onClick={async () => {
-                if (!a.access_token) return toast.error("맞춤 링크 토큰이 없어요.");
-                try {
-                  await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
-                  toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
-                } catch {
-                  toast.error("복사에 실패했어요");
-                }
-              }}
-              className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
-              title="본인 전용 맞춤 공고 페이지(/p/토큰) 링크 복사"
-            >
-              <MessageSquare size={14} /> 맞춤링크
-            </button>
-            <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
-            <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
-          </div>
+        )}
+
+        {/* 구분·유입·단계 배지 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {isPurePool ? (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EDF2F7] text-[#4A5568]">순수 인재풀</span>
+          ) : (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#3182CE]">공고 지원자 · {cands.length}건</span>
+          )}
+          {a.source && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</span>}
+          {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FAF5FF] text-[#805AD5]">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
+          {a.sms_opt_out_at && (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
+          )}
         </div>
 
-        {/* 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
+        {/* ② 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
         {hasRecontact && recontact && (
           <div className="rounded-xl border border-[#BEE3F8] bg-[#EBF8FF] p-3.5 space-y-2.5">
             <h3 className="text-[12.5px] font-extrabold text-[#2B6CB0] flex items-center gap-1.5">
@@ -471,10 +550,58 @@ export function ApplicantDetailContent({
           </div>
         )}
 
-        {/* 지원 공고 목록 */}
+        {/* ③ 핵심 판단 정보 — 자차·가용성·원지원일·희망 시간 (좁은 우측 패널에선 2칸, 드로어에선 4칸) */}
+        <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-3 grid grid-cols-2 @md:grid-cols-4 gap-x-3 gap-y-2">
+          <KeyCell label="자차" value={[a.own_vehicle, a.vehicle_type].filter(Boolean).join(" · ") || null} title="이동수단 · 차종" />
+          <KeyCell
+            label="가용성"
+            value={a.availability}
+            empty="미확인"
+            sub={a.availability_updated_at ? `확인 ${relTime(a.availability_updated_at)}` : undefined}
+            title="지금 일할 수 있는 상태인지 — 확인 시점이 오래됐다면 재확인이 필요해요"
+          />
+          <KeyCell
+            label="원지원일"
+            value={appliedMonth(a.applied_at)}
+            empty="기록 없음"
+            title={a.applied_at ? `처음 지원한 날: ${new Date(a.applied_at).toLocaleDateString("ko-KR")}` : "처음 지원한 시점 기록이 없어요"}
+          />
+          <KeyCell label="희망 시간" value={a.work_hours} />
+        </div>
+
+        {/* ④ 핵심 액션 */}
+        <div className="flex gap-2">
+          <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
+          <button
+            onClick={async () => {
+              if (!a.access_token) return toast.error("맞춤 링크 토큰이 없어요.");
+              try {
+                await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
+                toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
+              } catch {
+                toast.error("복사에 실패했어요");
+              }
+            }}
+            className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
+            title="본인 전용 맞춤 공고 페이지(/p/토큰) 링크 복사"
+          >
+            <MessageSquare size={14} /> 맞춤링크
+          </button>
+          <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+          <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
+        </div>
+      </div>
+
+      {/* 접이식 상세 — 기본 접힘. 헤더 클릭으로 필요한 것만 펼친다 */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-3 min-h-0">
+        {/* 지원 공고 — 후보 목록 + 진행 체크리스트 (진행 중 공고가 있으면 기본 펼침) */}
         {!isPurePool && (
-          <div>
-            <h3 className="text-[12px] font-bold text-[#718096] mb-2">지원 공고</h3>
+          <CollapsibleSection
+            title="지원 공고"
+            summary={`${cands.length}건${focusCand ? ` · 스크리닝 ${screeningDone}/${SCREENING_KEYS.length}` : ""}`}
+            open={jobsOpen}
+            onToggle={() => toggleSection("jobs", jobsOpen)}
+          >
             <div className="space-y-2">
               {cands.map((c) => (
                 <div key={c.id} className={`rounded-xl border p-3 ${focusCand?.id === c.id ? "border-[#FFCB3C] bg-[#FFFBEB]" : "border-[#E2E8F0] bg-white"}`}>
@@ -489,37 +616,42 @@ export function ApplicantDetailContent({
                 </div>
               ))}
             </div>
-          </div>
-        )}
 
-        {/* 스크리닝 / 온보딩 진행 */}
-        {focusCand && (
-          <div className="grid grid-cols-1 gap-3">
-            <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">스크리닝 체크리스트</h3>
-                <span className="text-[12px] font-extrabold text-[#3182CE]">{screeningDone}/{SCREENING_KEYS.length}</span>
-              </div>
-              <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#3182CE] rounded-full" style={{ width: `${(screeningDone / SCREENING_KEYS.length) * 100}%` }} /></div>
-              {SCREENING_KEYS.map((k) => <ChecklistRow key={k} label={SCREENING_LABELS[k]} done={screening[k] === true} />)}
-            </div>
-            {(focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
-              <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">온보딩 체크리스트</h3>
-                  <span className="text-[12px] font-extrabold text-[#38A169]">{onboardingDone}/{ONBOARDING_KEYS.length}</span>
+            {/* 스크리닝 / 온보딩 진행 — 표시 중인 공고 기준 */}
+            {focusCand && (
+              <div className="grid grid-cols-1 gap-3 mt-3">
+                <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">스크리닝 체크리스트</h3>
+                    <span className="text-[12px] font-extrabold text-[#3182CE]">{screeningDone}/{SCREENING_KEYS.length}</span>
+                  </div>
+                  <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#3182CE] rounded-full" style={{ width: `${(screeningDone / SCREENING_KEYS.length) * 100}%` }} /></div>
+                  {SCREENING_KEYS.map((k) => <ChecklistRow key={k} label={SCREENING_LABELS[k]} done={screening[k] === true} />)}
                 </div>
-                <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#38A169] rounded-full" style={{ width: `${(onboardingDone / ONBOARDING_KEYS.length) * 100}%` }} /></div>
-                {ONBOARDING_KEYS.map((k) => <ChecklistRow key={k} label={ONBOARDING_LABELS[k]} done={onboarding[k] === true} />)}
+                {(focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
+                  <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">온보딩 체크리스트</h3>
+                      <span className="text-[12px] font-extrabold text-[#38A169]">{onboardingDone}/{ONBOARDING_KEYS.length}</span>
+                    </div>
+                    <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#38A169] rounded-full" style={{ width: `${(onboardingDone / ONBOARDING_KEYS.length) * 100}%` }} /></div>
+                    {ONBOARDING_KEYS.map((k) => <ChecklistRow key={k} label={ONBOARDING_LABELS[k]} done={onboarding[k] === true} />)}
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </CollapsibleSection>
         )}
 
-        {/* 기본 정보 */}
-        <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-[#F7FAFC]">
+        {/* 상세 정보 — 기본 접힘. 값 있는 필드만 그리드, 빈 필드는 아래 한 줄로 축약 */}
+        <CollapsibleSection
+          title="상세 정보"
+          summary={emptyProfile.length > 0 ? `미입력 ${emptyProfile.length}` : undefined}
+          open={profileOpen}
+          onToggle={() => toggleSection("profile", profileOpen)}
+        >
           <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="text-[12px] font-bold text-[#718096]">기본 정보</h3>
+            <span className="text-[11px] font-bold text-[#A0AEC0]">문자 수신</span>
             {a.sms_opt_out_at ? (
               <div className="flex items-center gap-1.5">
                 <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
@@ -543,86 +675,89 @@ export function ApplicantDetailContent({
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-            <InfoCell label="연락처" value={a.phone} />
-            <InfoCell label="나이" value={age ? `${age}세` : null} />
-            <InfoCell label="이동수단" value={a.own_vehicle} />
-            <InfoCell label="면허" value={a.license_type} />
-            <InfoCell label="경력" value={a.experience} />
-            <InfoCell label="희망 근무" value={a.work_hours} />
-            <InfoCell label="희망 지점" value={a.branch1} />
-            <InfoCell label="거주 지역" value={a.location} />
-          </div>
-        </div>
-
-        {/* 온보딩 / 확정 관리 (편집) */}
-        <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[12.5px] font-extrabold text-[#1A202C] flex items-center gap-1.5"><Briefcase size={14} className="text-[#A0AEC0]" /> 온보딩 · 확정 관리</h3>
-            <span className="flex items-center gap-1 text-[11px] text-[#A0AEC0]"><Clock size={12} /> {relTime(a.last_message_at)}</span>
-          </div>
-
-          {/* 확정 슬롯 */}
-          <div>
-            <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯</span>
-            <div className="flex gap-1.5 flex-wrap mt-1.5">
-              {SLOTS.map((s) => {
-                const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
-                return (
-                  <button key={s} onClick={() => toggleSlot(s)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}>{s}</button>
-                );
-              })}
+          {filledProfile.length > 0 && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {filledProfile.map((f) => <InfoCell key={f.label} label={f.label} value={f.value} />)}
             </div>
-          </div>
+          )}
+          {emptyProfile.length > 0 && (
+            <p className="text-[11.5px] text-[#A0AEC0] mt-3">미입력 · {emptyProfile.map((f) => f.label).join(" · ")}</p>
+          )}
+        </CollapsibleSection>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점</span>
-              <input value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
-              <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">배민 커넥트 ID</span>
-              <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">온보딩 통화</span>
-              <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
-                <option value="">미지정</option>
-                {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
-                {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">
-                가용성
-                {a.availability_updated_at && <span className="font-medium"> · 갱신: {relTime(a.availability_updated_at)}</span>}
-              </span>
-              <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
-                <option value="">미확인</option>
-                {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </label>
-          </div>
+        {/* 온보딩·확정 관리 — 스크리닝 완료·확정인력이면 기본 펼침 */}
+        <CollapsibleSection
+          title="온보딩 · 확정 관리"
+          summary={dirty ? <span className="text-[#D69E2E]">저장 안 된 변경</span> : undefined}
+          open={manageOpen}
+          onToggle={() => toggleSection("manage", manageOpen)}
+        >
+          <div className="space-y-3">
+            {/* 확정 슬롯 + 마지막 메시지 시점 */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯</span>
+                <span className="flex items-center gap-1 text-[11px] text-[#A0AEC0]" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
+              </div>
+              <div className="flex gap-1.5 flex-wrap mt-1.5">
+                {SLOTS.map((s) => {
+                  const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
+                  return (
+                    <button key={s} onClick={() => toggleSlot(s)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}>{s}</button>
+                  );
+                })}
+              </div>
+            </div>
 
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
-              <span className="text-[12px] font-semibold text-[#4A5568]">가이드 전달</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
-              <span className="text-[12px] font-semibold text-[#4A5568]">카카오 채널 친구</span>
-            </label>
-          </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점</span>
+                <input value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
+                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">배민 커넥트 ID</span>
+                <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">온보딩 통화</span>
+                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
+                  <option value="">미지정</option>
+                  {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
+                  {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]" title="지금 일할 수 있는 상태인지 — 값이 같아도 재확인하면 확인 시점이 갱신돼요">
+                  가용성
+                  {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
+                </span>
+                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
+                  <option value="">미확인</option>
+                  {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </label>
+            </div>
 
-          <button onClick={saveFields} disabled={!dirty || busy} className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-40 transition-colors">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 저장
-          </button>
-        </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
+                <span className="text-[12px] font-semibold text-[#4A5568]">가이드 전달</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
+                <span className="text-[12px] font-semibold text-[#4A5568]">카카오 채널 친구</span>
+              </label>
+            </div>
+
+            <button onClick={saveFields} disabled={!dirty || busy} className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-40 transition-colors">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 저장
+            </button>
+          </div>
+        </CollapsibleSection>
       </div>
 
       {/* 확정 모달 — 확정 시점에 슬롯을 함께 지정해 슬롯 보드 정확도를 확보 */}
@@ -765,7 +900,15 @@ export function ApplicantDetailPanel({
                   {age && <span className="text-[12px] font-medium text-[#718096] bg-white px-2 py-0.5 rounded-md border border-[#E2E8F0]">{age}세</span>}
                   {a && <span className="text-[12px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#A0AEC0"}1A`, color: STATUS_COLORS[a.status] ?? "#4A5568" }}>{a.status}</span>}
                 </div>
-                <div className="text-[12px] text-[#A0AEC0] font-mono">#{applicantId} · {a?.phone ?? "연락처 없음"}</div>
+                <div className="text-[12px] text-[#A0AEC0] font-mono">
+                  #{applicantId} ·{" "}
+                  {a?.phone ? (
+                    <a href={`tel:${a.phone.replace(/[^0-9+]/g, "")}`} className="text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">{a.phone}</a>
+                  ) : (
+                    "연락처 없음"
+                  )}
+                  {a?.sigungu && <> · {a.sigungu}</>}
+                </div>
               </div>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-[#E2E8F0] rounded-lg transition-colors text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
