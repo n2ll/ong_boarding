@@ -10,7 +10,7 @@ import {
   // BarChart2,
   MessageSquare,
   Inbox,
-  // Brain,
+  Brain,
   Users,
   // CheckCircle,
   Briefcase,
@@ -62,7 +62,8 @@ export function Sidebar() {
     { label: "AI 에이전트", type: "header" },
     { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
     { label: "미분류 문자함", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
-    // { label: "에이전트 두뇌", icon: Brain, path: "/brain" }, // 파일럿 기간 숨김
+    // 자동 응대(auto) 가동으로 재노출 (2026-07-12) — AI 모드 전환·일반 라인 FAQ 편집 진입점
+    { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
 
     { label: "인재 관리", type: "header" },
     { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
