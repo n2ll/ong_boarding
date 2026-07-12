@@ -150,6 +150,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ mode, processed: 0, note: "mode off — 자동 복구 안 함" });
   }
 
+  // 야간 발송 억제 (KST 09~21시만 복구·재처리) — 밀린 답장이라도 심야에 어르신 폰을 울리지
+  // 않는다. engage 야간 규칙과 동일 취지(시작 09시로 통일). 대상은 그대로 두므로(attempts
+  // 미증가) 아침 첫 주기(09:00)에 자연 처리된다.
+  const kstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
+  if (kstHour < 9 || kstHour >= 21) {
+    return NextResponse.json({ mode, processed: 0, note: `야간(KST ${kstHour}시) — 09시 이후 처리` });
+  }
+
   const { data, error } = await supabase
     .from("job_candidates")
     .select(
