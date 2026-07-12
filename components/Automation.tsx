@@ -128,7 +128,7 @@ export function Automation() {
     { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-[#D69E2E]" },
     { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-[#3182CE]" },
     { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-[#718096]" },
-    { label: "미분류 인박스", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
+    { label: "미분류 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
     { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-[#1A202C]" },
   ];
 
@@ -138,7 +138,7 @@ export function Automation() {
       <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-3.5">
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[12px] font-extrabold tracking-wide text-[#1A202C]">실시간 자동화 현황</span>
-          <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">LIVE · 실데이터</span>
+          <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">실시간 집계</span>
         </div>
         <div className="grid grid-cols-6 gap-3">
           {kpis.map((k, i) => (
@@ -160,7 +160,7 @@ export function Automation() {
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-extrabold tracking-wide text-[#1A202C]">자동 점검 규칙</span>
-            <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">실동작</span>
+            <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
             {ruleRanAt && <span className="text-[11px] text-[#A0AEC0]">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
           <button
@@ -206,7 +206,7 @@ export function Automation() {
                       {rule.unit}
                     </label>
                   ) : (
-                    <span className="text-[11px] text-[#A0AEC0]">조건형</span>
+                    <span className="text-[11px] text-[#A0AEC0]" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
                   )}
                   {result ? (
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]" : "bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]"}`}>

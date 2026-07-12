@@ -178,7 +178,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
 
           {branchOpen && (
             <div className="absolute top-[50px] right-0 w-[220px] bg-white border border-[#E2E8F0] rounded-xl shadow-lg p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
-              <div className="text-[11px] font-bold text-[#A0AEC0] tracking-wide px-2.5 pt-2 pb-1.5">지점 스코프 (대시보드·파이프라인)</div>
+              <div className="text-[11px] font-bold text-[#A0AEC0] tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
                 className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-[#F1F4F8] ${!scopeBranch ? "bg-[#F1F4F8] font-bold text-[#2D3748]" : "bg-transparent font-medium text-[#4A5568] hover:bg-[#F1F4F8]"}`}
@@ -236,7 +236,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-[#A0AEC0]">
                     <Check size={26} className="text-[#38A169] mb-2" />
                     <div className="text-[13px] font-bold text-[#4A5568]">새 알림이 없어요</div>
-                    <div className="text-[12px] mt-0.5">미분류 인박스·미답장·AI 중단이 발생하면 표시됩니다.</div>
+                    <div className="text-[12px] mt-0.5">미분류 문자함·미답장·AI 중단이 발생하면 표시됩니다.</div>
                   </div>
                 ) : (
                   notices.map((n) => (

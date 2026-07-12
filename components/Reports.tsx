@@ -116,7 +116,7 @@ export function Reports() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">리포트 · 분석</h1>
-          <p className="text-[14px] text-[#718096]">채용 성과와 AI 에이전트의 효율성을 다각도로 분석합니다. <span className="text-[#A0AEC0]">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
+          <p className="text-[14px] text-[#718096]">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-[#A0AEC0]">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-white border border-[#E2E8F0] rounded-xl px-2 py-1 shadow-sm">

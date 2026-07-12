@@ -391,7 +391,7 @@ export function AgentBrain() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">에이전트 두뇌</h1>
-            <p className="text-[14px] text-[#718096]">페르소나·지식 베이스·인계 규칙·지식 현황은 모두 실데이터와 연동됩니다.</p>
+            <p className="text-[14px] text-[#718096]">AI가 응대할 때 쓰는 말투·지식·인계 규칙을 관리합니다. 여기서 바꾸면 바로 적용돼요.</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -540,7 +540,7 @@ export function AgentBrain() {
           {activeTab === 'persona' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-[#1A202C] mb-6 flex items-center gap-2">
-                <Sparkles size={20} className="text-[#FFCB3C]" /> AI 에이전트 성격 정의 (System Prompt)
+                <Sparkles size={20} className="text-[#FFCB3C]" /> AI 에이전트 성격 · 말투 정의
               </h2>
 
               <div className="space-y-6">

@@ -38,8 +38,8 @@ export interface RuleDef {
 export const AUTOMATION_RULES: RuleDef[] = [
   {
     id: "inbox_pending",
-    label: "미분류 인박스 적체 알림",
-    desc: "분류 대기 중인 인입 메시지가 기준치 이상이면 매니저에게 알립니다.",
+    label: "미분류 문자함 적체 알림",
+    desc: "분류 대기 중인 수신 문자가 기준치 이상이면 매니저에게 알립니다.",
     hasThreshold: true,
     defaultThreshold: 1,
     unit: "건",

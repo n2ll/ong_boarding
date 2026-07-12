@@ -94,8 +94,8 @@ export function Inbox() {
             <InboxIcon size={24} className="text-[#1A202C]" />
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">미분류 인박스</h1>
-            <p className="text-[14px] text-[#718096]">어떤 지원자와도 매칭되지 않은 인입 문자입니다. 매니저가 직접 분류해주세요.</p>
+            <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">미분류 문자함</h1>
+            <p className="text-[14px] text-[#718096]">어느 지원자의 문자인지 자동으로 연결하지 못한 수신 문자입니다. 아래 버튼으로 직접 분류해주세요.</p>
           </div>
         </div>
         <button
@@ -123,7 +123,7 @@ export function Inbox() {
             <Check size={30} className="text-[#38A169]" />
           </div>
           <div className="text-[15px] font-bold text-[#4A5568] mb-1">모두 처리했어요</div>
-          <div className="text-[13px]">미분류 상태로 남은 메시지가 없습니다.</div>
+          <div className="text-[13px]">분류가 필요한 문자가 새로 오면 여기에 표시됩니다.</div>
         </div>
       )}
 

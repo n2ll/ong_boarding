@@ -268,7 +268,7 @@ export function SosLedgerCard() {
 
       {/* 진행 중 건 */}
       {openRows.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">진행 중인 긴급 건이 없어요.</div>
+        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">진행 중인 긴급 건이 없어요. 결원·증차가 생기면 오른쪽 위 &lsquo;긴급 건 기록&rsquo;으로 남겨주세요.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {openRows.map((r) => (

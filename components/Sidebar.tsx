@@ -61,7 +61,7 @@ export function Sidebar() {
 
     { label: "AI 에이전트", type: "header" },
     { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
-    { label: "미분류 인박스", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
+    { label: "미분류 문자함", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
     // { label: "에이전트 두뇌", icon: Brain, path: "/brain" }, // 파일럿 기간 숨김
 
     { label: "인재 관리", type: "header" },

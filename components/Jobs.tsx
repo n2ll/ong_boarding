@@ -119,10 +119,11 @@ function slotMatch(confirmed: string | null | undefined, key: string): boolean {
   return confirmed.split(",").some((p) => p.includes(day) && p.includes(time));
 }
 
+// 표시 라벨만 실무 언어로 통일(LiveConsole·ApplicantDetailPanel·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_KO: Record<string, string> = {
   interest: "관심 표시",
-  exploration: "탐색", screening: "스크리닝", onboarding: "온보딩",
-  active: "활성", paused: "수동", abort: "중단",
+  exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
+  active: "활동 중", paused: "수동 응대", abort: "중단",
 };
 const STAGE_COLOR: Record<string, string> = {
   interest: "bg-[#FEEBC8] text-[#DD6B20]",
@@ -364,7 +365,7 @@ export function Jobs() {
     const name = c.applicants?.name ?? `#${c.applicant_id}`;
     const ok = await confirm({
       title: "이 공고에 다시 올릴까요?",
-      description: `'${name}'님을 이 공고 후보로 되살립니다(탐색 단계). 인력풀 상태는 그대로예요.`,
+      description: `'${name}'님을 이 공고 후보로 되살립니다(초기 대화 단계부터). 인력풀 상태는 그대로예요.`,
       confirmText: "재개하기",
     });
     if (!ok) return;
@@ -1225,8 +1226,8 @@ export function Jobs() {
               <div className="w-16 h-16 bg-[#F1F4F8] rounded-full flex items-center justify-center mb-4">
                 <Briefcase size={24} className="text-[#A0AEC0]" />
               </div>
-              <h3 className="text-[16px] font-bold text-[#1A202C] mb-2">공고가 없습니다</h3>
-              <p className="text-[14px] text-[#718096] mb-6">현재 선택된 상태의 공고가 존재하지 않습니다.</p>
+              <h3 className="text-[16px] font-bold text-[#1A202C] mb-2">이 상태의 공고가 없어요</h3>
+              <p className="text-[14px] text-[#718096] mb-6">위 상태 필터를 바꿔 보거나, 아래 버튼으로 새 공고를 만들면 AI가 채널별 초안까지 만들어 드려요.</p>
               <button
                 onClick={() => setAiModalOpen(true)}
                 className="flex items-center gap-2 bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
@@ -1850,7 +1851,7 @@ export function Jobs() {
                                   {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 응대 재개
                                 </button>
                               ) : (
-                                <button onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요 (수동 전환)")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
+                                <button onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요. 이제 매니저가 직접 답장합니다.")} disabled={busy} className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:bg-[#EDF2F7] px-2 py-1 rounded-md disabled:opacity-50 transition-colors">
                                   {busy ? <Loader2 size={12} className="animate-spin" /> : <Pause size={12} />} 응대 정지
                                 </button>
                               )}
