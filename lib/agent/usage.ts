@@ -28,7 +28,8 @@ export type UsagePurpose =
   | "triage"
   | "availability"
   | "job_generate"
-  | "job_extract";
+  | "job_extract"
+  | "recovery_healthcheck";
 
 /** messages 행에 박을 토큰 정보. usage 누락 시 null 필드 그대로. */
 export interface MessageTokenColumns {
