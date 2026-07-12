@@ -33,6 +33,18 @@ interface ActiveJob {
   agent_stage: string | null;
 }
 
+/** /api/admin/messages/preview 응답의 지원자별 마지막 메시지 요약 */
+interface LastMessagePreview {
+  body: string;
+  direction: string;
+  created_at: string;
+  sent_by?: string | null;
+  /** 마지막 메시지가 매니저 수동 발신(캠페인 벌크·AI 제외) — '답 대기' 판정용 */
+  manual_outbound?: boolean;
+  last_inbound_at?: string | null;
+  pending_draft?: boolean;
+}
+
 interface Handoff {
   candidate_id: number;
   applicant_id: number;
@@ -126,8 +138,18 @@ function isBaseChat(a: Applicant): boolean {
   return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status) || (a.unread_count ?? 0) > 0;
 }
 
-// 풀 응답자(agent_stage 없음)가 스레드 열람(unread 리셋) 후에도 목록에 남는 기간
+// 풀 응답자(agent_stage 없음)가 스레드 열람(unread 리셋) 후에도 목록에 남는 기간.
+// '답 대기'(매니저 발신 후 회신 대기) 대화가 목록에 남는 기간으로도 함께 쓴다.
 const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
+
+// 미리보기 조회 대상 상한 — 목록 후보가 많아져도 최근 활동순 상위만 조회(URL 길이·메시지 스캔 부하 방지)
+const PREVIEW_TARGET_CAP = 150;
+
+// '답 대기' 판정: 마지막 메시지가 매니저 수동 발신(14일 내) — 내가 보내고 회신을 기다리는 대화.
+// 캠페인 벌크 핑(system-bulk)·AI 발송은 서버(preview API)가 manual_outbound=false로 걸러준다.
+function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
+  return !!pv?.manual_outbound && !!pv.created_at && Date.now() - new Date(pv.created_at).getTime() < RECENT_INBOUND_MS;
+}
 
 export function LiveConsole() {
   const confirm = useConfirm();
@@ -135,7 +157,7 @@ export function LiveConsole() {
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
-  const [previewById, setPreviewById] = useState<Record<number, { body: string; direction: string; created_at: string; last_inbound_at?: string | null; pending_draft?: boolean }>>({});
+  const [previewById, setPreviewById] = useState<Record<number, LastMessagePreview>>({});
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
@@ -159,26 +181,38 @@ export function LiveConsole() {
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
   const { data: appsData, isLoading: appsLoading, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const appsLoaded = !!appsData;
   // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
   // 풀 응답자가 열람으로 unread가 리셋돼도 '마지막 inbound' 판별이 가능하게 살짝 넓게 잡는다.
-  const previewTargets = useMemo(
-    () =>
-      (appsData?.data ?? []).filter(
-        (a) => isBaseChat(a) || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
-      ),
-    [appsData]
-  );
-  // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음' —
-  // 풀 응답자(agent_stage 없음)가 스레드를 열람해 unread가 0이 돼도 목록에서 사라지지 않는다.
-  // 기본 조건 외로 잡힌 건은 '풀 응답'이라 목록에서 별도 라벨로 구분한다.
+  // 최근 활동순 상위 PREVIEW_TARGET_CAP명으로 상한 — 넘치는 건 오래된 대화라 잘려도 실사용 영향이 없다.
+  // ⚠️ 매니저 발신은 last_message_at을 갱신하지 않으므로 여기서 못 잡는다 —
+  //    '발신만 있는 대화(답 대기)'는 preview API가 with_manual=1로 서버에서 찾아 합집합으로 내려준다.
+  const previewTargets = useMemo(() => {
+    const base = (appsData?.data ?? []).filter(
+      (a) => isBaseChat(a) || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
+    );
+    if (base.length <= PREVIEW_TARGET_CAP) return base;
+    return [...base]
+      .sort(
+        (x, y) =>
+          new Date(y.last_message_at ?? y.created_at ?? 0).getTime() - new Date(x.last_message_at ?? x.created_at ?? 0).getTime()
+      )
+      .slice(0, PREVIEW_TARGET_CAP);
+  }, [appsData]);
+  // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음'(풀 응답)
+  // 또는 '마지막 메시지가 매니저 수동 발신'(답 대기) — 발신만 하고 회신을 기다리는 대화(빠른 컨택 등)가
+  // 목록에서 사라지지 않는다. previewById에는 서버가 합집합으로 찾아준 답 대기 건도 들어있다.
   const chats = useMemo(
     () =>
-      previewTargets.filter((a) => {
+      (appsData?.data ?? []).filter((a) => {
         if (isBaseChat(a)) return true;
-        const li = previewById[a.id]?.last_inbound_at;
-        return !!li && Date.now() - new Date(li).getTime() < RECENT_INBOUND_MS;
+        const pv = previewById[a.id];
+        if (!pv) return false;
+        const li = pv.last_inbound_at;
+        if (li && Date.now() - new Date(li).getTime() < RECENT_INBOUND_MS) return true;
+        return isAwaitingPreview(pv);
       }),
-    [previewTargets, previewById]
+    [appsData, previewById]
   );
   const loadingList = appsLoading && chats.length === 0;
 
@@ -188,7 +222,24 @@ export function LiveConsole() {
     (c: Applicant) => previewById[c.id]?.direction === "inbound" || (c.unread_count ?? 0) > 0,
     [previewById]
   );
+  // 답 대기 판정 — 미답이 우선이므로 미답이 아닌 것 중에서만(unread>0인데 마지막이 발신인 경계 케이스 방지)
+  const isAwaiting = useCallback(
+    (c: Applicant) => !isUnanswered(c) && isAwaitingPreview(previewById[c.id]),
+    [isUnanswered, previewById]
+  );
   const unansweredCount = useMemo(() => chats.filter(isUnanswered).length, [chats, isUnanswered]);
+  const awaitingCount = useMemo(() => chats.filter(isAwaiting).length, [chats, isAwaiting]);
+  // 카드 시각·정렬 기준 — 마지막 메시지 시각(미리보기)과 last_message_at(inbound 수신 시각) 중 더 최근.
+  // 매니저 발신은 last_message_at을 갱신하지 않아, 미리보기 시각이 있어야 답 대기 대화도 최신순에 올바로 낀다.
+  const lastActivityAt = useCallback(
+    (c: Applicant): string | null => {
+      const pv = previewById[c.id]?.created_at ?? null;
+      const lm = c.last_message_at ?? null;
+      if (pv && lm) return new Date(pv).getTime() >= new Date(lm).getTime() ? pv : lm;
+      return pv ?? lm ?? c.created_at ?? null;
+    },
+    [previewById]
+  );
 
   // 인계 큐도 SWR로 캐시.
   const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs");
@@ -212,27 +263,33 @@ export function LiveConsole() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sendSaving, setSendSaving] = useState(false);
 
-  const loadChats = useCallback(() => { void mutateApps(); }, [mutateApps]);
-  const loadHandoffs = useCallback(() => { void mutateHandoffs(); }, [mutateHandoffs]);
-
-  // 대화 상태가 바뀌면(재개/보류/발송 등) 목록과 인계 큐를 함께 새로고침.
+  // 대화 상태가 바뀌면(재개/보류/발송/브로드캐스트) 목록·인계·확정 큐를 함께 새로고침.
+  // 발송 후 onChanged와 DB 브로드캐스트가 거의 동시에 도착하므로 800ms 디바운스로 1회만 조회한다.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleChanged = useCallback(() => {
-    void mutateApps();
-    void mutateHandoffs();
-    void mutateConfirm();
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void mutateApps();
+      void mutateHandoffs();
+      void mutateConfirm();
+    }, 800);
   }, [mutateApps, mutateHandoffs, mutateConfirm]);
+  useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
 
   // 첫 대화 자동 선택은 하지 않는다 — 선택(열람) 시 서버가 unread를 리셋해
   // 탭 진입만으로 미답 신호가 지워지는 부작용이 있었다. 선택 전에는 빈 상태 안내를 보여준다.
 
   // 활성 대화 subset의 마지막 메시지 미리보기를 가볍게 조회(목록이 갱신될 때).
+  // with_manual=1: '최근 14일 내 매니저 수동 발신' 지원자를 서버가 찾아 합집합으로 내려준다 —
+  // ids가 비어도 답 대기 대화가 있을 수 있으므로 목록 로드 후에는 항상 호출한다.
   useEffect(() => {
+    if (!appsLoaded) return;
     const ids = previewTargets.map((c) => c.id);
-    if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
       try {
-        const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}`);
+        const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}&with_manual=1`);
         if (pRes.ok && !cancelled) {
           const pJson = await pRes.json();
           setPreviewById(pJson.previews ?? {});
@@ -242,30 +299,21 @@ export function LiveConsole() {
       }
     })();
     return () => { cancelled = true; };
-  }, [previewTargets]);
+  }, [appsLoaded, previewTargets]);
 
   // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
-  // PII 없는 "changed" 신호만 broadcast → 받으면 디바운스 후 목록·인계 큐를 재조회한다.
+  // PII 없는 "changed" 신호만 broadcast → 디바운스된 handleChanged로 목록·큐를 재조회한다.
   // (테이블 직접 구독이 아니라 공개 broadcast라 anon에 데이터가 노출되지 않는다.)
   useEffect(() => {
     const supabase = getBrowserClient();
-    let timer: ReturnType<typeof setTimeout> | null = null;
     const channel = supabase
       .channel("live-console")
-      .on("broadcast", { event: "changed" }, () => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => {
-          loadChats();
-          loadHandoffs();
-          void mutateConfirm();
-        }, 800);
-      })
+      .on("broadcast", { event: "changed" }, () => handleChanged())
       .subscribe();
     return () => {
-      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [loadChats, loadHandoffs, mutateConfirm]);
+  }, [handleChanged]);
 
   // 선택 지원자가 바뀌면 그 사람이 동시에 진행 중인 공고 목록을 불러온다.
   // 2건 이상이면 대화창 상단에 공고 탭이 떠서 공고별로 스레드·체크리스트·AI 토글이 분리된다.
@@ -501,33 +549,39 @@ export function LiveConsole() {
     }
   };
 
-  const visibleChats = chats
-    .filter((c) => {
-      const q = search.trim().toLowerCase();
-      if (q) {
-        const nameHit = c.name.toLowerCase().includes(q);
-        // 숫자 3자리 이상이면 전화번호(숫자열) 부분일치도 함께 검색
-        const qDigits = q.replace(/\D/g, "");
-        const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
-        if (!nameHit && !phoneHit) return false;
-      }
-      if (stageFilter !== "all") {
-        if (stageFilter === "paused") return c.agent_stage === "paused";
+  // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지,
+  // 같은 그룹 안에서는 마지막 활동 최신순. 폴링·브로드캐스트마다 재계산하지 않게 useMemo.
+  const visibleChats = useMemo(() => {
+    const rank = (c: Applicant): number => {
+      if (isUnanswered(c)) return 3;
+      if (previewById[c.id]?.pending_draft) return 2;
+      if (isAwaiting(c)) return 1;
+      return 0;
+    };
+    const q = search.trim().toLowerCase();
+    // 숫자 3자리 이상이면 전화번호(숫자열) 부분일치도 함께 검색
+    const qDigits = q.replace(/\D/g, "");
+    return chats
+      .filter((c) => {
+        if (q) {
+          const nameHit = c.name.toLowerCase().includes(q);
+          const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
+          if (!nameHit && !phoneHit) return false;
+        }
         if (stageFilter === "intervention") return isUnanswered(c);
-        return c.agent_stage === stageFilter;
-      }
-      return true;
-    })
-    // 정렬: 미답(마지막 메시지=inbound)을 최상단 — 그 안에서는 last_message_at 최신순으로
-    // 새로 온 답장(풀 응답 포함)이 먼저 보이게. 그 외는 최근 활동 순.
-    .sort((a, b) => {
-      const aInt = isUnanswered(a) ? 1 : 0;
-      const bInt = isUnanswered(b) ? 1 : 0;
-      if (aInt !== bInt) return bInt - aInt;
-      const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
-      const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
-      return bt - at;
-    });
+        if (stageFilter === "awaiting") return isAwaiting(c);
+        if (stageFilter === "active") return !!c.agent_stage && c.agent_stage !== "abort";
+        return true;
+      })
+      .sort((a, b) => {
+        const ar = rank(a);
+        const br = rank(b);
+        if (ar !== br) return br - ar;
+        const at = new Date(lastActivityAt(a) ?? 0).getTime();
+        const bt = new Date(lastActivityAt(b) ?? 0).getTime();
+        return bt - at;
+      });
+  }, [chats, search, stageFilter, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   return (
     <div className="flex h-full overflow-hidden bg-white">
@@ -554,11 +608,7 @@ export function LiveConsole() {
             </span>
           </div>
         )}
-        <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-4">
-          <Link href="/pipeline" className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2.5 rounded-xl text-[13px] font-bold transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
-            대량 발송은 파이프라인에서 <ArrowRight size={16} />
-          </Link>
-
+        <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
@@ -568,19 +618,21 @@ export function LiveConsole() {
             <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>인계 대기 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
             <button onClick={() => setActiveTab("confirm")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-[#2F855A] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
-          {/* all 탭: 단계 필터 / 인계 대기 탭: 사유 카테고리 필터 */}
+          {/* all 탭: 상태 필터 / 인계 대기 탭: 사유 카테고리 필터.
+              파일럿 단순화 — 스크리닝/온보딩/수동 세분 칩은 '진행 중' 하나로 통합(활성 후보가 적어 노이즈),
+              실사용 빈도 높은 미답·전체를 앞으로. */}
           {activeTab === "all" ? (
             <div className="flex gap-1 flex-wrap">
               {[
-                { id: "all", label: "전체" },
                 { id: "intervention", label: "미답" },
-                { id: "screening", label: "스크리닝" },
-                { id: "onboarding", label: "온보딩" },
-                { id: "paused", label: "수동" },
+                { id: "all", label: "전체" },
+                { id: "awaiting", label: "답 대기" },
+                { id: "active", label: "진행 중" },
               ].map((f) => (
                 <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>
                   {f.label}
                   {f.id === "intervention" && unansweredCount > 0 && <span className={`ml-1 ${stageFilter === f.id ? "opacity-60" : "text-[#E53E3E]"}`}>{unansweredCount}</span>}
+                  {f.id === "awaiting" && awaitingCount > 0 && <span className={`ml-1 ${stageFilter === f.id ? "opacity-60" : "text-[#718096]"}`}>{awaitingCount}</span>}
                 </button>
               ))}
             </div>
@@ -595,6 +647,10 @@ export function LiveConsole() {
               })}
             </div>
           ) : null}
+          {/* 대량 발송 진입점 — 큰 버튼 대신 작은 링크로(개별 응대 화면에서 실사용 빈도 낮음) */}
+          <Link href="/pipeline" className="self-start flex items-center gap-1 text-[12px] font-bold text-[#718096] hover:text-[#1A202C] transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+            대량 발송은 파이프라인에서 <ArrowRight size={13} />
+          </Link>
         </div>
 
         {/* 인계 대기 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
@@ -686,11 +742,24 @@ export function LiveConsole() {
         ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
           {loadingList && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대화 목록 불러오는 중…</div>}
-          {!loadingList && visibleChats.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">진행 중인 대화가 없어요</div>}
+          {!loadingList && visibleChats.length === 0 && (
+            <div className="text-[13px] text-[#A0AEC0] p-4 text-center">
+              {search.trim()
+                ? "검색 결과가 없어요 — 이름·전화번호를 확인해주세요"
+                : stageFilter === "intervention"
+                  ? "미답 대화가 없어요 — 모두 응대했어요 👍"
+                  : stageFilter === "awaiting"
+                    ? "답 대기 중인 대화가 없어요 — 문자를 보내고 회신을 기다리는 대화가 여기 떠요"
+                    : stageFilter === "active"
+                      ? "진행 중인 AI 대화가 없어요"
+                      : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
+            </div>
+          )}
           {visibleChats.map((chat, idx) => {
             const pal = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
             const unread = chat.unread_count ?? 0;
             const intervention = isUnanswered(chat);
+            const awaiting = isAwaiting(chat);
             const src = chat.source ? SOURCE_LABEL[chat.source] ?? chat.source : null;
             // 활성 대화(agent_stage)가 없는데 답장이 온 재컨택 응답자 = '풀 응답'.
             // 스크리닝 대화와 구분해 매니저가 스코프 밖 문자를 바로 알아보게 한다.
@@ -710,14 +779,14 @@ export function LiveConsole() {
                       <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{chat.name} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
                     </div>
                   </div>
-                  <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(chat.last_message_at ?? chat.created_at)}</div>
+                  <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
                 </div>
                 {(() => {
                   const pv = previewById[chat.id];
                   if (pv?.body) {
                     return (
                       <div className="text-[13px] line-clamp-1 mb-2.5">
-                        <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : "발신"}</span>
+                        <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : pv.manual_outbound ? "매니저" : "발신"}</span>
                         <span className="text-[#4A5568]"> · {pv.body}</span>
                       </div>
                     );
@@ -738,7 +807,9 @@ export function LiveConsole() {
                   {isPoolResponse
                     ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">풀 응답</span>
                     : intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#E53E3E]">개입 필요</span>}
-                  {chat.agent_stage && chat.agent_stage !== "paused" && chat.agent_stage !== "abort" && !intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EBF8FF] text-[#3182CE]">AI 응대 중</span>}
+                  {/* 답 대기: 매니저가 보내고 회신을 기다리는 대화(빠른 컨택 등) — 회색·시계 */}
+                  {awaiting && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#718096]">⏱ 답 대기</span>}
+                  {chat.agent_stage && chat.agent_stage !== "paused" && chat.agent_stage !== "abort" && !intervention && !awaiting && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EBF8FF] text-[#3182CE]">AI 응대 중</span>}
                 </div>
               </button>
             );
