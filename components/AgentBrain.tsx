@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
-import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap } from "lucide-react";
+import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap, Lightbulb, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
@@ -92,6 +92,43 @@ const TONE_LABEL: Record<string, string> = {
   neutral: "일반",
 };
 
+// 🔁 개선 제안 (R4) — improve API가 반환하는 제안. 서버 저장 없음(즉석 표시).
+interface ImproveProposal {
+  kind: "knowledge" | "conversation_example" | "system_message_tweak";
+  title: string;
+  body: string;
+  evidence: string;
+  confidence: "high" | "medium";
+}
+
+const IMPROVE_KIND_LABEL: Record<ImproveProposal["kind"], string> = {
+  knowledge: "일반 라인 FAQ",
+  conversation_example: "대화 예시",
+  system_message_tweak: "자동 발송 문구 제안",
+};
+const IMPROVE_KIND_BADGE: Record<ImproveProposal["kind"], string> = {
+  knowledge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]",
+  conversation_example: "bg-[#F0FFF4] text-[#276749] border-[#C6F6D5]",
+  system_message_tweak: "bg-[#FFFAF0] text-[#C05621] border-[#FBD38D]",
+};
+
+// AI 사용량 카드 (R4-3) — 모델별 단가 (USD per 1M tokens). 캐시 읽기는 입력 단가의 10%로 추정.
+interface UsageMonthModel {
+  model: string;
+  call_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read: number;
+}
+function modelRates(model: string): { in: number; out: number } {
+  return model.includes("haiku") ? { in: 1, out: 5 } : { in: 3, out: 15 };
+}
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 export function AgentBrain() {
   const confirm = useConfirm();
   const router = useRouter();
@@ -130,6 +167,83 @@ export function AgentBrain() {
   const [simResult, setSimResult] = useState<SimDraft | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 🔁 개선 제안 (R4-2) — 최근 7일 재료에서 배울 거리 추출. 반영은 매니저 승인으로만.
+  const [improveLoading, setImproveLoading] = useState(false);
+  const [improveRan, setImproveRan] = useState(false);
+  const [proposals, setProposals] = useState<ImproveProposal[]>([]);
+  const [approvingIdx, setApprovingIdx] = useState<number | null>(null);
+
+  // AI 사용량 카드 (R4-3) — 이번 달 ai_usage_daily 모델별 집계 (기존 usage API 재사용).
+  const { data: usageApi, isLoading: usageLoading } = useSWR<{ month?: { models?: UsageMonthModel[] } }>("/api/admin/usage");
+  const monthStats = useMemo(() => {
+    const models = usageApi?.month?.models ?? [];
+    let calls = 0;
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let cost = 0;
+    for (const m of models) {
+      calls += m.call_count;
+      tokensIn += m.tokens_in;
+      tokensOut += m.tokens_out;
+      const rate = modelRates(m.model);
+      cost += (m.tokens_in / 1e6) * rate.in + (m.tokens_out / 1e6) * rate.out + (m.cache_read / 1e6) * rate.in * 0.1;
+    }
+    return { calls, tokensIn, tokensOut, cost };
+  }, [usageApi]);
+
+  const handleRunImprove = async () => {
+    if (improveLoading) return;
+    setImproveLoading(true);
+    try {
+      const res = await fetch("/api/admin/agent/improve", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "개선 제안 생성에 실패했어요");
+        return;
+      }
+      setProposals((json.proposals ?? []) as ImproveProposal[]);
+      setImproveRan(true);
+    } catch {
+      toast.error("개선 제안 생성에 실패했어요");
+    } finally {
+      setImproveLoading(false);
+    }
+  };
+
+  // 승인 — knowledge/conversation_example만 기존 prompt-examples POST로 INSERT.
+  // system_message_tweak은 자동 반영 금지(지식 오염 방지) — 문구 편집에서 직접 반영 안내만.
+  const handleApproveProposal = async (idx: number) => {
+    const p = proposals[idx];
+    if (!p || p.kind === "system_message_tweak" || approvingIdx !== null) return;
+    setApprovingIdx(idx);
+    try {
+      const res = await fetch("/api/admin/prompt-examples", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: p.kind === "knowledge" ? "knowledge" : "conversation",
+          title: p.title,
+          body: p.body,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "지식 추가에 실패했어요");
+        return;
+      }
+      toast.success(`'${p.title}' 항목을 지식베이스에 추가했어요. 60초 이내 AI에 반영됩니다.`);
+      setProposals((prev) => prev.filter((_, i) => i !== idx));
+      await loadExamples();
+    } catch {
+      toast.error("지식 추가에 실패했어요");
+    } finally {
+      setApprovingIdx(null);
+    }
+  };
+
+  const handleDismissProposal = (idx: number) =>
+    setProposals((prev) => prev.filter((_, i) => i !== idx));
 
   // 운영자 페르소나 (시스템 프롬프트에 반영) — SWR로 로드 후 폼에 시드(이후 로컬 편집).
   const { data: personaApi, isLoading: personaLoading } = useSWR<{ data?: { role?: string; instructions?: string; tone?: string; emoji?: number } }>("/api/admin/agent/persona");
@@ -452,6 +566,12 @@ export function AgentBrain() {
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'simulator' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
             <FlaskConical size={18} className={activeTab === 'simulator' ? 'text-[#805AD5]' : ''} /> 응대 시뮬레이터
+          </button>
+          <button
+            onClick={() => setActiveTab("improve")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'improve' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <Lightbulb size={18} className={activeTab === 'improve' ? 'text-[#D69E2E]' : ''} /> 🔁 개선 제안
           </button>
         </div>
 
@@ -1073,6 +1193,112 @@ export function AgentBrain() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'improve' && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              {/* R4-3 AI 사용량 카드 — 이번 달 ai_usage_daily 집계 */}
+              <div className="p-5 border border-[#E2E8F0] rounded-2xl bg-white mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 text-[14px] font-bold text-[#1A202C]">
+                    <Coins size={16} className="text-[#D69E2E]" /> 이번 달 AI 사용량
+                  </div>
+                  <a
+                    href="https://console.anthropic.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[12px] font-bold text-[#3182CE] hover:underline flex items-center gap-1"
+                  >
+                    크레딧 잔액은 Anthropic 콘솔에서 <ExternalLink size={11} />
+                  </a>
+                </div>
+                {usageLoading ? (
+                  <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-0.5">Claude 호출</div>
+                      <div className="text-[20px] font-extrabold text-[#1A202C]">{monthStats.calls.toLocaleString()}<span className="text-[12px] font-bold text-[#A0AEC0]">회</span></div>
+                    </div>
+                    <div>
+                      <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-0.5">토큰 (입력 / 출력)</div>
+                      <div className="text-[20px] font-extrabold text-[#1A202C]">{fmtTokens(monthStats.tokensIn)}<span className="text-[13px] font-bold text-[#A0AEC0]"> / {fmtTokens(monthStats.tokensOut)}</span></div>
+                    </div>
+                    <div>
+                      <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-0.5">추정 비용</div>
+                      <div className="text-[20px] font-extrabold text-[#1A202C]">${monthStats.cost.toFixed(2)}</div>
+                    </div>
+                  </div>
+                )}
+                <p className="text-[11px] text-[#A0AEC0] mt-3 leading-relaxed">
+                  * 추정 비용 = 토큰 × 모델 단가 (Sonnet 4.6 입력 $3 · 출력 $15 / Haiku 4.5 입력 $1 · 출력 $5 per 1M tokens, 캐시 읽기는 입력 단가의 10%로 계산). 실제 청구액과 다를 수 있어요.
+                </p>
+              </div>
+
+              {/* R4-2 개선 제안 — 반영은 매니저 승인으로만 (자동 반영 금지) */}
+              <h2 className="text-lg font-bold text-[#1A202C] mb-2 flex items-center gap-2">
+                <Lightbulb size={20} className="text-[#D69E2E]" /> 🔁 개선 제안
+              </h2>
+              <p className="text-sm text-[#718096] mb-5">
+                최근 7일간 <b>매니저가 고쳐 보낸 AI 초안 · 매니저 인계 사유 · 정보 부족 사례</b>에서 AI가 배울 거리를 찾아 제안합니다.
+                제안은 <b>매니저가 승인해야만</b> 지식베이스에 반영돼요 — 자동으로 지식이 바뀌지 않습니다.
+              </p>
+
+              <button
+                onClick={handleRunImprove}
+                disabled={improveLoading}
+                className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl text-[14px] font-bold transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                {improveLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-[#FFCB3C]" />}
+                {improveLoading ? "지난 7일 기록에서 배울 거리를 찾는 중..." : "지난 7일에서 배울 거리 찾기"}
+              </button>
+              <p className="text-[11.5px] text-[#A0AEC0] mt-1.5">실행하면 Claude 호출 1회 비용이 발생해요.</p>
+
+              {improveRan && !improveLoading && proposals.length === 0 && (
+                <div className="mt-5 text-center text-[13px] text-[#A0AEC0] border border-dashed border-[#E2E8F0] rounded-xl p-8">
+                  아직 배울 재료가 없어요 — 코파일럿 초안 수정·인계 사례가 쌓이면 제안을 만들어요.
+                </div>
+              )}
+
+              {proposals.length > 0 && (
+                <div className="mt-5 space-y-3">
+                  {proposals.map((p, idx) => (
+                    <div key={`${p.kind}-${p.title}-${idx}`} className="border border-[#E2E8F0] rounded-xl p-4 bg-white hover:border-[#CBD5E0] transition-colors">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${p.confidence === 'high' ? 'bg-[#F0FFF4] text-[#276749] border-[#C6F6D5]' : 'bg-[#F7FAFC] text-[#718096] border-[#E2E8F0]'}`}>
+                          {p.confidence === 'high' ? '확신 높음' : '확신 중간'}
+                        </span>
+                      </div>
+                      <div className="text-[14px] font-bold text-[#1A202C]">{p.title}</div>
+                      <div className="text-[13px] text-[#4A5568] mt-1 leading-relaxed whitespace-pre-wrap">{p.body}</div>
+                      {p.evidence && <div className="text-[12px] text-[#A0AEC0] mt-2">근거: {p.evidence}</div>}
+                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                        {p.kind === "system_message_tweak" ? (
+                          <span className="text-[12px] font-bold text-[#C05621] bg-[#FFFAF0] border border-[#FBD38D] rounded-lg px-3 py-1.5">
+                            자동 반영되지 않아요 — ‘사내 지식 베이스 &gt; 자동 발송 문구’에서 직접 반영하세요
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleApproveProposal(idx)}
+                            disabled={approvingIdx !== null}
+                            className="flex items-center gap-1.5 bg-[#1A202C] hover:bg-[#2D3748] text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                          >
+                            {approvingIdx === idx ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} 승인 — 지식에 추가
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDismissProposal(idx)}
+                          className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold text-[#718096] border border-[#E2E8F0] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                        >
+                          무시
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
