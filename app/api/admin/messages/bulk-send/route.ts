@@ -176,6 +176,18 @@ export async function POST(req: NextRequest) {
             },
           });
           if (evErr) console.error("[bulk-send] pool_events ping_sent failed", evErr);
+
+          // 공고 마감 안내(purpose='job_closed')는 waitlist_notice로도 기록 —
+          // 공고 재개 시 '결원 우선 안내' 대상 역조회와 중복 안내 방지의 근거(engage의 충원 완료 안내와 동일 event_type).
+          if (purpose === "job_closed" && purposeJobId !== null) {
+            const { error: wlErr } = await supabase.from("pool_events").insert({
+              applicant_id: r.applicant_id,
+              job_id: purposeJobId,
+              event_type: "waitlist_notice",
+              meta: { trigger: "job_closed" },
+            });
+            if (wlErr) console.error("[bulk-send] pool_events waitlist_notice failed", wlErr);
+          }
         }
       }
 

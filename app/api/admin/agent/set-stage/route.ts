@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       .from("job_candidates")
       .select(`
         id, job_id, applicant_id, agent_stage, agent_state,
-        jobs:job_id ( id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id ),
+        jobs:job_id ( id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, recruit_mode ),
         applicants:applicant_id ( id, name, phone, branch1, work_hours, source )
       `)
       .eq("applicant_id", applicant_id)

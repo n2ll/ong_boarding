@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 
 // 'screening' 카테고리는 deprecated (시스템 자동 발송 문구로 일원화됨).
 // DB에 남은 레거시 행은 무해 — 더 이상 UI/백엔드에서 읽지 않는다.
-const CATEGORIES = ["conversation", "facts", "system_message"] as const;
+// 'knowledge' = 일반 배송 라인 FAQ — internal 실공고 프롬프트에만 주입 (facts와 분리).
+const CATEGORIES = ["conversation", "facts", "system_message", "knowledge"] as const;
 type Category = (typeof CATEGORIES)[number];
 
 function isValidCategory(v: unknown): v is Category {

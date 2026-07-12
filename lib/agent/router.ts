@@ -126,7 +126,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     .select(`
       id, job_id, applicant_id, agent_stage, agent_state,
       jobs:job_id (
-        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts
+        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts, recruit_mode
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,

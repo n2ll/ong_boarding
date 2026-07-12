@@ -139,7 +139,11 @@ export type TemplateKey =
   | "ATTENDANCE"
   | "GUIDE"
   | "SCREENING_ANNOUNCE"
-  | "VENUE_GUIDE";
+  | "VENUE_GUIDE"
+  // 일반 라인(internal 공고) 전용 — 알림톡 템플릿 미등록 상태라 SMS 폴백으로 발송된다.
+  // (비마트용 SCREENING_ANNOUNCE/GUIDE 템플릿을 재사용하면 등록된 비마트 본문이 나가므로 키를 분리)
+  | "GENERAL_SCREENING_ANNOUNCE"
+  | "GENERAL_SCREENING_HANDOFF";
 
 export async function sendNotification(
   to: string,

@@ -12,6 +12,14 @@ import { sendNotification } from "../solapi";
 import { sendSlackPausedAlert } from "../slack";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 import { mergeAgentState } from "./checklist";
+import {
+  buildGeneralCollectedSummary,
+  buildGeneralHandoffText,
+  buildGeneralScreeningAnnouncement,
+  GENERAL_SCREENING_AUTO_TRUE,
+  isGeneralLineJob,
+  readGeneralCollected,
+} from "./general-line";
 import type { AgentState, JobContext, ScreeningChecklist, StageName, StageTransition } from "./types";
 
 interface ApplyTransitionInput {
@@ -154,18 +162,24 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
 
       // ─── exploration → screening: 안내 묶음 자동 발송 + 조건부 자동 true ───
       if (transition.to === "screening") {
-        // 1) 안내 묶음 (정산/프로모션/업무시간) 1통 발송
+        const general = isGeneralLineJob(job);
+        // 1) 안내 발송 — 비마트: 안내 묶음(정산/프로모션/업무시간) / 일반 라인: 첫 확인질문(차종·본인명의)
         try {
-          const storedAnnounce = await getSystemMessage(supabase, "screening_announce");
+          const storedAnnounce = await getSystemMessage(
+            supabase,
+            general ? "general_screening_announce" : "screening_announce"
+          );
           const announceText = storedAnnounce
             ? fillTemplate(storedAnnounce, { 이름: applicant_name ?? "지원자" })
-            : buildScreeningAnnouncement(applicant_name);
+            : general
+              ? buildGeneralScreeningAnnouncement(applicant_name)
+              : buildScreeningAnnouncement(applicant_name);
           if (await isAlreadySentRecently(announceText)) {
             // 이미 발송됨 — 중복 방지
           } else {
           const r = await maybeSendNotification(
             applicant_phone,
-            "SCREENING_ANNOUNCE",
+            general ? "GENERAL_SCREENING_ANNOUNCE" : "SCREENING_ANNOUNCE",
             { "#{이름}": applicant_name ?? "지원자" },
             announceText
           );
@@ -194,19 +208,26 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
 
         // 2) 안내 항목 + 조건부 항목 자동 true — 안내 발송이 실패했으면 진행하지 않는다.
         if (!criticalSendFailure) {
-          const autoTrue: Partial<ScreeningChecklist> = {
-            프로모션_종료가능성_안내: true,
-            정산주기_안내: true,
-            업무시간_체계_이해: true,
-          };
-          // 자차 필요 없는 공고면 자차_재확인 자동 통과
-          if (job && job.vehicle_required === false) {
-            autoTrue.자차_재확인 = true;
-          }
-          // 주말 슬롯이 아니면 공휴일 항목 자동 통과
-          const slot = job?.slot ?? "";
-          if (!slot.includes("주말")) {
-            autoTrue.공휴일_업무여부_확인 = true;
+          let autoTrue: Partial<ScreeningChecklist>;
+          if (general) {
+            // 일반 라인: 비마트 전용 안내 항목은 해당 없음 처리.
+            // 자차_재확인(=차종 확인)은 렌트 안내 분기가 있어 항상 AI가 확인한다.
+            autoTrue = { ...GENERAL_SCREENING_AUTO_TRUE };
+          } else {
+            autoTrue = {
+              프로모션_종료가능성_안내: true,
+              정산주기_안내: true,
+              업무시간_체계_이해: true,
+            };
+            // 자차 필요 없는 공고면 자차_재확인 자동 통과
+            if (job && job.vehicle_required === false) {
+              autoTrue.자차_재확인 = true;
+            }
+            // 주말 슬롯이 아니면 공휴일 항목 자동 통과
+            const slot = job?.slot ?? "";
+            if (!slot.includes("주말")) {
+              autoTrue.공휴일_업무여부_확인 = true;
+            }
           }
 
           extraStateUpdate = {
@@ -237,6 +258,83 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           .update({ status: "스크리닝 완료" })
           .eq("id", applicant_id)
           .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
+
+        // ─── 일반 라인(internal 공고): 배민 앱 가이드 발송 금지 ───
+        // 스크리닝 통과 = AI 역할 종료. 선탑(동승) 인계 마무리 1통 발송 후 onboarding 대신
+        // paused로 전환해 매니저에게 인계한다 (Slack에 수집 요약 포함).
+        if (isGeneralLineJob(job)) {
+          try {
+            const storedHandoff = await getSystemMessage(supabase, "general_screening_handoff");
+            const handoffText = storedHandoff
+              ? fillTemplate(storedHandoff, { 이름: applicant_name ?? "지원자" })
+              : buildGeneralHandoffText(applicant_name);
+            if (await isAlreadySentRecently(handoffText)) {
+              // 이미 발송됨 — 중복 방지
+            } else {
+              const r = await maybeSendNotification(
+                applicant_phone,
+                "GENERAL_SCREENING_HANDOFF",
+                { "#{이름}": applicant_name ?? "지원자" },
+                handoffText
+              );
+              if (r.success) {
+                await supabase.from("messages").insert({
+                  applicant_id,
+                  applicant_phone,
+                  direction: "outbound",
+                  body: handoffText,
+                  status: "sent",
+                  sent_by: "system-auto",
+                  solapi_msg_id: r.messageId ?? null,
+                  message_type: r.via,
+                  template_id: r.templateId ?? null,
+                  job_id,
+                });
+                autoSent++;
+              } else {
+                criticalSendFailure = `GENERAL_HANDOFF 발송 실패: ${r.error ?? "unknown"}`;
+              }
+            }
+          } catch (e) {
+            criticalSendFailure = `GENERAL_HANDOFF 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
+            console.error("[transitions] GENERAL_HANDOFF send failed", e);
+          }
+
+          if (!criticalSendFailure) {
+            const summary = buildGeneralCollectedSummary(readGeneralCollected(state_update.meta));
+            const reason = `일반 라인 스크리닝 통과 — 선탑(동승) 일정 조율 필요\n${summary}`;
+            nextStage = "paused";
+            extraStateUpdate = {
+              meta: {
+                paused_from_stage: "screening",
+                paused_at: now,
+                screening_passed_at: now,
+                pause: {
+                  category: "call",
+                  summary: reason,
+                  suggested_action: "수집 요약(차종·명의·시작일·선탑 가능 시간대·법인차 렌트 희망)을 확인하고 선탑 일정을 잡아 연락하세요.",
+                },
+              },
+            };
+            await supabase
+              .from("job_candidates")
+              .update({ paused_reason: reason })
+              .eq("id", candidate_id);
+            if (!simulate) {
+              try {
+                await sendSlackPausedAlert({
+                  applicant_name,
+                  applicant_phone,
+                  branch: input.applicant_branch ?? job?.branch ?? null,
+                  reason,
+                });
+              } catch (e) {
+                console.error("[transitions] slack general handoff alert failed", e);
+              }
+            }
+          }
+          break;
+        }
 
         // (온보딩 진입 슬랙은 제거 — '준비 완료'(배민 아이디 수신) 시점에
         //  onboarding stage에서 발송한다.)
@@ -327,9 +425,13 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
   // (지원자는 0통 수신 → 확정 뉘앙스 금지 자동 준수. 알림은 매니저 대상.)
   if (transition.kind === "advance" && criticalSendFailure) {
     nextStage = "paused";
+    // 일반 라인은 onboarding 단계를 쓰지 않는다 — 재개 시 screening으로 복귀해
+    // 완료 체크리스트 기반 자동 재전이(인계 마무리 재시도)가 일어나게 한다.
+    const pausedFrom =
+      transition.to === "onboarding" && isGeneralLineJob(job) ? "screening" : transition.to;
     extraStateUpdate = mergeAgentState(extraStateUpdate, {
       meta: {
-        paused_from_stage: transition.to,
+        paused_from_stage: pausedFrom,
         paused_at: now,
         pause: {
           category: "tech",
