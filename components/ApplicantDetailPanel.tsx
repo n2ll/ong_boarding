@@ -88,10 +88,18 @@ interface RecontactSummary {
   interest_jobs: RecontactInterestJob[];
 }
 
+// 선탑(동승) 완료 이력 — pool_events(suntop_done) 원장. 프리보딩 자산 배지·기록 UI용.
+interface SuntopEvent {
+  id: number;
+  created_at: string;
+  meta: { client?: string; line?: string; note?: string } | null;
+}
+
 interface Detail {
   applicant: ApplicantFull;
   candidates: CandidateLink[];
   recontact?: RecontactSummary | null;
+  suntop?: { done: boolean; events: SuntopEvent[] } | null;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -291,11 +299,18 @@ export function ApplicantDetailContent({
   const [excludeOpen, setExcludeOpen] = useState(false);
   // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
   const [sectionOpen, setSectionOpen] = useState<Partial<Record<"jobs" | "profile" | "manage", boolean>>>({});
+  // 선탑(동승) 완료 기록 폼 — 프리보딩 자산 원장(pool_events suntop_done) 수동 기록.
+  const [suntopFormOpen, setSuntopFormOpen] = useState(false);
+  const [suntopClient, setSuntopClient] = useState("");
+  const [suntopLine, setSuntopLine] = useState("");
 
   useEffect(() => {
     setEdit({});
     setDirty(false);
     setSectionOpen({});
+    setSuntopFormOpen(false);
+    setSuntopClient("");
+    setSuntopLine("");
   }, [applicantId]);
 
   if (loading && !detail) {
@@ -417,6 +432,40 @@ export function ApplicantDetailContent({
     );
   };
 
+  // 선탑(동승) 완료 기록/삭제 — pool_events(suntop_done) 원장. 기록하면 배지가 뜨고
+  // 새 공고 안내(announce-targets)에서 S그룹(최우선) 대상이 된다.
+  const recordSuntop = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/applicants/${a.id}/suntop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client: suntopClient, line: suntopLine }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("선탑 완료로 기록했어요. 새 공고 안내에서 최우선 대상이 됩니다.");
+      setSuntopFormOpen(false);
+      setSuntopClient("");
+      setSuntopLine("");
+      reload();
+      onChanged?.();
+    } catch {
+      toast.error("선탑 기록에 실패했어요");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeSuntop = async (eventId: number) => {
+    try {
+      const res = await fetch(`/api/admin/applicants/${a.id}/suntop?event_id=${eventId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      toast.success("선탑 기록을 삭제했어요");
+      reload();
+    } catch {
+      toast.error("삭제에 실패했어요");
+    }
+  };
+
   // 관심 공고 배지 클릭 → 대기 안내 문구 클립보드 복사 (확정 뉘앙스 금지 — '먼저 안내' 수준).
   const copyInterestReply = async (ij: RecontactInterestJob) => {
     const jobTitle = (ij.title ?? "").trim() || `공고 #${ij.job_id}`;
@@ -499,6 +548,9 @@ export function ApplicantDetailContent({
           )}
           {a.source && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</span>}
           {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FAF5FF] text-[#805AD5]">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
+          {detail.suntop?.done && (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
+          )}
           {a.sms_opt_out_at && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
           )}
@@ -741,6 +793,39 @@ export function ApplicantDetailContent({
                   {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </label>
+            </div>
+
+            {/* 선탑(동승) 이력 — 프리보딩 자산. 기록 즉시 원장(pool_events)에 남아 새 공고 안내 S그룹(최우선)이 된다. */}
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-[#A0AEC0]" title="선탑 완료 = 현장을 미리 경험한 프리보딩 인력 — 새 공고 안내 시 최우선으로 상정돼요">선탑(동승) 이력</span>
+                <button onClick={() => setSuntopFormOpen((v) => !v)} className="text-[11.5px] font-bold text-[#2B6CB0] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">
+                  {suntopFormOpen ? "닫기" : "+ 선탑 완료 기록"}
+                </button>
+              </div>
+              {(detail.suntop?.events?.length ?? 0) > 0 ? (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {detail.suntop!.events.map((ev) => (
+                    <span key={ev.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">
+                      {[ev.meta?.client, ev.meta?.line].filter(Boolean).join(" · ") || "선탑 완료"} · {new Date(ev.created_at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })}
+                      <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="text-[#2F855A] hover:text-[#E53E3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"><X size={11} /></button>
+                    </span>
+                  ))}
+                </div>
+              ) : !suntopFormOpen ? (
+                <div className="text-[11.5px] text-[#A0AEC0] mt-1">기록 없음 — 선탑을 진행했다면 기록해 두세요. 새 공고 안내 때 최우선으로 상정돼요.</div>
+              ) : null}
+              {suntopFormOpen && (
+                <div className="mt-2 space-y-1.5">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 용산·한남)" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                  </div>
+                  <button onClick={recordSuntop} disabled={busy} className="w-full bg-[#2F855A] hover:bg-[#276749] text-white py-1.5 rounded-lg text-[12px] font-bold disabled:opacity-50 flex justify-center items-center gap-1.5">
+                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} 선탑 완료로 기록
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4">

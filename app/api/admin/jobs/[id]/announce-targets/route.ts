@@ -5,7 +5,8 @@
  * pull 마감 카드 알림 신청(notify_request)의 이행 대상을, 공고 게시 순간 원클릭 발송용으로 내려준다.
  * 발송 자체는 클라이언트가 bulk-send(purpose='new_job')로 수행 — 수신거부·인력풀 제외·10분 중복 가드는 거기서 재차 방어.
  *
- * 우선순위 그룹 (A > B > C, 상위 그룹 우선으로 중복 제거):
+ * 우선순위 그룹 (S > A > B > C, 상위 그룹 우선으로 중복 제거):
+ *   S suntop    — 선탑(동승) 완료자(suntop_done, 기간 무관) — 현장을 미리 경험한 프리보딩 인력, 압도적 우선
  *   A promised  — waitlist_notice 수신자 (전 공고 대상 — 약속은 공고 무관 "새 공고" 약속)
  *   B requested — notify_request 이력자 (pull 마감 카드 '먼저 알려주세요')
  *   C matched   — 최근 14일 ping_sent 코호트 중 이 공고 앵커(상차지·마지막 경유지) 15km 이내
@@ -34,7 +35,7 @@ const MATCH_RADIUS_KM = 15;
 const PING_COHORT_DAYS = 14;
 const NEW_JOB_FATIGUE_DAYS = 7;
 
-type AnnounceGroup = "promised" | "requested" | "matched";
+type AnnounceGroup = "suntop" | "promised" | "requested" | "matched";
 
 interface ApplicantRow {
   id: number;
@@ -66,6 +67,16 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
   if (!job) {
     return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  // S 선탑 완료자 — 프리보딩 자산(pool_events suntop_done, 기간 무관). 거리·차량 조건 없이 최우선.
+  const { data: suntopRows, error: sunErr } = await supabase
+    .from("pool_events")
+    .select("applicant_id")
+    .eq("event_type", "suntop_done");
+  if (sunErr) {
+    console.error("[announce-targets] suntop_done", sunErr);
+    return NextResponse.json({ error: sunErr.message }, { status: 500 });
   }
 
   // A 약속자 — waitlist_notice는 "새 공고가 올라오면 먼저 안내" 약속(충원완료 자동 안내·마감 안내 공통).
@@ -101,16 +112,17 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: pingErr.message }, { status: 500 });
   }
 
+  const suntopIds = [...new Set((suntopRows ?? []).map((r) => r.applicant_id as number))];
   const promisedIds = [...new Set((promisedRows ?? []).map((r) => r.applicant_id as number))];
   const requestedIds = [...new Set((requestedRows ?? []).map((r) => r.applicant_id as number))];
   const pingedIds = [...new Set((pingedRows ?? []).map((r) => r.applicant_id as number))];
 
   const night = isNightKst();
   const smsTitle = smsJobTitle(job.title as string);
-  const unionIds = [...new Set([...promisedIds, ...requestedIds, ...pingedIds])];
+  const unionIds = [...new Set([...suntopIds, ...promisedIds, ...requestedIds, ...pingedIds])];
   if (unionIds.length === 0) {
     return NextResponse.json({
-      groups: { promised: 0, requested: 0, matched: 0 },
+      groups: { suntop: 0, promised: 0, requested: 0, matched: 0 },
       targets: [],
       night,
       sms_title: smsTitle,
@@ -180,7 +192,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return true;
   };
 
-  // A > B > C 순으로 채워 상위 그룹 우선 중복 제거 — 절단(상한 200)도 같은 순서라 약속자부터 보장.
+  // S > A > B > C 순으로 채워 상위 그룹 우선 중복 제거 — 절단(상한 200)도 같은 순서라 선탑 완료자부터 보장.
+  const suntopSet = new Set(suntopIds);
   const promisedSet = new Set(promisedIds);
   const requestedSet = new Set(requestedIds);
   const targets: { id: number; name: string | null; phone: string; access_token: string; group: AnnounceGroup }[] = [];
@@ -190,12 +203,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     if (group === "matched" && !matchesJob(a)) return;
     targets.push({ id: a.id, name: a.name, phone: a.phone as string, access_token: a.access_token as string, group });
   };
-  for (const id of promisedIds) push(id, "promised");
-  for (const id of requestedIds) if (!promisedSet.has(id)) push(id, "requested");
-  for (const id of pingedIds) if (!promisedSet.has(id) && !requestedSet.has(id)) push(id, "matched");
+  for (const id of suntopIds) push(id, "suntop");
+  for (const id of promisedIds) if (!suntopSet.has(id)) push(id, "promised");
+  for (const id of requestedIds) if (!suntopSet.has(id) && !promisedSet.has(id)) push(id, "requested");
+  for (const id of pingedIds) if (!suntopSet.has(id) && !promisedSet.has(id) && !requestedSet.has(id)) push(id, "matched");
 
   const capped = targets.slice(0, TARGET_CAP);
   const groups = {
+    suntop: capped.filter((t) => t.group === "suntop").length,
     promised: capped.filter((t) => t.group === "promised").length,
     requested: capped.filter((t) => t.group === "requested").length,
     matched: capped.filter((t) => t.group === "matched").length,
