@@ -51,16 +51,16 @@ export function Dashboard() {
   const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
   // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
-  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
-  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
+  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
+  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 인계 대기(paused)·AI 전역 중단 카운트
   const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
   const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
-  const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat");
+  const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
-  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number }>("/api/admin/interest-queue");
+  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
   const { data: killRes } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");

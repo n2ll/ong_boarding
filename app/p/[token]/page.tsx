@@ -124,21 +124,45 @@ export default function PoolPage() {
 
   useEffect(() => {
     if (!token) return;
-    fetch(`/api/pool/${token}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          setNotFound(true);
-          return;
-        }
-        const json = await res.json();
-        setName(json.name ?? null);
-        setAvailability(json.availability ?? null);
-        setJobs(json.jobs ?? []);
-        setDoneIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id)));
-        setNotifyIds(new Set((json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id)));
-      })
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
+    // 살아있는 갱신 — 페이지를 열어둔 채여도 새 공고·마감이 반영되게 60초 주기 + 탭 복귀 시 재조회.
+    // 백그라운드 갱신은 로딩 화면을 다시 띄우지 않고, 관심/알림 상태는 로컬과 서버의 합집합(낙관적 클릭 보존).
+    let cancelled = false;
+    const load = (background: boolean) => {
+      fetch(`/api/pool/${token}`)
+        .then(async (res) => {
+          if (cancelled) return;
+          if (!res.ok) {
+            if (!background) setNotFound(true);
+            return;
+          }
+          const json = await res.json();
+          if (cancelled) return;
+          setName(json.name ?? null);
+          setAvailability(json.availability ?? null);
+          setJobs(json.jobs ?? []);
+          const serverDone = (json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id);
+          const serverNotify = (json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id);
+          setDoneIds((prev) => new Set([...(background ? prev : []), ...serverDone]));
+          setNotifyIds((prev) => new Set([...(background ? prev : []), ...serverNotify]));
+        })
+        .catch(() => {
+          if (!background && !cancelled) setNotFound(true);
+        })
+        .finally(() => {
+          if (!background && !cancelled) setLoading(false);
+        });
+    };
+    load(false);
+    const interval = setInterval(() => load(true), 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [token]);
 
   const expressInterest = async (job: PoolJob) => {
@@ -163,7 +187,7 @@ export default function PoolPage() {
     }
   };
 
-  // 마감된 공고 카드의 "다음 급구 때 먼저 알려주세요" — 놓친 지원자의 가용성 수집
+  // 마감된 공고 카드의 "이런 일자리가 또 나오면 먼저 알려주세요" — 놓친 지원자의 가용성 수집
   const expressNotify = async (job: PoolJob) => {
     if (sendingId !== null || notifyIds.has(job.id)) return;
     setSendingId(job.id);
@@ -244,11 +268,11 @@ export default function PoolPage() {
                     </p>
                   )}
                   <p className="mt-2 text-[14px] text-[#A0AEC0] leading-relaxed">
-                    이 공고는 마감됐어요. 비슷한 급구 건이 생기면 먼저 안내받으실 수 있어요.
+                    이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
                   </p>
                   {notified ? (
                     <p className="mt-3 py-3 text-[15px] font-bold text-[#38A169] text-center">
-                      ✓ 다음 급구 때 먼저 안내드릴게요
+                      ✓ 네, 새 일자리가 나오면 먼저 안내드릴게요
                     </p>
                   ) : (
                     <button
@@ -256,7 +280,7 @@ export default function PoolPage() {
                       disabled={sendingId === job.id}
                       className="mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#CBD5E0] text-[#4A5568] hover:bg-[#EDF2F7] active:bg-[#EDF2F7]"
                     >
-                      {sendingId === job.id ? "접수 중…" : "다음 급구 때 먼저 알려주세요"}
+                      {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
                     </button>
                   )}
                 </section>

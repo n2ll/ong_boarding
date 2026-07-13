@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
+import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -147,6 +147,33 @@ interface CloseNotifyTarget {
   name: string | null;
   phone: string;
   access_token: string;
+}
+
+// 새 공고 안내 문구 — #{이름}/#{맞춤링크}는 bulk-send가 수신자별 치환, {공고명}은 발송 전 모달에서
+// 치환(smsJobTitle 단가 괄호 제거본 — announce-targets가 내려준다).
+// '조건 확인'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙). '그만' 회신 안내로 수신거부 경로 유지.
+const NEW_JOB_NOTICE = `#{이름}님, 새 배송 건이 올라왔어요!\n{공고명}\n\n조건 확인: #{맞춤링크}\n(안내 중단: '그만' 회신)`;
+
+// 새 공고 안내 대상 — announce-targets API 응답. group은 A 약속자 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
+type AnnounceGroup = "promised" | "requested" | "matched";
+const ANNOUNCE_GROUP_LABEL: Record<AnnounceGroup, string> = {
+  promised: "먼저 안내 약속",
+  requested: "알림 신청",
+  matched: "조건 맞는 최근 관심",
+};
+interface AnnounceTarget {
+  id: number;
+  name: string | null;
+  phone: string;
+  access_token: string;
+  group: AnnounceGroup;
+}
+interface AnnounceGroups { promised: number; requested: number; matched: number }
+interface AnnounceTargetsRes {
+  groups: AnnounceGroups;
+  targets: AnnounceTarget[];
+  night: boolean;
+  sms_title: string;
 }
 
 // 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
@@ -318,6 +345,11 @@ export function Jobs() {
   // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
   const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
   const [closing, setClosing] = useState(false);
+  // 새 공고 안내 모달 — 등록 직후(대상 ≥1이면 자동)와 행 '대기자에게 안내'(수동)가 같은 모달을 쓴다.
+  // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
+  const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean } | null>(null);
+  const [announcing, setAnnouncing] = useState(false);
+  const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
   const [aiGlobalOn, setAiGlobalOn] = useState(true);
 
@@ -785,6 +817,19 @@ export function Jobs() {
       setAiModalOpen(false);
       resetNewJobForm();
       await loadJobs();
+      // 새 공고를 기다리던 사람들(안내 약속·알림 신청·조건 맞는 최근 관심) 원클릭 안내 — 대상 ≥1일 때만 모달.
+      // 조회 실패는 등록 흐름에 영향 없음(행 '대기자에게 안내'로 나중에 가능).
+      const newJobId = typeof json.job?.id === "number" ? json.job.id : null;
+      if (newJobId !== null) {
+        try {
+          const at = await fetchAnnounceTargets(newJobId);
+          if (at.targets.length > 0) {
+            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+          }
+        } catch {
+          /* noop */
+        }
+      }
     } catch {
       toast.error("공고 등록에 실패했어요");
     } finally {
@@ -956,11 +1001,16 @@ export function Jobs() {
     }
   };
 
-  // 미선발 관심자 마감 안내 발송 — bulk-send 재사용(수신거부·인력풀 제외·10분 중복 가드 공유).
-  // purpose='job_closed'로 보내면 서버가 pool_events(waitlist_notice, trigger:'job_closed')를 남겨
-  // 이후 '결원 시 우선 안내' 대상 역조회의 근거가 된다.
-  const sendCloseNotices = async (job: JobRow, targets: CloseNotifyTarget[]) => {
-    const body = JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
+  // 안내 문자 청크 발송 + Sonner 구분 보고 — 마감 안내(job_closed)·새 공고 안내(new_job) 공용.
+  // bulk-send 재사용으로 수신거부·인력풀 제외·10분 중복 가드는 서버가 재차 방어한다.
+  const sendBulkNotices = async (
+    targets: { id: number; phone: string }[],
+    body: string,
+    purpose: string,
+    jobId: number,
+    label: string,
+    zeroSentNote?: string
+  ) => {
     let sent = 0;
     const failErrors: string[] = [];
     let chunkFailed = 0;
@@ -974,8 +1024,8 @@ export function Jobs() {
           body: JSON.stringify({
             recipients: chunk.map((t) => ({ phone: t.phone, applicant_id: t.id })),
             body,
-            purpose: "job_closed",
-            job_id: Number(job.id),
+            purpose,
+            job_id: jobId,
           }),
         });
         const json = await res.json().catch(() => null);
@@ -1000,13 +1050,62 @@ export function Jobs() {
     if (guarded) parts.push(`가드 제외 ${guarded}명`);
     if (failed) parts.push(`실패 ${failed}명`);
     (sent > 0 ? toast.success : toast.error)(
-      `마감 안내: ${parts.join(" · ")}`,
-      sent === 0
-        ? { description: "발송은 실패했지만 공고 마감은 완료됐어요." }
+      `${label}: ${parts.join(" · ")}`,
+      sent === 0 && zeroSentNote
+        ? { description: zeroSentNote }
         : failed > 0
           ? { description: "실패분은 파이프라인 캠페인 발송으로 다시 보낼 수 있어요." }
           : undefined
     );
+  };
+
+  // 미선발 관심자 마감 안내 발송 — purpose='job_closed'로 보내면 서버가
+  // pool_events(waitlist_notice, trigger:'job_closed')를 남겨 이후 '결원 시 우선 안내' 대상 역조회의 근거가 된다.
+  const sendCloseNotices = async (job: JobRow, targets: CloseNotifyTarget[]) => {
+    const body = JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
+    await sendBulkNotices(targets, body, "job_closed", Number(job.id), "마감 안내", "발송은 실패했지만 공고 마감은 완료됐어요.");
+  };
+
+  // 새 공고 안내 대상 조회 — 등록 직후(자동)와 행 '대기자에게 안내'(수동) 공용.
+  const fetchAnnounceTargets = async (jobId: number): Promise<AnnounceTargetsRes> => {
+    const res = await fetch(`/api/admin/jobs/${jobId}/announce-targets`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || "대상 조회 실패");
+    return json as AnnounceTargetsRes;
+  };
+
+  // 행 '대기자에게 안내' — 등록 직후 모달을 놓쳤거나 야간이라 미뤘을 때 같은 모달을 다시 연다.
+  const openAnnounce = async (job: JobRow) => {
+    if (announceBusyId) return;
+    setAnnounceBusyId(job.id);
+    try {
+      const at = await fetchAnnounceTargets(Number(job.id));
+      if (at.targets.length === 0) {
+        toast.info("안내할 대기자가 없어요", {
+          description: "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
+        });
+        return;
+      }
+      setAnnounceModal({ jobId: Number(job.id), smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+    } catch {
+      toast.error("안내 대상을 불러오지 못했어요");
+    } finally {
+      setAnnounceBusyId(null);
+    }
+  };
+
+  // 새 공고 안내 발송 — purpose='new_job'이 ping_sent meta에 {purpose, job_id}로 기록돼
+  // announce-targets의 '최근 7일 수신자 제외'(주 1회 피로도 상한)의 근거가 된다.
+  const sendAnnounce = async () => {
+    if (!announceModal || announcing || announceModal.night) return;
+    const { jobId, smsTitle, targets } = announceModal;
+    setAnnouncing(true);
+    try {
+      await sendBulkNotices(targets, NEW_JOB_NOTICE.replace("{공고명}", smsTitle), "new_job", jobId, "새 공고 안내");
+      setAnnounceModal(null);
+    } finally {
+      setAnnouncing(false);
+    }
   };
 
   // 마감 확정 — 마감(PATCH)이 성공해야만 안내 발송하고, 발송 실패는 마감에 영향 없음(발송은 부가 동작).
@@ -1311,6 +1410,17 @@ export function Jobs() {
                         ))}
                       </DropdownMenuContent>
                     </DropdownMenu>
+                  )}
+                  {/* 대기자에게 안내 — 진행 중 공고만(마감 공고에 '새 공고' 문자는 모순). 등록 직후 모달과 같은 모달 재사용. */}
+                  {!job.effectivelyClosed && (
+                    <button
+                      onClick={() => openAnnounce(job)}
+                      disabled={announceBusyId === job.id}
+                      className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50"
+                      title="대기자에게 안내 — 새 공고를 기다리던 분들(안내 약속·알림 신청·최근 관심)에게 문자 발송"
+                    >
+                      {announceBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : <Megaphone size={16} />}
+                    </button>
                   )}
                   <button
                     onClick={() => duplicateJob(job)}
@@ -1840,6 +1950,52 @@ export function Jobs() {
                 {!closeModal.loading && closeModal.send && closeModal.targets.length > 0
                   ? `마감 + ${closeModal.targets.length}명 안내 발송`
                   : "마감하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 새 공고 안내 확인 모달 — 등록 직후(대상 ≥1) 자동 + 행 '대기자에게 안내' 재사용.
+          "먼저 안내드릴게요" 약속(waitlist_notice)·알림 신청(notify_request) 이행을 게시 순간 원클릭으로. */}
+      {announceModal && (
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !announcing && setAnnounceModal(null)}>
+          <div className="bg-white w-full max-w-[480px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-7 pt-6 pb-2">
+              <h2 className="text-[18px] font-extrabold text-[#1A202C]">새 공고를 기다리던 분들에게 안내할까요?</h2>
+              <p className="text-[13.5px] text-[#718096] mt-2 leading-relaxed">
+                {`'${announceModal.smsTitle}' 공고를 ${announceModal.targets.length}명에게 문자로 안내합니다.`}
+              </p>
+              {/* 그룹별 인원 — A 약속 > B 알림 신청 > C 조건 매칭, 상위 그룹 우선으로 중복 제거된 수 */}
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {(Object.keys(ANNOUNCE_GROUP_LABEL) as AnnounceGroup[])
+                  .filter((g) => announceModal.groups[g] > 0)
+                  .map((g) => (
+                    <span key={g} className="px-2 py-0.5 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">
+                      {ANNOUNCE_GROUP_LABEL[g]} {announceModal.groups[g]}
+                    </span>
+                  ))}
+              </div>
+              <div className="mt-3 px-3 py-2.5 rounded-lg bg-[#F7FAFC] border border-[#E2E8F0] text-[11.5px] text-[#718096] leading-relaxed whitespace-pre-line">
+                {NEW_JOB_NOTICE.replace("{공고명}", announceModal.smsTitle)}
+              </div>
+              <p className="mt-1.5 text-[11px] text-[#A0AEC0]">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+              {/* 야간(KST 21~08)엔 발송하지 않는다 — engage와 동일 원칙(isNightKst). */}
+              {announceModal.night && (
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[12.5px] font-bold text-[#B7791F]">
+                  야간에는 발송하지 않아요 — 아침 9시 이후 이 공고의 관리 메뉴에서 보낼 수 있어요
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-7 py-5">
+              <button onClick={() => setAnnounceModal(null)} disabled={announcing} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">건너뛰기</button>
+              <button
+                onClick={sendAnnounce}
+                disabled={announcing || announceModal.night}
+                className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                {announcing ? <Loader2 size={16} className="animate-spin" /> : <Megaphone size={16} />}
+                {announcing ? "발송 중..." : `${announceModal.targets.length}명에게 안내 발송`}
               </button>
             </div>
           </div>

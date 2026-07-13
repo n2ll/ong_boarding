@@ -49,7 +49,7 @@ const scrollToAnchor = (id: string) =>
 
 export function CampaignStatsCard() {
   const router = useRouter();
-  const { data, error, mutate, isValidating } = useSWR<CampaignStatsRes>("/api/admin/campaign-stats");
+  const { data, error, mutate, isValidating } = useSWR<CampaignStatsRes>("/api/admin/campaign-stats", { refreshInterval: 60_000 }); // 살아있는 갱신 — 반응이 실시간으로 반영
 
   // '마지막 발송 상대시각' 갱신용 1분 틱 (InterestQueueCard와 동일 패턴)
   const [nowTick, setNowTick] = useState(() => Date.now());

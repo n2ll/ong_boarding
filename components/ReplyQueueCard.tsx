@@ -58,7 +58,7 @@ function agoLabel(iso: string | null | undefined, now: number): string {
 
 // initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
 export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null } = {}) {
-  const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants");
+  const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
   // 공고 제목 매핑용 — Jobs 탭과 동일 SWR 키라 중복 호출을 dedup. 실패해도 필터만 미노출.
   const { data: jobsRes } = useSWR<{ jobs?: JobLite[] }>("/api/admin/jobs?status=all");
   const jobTitleById = useMemo(() => {
