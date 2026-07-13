@@ -164,9 +164,10 @@ interface CloseNotifyTarget {
 // '조건 확인'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙). '그만' 회신 안내로 수신거부 경로 유지.
 const NEW_JOB_NOTICE = `#{이름}님, 새 배송 건이 올라왔어요!\n{공고명}\n\n조건 확인: #{맞춤링크}\n(안내 중단: '그만' 회신)`;
 
-// 새 공고 안내 대상 — announce-targets API 응답. group은 A 약속자 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
-type AnnounceGroup = "promised" | "requested" | "matched";
+// 새 공고 안내 대상 — announce-targets API 응답. group은 S 선탑 완료 > A 약속자 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
+type AnnounceGroup = "suntop" | "promised" | "requested" | "matched";
 const ANNOUNCE_GROUP_LABEL: Record<AnnounceGroup, string> = {
+  suntop: "선탑 완료(최우선)",
   promised: "먼저 안내 약속",
   requested: "알림 신청",
   matched: "조건 맞는 최근 관심",
@@ -178,7 +179,7 @@ interface AnnounceTarget {
   access_token: string;
   group: AnnounceGroup;
 }
-interface AnnounceGroups { promised: number; requested: number; matched: number }
+interface AnnounceGroups { suntop: number; promised: number; requested: number; matched: number }
 interface AnnounceTargetsRes {
   groups: AnnounceGroups;
   targets: AnnounceTarget[];

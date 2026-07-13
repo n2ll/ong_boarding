@@ -141,6 +141,17 @@ export async function GET(
     }))
     .sort((a, b) => Date.parse(b.clicked_at) - Date.parse(a.clicked_at));
 
+  // 선탑(동승) 완료 이력 — 프리보딩 자산이라 기간 제한 없이 조회(90일 윈도우 미적용).
+  // 상세 패널 배지·이력 표시와 새 공고 안내 S그룹(최우선)의 근거.
+  const { data: suntopRows, error: suntopErr } = await supabase
+    .from("pool_events")
+    .select("id, job_id, meta, created_at")
+    .eq("applicant_id", id)
+    .eq("event_type", "suntop_done")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (suntopErr) console.error("[applicant GET] suntop_done fetch failed", suntopErr);
+
   return NextResponse.json({
     applicant,
     candidates,
@@ -148,6 +159,10 @@ export async function GET(
       last_ping_at: lastPingAt,
       last_link_view_at: lastLinkViewAt,
       interest_jobs: interestJobs,
+    },
+    suntop: {
+      done: (suntopRows ?? []).length > 0,
+      events: (suntopRows ?? []).map((e) => ({ id: e.id, created_at: e.created_at, meta: e.meta ?? null })),
     },
   });
 }
