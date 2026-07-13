@@ -30,13 +30,19 @@ import { getSystemMessage, fillTemplate } from "./system-messages";
 /** messages.sent_by 값 — 이 공고로 자동 안내(첫 문자·대기 안내)를 이미 보냈는지 중복 판정에 쓴다. */
 export const ENGAGE_SENT_BY = "agent-engage";
 
-/** 스크리닝 첫 문자 폴백 — 운영 문구는 system_message 'interest_engage'({{이름}}·{{공고명}})가 우선. */
+/** SMS용 공고 제목 — 끝의 '(…원)' 단가 괄호 제거(문자에선 군더더기, pull 카드와 동일 규칙). */
+export function smsJobTitle(title: string): string {
+  return title.replace(/\s*\([^)]*원\)\s*$/, "");
+}
+
+/** 스크리닝 첫 문자 폴백 — 운영 문구는 system_message 'interest_engage'({{이름}}·{{공고명}})가 우선.
+ *  웹발신 가독성: 문장 단위 줄바꿈, 질문은 마지막 줄에 하나. */
 const FALLBACK_ENGAGE = (name: string, jobTitle: string) =>
-  `${name}님, '${jobTitle}' 관심 감사합니다! 빠른 진행을 위해 몇 가지만 여쭤볼게요. 지금 운행하시는 차량(차종)이 어떻게 되세요?`;
+  `${name}님, '${jobTitle}' 관심 감사합니다!\n빠른 진행을 위해 몇 가지만 여쭤볼게요.\n\n지금 운행하시는 차량(차종)이 어떻게 되세요?`;
 
 /** 충원 완료 대기 안내 — 자리·새 공고 시 재안내를 약속하는 투명한 안내(확정 뉘앙스 없음). */
 const WAITLIST_NOTICE = (name: string, jobTitle: string) =>
-  `${name}님, '${jobTitle}' 관심 감사합니다! 지금은 이 공고 자리가 모두 차 있어요. 자리가 나거나 조건이 맞는 새 공고가 올라오면 이 번호로 먼저 안내드릴게요.`;
+  `${name}님, '${jobTitle}' 관심 감사합니다!\n지금은 이 공고 자리가 모두 차 있어요.\n자리가 나거나 조건이 맞는 새 공고가 올라오면 이 번호로 먼저 안내드릴게요.`;
 
 /** KST 21시~익일 08시 — 야간엔 즉시 발송 대신 큐잉하고 아침 9시 cron이 발송한다. */
 export function isNightKst(d: Date = new Date()): boolean {
@@ -234,7 +240,7 @@ export async function runInterestEngage(params: {
 
   // ─── 충원 완료 → 투명한 대기 안내 1통 (스크리닝 시작 안 함, 확정 뉘앙스 없음) ───
   if (await isJobFullyStaffed(supabase, jobId, capacity)) {
-    const text = WAITLIST_NOTICE(name, job.title);
+    const text = WAITLIST_NOTICE(name, smsJobTitle(job.title));
     const send = await sendSms(applicant.phone, text);
     if (!send.success) {
       console.error("[engage] waitlist SMS fail", applicantId, send.error);
@@ -260,9 +266,10 @@ export async function runInterestEngage(params: {
 
   // ─── 스크리닝 시작 — 첫 질문 문자 발송 ───
   const stored = (await getSystemMessage(supabase, "interest_engage"))?.trim();
+  const cleanTitle = smsJobTitle(job.title);
   const text = stored
-    ? fillTemplate(stored, { 이름: name, 공고명: job.title })
-    : FALLBACK_ENGAGE(name, job.title);
+    ? fillTemplate(stored, { 이름: name, 공고명: cleanTitle })
+    : FALLBACK_ENGAGE(name, cleanTitle);
   const send = await sendSms(applicant.phone, text);
   if (!send.success) {
     console.error("[engage] engage SMS fail", applicantId, send.error);
