@@ -100,6 +100,10 @@ export interface JobContext {
   ai_facts?: string | null;
   /** 모집 방식 (external/internal/both) — internal 실공고는 일반 라인 스크리닝 흐름을 탄다. */
   recruit_mode?: string | null;
+  /** 공고 상태 — 라우터가 실질 마감(isJobEffectivelyClosed) 판단에 사용. */
+  status?: string | null;
+  /** 마감시각 — status='active'여도 지났으면 실질 마감. */
+  closes_at?: string | null;
 }
 
 export interface ApplicantContext {
@@ -146,6 +150,9 @@ export interface StageContext {
   state: AgentState;
   /** 이 지원자가 동시에 진행 중인 '다른' 공고들. 비어있으면 단일 공고(기존과 동일). */
   otherActiveJobs?: OtherActiveJob[];
+  /** 현재 공고가 실질 마감 상태 — 일반 라인 스크리닝이 '마감 안내 모드'(신규 진행 대신
+   *  충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환)로 동작하는 근거. */
+  jobClosed?: boolean;
 }
 
 export type StageTransition =
