@@ -30,7 +30,10 @@ import { createServiceClient } from "@/lib/supabase";
 import { runAgentForCandidate } from "@/lib/agent/router";
 import { triageInbound, isHardSpam } from "@/lib/agent/baemin-triage";
 import { classifyAvailabilitySignal } from "@/lib/agent/availability";
+import { getAgentMode } from "@/lib/agent/kill-switch";
+import { pickJobForCampaignReply } from "@/lib/agent/engage";
 import { sendSms } from "@/lib/solapi";
+import { sendSlackText } from "@/lib/slack";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { recordUsage, toMessageTokens } from "@/lib/agent/usage";
 
@@ -207,6 +210,12 @@ export async function POST(req: NextRequest) {
       }
     );
 
+    // 캠페인 답장자 편입(아래 4a-2)에서 쓰는 신호 — 가용성 분류가 끝난 뒤에만 판단한다.
+    // recentPingAt: 최근 14일 내 ping_sent(캠페인 코호트 판정). inboundOptOut: 이번 인바운드가
+    // '그만' 등 opt_out으로 분류됐는지(null=분류 자체가 안 됨 → 편입하지 않음, 보수적 폴백).
+    let recentPingAt: string | null = null;
+    let inboundOptOut: boolean | null = null;
+
     // 가용성 신호 수집 (Phase C) — 풀 응답(활성 후보 없음) 또는 최근 14일 내 ping 발송
     // 대상의 답장만 분류한다(비용 가드 §5.7). 실패해도 인입 처리는 깨지 않는다.
     try {
@@ -219,6 +228,7 @@ export async function POST(req: NextRequest) {
         .order("created_at", { ascending: false })
         .limit(1);
       const lastPing = recentPings?.[0] ?? null;
+      recentPingAt = (lastPing?.created_at as string | undefined) ?? null;
 
       if (!jc || lastPing) {
         // ping 응답 이벤트 — 응답률·응답속도(신뢰점수 §6.4-4) 재료
@@ -237,6 +247,8 @@ export async function POST(req: NextRequest) {
         }
 
         const cls = await classifyAvailabilitySignal({ body: text });
+        // 편입 가드용 opt-out 플래그 — DB 반영(confidence ≥ 0.6)보다 넓게, 신호만 있어도 편입은 막는다.
+        inboundOptOut = cls.signal === "opt_out";
         if (cls.usage?.model) {
           await recordUsage(supabase, {
             model: cls.usage.model,
@@ -293,6 +305,110 @@ export async function POST(req: NextRequest) {
 
     // Agent 호출
     if (!jc || !jc.agent_stage) {
+      // ── 4a-2) 캠페인 답장자 자동 편입 (auto 모드 한정) ──
+      // 캠페인 문자에 링크 클릭 없이 '답장으로만' 반응한 지원자는 활성 후보가 없어 기존엔
+      // 여기서 종료 → 무응답 사각지대(실사고 2026-07-10 김문규 "차량이없어요" 3일 방치).
+      // auto 모드에서는 공고를 골라 screening 후보로 편입하고 이 인바운드를 그대로 라우터에
+      // 넘긴다 — 별도 인트로 문자 없이 자연스러운 회신이 곧 스크리닝 시작.
+      // draft/off 모드는 기존 경로 유지(초안 웹훅·매니저 수동 처리가 담당).
+      // 어떤 실패도 non-fatal — 아래 기존 응답(no active job_candidate)으로 폴백한다.
+      // 야간에도 발송함 — 방금 온 답장에 대한 즉시 회신은 기존 활성 후보 응대와 동일 원칙.
+      try {
+        const mode = await getAgentMode(supabase);
+        // 편입 조건: auto 모드 + 최근 14일 내 ping_sent(캠페인 코호트) + 이번 인바운드가
+        // opt-out으로 분류되지 않았음(inboundOptOut === false — 분류는 위 가용성 블록에서 이미 끝남).
+        if (mode === "auto" && recentPingAt && inboundOptOut === false) {
+          // 최신 상태 재조회 — 위 가용성 블록이 방금 sms_opt_out_at을 기록했을 수 있다.
+          const { data: aRow } = await supabase
+            .from("applicants")
+            .select("status, sms_opt_out_at, current_job_id, lat, lng")
+            .eq("id", applicant.id)
+            .maybeSingle();
+          const a = aRow as {
+            status: string | null;
+            sms_opt_out_at: string | null;
+            current_job_id: number | null;
+            lat: number | null;
+            lng: number | null;
+          } | null;
+          const blockedStatus = a?.status === "부적합" || a?.status === "이탈";
+          if (a && !a.sms_opt_out_at && !blockedStatus) {
+            const pick = await pickJobForCampaignReply(supabase, {
+              id: applicant.id,
+              lat: a.lat,
+              lng: a.lng,
+            });
+            // 정책: 한 사람 = 하나의 '진행 중' 공고 (engage·dispatch와 동일)
+            const jobConflict =
+              pick != null && a.current_job_id != null && a.current_job_id !== pick.jobId;
+            if (pick && !jobConflict) {
+              const { data: upserted, error: upErr } = await supabase
+                .from("job_candidates")
+                .upsert(
+                  {
+                    job_id: pick.jobId,
+                    applicant_id: applicant.id,
+                    agent_stage: "screening",
+                    sent_at: new Date().toISOString(),
+                    responded_at: receivedAt, // 이 인바운드가 곧 첫 응답
+                  },
+                  { onConflict: "job_id,applicant_id" }
+                )
+                .select("id")
+                .single();
+              if (upErr || !upserted) {
+                console.error("[supabase-webhook] campaign-reply jc upsert failed", upErr);
+              } else {
+                const candidateId = (upserted as { id: number }).id;
+                // engage와 동일 축 — current_job_id·인바운드 메시지 job_id 연결 (둘 다 non-fatal)
+                const { error: cjErr } = await supabase
+                  .from("applicants")
+                  .update({ current_job_id: pick.jobId })
+                  .eq("id", applicant.id);
+                if (cjErr) console.error("[supabase-webhook] campaign-reply current_job_id failed", cjErr);
+                const { error: mjErr } = await supabase
+                  .from("messages")
+                  .update({ job_id: pick.jobId })
+                  .eq("id", msg.id);
+                if (mjErr) console.error("[supabase-webhook] campaign-reply msg job_id failed", mjErr);
+                const { error: evErr } = await supabase.from("pool_events").insert({
+                  applicant_id: applicant.id,
+                  job_id: pick.jobId,
+                  event_type: "auto_engage",
+                  meta: {
+                    source: "campaign-reply",
+                    picked_by: pick.pickedBy,
+                    message_id: String(msg.id),
+                  },
+                });
+                if (evErr) console.error("[supabase-webhook] campaign-reply pool_events failed", evErr);
+                await sendSlackText(
+                  `💬 캠페인 답장 → #${pick.jobId} 공고 스크리닝 자동 편입: ${applicant.name?.trim() || phone}`
+                );
+                // 그 인바운드를 그대로 라우터로 — 대화 맥락을 보고 자연스럽게 회신(확정 뉘앙스 금지는 라우터 백스톱이 보장)
+                const agentResult = await runAgentForCandidate({
+                  supabase,
+                  candidate_id: candidateId,
+                  inbound_message_id: String(msg.id),
+                  inbound_text: text,
+                  received_at: receivedAt,
+                });
+                return NextResponse.json({
+                  ok: true,
+                  matched: true,
+                  agent_invoked: true,
+                  enrolled: "campaign-reply",
+                  job_id: pick.jobId,
+                  picked_by: pick.pickedBy,
+                  agent: agentResult,
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[supabase-webhook] campaign-reply enroll failed (fallback to draft path)", e);
+      }
       return NextResponse.json({
         ok: true,
         matched: true,

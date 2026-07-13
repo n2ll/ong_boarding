@@ -23,6 +23,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
+import { haversineKm } from "../kakao-geocode";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 
@@ -295,6 +296,92 @@ export async function runInterestEngage(params: {
   });
   if (evErr) console.error("[engage] pool_events auto_engage failed", evErr);
   return { action: "engaged" };
+}
+
+/** pickJobForCampaignReply 선택 근거 — pool_events meta·로그용. */
+export type CampaignReplyJobPickedBy = "interest_candidate" | "nearest_anchor" | "latest_active";
+
+export interface CampaignReplyJobPick {
+  jobId: number;
+  jobTitle: string;
+  pickedBy: CampaignReplyJobPickedBy;
+}
+
+/**
+ * 캠페인 문자에 '답장으로만' 반응한 지원자(활성 후보 없음)를 편입할 공고 선택.
+ *
+ * 우선순위:
+ *  ① 이 지원자의 stage NULL 후보가 걸린 활성 공고 — 관심 클릭했던 곳(최신 우선)
+ *  ② 지원자 좌표가 있으면 활성 공고 앵커(상차지·마지막 경유지) 최근접
+ *  ③ 최신 활성 공고
+ *
+ * 시스템 공고(`__` 프리픽스)·실질 마감(isJobEffectivelyClosed)은 제외. 후보 없으면 null.
+ */
+export async function pickJobForCampaignReply(
+  supabase: SupabaseClient,
+  applicant: { id: number; lat: number | null; lng: number | null }
+): Promise<CampaignReplyJobPick | null> {
+  type JobRow = {
+    id: number;
+    title: string;
+    status: string | null;
+    closes_at: string | null;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
+  };
+  const { data: jobRows, error: jobsErr } = await supabase
+    .from("jobs")
+    .select("id, title, status, closes_at, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (jobsErr) {
+    console.error("[engage] campaign-reply jobs load failed", jobsErr);
+    return null;
+  }
+  const jobs = ((jobRows ?? []) as JobRow[]).filter(
+    (j) => !isSystemJobTitle(j.title) && !isJobEffectivelyClosed(j.status, j.closes_at)
+  );
+  if (jobs.length === 0) return null;
+
+  // ① 관심 클릭 이력(stage NULL 후보) — 지원자가 직접 고른 공고가 최우선(최신순)
+  const { data: nullCands, error: candsErr } = await supabase
+    .from("job_candidates")
+    .select("job_id")
+    .eq("applicant_id", applicant.id)
+    .is("agent_stage", null)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (candsErr) console.error("[engage] campaign-reply null-stage cands load failed", candsErr);
+  for (const c of (nullCands ?? []) as { job_id: number | null }[]) {
+    const hit = c.job_id != null ? jobs.find((j) => j.id === c.job_id) : undefined;
+    if (hit) return { jobId: hit.id, jobTitle: hit.title, pickedBy: "interest_candidate" };
+  }
+
+  // ② 좌표 있으면 앵커(상차지·마지막 경유지 중 가까운 쪽) 최근접 — 파이프라인 거리 정렬과 동일 원칙
+  if (typeof applicant.lat === "number" && typeof applicant.lng === "number") {
+    const alat = applicant.lat;
+    const alng = applicant.lng;
+    let best: { job: JobRow; km: number } | null = null;
+    for (const j of jobs) {
+      const anchors: { lat: number; lng: number }[] = [];
+      if (typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number") {
+        anchors.push({ lat: j.pickup_lat, lng: j.pickup_lng });
+      }
+      if (typeof j.dropoff_lat === "number" && typeof j.dropoff_lng === "number") {
+        anchors.push({ lat: j.dropoff_lat, lng: j.dropoff_lng });
+      }
+      if (anchors.length === 0) continue;
+      const km = Math.min(...anchors.map((p) => haversineKm(alat, alng, p.lat, p.lng)));
+      if (!best || km < best.km) best = { job: j, km };
+    }
+    if (best) return { jobId: best.job.id, jobTitle: best.job.title, pickedBy: "nearest_anchor" };
+  }
+
+  // ③ 최신 활성 공고
+  return { jobId: jobs[0].id, jobTitle: jobs[0].title, pickedBy: "latest_active" };
 }
 
 /** 관심 클릭 Slack 알림에 병기할 자동 응대 결과 한 줄. 빈 문자열이면 표기 생략. */
