@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
+import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -140,6 +140,16 @@ const STAGE_COLOR: Record<string, string> = {
 // '결원이 생기면 먼저 안내'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙).
 const JOB_CLOSED_NOTICE = `#{이름}님, '#{공고명}' 관심 가져주셔서 감사합니다. 이 공고는 충원이 완료됐어요. 지금 모집 중인 다른 공고는 여기서 보실 수 있어요: #{맞춤링크}
 결원이 생기면 이 번호로 먼저 안내드릴게요!`;
+
+// 일반 라인(internal) 마감 안내에만 덧붙는 선탑 제안 — 답장하면 AI '마감 안내 모드'가 받아
+// 선탑 가능 시간대를 수집하고 매니저에게 인계한다. (선탑≠투입 확정 — '우선순위' 표현까지만)
+const JOB_CLOSED_SUNTOP_LINE = `
+그동안 선탑(동승)으로 현장을 미리 경험해두실 수도 있어요. 비슷한 라인 투입 때 우선순위가 생깁니다. 원하시면 이 번호로 '선탑'이라고 답장 주세요.`;
+
+// 마감 안내 최종 본문 — internal 공고면 선탑 제안 포함. 모달 미리보기와 실제 발송이 같은 본문을 쓴다.
+const closeNoticeBody = (job: JobRow) =>
+  (JOB_CLOSED_NOTICE + (job.recruitMode === "internal" ? JOB_CLOSED_SUNTOP_LINE : ""))
+    .replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
 
 // 마감 안내 발송 대상(미선발 관심자) — interested API(detail=1)가 수신거부·확정인력·기수신자 등을 걸러 내려준다.
 interface CloseNotifyTarget {
@@ -1063,8 +1073,28 @@ export function Jobs() {
   // 미선발 관심자 마감 안내 발송 — purpose='job_closed'로 보내면 서버가
   // pool_events(waitlist_notice, trigger:'job_closed')를 남겨 이후 '결원 시 우선 안내' 대상 역조회의 근거가 된다.
   const sendCloseNotices = async (job: JobRow, targets: CloseNotifyTarget[]) => {
-    const body = JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
-    await sendBulkNotices(targets, body, "job_closed", Number(job.id), "마감 안내", "발송은 실패했지만 공고 마감은 완료됐어요.");
+    await sendBulkNotices(targets, closeNoticeBody(job), "job_closed", Number(job.id), "마감 안내", "발송은 실패했지만 공고 마감은 완료됐어요.");
+  };
+
+  // 지원자 화면 미리보기 — 테스트 지원자(설정: pull_preview_token)의 맞춤링크를 새 탭에 연다.
+  // 등록·수정한 공고가 지원자에게 어떻게 보이는지(카드·마감 처리·관심 버튼)를 그대로 확인하는 동선.
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const openApplicantPreview = async () => {
+    if (previewLoading) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch("/api/admin/pull-preview");
+      const json = await res.json();
+      if (!res.ok || !json.token) throw new Error(json?.error || "미리보기 토큰을 가져오지 못했어요");
+      window.open(`/p/${json.token}`, "_blank", "noopener");
+      toast.success(`${json.name ?? "테스트 지원자"}님 시점으로 열었어요`, {
+        description: json.source === "fallback" ? "테스트 지원자가 지정되지 않아 최신 지원자 링크로 열었어요." : undefined,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "미리보기를 열지 못했어요");
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   // 새 공고 안내 대상 조회 — 등록 직후(자동)와 행 '대기자에게 안내'(수동) 공용.
@@ -1261,6 +1291,14 @@ export function Jobs() {
               />
             </div>
             <button
+              onClick={openApplicantPreview}
+              disabled={previewLoading}
+              className="flex items-center gap-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              title="테스트 지원자의 맞춤링크(/p)를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
+            >
+              {previewLoading ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />} 지원자 화면
+            </button>
+            <button
               onClick={() => setAiModalOpen(true)}
               className="flex items-center gap-1.5 bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] px-4 py-2 rounded-xl text-sm font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
             >
@@ -1377,7 +1415,7 @@ export function Jobs() {
                         onClick={() => handleToggleClose(job)}
                         disabled={statusBusyId === job.id}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[#38A169] text-white hover:bg-[#2F855A] disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38A169]"
-                        title={`매니저 확정 ${job.confirmed}명으로 정원(${job.capacity}명)이 찼어요 — 마감하면 발송·관심 접수·AI 응대가 멈춥니다`}
+                        title={`매니저 확정 ${job.confirmed}명으로 정원(${job.capacity}명)이 찼어요 — 마감하면 발송·관심 접수가 멈춰요${job.recruitMode === "internal" ? " (AI 응대는 마감 안내 모드로 전환)" : ""}`}
                       >
                         {statusBusyId === job.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} 충원 완료 — 마감하기
                       </button>
@@ -1908,11 +1946,19 @@ export function Jobs() {
               <p className="text-[13.5px] text-[#718096] mt-2 leading-relaxed">
                 {`'${closeModal.job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.`}
               </p>
-              {/* 마감하면 dispatch·pull 관심표시가 막히고 AI 자동 응대가 꺼진다 — 진행 중 후보 경고(E2-2). */}
+              {/* 마감하면 dispatch·pull 관심표시가 막힌다. 진행 중 후보의 AI 응대는:
+                  internal(일반 라인) = '마감 안내 모드'로 전환(충원완료 안내+결원 우선 약속+선탑 제안, 응대 지속)
+                  external/both = AI가 마감을 인지하지 못한 채 응대할 수 있음 — 직접 안내 권고(E2-2). */}
               {closeModal.job.inProgress > 0 && (
-                <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFF5F5] border border-[#FED7D7] text-[12.5px] font-bold text-[#E53E3E]">
-                  ⚠️ 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대가 멈춰요. 나누던 대화가 끊길 수 있어요.
-                </div>
+                closeModal.job.recruitMode === "internal" ? (
+                  <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FEEBC8] text-[12.5px] font-bold text-[#B7791F]">
+                    💬 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대는 &lsquo;마감 안내 모드&rsquo;로 전환돼요 — 충원 완료 안내, 결원 시 먼저 안내 약속, 선탑(동승) 제안까지 응대를 이어갑니다.
+                  </div>
+                ) : (
+                  <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFF5F5] border border-[#FED7D7] text-[12.5px] font-bold text-[#E53E3E]">
+                    ⚠️ 진행 중인 후보 {closeModal.job.inProgress}명이 있어요. 마감 후 답장에는 AI가 마감을 인지하지 못한 채 응대할 수 있으니 직접 안내를 권해요.
+                  </div>
+                )
               )}
               {closeModal.loading ? (
                 <div className="mt-4 flex items-center gap-2 text-[12.5px] text-[#A0AEC0]">
@@ -1932,7 +1978,7 @@ export function Jobs() {
                   {closeModal.send && (
                     <>
                       <div className="mt-2 px-3 py-2.5 rounded-lg bg-[#F7FAFC] border border-[#E2E8F0] text-[11.5px] text-[#718096] leading-relaxed whitespace-pre-line">
-                        {JOB_CLOSED_NOTICE.replace(/#\{공고명\}/g, stripSystemPrefix(closeModal.job.title))}
+                        {closeNoticeBody(closeModal.job)}
                       </div>
                       <p className="mt-1.5 text-[11px] text-[#A0AEC0]">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
                     </>
