@@ -336,7 +336,7 @@ export function Pipeline() {
 
   // 지원자 목록은 SWR 캐시로 관리 — 탭 재방문 시 즉시 표시 + 대시보드와 중복 호출 dedup.
   // 칸반 컬럼은 드래그로 낙관적 변경되는 로컬 상태라, SWR 데이터가 갱신될 때만 동기화한다.
-  const { data: applicantsData, isLoading, mutate: mutateApplicants } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const { data: applicantsData, isLoading, mutate: mutateApplicants } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
   const loading = isLoading && rawApplicants.length === 0;
   useEffect(() => {
     if (applicantsData?.data) {
@@ -360,7 +360,7 @@ export function Pipeline() {
     error: funnelError,
     mutate: mutateFunnel,
     isValidating: funnelValidating,
-  } = useSWR<CampaignFunnelRes>(view === "funnel" ? `/api/admin/campaign-funnel?days=${funnelDays}` : null);
+  } = useSWR<CampaignFunnelRes>(view === "funnel" ? `/api/admin/campaign-funnel?days=${funnelDays}` : null, { refreshInterval: 60_000 }); // 살아있는 갱신
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");

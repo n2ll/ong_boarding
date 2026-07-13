@@ -71,7 +71,7 @@ function prefillContactBody(name: string | null, jobTitle: string): string {
 // initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
 export function InterestQueueCard({ initialJobId }: { initialJobId?: number | null } = {}) {
   const confirm = useConfirm();
-  const { data, mutate, error } = useSWR<QueueRes>("/api/admin/interest-queue");
+  const { data, mutate, error } = useSWR<QueueRes>("/api/admin/interest-queue", { refreshInterval: 30_000 }); // 살아있는 갱신
 
   const allItems = data?.items ?? [];
 
