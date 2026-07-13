@@ -15,6 +15,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
+import { isJobEffectivelyClosed } from "../jobs";
+import { isGeneralLineJob } from "./general-line";
 import { applyTransition } from "./transitions";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
@@ -126,7 +128,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     .select(`
       id, job_id, applicant_id, agent_stage, agent_state,
       jobs:job_id (
-        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts, recruit_mode
+        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts, recruit_mode, status, closes_at
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,
@@ -250,7 +252,11 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   const applicant = jc.applicants as unknown as ApplicantContext;
   const state = (jc.agent_state ?? {}) as AgentState;
 
-  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs };
+  // 실질 마감 공고 감지 — 일반 라인이면 스크리닝이 '마감 안내 모드'로 전환된다
+  // (충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환). 응대를 멈추지 않는다.
+  const jobClosed = !!job && isJobEffectivelyClosed(job.status ?? null, job.closes_at ?? null);
+
+  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs, jobClosed };
   const result = await stage.process(ctx, cleanInbound);
 
   // Claude 사용량 → ai_usage_daily 적재. stage 이름 = purpose.
@@ -404,6 +410,31 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
           resolved_at: new Date().toISOString(),
         });
       }
+    }
+  }
+
+  // 마감 안내 모드 응대(일반 라인 + 실질 마감)에서 답장이 나갔으면 '결원·새 공고 먼저 안내' 약속을
+  // 원장(pool_events waitlist_notice)에 기록 — announce-targets A그룹(먼저 안내 약속)의 근거.
+  // 지원자·공고당 1회만(중복 방지). 실패해도 응대 파이프라인은 죽이지 않는다.
+  if (replySent && !simulate && jobClosed && isGeneralLineJob(job)) {
+    try {
+      const { data: existing } = await supabase
+        .from("pool_events")
+        .select("id")
+        .eq("applicant_id", applicant.id)
+        .eq("job_id", jc.job_id)
+        .eq("event_type", "waitlist_notice")
+        .limit(1);
+      if (!existing || existing.length === 0) {
+        await supabase.from("pool_events").insert({
+          applicant_id: applicant.id,
+          job_id: jc.job_id,
+          event_type: "waitlist_notice",
+          meta: { source: "agent_closed_reply" },
+        });
+      }
+    } catch (e) {
+      console.error("[router] closed-mode waitlist_notice insert failed", e);
     }
   }
 

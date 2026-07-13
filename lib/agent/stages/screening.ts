@@ -252,12 +252,29 @@ transition_reason에 한 줄로 신호를 적어라.
 ## 출력
 screening_turn tool로만 응답.`;
 
+// 마감(충원 완료) 공고 응대 모드 — 마감돼도 일반 라인 AI 응대를 멈추지 않는다(관계 유지 + 선탑 전환).
+// 확정 뉘앙스 금지 원칙은 그대로: 선탑≠투입 확정, 결원·새 공고 시 '먼저 안내'까지만 약속한다.
+const CLOSED_MODE_BLOCK = `
+
+## ⚠️ 마감 안내 모드 — 이 공고는 충원이 완료돼 마감된 상태다
+신규 스크리닝 진행이 목적이 아니다. 목적은 ①솔직한 마감 안내 ②관계 유지 ③선탑(동승) 전환이다.
+1. 이번 대화에서 아직 마감 안내를 하지 않았다면 첫 응답에 자연스럽게 안내해라:
+   충원이 완료됐다는 사실 + "결원이 생기거나 새 공고가 올라오면 이 번호로 먼저 안내드릴게요."
+2. **선탑(동승)은 마감과 무관하게 언제든 가능**하다는 점도 함께 안내해라 — 미리 현장을 경험해두면
+   비슷한 라인 투입 때 우선순위가 생긴다. 단 선탑≠투입 확정(뉘앙스 금지), 일정 확약 금지(매니저 몫).
+3. 지원자가 선탑에 관심을 보이면 가능 요일·시간대를 물어 collected.선탑_가능시간에 기록하고
+   transition: "pause" (transition_reason: "마감 공고 — 선탑 희망, 매니저 일정 조율 필요").
+4. 선탑 관심이 없으면 정중히 마무리하고 transition: "stay" — 이후 질문에도 계속 응대한다.
+5. 새 확인질문(차종·명의·시작일)을 네가 먼저 던지지 마라. 지원자가 스스로 준 정보는 collected에 기록만.
+6. FAQ 질문에는 평소처럼 답해라. transition: "advance"는 이 모드에서 금지다.`;
+
 async function buildSystemPrompt(
   branchName?: string | null,
   ctx?: StageContext
 ): Promise<string> {
   const general = isGeneralLineJob(ctx?.job);
-  const body = general ? SYSTEM_PROMPT_BODY_GENERAL : SYSTEM_PROMPT_BODY;
+  const body = (general ? SYSTEM_PROMPT_BODY_GENERAL : SYSTEM_PROMPT_BODY)
+    + (general && ctx?.jobClosed ? CLOSED_MODE_BLOCK : "");
   const knowledgeBlock = general ? buildLineKnowledgeBlock(await loadLineKnowledge()) : "";
   // 일반 라인: 공통 운영 정보(facts)는 비마트 기준(정산 주기 등)이라 주입하지 않는다 — FAQ(knowledge)가 대신한다.
   // 지점 ai_facts도 지원자의 비마트 1지망이 아니라 이 공고의 지점 기준으로만.
@@ -466,7 +483,7 @@ export const screeningStage: Stage = {
     const userContent = `[오늘 날짜] ${todayKST}
 
 [현재 공고]
-${formatJob(ctx.job)}
+${formatJob(ctx.job)}${general && ctx.jobClosed ? "\n⚠️ 공고 상태: 마감(충원 완료) — '마감 안내 모드' 규칙을 따르라." : ""}
 
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
@@ -533,6 +550,9 @@ function countTrueFlags(obj: Record<string, unknown> | undefined): number {
 
 function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult {
   const general = isGeneralLineJob(ctx.job);
+  // 마감 안내 모드 — advance(→onboarding) 금지. 목적이 스크리닝 완주가 아니라
+  // 마감 안내 + 선탑 전환이므로, 남은 전이는 stay(계속 응대)/pause(선탑 희망 인계)/abort뿐.
+  const closedMode = general && !!ctx.jobClosed;
   // 일반 라인: 비마트 전용 안내 항목은 해당 없음 → 자동 true 오버레이.
   // (engage 직행 진입은 transitions의 자동 true를 거치지 않으므로 여기서 경로 무관하게 보장)
   // 수집값(차종·시작가능일·선탑 가능시간·법인차 렌트 희망)은 meta.general_screening에 누적 병합.
@@ -551,7 +571,9 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
   });
 
   // advance 준비 판정 — 체크리스트 완료 + (일반 라인이면) 수집값(시작가능일·선탑 가능시간)까지.
+  // 마감 안내 모드에서는 항상 false — AI가 advance를 반환해도 stay로 강등된다.
   const advanceReady =
+    !closedMode &&
     isComplete(state_update, "screening") &&
     (!general || isGeneralCollectedComplete(collected ?? {}));
 
@@ -620,10 +642,24 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
   // 곧바로 나가며 그게 응답을 겸함. (exploration → screening 전환과 동일한 패턴)
   const reply_text = transition.kind === "advance" ? null : out.reply_text;
 
+  // 대화로 확인된 차종을 지원자 프로필에도 반영 — 인재풀 카드·새 공고 안내(자차 매칭)가
+  // 폼 제출 당시 값이 아니라 최신 확인 값을 쓰게 한다. '차 없음' 류 표현은 보유 확정이 아니므로 제외.
+  let applicant_patch: Record<string, unknown> | undefined;
+  if (general && collected?.차종) {
+    const v = collected.차종.trim();
+    if (v && !v.includes("없")) {
+      const patch: Record<string, unknown> = {};
+      if (v !== (ctx.applicant.vehicle_type ?? "")) patch.vehicle_type = v;
+      if (ctx.applicant.own_vehicle !== "있음") patch.own_vehicle = "있음";
+      if (Object.keys(patch).length > 0) applicant_patch = patch;
+    }
+  }
+
   return {
     reply_text,
     state_update,
     transition,
+    applicant_patch,
     reasoning: out.reasoning,
   };
 }
