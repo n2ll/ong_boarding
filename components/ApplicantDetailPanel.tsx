@@ -37,6 +37,8 @@ interface CandidateLink {
   job_title: string | null;
   job_branch: string | null;
   job_status: string | null;
+  job_start_date: string | null;
+  job_effectively_closed: boolean;
   client_id: number | null;
   client_name: string | null;
 }
@@ -295,6 +297,10 @@ export function ApplicantDetailContent({
   // 확정 모달: 확정 시점에 슬롯을 함께 받아 confirmed_slot 공백을 방지한다.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmSlots, setConfirmSlots] = useState<string[]>([]);
+  // 확정 대상 공고(진행 중 후보 중 선택) + 시작일·지점 — 확정을 공고에 결속하고 필요한 정보를 함께 받는다.
+  const [confirmJobId, setConfirmJobId] = useState<number | null>(null);
+  const [confirmStartDate, setConfirmStartDate] = useState("");
+  const [confirmBranch, setConfirmBranch] = useState("");
   // 인력풀 제외(=status 부적합) 확인 모달 — 모든 공고에서 빠지는 파괴적 액션이라 확인을 받는다.
   const [excludeOpen, setExcludeOpen] = useState(false);
   // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
@@ -382,10 +388,19 @@ export function ApplicantDetailContent({
   };
 
   // 확정 모달 열기 — 기존 확정 슬롯(있으면)을 미리 선택해 둔다.
+  // 확정 대상 공고 후보 — 진행 중(비마감) 공고만. 확정은 마감 공고로 못 하게 여기서 거른다.
+  const confirmableCands = cands.filter((c) => !c.job_effectively_closed && c.agent_stage !== "abort");
+
   const openConfirm = () => {
     setConfirmSlots(
       String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
     );
+    // 대상 공고 기본값: 현재 포커스 후보가 진행 중이면 그것, 아니면 진행 중 후보 첫 번째.
+    const focusOpen = focusCand && !focusCand.job_effectively_closed && focusCand.agent_stage !== "abort" ? focusCand : null;
+    const target = focusOpen ?? confirmableCands[0] ?? null;
+    setConfirmJobId(target?.job_id ?? null);
+    setConfirmStartDate(String(a.start_date ?? target?.job_start_date ?? "").slice(0, 10));
+    setConfirmBranch(String(a.confirmed_branch ?? a.branch1 ?? target?.job_branch ?? ""));
     setConfirmOpen(true);
   };
 
@@ -393,10 +408,24 @@ export function ApplicantDetailContent({
     setConfirmSlots((cur) => (cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot]));
   };
 
-  // 확정 확정(commit) — status + confirmed_slot을 함께 저장. 슬롯 미선택도 허용(비강제)하되 권장.
+  // 확정 대상 공고 선택 시 시작일·지점 기본값도 그 공고 기준으로 갱신.
+  const pickConfirmJob = (jid: number) => {
+    setConfirmJobId(jid);
+    const c = confirmableCands.find((x) => x.job_id === jid);
+    if (c) {
+      if (!confirmStartDate && c.job_start_date) setConfirmStartDate(String(c.job_start_date).slice(0, 10));
+      if (!confirmBranch && c.job_branch) setConfirmBranch(c.job_branch);
+    }
+  };
+
+  // 확정 확정(commit) — status + 대상 공고(current_job_id) + 시작일·지점·슬롯을 한 번에 저장.
+  // current_job_id로 확정이 공고에 결속되고, 서버가 잔여 후보 자동 정리·라인 태깅을 그 공고 기준으로 처리한다.
   const commitConfirm = async () => {
     const body: Record<string, unknown> = { status: "확정인력" };
+    if (confirmJobId != null) body.current_job_id = confirmJobId;
     if (confirmSlots.length > 0) body.confirmed_slot = confirmSlots.join(", ");
+    if (confirmStartDate.trim()) body.start_date = confirmStartDate.trim();
+    if (confirmBranch.trim()) body.confirmed_branch = confirmBranch.trim();
     const ok = await patch(body, `${a.name}님을 확정인력으로 이동했어요.`);
     if (ok) setConfirmOpen(false);
   };
@@ -852,10 +881,48 @@ export function ApplicantDetailContent({
           <AlertDialogHeader>
             <AlertDialogTitle>{a.name}님을 확정인력으로</AlertDialogTitle>
             <AlertDialogDescription className="whitespace-pre-line">
-              확정 슬롯을 함께 지정하면 슬롯 보드에 정확히 반영됩니다.
+              어느 공고에 확정하는지·시작일을 함께 지정하면 충원율·통계가 그 공고에 정확히 반영되고, 다른 공고의 진행 후보는 자동 정리됩니다.
               {a.work_hours ? `\n희망 시간대: ${a.work_hours}` : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* 확정 대상 공고 — 진행 중(비마감) 후보만. 여러 개면 선택, 없으면 경고. */}
+          <div>
+            <span className="text-[11px] font-bold text-[#A0AEC0]">확정 공고</span>
+            {confirmableCands.length === 0 ? (
+              <p className="text-[11.5px] text-[#E53E3E] mt-1.5 leading-relaxed">
+                진행 중인 공고 후보가 없어요. 인재풀에서 공고에 후보로 추가한 뒤 확정해 주세요 (마감된 공고로는 확정할 수 없어요).
+              </p>
+            ) : confirmableCands.length === 1 ? (
+              <div className="mt-1.5 px-3 py-2 rounded-lg bg-[#F0FFF4] border border-[#C6F6D5] text-[12.5px] font-bold text-[#2F855A]">
+                {confirmableCands[0].job_title ?? `공고 #${confirmableCands[0].job_id}`}
+              </div>
+            ) : (
+              <div className="flex gap-1.5 flex-wrap mt-1.5">
+                {confirmableCands.map((c) => (
+                  <button
+                    key={c.job_id}
+                    type="button"
+                    onClick={() => pickConfirmJob(c.job_id)}
+                    className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${confirmJobId === c.job_id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}
+                  >
+                    {c.job_title ?? `공고 #${c.job_id}`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
+              <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점(선택)</span>
+              <input value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} placeholder="예: 강남" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+            </label>
+          </div>
 
           <div>
             <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯 (복수 선택 가능)</span>
@@ -884,7 +951,7 @@ export function ApplicantDetailContent({
 
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-xl" disabled={busy}>취소</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy} className="rounded-xl">
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy || confirmJobId == null} className="rounded-xl">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} 확정
             </AlertDialogAction>
           </AlertDialogFooter>
