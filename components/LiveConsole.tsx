@@ -152,12 +152,31 @@ function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
   return !!pv?.manual_outbound && !!pv.created_at && Date.now() - new Date(pv.created_at).getTime() < RECENT_INBOUND_MS;
 }
 
+// 카드 상태를 '누구 차례냐' 단일 축 배지 하나로 압축(간소화).
+// 이전엔 카드당 최대 6개 배지(미답·개입필요·풀응답·초안대기·수동응대·AI응대중 + 가용성·수신거부)가
+// 겹쳐 무엇을 먼저 봐야 할지 헷갈렸다. 실무자의 질문은 하나 — "지금 내가 답할 것이 뭐지?".
+// 우선순위: 수신거부 > 초안 검토 > 답장 필요 > 수동 응대 > AI 응대 중 > 답 대기 > (그 외).
+interface TurnBadge { label: string; cls: string; sub?: string }
+function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBadge {
+  const unanswered = pv?.direction === "inbound" || (chat.unread_count ?? 0) > 0;
+  if (chat.sms_opt_out_at) return { label: "수신거부", cls: "bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" };
+  if (pv?.pending_draft) return { label: "초안 검토", cls: "bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]" };
+  if (unanswered) {
+    // 활성 대화 없이 답장 온 재컨택 응답자 = 스크리닝 스코프 밖 답장. 서브라벨로만 구분(별도 색 배지 X).
+    const isPool = (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
+    return { label: "답장 필요", cls: "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]", sub: isPool ? "풀 밖 답장" : undefined };
+  }
+  if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-[#EDF2F7] text-[#4A5568]" };
+  if (isAwaitingPreview(pv)) return { label: "답 대기", cls: "bg-[#EDF2F7] text-[#718096]" };
+  if (chat.agent_stage && chat.agent_stage !== "abort") return { label: "AI 응대 중", cls: "bg-[#EBF8FF] text-[#3182CE] border border-[#BEE3F8]" };
+  return { label: chat.status, cls: "bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]" };
+}
+
 export function LiveConsole() {
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<"all" | "intervention" | "confirm">("all");
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<string>("all");
   const [previewById, setPreviewById] = useState<Record<number, LastMessagePreview>>({});
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
@@ -229,7 +248,6 @@ export function LiveConsole() {
     [isUnanswered, previewById]
   );
   const unansweredCount = useMemo(() => chats.filter(isUnanswered).length, [chats, isUnanswered]);
-  const awaitingCount = useMemo(() => chats.filter(isAwaiting).length, [chats, isAwaiting]);
   // 카드 시각·정렬 기준 — 마지막 메시지 시각(미리보기)과 last_message_at(inbound 수신 시각) 중 더 최근.
   // 매니저 발신은 last_message_at을 갱신하지 않아, 미리보기 시각이 있어야 답 대기 대화도 최신순에 올바로 낀다.
   const lastActivityAt = useCallback(
@@ -569,9 +587,6 @@ export function LiveConsole() {
           const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
           if (!nameHit && !phoneHit) return false;
         }
-        if (stageFilter === "intervention") return isUnanswered(c);
-        if (stageFilter === "awaiting") return isAwaiting(c);
-        if (stageFilter === "active") return !!c.agent_stage && c.agent_stage !== "abort";
         return true;
       })
       .sort((a, b) => {
@@ -582,7 +597,7 @@ export function LiveConsole() {
         const bt = new Date(lastActivityAt(b) ?? 0).getTime();
         return bt - at;
       });
-  }, [chats, search, stageFilter, isUnanswered, isAwaiting, previewById, lastActivityAt]);
+  }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   return (
     <div className="flex h-full overflow-hidden bg-white">
@@ -619,24 +634,18 @@ export function LiveConsole() {
             <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>인계 대기 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
             <button onClick={() => setActiveTab("confirm")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-[#2F855A] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
-          {/* all 탭: 상태 필터 / 인계 대기 탭: 사유 카테고리 필터.
-              파일럿 단순화 — 스크리닝/온보딩/수동 세분 칩은 '진행 중' 하나로 통합(활성 후보가 적어 노이즈),
-              실사용 빈도 높은 미답·전체를 앞으로. */}
+          {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(답장 필요→AI→답 대기)로 대체(간소화).
+              '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
+              인계 대기 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
           {activeTab === "all" ? (
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { id: "intervention", label: "미답" },
-                { id: "all", label: "전체" },
-                { id: "awaiting", label: "답 대기" },
-                { id: "active", label: "진행 중" },
-              ].map((f) => (
-                <button key={f.id} onClick={() => setStageFilter(f.id)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${stageFilter === f.id ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>
-                  {f.label}
-                  {f.id === "intervention" && unansweredCount > 0 && <span className={`ml-1 ${stageFilter === f.id ? "opacity-60" : "text-[#E53E3E]"}`}>{unansweredCount}</span>}
-                  {f.id === "awaiting" && awaitingCount > 0 && <span className={`ml-1 ${stageFilter === f.id ? "opacity-60" : "text-[#718096]"}`}>{awaitingCount}</span>}
-                </button>
-              ))}
-            </div>
+            unansweredCount > 0 ? (
+              <div className="text-[12px] font-bold text-[#E53E3E] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E]" />
+                지금 답할 대화 {unansweredCount}건 — 목록 맨 위에 있어요
+              </div>
+            ) : (
+              <div className="text-[12px] font-semibold text-[#38A169]">답할 대화 없음 — 모두 응대했어요 👍</div>
+            )
           ) : activeTab === "intervention" ? (
             <div className="flex gap-1 flex-wrap">
               <button onClick={() => setHandoffCat("all")} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 {handoffs.length}</button>
@@ -747,26 +756,20 @@ export function LiveConsole() {
             <div className="text-[13px] text-[#A0AEC0] p-4 text-center">
               {search.trim()
                 ? "검색 결과가 없어요 — 이름·전화번호를 확인해주세요"
-                : stageFilter === "intervention"
-                  ? "미답 대화가 없어요 — 모두 응대했어요 👍"
-                  : stageFilter === "awaiting"
-                    ? "답 대기 중인 대화가 없어요 — 문자를 보내고 회신을 기다리는 대화가 여기 떠요"
-                    : stageFilter === "active"
-                      ? "진행 중인 AI 대화가 없어요"
-                      : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
+                : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
             </div>
           )}
           {visibleChats.map((chat, idx) => {
             const pal = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
             const unread = chat.unread_count ?? 0;
             const intervention = isUnanswered(chat);
-            const awaiting = isAwaiting(chat);
+            const pv = previewById[chat.id];
+            const turn = whoseTurn(chat, pv);
+            // 메타(유입·지점·가용성)는 회색 한 줄로 강등 — 색 배지 경쟁을 없앤다. 수신거부는 turn 배지가 대신 표시.
             const src = chat.source ? SOURCE_LABEL[chat.source] ?? chat.source : null;
-            // 활성 대화(agent_stage)가 없는데 답장이 온 재컨택 응답자 = '풀 응답'.
-            // 스크리닝 대화와 구분해 매니저가 스코프 밖 문자를 바로 알아보게 한다.
-            const isPoolResponse = intervention && (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
-            const avail = chat.availability;
-            const availStyle = avail === "휴면" ? "bg-[#EDF2F7] text-[#A0AEC0]" : "bg-[#F0FFF4] text-[#38A169]";
+            const branch = chat.branch || chat.branch1 || null;
+            const availMeta = !chat.sms_opt_out_at && chat.availability ? (chat.availability === "휴면" ? "휴면" : "가능") : null;
+            const metaLine = [src, branch, availMeta].filter(Boolean).join(" · ");
             return (
               <button
                 key={chat.id}
@@ -782,35 +785,20 @@ export function LiveConsole() {
                   </div>
                   <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
                 </div>
-                {(() => {
-                  const pv = previewById[chat.id];
-                  if (pv?.body) {
-                    return (
-                      <div className="text-[13px] line-clamp-1 mb-2.5">
-                        <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : pv.manual_outbound ? "매니저" : "발신"}</span>
-                        <span className="text-[#4A5568]"> · {pv.body}</span>
-                      </div>
-                    );
-                  }
-                  return <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2.5">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>;
-                })()}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {src && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{src}</span>}
-                  {(chat.branch || chat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{chat.branch || chat.branch1}</span>}
-                  {/* 의도 배지: 가용성/수신거부 — 재컨택 응답의 성격을 한눈에 */}
-                  {chat.sms_opt_out_at
-                    ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]">수신거부</span>
-                    : avail && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${availStyle}`}>{avail === "휴면" ? "휴면" : "가능"}</span>}
-                  {chat.agent_stage === "paused" && <span title="AI 자동 응대가 꺼진 대화 — 매니저가 직접 답장합니다" className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#4A5568]">수동 응대</span>}
-                  {/* 미처리 AI 초안 대기 — 코파일럿 모드에서 승인이 필요한 대화를 목록에서 바로 식별 */}
-                  {previewById[chat.id]?.pending_draft && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]">⚡ 초안 대기</span>}
-                  {/* 풀 응답: 활성 대화 없이 답장 온 건 — 스크리닝의 '개입 필요'와 구분(노랑) */}
-                  {isPoolResponse
-                    ? <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">풀 응답</span>
-                    : intervention && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFF5F5] text-[#E53E3E]">개입 필요</span>}
-                  {/* 답 대기: 매니저가 보내고 회신을 기다리는 대화(빠른 컨택 등) — 회색·시계 */}
-                  {awaiting && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EDF2F7] text-[#718096]">⏱ 답 대기</span>}
-                  {chat.agent_stage && chat.agent_stage !== "paused" && chat.agent_stage !== "abort" && !intervention && !awaiting && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#EBF8FF] text-[#3182CE]">AI 응대 중</span>}
+                {pv?.body ? (
+                  <div className="text-[13px] line-clamp-1 mb-2">
+                    <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : pv.manual_outbound ? "매니저" : "발신"}</span>
+                    <span className="text-[#4A5568]"> · {pv.body}</span>
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
+                )}
+                {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded-md text-[11px] font-bold shrink-0 ${turn.cls}`}>
+                    {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
+                  </span>
+                  {metaLine && <span className="text-[11px] text-[#A0AEC0] truncate">{metaLine}</span>}
                 </div>
               </button>
             );
