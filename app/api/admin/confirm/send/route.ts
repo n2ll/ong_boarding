@@ -94,6 +94,13 @@ export async function POST(req: NextRequest) {
         const tmpl = (await getSystemMessage(supabase, "ongoing_app_guide"))?.trim();
         text = tmpl ? fillTemplate(tmpl, { 이름: name ?? "선생님" }) : buildOngoingAppGuide(name);
       }
+      // 자리표시 문구 하드 차단 — 운영 문구 미설정 상태로 지원자에게 발송되는 사고 방지(체크박스·버튼 공통).
+      if (!overriding && text.includes("여기에 넣어주세요")) {
+        return NextResponse.json(
+          { error: "옹고잉 앱 안내 문구가 아직 설정되지 않았어요. 에이전트 두뇌 탭 'ongoing_app_guide'에 실제 안내를 입력한 뒤 발송하세요." },
+          { status: 400 }
+        );
+      }
     } else {
       // venue — 구조화 정보(시작일·픽업·현장매니저)가 필요. text override면 그대로, 아니면 서버 빌드.
       if (!job_id || !job) {
@@ -118,7 +125,9 @@ export async function POST(req: NextRequest) {
           smName = (sm?.name as string) || "";
           smPhone = (sm?.phone as string) || "";
         }
-        if (!smName) {
+        // 현장매니저는 비마트 라인에서만 필수. internal 정기배송 라인은 담당자 줄을 생략하고 발송 가능
+        // (도시락 등은 현장매니저를 별도로 두지 않는 경우가 많다 — 발송이 막히지 않게).
+        if (!smName && !general) {
           return NextResponse.json({ error: "공고에 현장매니저가 지정되지 않았습니다." }, { status: 400 });
         }
 
@@ -126,8 +135,8 @@ export async function POST(req: NextRequest) {
           name,
           start_date: startDate,
           pickup_address: pickup,
-          site_manager_name: smName,
-          site_manager_phone: smPhone,
+          site_manager_name: smName || null,
+          site_manager_phone: smPhone || null,
           meeting_time: (meeting_time as string) || null,
         });
       }

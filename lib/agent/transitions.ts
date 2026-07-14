@@ -520,21 +520,24 @@ export function buildVenueGuideText(params: {
   name: string | null;
   start_date: string;
   pickup_address: string;
-  site_manager_name: string;
-  site_manager_phone: string;
+  /** 현장 담당자 — 지정된 라인만. 없으면(예: internal 정기배송) 담당자 줄을 생략한다. */
+  site_manager_name?: string | null;
+  site_manager_phone?: string | null;
   /** 집합 시각 (예: "07:50", "09:40"). 공고·라인마다 달라 하드코딩하지 않는다. 비면 시각 줄 생략. */
   meeting_time?: string | null;
 }): string {
   const n = params.name ?? "지원자";
   const t = (params.meeting_time ?? "").trim();
   const dateLine = t ? `일시: ${formatStartDate(params.start_date)} ${t}` : `일시: ${formatStartDate(params.start_date)}`;
-  return [
+  const lines = [
     `${n}님, 업무 시작 만남 장소 안내드립니다.`,
     "",
     dateLine,
     `위치: ${params.pickup_address}`,
-    `현장 담당자: ${params.site_manager_name} 매니저 ${params.site_manager_phone}`,
-  ].join("\n");
+  ];
+  const sm = (params.site_manager_name ?? "").trim();
+  if (sm) lines.push(`현장 담당자: ${sm} 매니저${params.site_manager_phone ? ` ${params.site_manager_phone}` : ""}`);
+  return lines.join("\n");
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -165,7 +165,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const infoById = new Map<number, ApplicantRow>();
   for (const a of (apps ?? []) as ApplicantRow[]) infoById.set(a.id, a);
 
-  const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈"]);
+  // 새 공고 안내 제외 상태: 인력풀 제외(부적합·이탈) + 이미 투입 확정된 인력(확정인력) —
+  // 확정자는 재컨택 대상이 아니다(라우터 AI 침묵 PR#65와 대칭). waitlist_notice 보유자여도 제외.
+  const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈", "확정인력"]);
   const eligible = (a: ApplicantRow): boolean => {
     if (!a.phone || !a.access_token) return false; // 문구에 맞춤링크가 들어가므로 발송 불가 인원 제외
     if (a.sms_opt_out_at) return false;
