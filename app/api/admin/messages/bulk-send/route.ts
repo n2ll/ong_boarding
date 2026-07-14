@@ -99,6 +99,34 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    // 공고 안내 교차 가드(24시간) — 마감 안내(job_closed)와 새 공고 안내(new_job)가 같은 사람에게
+    // 몇 분 간격으로 겹쳐 나가는 상황을 실무자의 조작 순서와 무관하게 서버에서 차단한다.
+    // 두 안내 모두 맞춤링크(살아있는 페이지)를 담고 있어 한 통이면 최신 상태가 전부 전달된다.
+    // (지원자 경험 원칙, 2026-07-14. 10분 가드는 동일 발송 재클릭용 — 이 가드는 목적 교차용.)
+    const CROSS_NOTICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const CROSS_NOTICE_PURPOSES = new Set(["job_closed", "new_job"]);
+    const recentNoticed = new Set<number>();
+    if (CROSS_NOTICE_PURPOSES.has(purpose)) {
+      const ids = recipients
+        .map((r) => r.applicant_id)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (ids.length > 0) {
+        const since = new Date(Date.now() - CROSS_NOTICE_WINDOW_MS).toISOString();
+        const { data: recent } = await supabase
+          .from("pool_events")
+          .select("applicant_id, meta")
+          .in("applicant_id", ids)
+          .eq("event_type", "ping_sent")
+          .gt("created_at", since);
+        for (const ev of recent ?? []) {
+          const p = (ev.meta as { purpose?: string } | null)?.purpose;
+          if (p && CROSS_NOTICE_PURPOSES.has(p) && typeof ev.applicant_id === "number") {
+            recentNoticed.add(ev.applicant_id);
+          }
+        }
+      }
+    }
+
     const baseUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.VERCEL_PROJECT_PRODUCTION_URL ||
@@ -127,6 +155,11 @@ export async function POST(req: NextRequest) {
       // 중복 발송 가드 — 최근 10분 내 캠페인 발송된 지원자는 스킵.
       if (typeof r.applicant_id === "number" && recentlySent.has(r.applicant_id)) {
         results.push({ phone, success: false, error: "최근 발송됨(중복 방지)" });
+        continue;
+      }
+      // 공고 안내 교차 가드 — 24시간 내 마감/새 공고 안내를 이미 받은 지원자는 스킵.
+      if (typeof r.applicant_id === "number" && recentNoticed.has(r.applicant_id)) {
+        results.push({ phone, success: false, error: "24시간 내 공고 안내 수신(중복 방지)" });
         continue;
       }
 
