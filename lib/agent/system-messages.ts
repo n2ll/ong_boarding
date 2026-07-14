@@ -29,6 +29,9 @@ export type SystemMessageKey =
   | "onboarding_guide"
   | "onboarding_reminder"
   | "first_day_rules"
+  | "first_day_rules_general"
+  | "venue_guide"
+  | "ongoing_app_guide"
   | "interest_engage"
   | "general_screening_announce"
   | "general_screening_handoff";
