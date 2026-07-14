@@ -275,9 +275,12 @@ export function LiveConsole() {
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
   const copilotMode = !globalKill && killData?.mode === "draft";
 
-  // 발송 미리보기 모달(내용·비용 확인 후 발송) — 첫날규칙/만남장소 공용
-  const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: "venue" | "first_day" } | null>(null);
+  // 발송 미리보기 모달(내용·비용 확인·수정 후 발송) — 만남장소/첫날규칙/옹고잉 앱 안내 공용
+  type SendKind = "venue" | "first_day" | "app_guide";
+  const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: SendKind } | null>(null);
   const [venueDate, setVenueDate] = useState("");
+  const [venueTime, setVenueTime] = useState(""); // 집합 시각 (예: 09:40) — 하드코딩 대신 매니저 입력
+  const [editText, setEditText] = useState(""); // 발송 직전 수정 가능한 본문(편집 가능 템플릿)
   const [preview, setPreview] = useState<{ text: string; sms_type: string; cost_krw: number } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sendSaving, setSendSaving] = useState(false);
@@ -497,49 +500,55 @@ export function LiveConsole() {
     }
   };
 
-  // ── 확정 대기 액션 (내용·비용 미리보기 → 발송) ──
-  const fetchPreview = useCallback(async (p: ConfirmPending, kind: "venue" | "first_day", startDate?: string) => {
+  // ── 확정 대기 액션 (내용·비용 미리보기 → 수정 → 발송) ──
+  // 미리보기 본문을 editText에 채워 발송 직전 수정 가능하게 한다(편집 가능 템플릿).
+  const fetchPreview = useCallback(async (p: ConfirmPending, kind: SendKind, opts?: { startDate?: string; meetingTime?: string }) => {
     setPreviewLoading(true);
     setPreview(null);
     try {
       const res = await fetch("/api/admin/confirm/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: startDate, preview: true }),
+        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: opts?.startDate, meeting_time: opts?.meetingTime, preview: true }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(json.error || "미리보기 실패"); return; }
       setPreview({ text: json.text, sms_type: json.sms_type, cost_krw: json.cost_krw });
+      setEditText(json.text ?? "");
     } finally {
       setPreviewLoading(false);
     }
   }, []);
 
-  const openSend = (p: ConfirmPending, kind: "venue" | "first_day") => {
+  const openSend = (p: ConfirmPending, kind: SendKind) => {
     setSendModal({ p, kind });
     setPreview(null);
+    setEditText("");
+    setVenueTime("");
     const d = p.start_date ?? "";
     setVenueDate(d);
-    // 첫날규칙은 시작일 불필요 → 즉시 미리보기. 만남장소는 시작일 있어야 미리보기.
-    if (kind === "first_day") void fetchPreview(p, "first_day");
-    else if (d) void fetchPreview(p, "venue", d);
+    // 첫날규칙·앱안내는 시작일 불필요 → 즉시 미리보기. 만남장소는 시작일 있어야 미리보기.
+    if (kind === "first_day" || kind === "app_guide") void fetchPreview(p, kind);
+    else if (d) void fetchPreview(p, "venue", { startDate: d });
   };
 
+  const KIND_LABEL: Record<SendKind, string> = { venue: "만남장소 안내", first_day: "첫날 규칙 안내", app_guide: "옹고잉 앱 안내" };
   const doSend = async () => {
     if (!sendModal) return;
     const { p, kind } = sendModal;
     if (kind === "venue" && !venueDate) return toast.error("시작일을 선택해주세요.");
-    if (!preview) return toast.error("미리보기를 불러온 뒤 발송하세요.");
+    if (!editText.trim()) return toast.error("발송할 내용이 비어 있어요.");
     setSendSaving(true);
     try {
       const res = await fetch("/api/admin/confirm/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: kind === "venue" ? venueDate : undefined }),
+        // 수정된 본문(editText)을 그대로 발송. venue는 시작일·집합시각도 함께(기록·재빌드 대비).
+        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, text: editText.trim(), start_date: kind === "venue" ? venueDate : undefined, meeting_time: kind === "venue" ? venueTime : undefined }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "발송 실패");
-      toast.success(`${p.name}님 — ${kind === "venue" ? "만남장소 안내" : "첫날 규칙 안내"}를 발송했어요.`);
+      toast.success(`${p.name}님 — ${KIND_LABEL[kind]}를 발송했어요.`);
       setSendModal(null);
       handleChanged();
     } catch (e) {
@@ -743,8 +752,9 @@ export function LiveConsole() {
                     </div>
                   </button>
                   <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
-                    <button onClick={() => openSend(p, "venue")} disabled={!p.can_send_venue} title={p.can_send_venue ? "만남장소 안내 발송 (내용·비용 확인)" : "공고에 픽업주소·현장매니저가 있어야 발송 가능"} className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">만남장소 발송</button>
-                    <button onClick={() => openSend(p, "first_day")} title="첫날 규칙 안내 발송 (내용·비용 확인)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95">첫날규칙</button>
+                    <button onClick={() => openSend(p, "app_guide")} title="옹고잉 앱 설치·가이드 안내 발송 (내용 확인·수정)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95">앱 안내</button>
+                    <button onClick={() => openSend(p, "venue")} disabled={!p.can_send_venue} title={p.can_send_venue ? "만남장소 안내 발송 (내용 확인·수정)" : "공고에 픽업주소·현장매니저가 있어야 발송 가능"} className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">만남장소 발송</button>
+                    <button onClick={() => openSend(p, "first_day")} title="첫날 규칙 안내 발송 (내용 확인·수정)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95">첫날규칙</button>
                     <button onClick={() => confirmHire(p)} title="확정인력으로 전환" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
                   </div>
                 </div>
@@ -974,33 +984,47 @@ export function LiveConsole() {
         <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !sendSaving && setSendModal(null)}>
           <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
-              <h2 className="text-[16px] font-extrabold text-[#1A202C]">{sendModal.kind === "venue" ? "만남장소 안내 발송" : "첫날 규칙 안내 발송"}</h2>
+              <h2 className="text-[16px] font-extrabold text-[#1A202C]">{KIND_LABEL[sendModal.kind]} 발송</h2>
               <button onClick={() => setSendModal(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
             </div>
             <div className="p-6 flex flex-col gap-4">
               <div className="text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">{sendModal.p.name}</b>님({sendModal.p.phone})에게 <b className="text-[#E53E3E]">실제 문자</b>가 발송됩니다. 아래 내용과 예상 비용을 확인하세요.
+                <b className="text-[#4A5568]">{sendModal.p.name}</b>님({sendModal.p.phone})에게 <b className="text-[#E53E3E]">실제 문자</b>가 발송됩니다. 아래 내용을 확인·수정 후 발송하세요.
               </div>
               {sendModal.kind === "venue" && (
-                <div>
-                  <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">근무 시작일 (매니저가 정함)</label>
-                  <input type="date" value={venueDate} onChange={(e) => { const v = e.target.value; setVenueDate(v); if (v) void fetchPreview(sendModal.p, "venue", v); else setPreview(null); }} className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">근무 시작일</label>
+                    <input type="date" value={venueDate} onChange={(e) => { const v = e.target.value; setVenueDate(v); if (v) void fetchPreview(sendModal.p, "venue", { startDate: v, meetingTime: venueTime }); else setPreview(null); }} className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">집합 시각</label>
+                    <input type="time" value={venueTime} onChange={(e) => { const v = e.target.value; setVenueTime(v); if (venueDate) void fetchPreview(sendModal.p, "venue", { startDate: venueDate, meetingTime: v }); }} className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  </div>
                 </div>
               )}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[12px] font-bold text-[#4A5568]">발송 내용 미리보기</label>
+                  <label className="text-[12px] font-bold text-[#4A5568]">발송 내용 (수정 가능)</label>
                   {preview && <span className="text-[11px] font-bold text-[#B7791F] bg-[#FFFBEB] border border-[#FAF089] rounded-md px-2 py-0.5">{preview.sms_type} · 약 {preview.cost_krw}원</span>}
                 </div>
-                <div className="w-full min-h-[120px] px-4 py-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[13px] leading-relaxed whitespace-pre-line text-[#2D3748]">
-                  {previewLoading ? "불러오는 중…" : preview ? preview.text : (sendModal.kind === "venue" && !venueDate ? "시작일을 선택하면 발송 내용이 표시됩니다." : "미리보기를 불러오지 못했어요.")}
-                </div>
-                <div className="text-[11px] text-[#A0AEC0] mt-1.5">* 비용은 SOLAPI 기준 대략치입니다(SMS 20원 / LMS 33원). 실제 청구는 발송 결과에 따릅니다.</div>
+                {previewLoading ? (
+                  <div className="w-full min-h-[140px] px-4 py-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[13px] text-[#A0AEC0]">불러오는 중…</div>
+                ) : (
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    rows={7}
+                    placeholder={sendModal.kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
+                    className="w-full px-4 py-3 bg-white border border-[#E2E8F0] rounded-xl text-[13px] leading-relaxed text-[#2D3748] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none"
+                  />
+                )}
+                <div className="text-[11px] text-[#A0AEC0] mt-1.5">* 기본 문안은 라인 형태에 맞춰 채워지며, 그대로 두거나 수정해 발송할 수 있어요. 비용은 SOLAPI 대략치(SMS 20원 / LMS 33원).</div>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
               <button onClick={() => setSendModal(null)} disabled={sendSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
-              <button onClick={doSend} disabled={sendSaving || previewLoading || !preview} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2B6CB0] hover:bg-[#2C5282] disabled:opacity-50">{sendSaving ? "발송 중…" : "발송"}</button>
+              <button onClick={doSend} disabled={sendSaving || previewLoading || !editText.trim()} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2B6CB0] hover:bg-[#2C5282] disabled:opacity-50">{sendSaving ? "발송 중…" : "발송"}</button>
             </div>
           </div>
         </div>

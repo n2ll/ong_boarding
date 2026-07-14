@@ -301,6 +301,9 @@ export function ApplicantDetailContent({
   const [confirmJobId, setConfirmJobId] = useState<number | null>(null);
   const [confirmStartDate, setConfirmStartDate] = useState("");
   const [confirmBranch, setConfirmBranch] = useState("");
+  // 확정 후 옹고잉 앱 설치·가이드 안내 발송 옵션 — 문구는 두뇌 탭 'ongoing_app_guide'에서 관리.
+  // 문구가 아직 준비되지 않았을 때 자리표시 문안이 나가지 않도록 기본 꺼짐(문구 설정 후 사용).
+  const [confirmSendAppGuide, setConfirmSendAppGuide] = useState(false);
   // 인력풀 제외(=status 부적합) 확인 모달 — 모든 공고에서 빠지는 파괴적 액션이라 확인을 받는다.
   const [excludeOpen, setExcludeOpen] = useState(false);
   // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
@@ -401,6 +404,7 @@ export function ApplicantDetailContent({
     setConfirmJobId(target?.job_id ?? null);
     setConfirmStartDate(String(a.start_date ?? target?.job_start_date ?? "").slice(0, 10));
     setConfirmBranch(String(a.confirmed_branch ?? a.branch1 ?? target?.job_branch ?? ""));
+    setConfirmSendAppGuide(false);
     setConfirmOpen(true);
   };
 
@@ -427,7 +431,26 @@ export function ApplicantDetailContent({
     if (confirmStartDate.trim()) body.start_date = confirmStartDate.trim();
     if (confirmBranch.trim()) body.confirmed_branch = confirmBranch.trim();
     const ok = await patch(body, `${a.name}님을 확정인력으로 이동했어요.`);
-    if (ok) setConfirmOpen(false);
+    if (ok) {
+      setConfirmOpen(false);
+      // 확정 후 옹고잉 앱 안내 발송(옵션) — 문구는 두뇌 탭 'ongoing_app_guide'. 실패해도 확정은 유지.
+      if (confirmSendAppGuide) {
+        try {
+          const res = await fetch("/api/admin/confirm/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ applicant_id: a.id, kind: "app_guide", job_id: confirmJobId ?? undefined }),
+          });
+          if (res.ok) toast.success("옹고잉 앱 안내 문자를 발송했어요.");
+          else {
+            const j = await res.json().catch(() => ({}));
+            toast.error(j.error || "앱 안내 발송에 실패했어요(확정은 완료).");
+          }
+        } catch {
+          toast.error("앱 안내 발송에 실패했어요(확정은 완료).");
+        }
+      }
+    }
   };
 
   // 인력풀 제외(commit) — status='부적합'. 지원자를 모든 공고 매칭·발송에서 빼는 person-level 액션.
@@ -948,6 +971,15 @@ export function ApplicantDetailContent({
               </p>
             )}
           </div>
+
+          {/* 확정 후 옹고잉 앱 안내 발송(옵션) — 문구는 두뇌 탭 'ongoing_app_guide'에서 관리 */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={confirmSendAppGuide} onChange={(e) => setConfirmSendAppGuide(e.target.checked)} className="accent-[#2F855A] w-4 h-4 mt-0.5" />
+            <span className="text-[12.5px] text-[#4A5568] leading-snug">
+              확정 후 <b>옹고잉 앱 설치·가이드 안내</b> 문자 보내기
+              <span className="block text-[11px] text-[#A0AEC0]">문구는 에이전트 두뇌 탭 &lsquo;ongoing_app_guide&rsquo;에서 편집 — 설정 전이면 자리표시 문구가 나가니 주의</span>
+            </span>
+          </label>
 
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-xl" disabled={busy}>취소</AlertDialogCancel>

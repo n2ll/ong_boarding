@@ -522,12 +522,16 @@ export function buildVenueGuideText(params: {
   pickup_address: string;
   site_manager_name: string;
   site_manager_phone: string;
+  /** 집합 시각 (예: "07:50", "09:40"). 공고·라인마다 달라 하드코딩하지 않는다. 비면 시각 줄 생략. */
+  meeting_time?: string | null;
 }): string {
   const n = params.name ?? "지원자";
+  const t = (params.meeting_time ?? "").trim();
+  const dateLine = t ? `일시: ${formatStartDate(params.start_date)} ${t}` : `일시: ${formatStartDate(params.start_date)}`;
   return [
     `${n}님, 업무 시작 만남 장소 안내드립니다.`,
     "",
-    `일시: ${formatStartDate(params.start_date)} 07:50`,
+    dateLine,
     `위치: ${params.pickup_address}`,
     `현장 담당자: ${params.site_manager_name} 매니저 ${params.site_manager_phone}`,
   ].join("\n");
@@ -571,7 +575,8 @@ export function buildOnboardingGuideText(_name: string | null): string {
   ].join("\n");
 }
 
-export function buildFirstDayRules(name: string | null): string {
+// 비마트(배민커넥트) 실시간 배차 라인용 첫날 규칙.
+function buildFirstDayRulesBaemin(name: string | null): string {
   const n = name ?? "지원자";
   return [
     `${n}님 안녕하세요? 첫 근무 관련 안내사항 전달드립니다!`,
@@ -581,5 +586,37 @@ export function buildFirstDayRules(name: string | null): string {
     "3) 식사는 13시 이후로 진행 부탁드립니다.",
     "4) 배차 시점부터 60분 내 배송 완료 부탁드립니다.",
     "5) 상차지에서 배차 받고 10분 대기 후 출발 부탁드립니다.",
+  ].join("\n");
+}
+
+// 도시락 등 internal 정기 배송 라인용 첫날 규칙 — 실시간 배차가 아니라 정해진 시간·경로.
+// 선탑(동승)에서 배운 동선대로 진행하는 라인이라 배차 문구를 쓰지 않는다.
+function buildFirstDayRulesGeneral(name: string | null): string {
+  const n = name ?? "지원자";
+  return [
+    `${n}님, 첫 근무 관련 안내드립니다!`,
+    "",
+    "1) 안내드린 집합 시간·장소로 나와주세요. 도착하시면 현장 담당자에게 알려주세요.",
+    "2) 선탑(동승) 때 익히신 순서·경로대로 상차 후 배송 진행 부탁드립니다.",
+    "3) 배송 완료 후 회수품·잔여물은 정해진 반납 절차대로 처리해 주세요.",
+    "4) 진행 중 문제가 생기면 바로 현장 담당자에게 연락 주세요.",
+  ].join("\n");
+}
+
+/** 첫날 규칙 — 라인 형태(general=internal 정기배송)에 맞춰 분기. */
+export function buildFirstDayRules(name: string | null, opts?: { general?: boolean }): string {
+  return opts?.general ? buildFirstDayRulesGeneral(name) : buildFirstDayRulesBaemin(name);
+}
+
+/** 확정 시 발송하는 옹고잉 앱 설치·가이드 안내 기본문(코드 폴백).
+ *  실제 운영 문구는 system_message 'ongoing_app_guide'가 우선 — 두뇌 탭에서 편집.
+ *  ⚠️ 확정 뉘앙스 금지 규칙 준수: 이 문구는 매니저 확정 후 발송하는 '안내'이므로 확정 통보 자체는 가능하되,
+ *  링크·문구는 사장님이 공유한 실제 옹고잉 앱 안내 내용으로 두뇌 탭에서 교체해야 완성된다. */
+export function buildOngoingAppGuide(name: string | null): string {
+  const n = name ?? "선생님";
+  return [
+    `${n}님, 함께하게 되어 반갑습니다! 업무 진행을 위해 옹고잉 앱 설치를 안내드립니다.`,
+    "",
+    "(옹고잉 앱 설치 링크·가이드 내용을 여기에 넣어주세요 — 에이전트 두뇌 탭 > 'ongoing_app_guide'에서 편집)",
   ].join("\n");
 }
