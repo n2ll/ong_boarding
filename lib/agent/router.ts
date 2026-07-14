@@ -142,10 +142,11 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     return { ok: false, error: `job_candidate not found: ${jcErr?.message}` };
   }
 
-  // 매니저가 '부적합'/'이탈'로 처리한 지원자는 agent_stage가 활성이어도 자동 응답하지 않는다.
+  // 매니저가 처리를 확정한 지원자는 agent_stage가 활성이어도 자동 응답하지 않는다.
+  // '부적합'/'이탈'(인력풀 제외) + '확정인력'(투입 확정 — 확정 후 AI가 스크리닝/응대를 이어가면 안 됨).
   // (kill-switch·답장 텀 sleep 이후, stage 디스패치·Claude 호출 전 초크포인트 — 세 호출자 모두 커버)
   const applicantStatus = (jc.applicants as { status?: string | null } | null)?.status ?? null;
-  if (applicantStatus === "부적합" || applicantStatus === "이탈") {
+  if (applicantStatus === "부적합" || applicantStatus === "이탈" || applicantStatus === "확정인력") {
     return { ok: true, skipped: `applicant status=${applicantStatus} — agent silenced` };
   }
 
