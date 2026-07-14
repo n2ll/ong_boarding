@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
 import {
   VALID_STATUS,
   VALID_CALL_STATUS,
@@ -41,7 +42,7 @@ export async function GET(
     .select(
       `id, job_id, agent_stage, agent_state, paused_reason,
        sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
-       jobs:job_id ( id, title, branch, client_id, status )`
+       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at )`
     )
     .eq("applicant_id", id)
     .order("created_at", { ascending: false });
@@ -69,7 +70,7 @@ export async function GET(
 
   const candidates = cands.map((c) => {
     const job = c.jobs as unknown as
-      | { id: number; title: string; branch: string | null; client_id: number | null; status: string }
+      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null }
       | null;
     return {
       id: c.id,
@@ -87,6 +88,8 @@ export async function GET(
       job_title: job?.title ?? null,
       job_branch: job?.branch ?? null,
       job_status: job?.status ?? null,
+      job_start_date: job?.start_date ?? null,
+      job_effectively_closed: job ? isJobEffectivelyClosed(job.status, job.closes_at) : true,
       client_id: job?.client_id ?? null,
       client_name:
         job?.client_id != null ? clientNameById.get(job.client_id) ?? null : null,
@@ -176,7 +179,7 @@ const ALLOWED_FIELDS = new Set([
   "work_hours", "available_date", "self_ownership",
   "introduction", "experience",
   "source", "status", "filter_pass", "note", "memo",
-  "start_date", "confirmed_slot", "confirmed_branch", "current_branch",
+  "start_date", "confirmed_slot", "confirmed_branch", "current_branch", "current_job_id",
   "churn_reason", "screening", "sort_order",
   "marketing_consent", "kakao_channel_friend",
   // PPC 상세 페이지에서 매니저가 편집하는 필드
@@ -258,6 +261,30 @@ export async function PATCH(
 
   const supabase = createServiceClient();
 
+  // current_job_id 이관 검증 — 확정을 특정 공고에 결속하는 값. 임의 공고로 못 옮기게:
+  // (1) 그 지원자가 실제로 후보로 걸린 공고여야 하고 (2) 진행 중(비마감) 공고여야 한다.
+  // null로 비우는 것은 허용(후보 정리 등). 유효하지 않으면 400.
+  if ("current_job_id" in updates && updates.current_job_id != null) {
+    const targetJobId = Number(updates.current_job_id);
+    if (!Number.isFinite(targetJobId)) {
+      return NextResponse.json({ error: "invalid current_job_id" }, { status: 400 });
+    }
+    updates.current_job_id = targetJobId;
+    const { data: link } = await supabase
+      .from("job_candidates")
+      .select("id, jobs:job_id ( id, status, closes_at, title )")
+      .eq("applicant_id", id)
+      .eq("job_id", targetJobId)
+      .maybeSingle();
+    const job = (link?.jobs ?? null) as unknown as { status: string | null; closes_at: string | null } | null;
+    if (!link) {
+      return NextResponse.json({ error: "current_job_id: 이 지원자의 후보 공고가 아닙니다." }, { status: 400 });
+    }
+    if (job && isJobEffectivelyClosed(job.status, job.closes_at)) {
+      return NextResponse.json({ error: "current_job_id: 마감된 공고로는 확정할 수 없습니다." }, { status: 400 });
+    }
+  }
+
   // 이전 상태가 필요한 자동 기록(확정지점 채움·확정 시각·가용성 이벤트)은 1회 조회로 해결.
   const needPrev =
     updates.status === "확정인력" || updates.status === "대기자" ||
@@ -297,12 +324,17 @@ export async function PATCH(
     updates.hired_at = new Date().toISOString();
   }
 
+  // 확정 대상 공고 — 이번 요청에서 이관하는 current_job_id 우선, 없으면 기존 값.
+  // (확정을 새 공고에 결속하면서 이관하면 태깅·후보 정리가 실투입 공고를 정확히 따라간다)
+  const confirmTargetJobId =
+    ("current_job_id" in updates ? (updates.current_job_id as number | null) : null) ?? prev?.current_job_id ?? null;
+
   // 라인 경험 자동 태깅 — 확정으로 전환될 때 진행 공고 제목을 append (§6.2: 벤치는 라인 단위, 수기 태깅 금지)
-  if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && prev.current_job_id) {
+  if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && confirmTargetJobId) {
     const { data: job } = await supabase
       .from("jobs")
       .select("title")
-      .eq("id", prev.current_job_id)
+      .eq("id", confirmTargetJobId)
       .maybeSingle();
     const title = ((job?.title as string | null) ?? "").trim();
     if (title && !title.startsWith("__")) {
@@ -338,6 +370,26 @@ export async function PATCH(
       meta: { from: prev.availability, to: updates.availability, source: "manual" },
     });
     if (evErr) console.error("[applicant PATCH] pool_events insert failed", evErr);
+  }
+
+  // 확정 시 잔여 후보 자동 정리 — 대상 공고(confirmTargetJobId) 외 진행 중이던 후보를 abort.
+  // 한 사람 = 한 투입 원칙(engage/dispatch와 동일). 마감된 공고에 남은 유령 링크(예: 외부 충원된
+  // 공고의 paused 후보)도 함께 정리돼 상세 '지원 공고'·충원율이 실투입 공고만 반영한다.
+  // status가 처음 '확정인력'이 될 때 1회만. 실패해도 응답은 성공 유지(non-fatal).
+  if (updates.status === "확정인력" && prev && prev.status !== "확정인력") {
+    let q = supabase
+      .from("job_candidates")
+      .update({
+        agent_stage: "abort",
+        closed_reason: "투입 확정 — 타 공고 자동 정리",
+        closed_at: new Date().toISOString(),
+      })
+      .eq("applicant_id", id)
+      .not("agent_stage", "is", null)
+      .neq("agent_stage", "abort");
+    if (confirmTargetJobId != null) q = q.neq("job_id", confirmTargetJobId);
+    const { error: abErr } = await q;
+    if (abErr) console.error("[applicant PATCH] confirm auto-abort failed", abErr);
   }
 
   // 수신거부 수동 등록/해제 이력 — pool_events 기록 (실패해도 응답은 성공 유지)

@@ -558,7 +558,9 @@ export function LiveConsole() {
       const res = await fetch(`/api/admin/applicants/${p.applicant_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "확정인력" }),
+        // 확정을 대상 공고에 결속 — confirm/pending이 내려준 job_id로 current_job_id 이관.
+        // 서버가 잔여 후보 자동 정리·충원율 반영을 그 공고 기준으로 처리한다.
+        body: JSON.stringify(p.job_id != null ? { status: "확정인력", current_job_id: p.job_id } : { status: "확정인력" }),
       });
       if (!res.ok) throw new Error();
       toast.success(`${p.name}님을 확정인력으로 전환했어요.`);
