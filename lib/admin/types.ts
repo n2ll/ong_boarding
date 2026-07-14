@@ -164,14 +164,22 @@ export function getSlotCapacity(branch: Branch | undefined, slot: SlotKey): numb
   return typeof v === "number" ? v : DEFAULT_SLOT_CAPACITY[slot];
 }
 
-// birth_date(YYMMDD) → 만 나이. 50~99 → 19xx, 00~49 → 20xx.
+// birth_date(YYMMDD) → 만 나이.
+// 세기(19xx/20xx) 판정은 고정 컷오프(50) 대신 '근로 가능 나이' 기준으로 한다.
+// 시니어 플랫폼이라 1940년대생(예: 480302=1948)이 핵심 인구인데, 고정 컷오프로는
+// 이들이 2048년생(음수 나이)으로 뒤집혔다. 2000+yy가 미래이거나 15세 미만이면 1900년대로 본다.
+// 월/일이 유효 범위를 벗어나면(테스트·오입력 쓰레기 값) null 반환.
+const MIN_WORKING_AGE = 15;
 export function calcAge(birth_date: string | null | undefined): number | null {
   if (!birth_date || !/^\d{6}$/.test(birth_date)) return null;
   const yy = parseInt(birth_date.slice(0, 2), 10);
   const mm = parseInt(birth_date.slice(2, 4), 10);
   const dd = parseInt(birth_date.slice(4, 6), 10);
-  const year = yy >= 50 ? 1900 + yy : 2000 + yy;
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
   const today = new Date();
+  let year = 2000 + yy;
+  // 2000년대 해석이 미래이거나 근로 불가능하게 어리면 1900년대생으로 해석(시니어).
+  if (today.getFullYear() - year < MIN_WORKING_AGE) year -= 100;
   let age = today.getFullYear() - year;
   const beforeBirthday =
     today.getMonth() + 1 < mm || (today.getMonth() + 1 === mm && today.getDate() < dd);
