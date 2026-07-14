@@ -108,6 +108,8 @@ export async function GET() {
       const jc = jobByApplicant.get(a.id) ?? null;
       const job = jc?.job ?? null;
       const sm = job?.site_manager_id != null ? smById.get(job.site_manager_id) ?? null : null;
+      // internal 정기배송 라인은 현장매니저 없이도 만남장소 발송 허용(픽업주소만) — send 라우트와 동일 원칙.
+      const isInternal = job?.recruit_mode === "internal";
       const jobTitle =
         job && typeof job.title === "string"
           ? job.title.startsWith("__") ? "공고 미지정" : job.title
@@ -124,7 +126,7 @@ export async function GET() {
         pickup_address: job?.pickup_address ?? null,
         site_manager_name: sm?.name ?? null,
         site_manager_phone: sm?.phone ?? null,
-        can_send_venue: !!(job?.pickup_address && sm?.name),
+        can_send_venue: !!(job?.pickup_address && (sm?.name || isInternal)),
       };
     });
 

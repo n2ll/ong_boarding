@@ -375,9 +375,11 @@ export async function PATCH(
   // 확정 시 잔여 후보 자동 정리 — 대상 공고(confirmTargetJobId) 외 진행 중이던 후보를 abort.
   // 한 사람 = 한 투입 원칙(engage/dispatch와 동일). 마감된 공고에 남은 유령 링크(예: 외부 충원된
   // 공고의 paused 후보)도 함께 정리돼 상세 '지원 공고'·충원율이 실투입 공고만 반영한다.
+  // ⚠️ 대상 공고를 모를 때(confirmTargetJobId=null, 예: bulk-status·드래그로 current_job_id 없이 확정)는
+  //    아무것도 정리하지 않는다 — 그렇지 않으면 neq 가드 없이 '모든' 후보가 abort돼 유령 확정이 된다.
   // status가 처음 '확정인력'이 될 때 1회만. 실패해도 응답은 성공 유지(non-fatal).
-  if (updates.status === "확정인력" && prev && prev.status !== "확정인력") {
-    let q = supabase
+  if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && confirmTargetJobId != null) {
+    const { error: abErr } = await supabase
       .from("job_candidates")
       .update({
         agent_stage: "abort",
@@ -386,9 +388,8 @@ export async function PATCH(
       })
       .eq("applicant_id", id)
       .not("agent_stage", "is", null)
-      .neq("agent_stage", "abort");
-    if (confirmTargetJobId != null) q = q.neq("job_id", confirmTargetJobId);
-    const { error: abErr } = await q;
+      .neq("agent_stage", "abort")
+      .neq("job_id", confirmTargetJobId);
     if (abErr) console.error("[applicant PATCH] confirm auto-abort failed", abErr);
   }
 
