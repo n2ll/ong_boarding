@@ -354,7 +354,7 @@ async function processInbound(
             lat: number | null;
             lng: number | null;
           } | null;
-          const blockedStatus = a?.status === "부적합" || a?.status === "이탈";
+          const blockedStatus = a?.status === "부적합" || a?.status === "이탈" || a?.status === "확정인력";
           if (a && !a.sms_opt_out_at && !blockedStatus) {
             const pick = await pickJobForCampaignReply(supabase, {
               id: applicant.id,

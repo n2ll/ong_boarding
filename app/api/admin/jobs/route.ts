@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
-import { isSystemJobTitle } from "@/lib/jobs";
+import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
@@ -47,6 +47,12 @@ export async function GET(req: NextRequest) {
   // '확정'이 아니다(확정은 매니저 판단, transitions.ts 참조). confirmed_count로 별도 집계해 게이지와
   // 보드의 '확정 슬롯 분포'가 같은 소스를 쓰게 한다.
   const jobIds = (jobs ?? []).map((j) => j.id);
+  // 마감(실질) 공고 집합 — 확정 충원율 계상에서 제외한다. 확정은 person-level(applicants.status)이라
+  // 한 지원자가 여러 공고에 링크되면 마감된 공고로도 새어 이중 계상된다(외부 충원 마감 공고에 유령 1).
+  // 진행 중 공고 링크에만 확정을 계상해 게이지가 실제 투입 공고를 정확히 반영하게 한다.
+  const closedJobIds = new Set(
+    (jobs ?? []).filter((j) => isJobEffectivelyClosed(j.status as string | null, j.closes_at as string | null)).map((j) => j.id as number)
+  );
   const stageCounts: Record<number, Record<string, number>> = {};
   const confirmedCounts: Record<number, number> = {};
   const unreadTotals: Record<number, number> = {};
@@ -63,7 +69,10 @@ export async function GET(req: NextRequest) {
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
       const rel = (c as { applicants?: { status?: string | null; unread_count?: number | null } | { status?: string | null; unread_count?: number | null }[] | null }).applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
-      if (a?.status === "확정인력") confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
+      // 확정 계상 가드: 마감 공고 링크·이탈(abort) 링크는 제외 → 실제 진행 공고에만 충원 1 반영.
+      if (a?.status === "확정인력" && stage !== "abort" && !closedJobIds.has(jid)) {
+        confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
+      }
       // 후보 미읽음 답장 합산 — 목록 행 '답장 N' 칩(수동 응대 필요 신호)의 근거.
       if (typeof a?.unread_count === "number" && a.unread_count > 0) {
         unreadTotals[jid] = (unreadTotals[jid] ?? 0) + a.unread_count;
