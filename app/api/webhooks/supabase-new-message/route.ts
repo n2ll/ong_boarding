@@ -6,7 +6,9 @@
  * 호출되지 않는다. 그래서 Supabase가 INSERT 이벤트를 받아 이 라우트로 webhook을 쏘게 한다.
  *
  * 처리:
- *  1. Supabase Webhook payload 검증
+ *  1. Supabase Webhook payload 검증 → 멱등 클레임까지 동기 처리 후 **즉시 200 ACK**
+ *     (발사원 pg_net은 10초 상한·재시도 없음 — 본처리는 waitUntil 백그라운드로.
+ *      2026-07-13 배포 직후 콜드 스타트 유실 RCA의 원인 제거)
  *  2. record.direction='inbound' + classification IS NULL이면 (idempotent guard)
  *  3. phone으로 applicants 매칭 시도
  *     a. 매칭됨 → 메시지에 applicant_id 채우고 router.runAgentForCandidate
@@ -26,6 +28,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase";
 import { runAgentForCandidate } from "@/lib/agent/router";
 import { triageInbound, isHardSpam } from "@/lib/agent/baemin-triage";
@@ -114,6 +118,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 3~4) 본처리는 백그라운드로 넘기고 즉시 200 ACK.
+  // 발사원(Supabase pg_net 웹훅)은 10초 상한·1회 발사·재시도 없음인데, 본처리는 답장 텀
+  // (60~75초)까지 응답을 잡고 있었다 → "클라이언트가 끊겨도 함수는 계속 돈다"는 비보장 동작에
+  // 매 인입이 의존. 배포 직후 콜드 스타트와 겹치면 호출이 통째로 소멸(2026-07-13 송시권 QM6
+  // 유실 RCA). waitUntil은 응답 후에도 완료를 플랫폼이 보장한다. 잔여 극단 케이스(핸들러 시작
+  // 전 취소)는 inbound-sweeper cron이 회수.
+  waitUntil(
+    processInbound(supabase, msg)
+      .then((r) => console.log("[supabase-webhook] processed", JSON.stringify(r)))
+      .catch((e) => console.error("[supabase-webhook] background processing failed", e))
+  );
+  return NextResponse.json({ ok: true, accepted: true });
+}
+
+// 인입 본처리 — 기존 동기 처리 본문 그대로(반환값은 로그용). 실패해도 POST 응답과 무관.
+async function processInbound(
+  supabase: SupabaseClient,
+  msg: MessageRecord
+): Promise<Record<string, unknown>> {
   const phone = String(msg.applicant_phone || "").replace(/[^\d]/g, "");
   const text = String(msg.body || "").trim();
   const receivedAt = msg.created_at;
@@ -393,7 +416,7 @@ export async function POST(req: NextRequest) {
                   inbound_text: text,
                   received_at: receivedAt,
                 });
-                return NextResponse.json({
+                return {
                   ok: true,
                   matched: true,
                   agent_invoked: true,
@@ -401,7 +424,7 @@ export async function POST(req: NextRequest) {
                   job_id: pick.jobId,
                   picked_by: pick.pickedBy,
                   agent: agentResult,
-                });
+                };
               }
             }
           }
@@ -409,20 +432,20 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.error("[supabase-webhook] campaign-reply enroll failed (fallback to draft path)", e);
       }
-      return NextResponse.json({
+      return {
         ok: true,
         matched: true,
         agent_invoked: false,
         reason: "no active job_candidate",
-      });
+      };
     }
     if (jc.agent_stage === "paused") {
-      return NextResponse.json({
+      return {
         ok: true,
         matched: true,
         agent_invoked: false,
         reason: "candidate paused — manager handles",
-      });
+      };
     }
     const agentResult = await runAgentForCandidate({
       supabase,
@@ -431,12 +454,12 @@ export async function POST(req: NextRequest) {
       inbound_text: text,
       received_at: receivedAt,
     });
-    return NextResponse.json({
+    return {
       ok: true,
       matched: true,
       agent_invoked: true,
       agent: agentResult,
-    });
+    };
   }
 
   // ───────────────────────────────────────────────────────────────
@@ -444,12 +467,12 @@ export async function POST(req: NextRequest) {
   // ───────────────────────────────────────────────────────────────
   if (isHardSpam(phone, text)) {
     await supabase.from("messages").update({ classification: "other" }).eq("id", msg.id);
-    return NextResponse.json({
+    return {
       ok: true,
       matched: false,
       classification: "other",
       reason: "hard-filter spam",
-    });
+    };
   }
 
   const triage = await triageInbound({ phone, body: text });
@@ -508,12 +531,12 @@ export async function POST(req: NextRequest) {
     if (appErr || !newApplicant) {
       console.error("[supabase-webhook] baemin applicant create error", appErr);
       await supabase.from("messages").update({ classification: "pending" }).eq("id", msg.id);
-      return NextResponse.json({
+      return {
         ok: true,
         classification: "pending",
         reason: "applicant create failed",
         triage,
-      });
+      };
     }
     const applicantId = (newApplicant as { id: number; name: string | null }).id;
 
@@ -572,21 +595,21 @@ export async function POST(req: NextRequest) {
       message_type: "sms",
     });
 
-    return NextResponse.json({
+    return {
       ok: true,
       classification: "baemin",
       applicant_id: applicantId,
       triage,
       apply_url_sent: true,
       agent_invoked: false,
-    });
+    };
   }
 
   // 자신 없음 → pending (매니저 인박스)
   await supabase.from("messages").update({ classification: "pending" }).eq("id", msg.id);
-  return NextResponse.json({
+  return {
     ok: true,
     classification: "pending",
     triage,
-  });
+  };
 }
