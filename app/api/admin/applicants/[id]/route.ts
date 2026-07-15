@@ -384,13 +384,12 @@ export async function PATCH(
     if (evErr) console.error("[applicant PATCH] pool_events insert failed", evErr);
   }
 
-  // 확정 시 잔여 후보 자동 정리 — 대상 공고(confirmTargetJobId) 외 후보를 공고 마감 여부까지 보고 정리.
-  //  · 진행 중이던 후보(스크리닝/온보딩/paused 등) → 정리 (한 사람=한 투입 원칙)
-  //  · 관심만 누른 후보(agent_stage=null): 그 공고가 마감됐으면 정리(죽은 공고라 무의미), 열려 있으면 유지
-  //    (다른 열린 공고에 대한 정당한 관심일 수 있어 지우지 않는다)
-  // 상세 '지원 공고'·충원율이 실투입 공고와 살아있는 관심만 남기게 한다.
-  // ⚠️ 대상 공고를 모를 때(confirmTargetJobId=null, 예: bulk-status·드래그 확정)는 아무것도 정리하지 않는다.
-  // status가 처음 '확정인력'이 될 때 1회만. 실패해도 응답은 성공 유지(non-fatal).
+  // 확정 시 잔여 후보 정리 — **마감된(죽은) 공고 링크만** 정리한다.
+  // ⚠️ 한 사람이 시간대가 다르면 여러 배송라인(화주사 무관)에 병행 투입될 수 있다(실운영 케이스).
+  //    따라서 '진행 중인 다른 열린 공고' 후보는 절대 건드리지 않는다 — 병행 투입의 다른 라인일 수 있다.
+  //    (충원율은 이미 마감 공고를 제외해 세므로, 마감 공고 링크를 안 지워도 이중 계상은 없다. 여기선
+  //     상세 '지원 공고' 목록에서 죽은 공고 링크만 정리하는 위생 처리.)
+  // 대상 공고 미상(confirmTargetJobId=null)이면 아무것도 정리하지 않는다. 최초 '확정인력' 전환 시 1회.
   if (updates.status === "확정인력" && prev && prev.status !== "확정인력" && confirmTargetJobId != null) {
     const { data: otherCands } = await supabase
       .from("job_candidates")
@@ -399,12 +398,10 @@ export async function PATCH(
       .neq("job_id", confirmTargetJobId);
     const toAbort = (otherCands ?? [])
       .filter((c) => {
-        const stage = c.agent_stage as string | null;
-        if (stage === "abort") return false; // 이미 정리됨
+        if ((c.agent_stage as string | null) === "abort") return false; // 이미 정리됨
         const job = (c.jobs ?? null) as unknown as { status: string | null; closes_at: string | null } | null;
-        const jobClosed = job ? isJobEffectivelyClosed(job.status, job.closes_at) : true;
-        if (stage != null) return true;   // 진행 중이던 후보 — 항상 정리
-        return jobClosed;                  // 관심만(null) — 마감 공고만 정리, 열린 공고는 유지
+        // 마감(실질) 공고 링크만 정리 — 열린 공고 후보(진행/관심 무관)는 병행 투입 가능성이라 유지.
+        return job ? isJobEffectivelyClosed(job.status, job.closes_at) : true;
       })
       .map((c) => c.id as number);
     if (toAbort.length > 0) {
@@ -412,12 +409,22 @@ export async function PATCH(
         .from("job_candidates")
         .update({
           agent_stage: "abort",
-          closed_reason: "투입 확정 — 타 공고 자동 정리",
+          closed_reason: "투입 확정 — 마감 공고 링크 정리",
           closed_at: new Date().toISOString(),
         })
         .in("id", toAbort);
-      if (abErr) console.error("[applicant PATCH] confirm auto-abort failed", abErr);
+      if (abErr) console.error("[applicant PATCH] confirm dead-link cleanup failed", abErr);
     }
+
+    // 확정한 '그 공고' 후보의 AI만 중지 — 아직 진행 단계(exploration/screening/onboarding/active)면
+    // paused로 전환(매니저 인계). 사람 단위가 아니라 공고 단위 중지라, 다른 라인 병행 스크리닝은 계속된다.
+    const { error: pauseErr } = await supabase
+      .from("job_candidates")
+      .update({ agent_stage: "paused", paused_reason: "투입 확정 — 매니저 인계" })
+      .eq("applicant_id", id)
+      .eq("job_id", confirmTargetJobId)
+      .in("agent_stage", ["exploration", "screening", "onboarding", "active"]);
+    if (pauseErr) console.error("[applicant PATCH] confirm target pause failed", pauseErr);
   }
 
   // 수신거부 수동 등록/해제 이력 — pool_events 기록 (실패해도 응답은 성공 유지)

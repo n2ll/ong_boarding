@@ -142,11 +142,13 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     return { ok: false, error: `job_candidate not found: ${jcErr?.message}` };
   }
 
-  // 매니저가 처리를 확정한 지원자는 agent_stage가 활성이어도 자동 응답하지 않는다.
-  // '부적합'/'이탈'(인력풀 제외) + '확정인력'(투입 확정 — 확정 후 AI가 스크리닝/응대를 이어가면 안 됨).
+  // 인력풀에서 빠진 지원자('부적합'/'이탈')는 어떤 공고든 자동 응답하지 않는다(사람 단위 제외).
+  // ⚠️ '확정인력'은 여기서 막지 않는다 — 한 사람이 시간대가 다르면 여러 라인에 병행 투입될 수 있어,
+  //    A라인 확정자가 B라인은 아직 스크리닝 중일 수 있다. 확정된 '그 라인'의 AI 중지는 사람 단위가
+  //    아니라 그 공고 후보를 paused로 두어(확정 시 처리) 아래 per-candidate 게이트로 막는다.
   // (kill-switch·답장 텀 sleep 이후, stage 디스패치·Claude 호출 전 초크포인트 — 세 호출자 모두 커버)
   const applicantStatus = (jc.applicants as { status?: string | null } | null)?.status ?? null;
-  if (applicantStatus === "부적합" || applicantStatus === "이탈" || applicantStatus === "확정인력") {
+  if (applicantStatus === "부적합" || applicantStatus === "이탈") {
     return { ok: true, skipped: `applicant status=${applicantStatus} — agent silenced` };
   }
 
