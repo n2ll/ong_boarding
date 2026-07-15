@@ -30,6 +30,7 @@ interface AppRow {
   agent_stage?: string | null;
   guide_sent?: boolean | null;
   baemin_id?: string | null;
+  current_recruit_mode?: string | null;
   onboarding_call_status?: string | null;
   sigungu?: string | null;
   sido?: string | null;
@@ -157,6 +158,10 @@ export function Dashboard() {
       (a) => a.agent_stage === "onboarding" || a.agent_stage === "active" || a.status === "확정인력"
     );
     const t = onboardingTargets.length || 1;
+    // 배민 ID는 배민 커넥트 라인 전용 단계 — internal(도시락 등) 대상은 배민 ID가 없어 분모/분자 모두에서 제외.
+    // (예전엔 internal 대상까지 분모에 들어가 '배민 ID 수신'이 영영 낮게 왜곡됐다)
+    const baeminTargets = onboardingTargets.filter((a) => a.current_recruit_mode !== "internal");
+    const bt = baeminTargets.length || 1;
     return {
       exploration: stage("exploration"),
       screening: stage("screening"),
@@ -164,9 +169,11 @@ export function Dashboard() {
       active: stage("active"),
       targets: onboardingTargets.length,
       guideSent: onboardingTargets.filter((a) => a.guide_sent).length,
-      baeminId: onboardingTargets.filter((a) => (a.baemin_id ?? "").trim()).length,
+      baeminId: baeminTargets.filter((a) => (a.baemin_id ?? "").trim()).length,
+      baeminTargets: baeminTargets.length,
       called: onboardingTargets.filter((a) => (a.onboarding_call_status ?? "").includes("완료")).length,
       pct: (n: number) => Math.round((n / t) * 100),
+      pctBaemin: (n: number) => Math.round((n / bt) * 100),
     };
   }, [apps]);
 
@@ -483,7 +490,7 @@ export function Dashboard() {
                   {[
                     { label: "초기 대화", value: flow.exploration, color: "text-[#718096]", bg: "bg-[#F7FAFC]", hint: "AI가 조건을 안내하며 첫 대화를 나누는 단계" },
                     { label: "스크리닝", value: flow.screening, color: "text-[#D69E2E]", bg: "bg-[#FFFBEB]", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
-                    { label: "온보딩", value: flow.onboarding, color: "text-[#805AD5]", bg: "bg-[#FAF5FF]", hint: "확정 후 첫 근무 준비(가이드·ID·통화)를 챙기는 단계" },
+                    { label: "온보딩", value: flow.onboarding, color: "text-[#805AD5]", bg: "bg-[#FAF5FF]", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
                     { label: "활동 중", value: flow.active, color: "text-[#38A169]", bg: "bg-[#F0FFF4]", hint: "온보딩을 마치고 실제 근무 중인 단계" },
                   ].map((s) => (
                     <div key={s.label} className={`rounded-xl px-3 py-2 ${s.bg}`} title={s.hint}>
@@ -497,17 +504,18 @@ export function Dashboard() {
                 <div className="border-t border-[#F1F4F8] pt-3 space-y-2.5">
                   <div className="text-[11.5px] font-bold text-[#718096] flex items-center justify-between">온보딩 진행 <span className="text-[#A0AEC0] font-medium">대상 {flow.targets}명</span></div>
                   {[
-                    { label: "가이드 전달", value: flow.guideSent, icon: ClipboardCheck, color: "#38A169" },
-                    { label: "배민 ID 수신", value: flow.baeminId, icon: Smartphone, color: "#3182CE" },
-                    { label: "온보딩 통화", value: flow.called, icon: PhoneCall, color: "#805AD5" },
+                    { label: "가이드 전달", value: flow.guideSent, total: flow.targets, pct: flow.pct(flow.guideSent), icon: ClipboardCheck, color: "#38A169" },
+                    // 배민 ID는 배민 라인 전용 — 분모를 배민 대상으로. 배민 대상이 없으면(도시락만) 숨김.
+                    ...(flow.baeminTargets > 0 ? [{ label: "배민 ID 수신", value: flow.baeminId, total: flow.baeminTargets, pct: flow.pctBaemin(flow.baeminId), icon: Smartphone, color: "#3182CE" }] : []),
+                    { label: "온보딩 통화", value: flow.called, total: flow.targets, pct: flow.pct(flow.called), icon: PhoneCall, color: "#805AD5" },
                   ].map((m) => (
                     <div key={m.label}>
                       <div className="flex items-center justify-between text-[11.5px] mb-1">
                         <span className="flex items-center gap-1.5 font-semibold text-[#4A5568]"><m.icon size={12} style={{ color: m.color }} /> {m.label}</span>
-                        <span className="font-bold text-[#1A202C]">{m.value}/{flow.targets}</span>
+                        <span className="font-bold text-[#1A202C]">{m.value}/{m.total}</span>
                       </div>
                       <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${flow.pct(m.value)}%`, backgroundColor: m.color }} />
+                        <div className="h-full rounded-full" style={{ width: `${m.pct}%`, backgroundColor: m.color }} />
                       </div>
                     </div>
                   ))}
