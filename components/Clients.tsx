@@ -343,7 +343,7 @@ export function Clients() {
             <div className="p-6 grid grid-cols-2 gap-5">
               <div className="col-span-2">
                 <label className="block text-[13px] font-bold text-[#4A5568] mb-2">화주사 이름 <span className="text-[#E53E3E]">*</span></label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: 우아한형제들 (비마트)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: OO도시락 · 우아한형제들(비마트)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-[#4A5568] mb-2">유형</label>

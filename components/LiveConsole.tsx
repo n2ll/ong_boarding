@@ -920,7 +920,7 @@ export function LiveConsole() {
                 onChange={(e) => setPromoteText(e.target.value)}
                 rows={5}
                 disabled={promoteLoading}
-                placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 기본 건당 3,200원 · 매주 정산 · 프로모션 5천원(1~2개월 후 종료 가능)" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
+                placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
                 className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
               />
               <div className="text-[11px] text-[#A0AEC0]">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
@@ -954,7 +954,7 @@ export function LiveConsole() {
                 <input
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
-                  placeholder="예: 배민 커넥트 가입 순서"
+                  placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
                   className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
                 />
               </div>
@@ -965,7 +965,7 @@ export function LiveConsole() {
                   onChange={(e) => setKbBody(e.target.value)}
                   rows={4}
                   disabled={kbLoading}
-                  placeholder={kbLoading ? "불러오는 중…" : "예: 앱에서 본인인증 → 차량 등록 → 안전교육 순서로 진행합니다."}
+                  placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
                   className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
                 />
               </div>
