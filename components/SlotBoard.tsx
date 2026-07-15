@@ -43,20 +43,21 @@ export function SlotBoard() {
   const applicants = useMemo(() => applicantsApi?.data ?? [], [applicantsApi]);
   const loading = isLoading && branches.length === 0;
   const [clientFilter, setClientFilter] = useState<number | "">("");
-  const [showAll, setShowAll] = useState(false);
 
   const slotClientIds = useMemo(
     () => new Set(clients.filter((c) => c.uses_slots).map((c) => c.id)),
     [clients]
   );
 
+  // 슬롯 보드는 비마트식 슬롯 구인(uses_slots) 전용 도구 — 슬롯 미사용(도시락 등) 지점은
+  // 구조적으로 제외한다. 예전 '전체 지점 보기' 우회가 비슬롯 지점을 가짜 정원과 함께 노출했다.
   const visibleBranches = useMemo(() => {
     return branches
       .filter((b) => b.active)
-      .filter((b) => (showAll ? true : b.client_id != null && slotClientIds.has(b.client_id)))
+      .filter((b) => b.client_id != null && slotClientIds.has(b.client_id))
       .filter((b) => (clientFilter === "" ? true : b.client_id === clientFilter))
       .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  }, [branches, slotClientIds, showAll, clientFilter]);
+  }, [branches, slotClientIds, clientFilter]);
 
   const clientName = useCallback(
     (id: number | null) => clients.find((c) => c.id === id)?.name ?? "미지정",
@@ -145,18 +146,11 @@ export function SlotBoard() {
               className="bg-transparent text-sm font-semibold text-[#4A5568] py-1.5 pr-1 focus:outline-none cursor-pointer"
             >
               <option value="">전체 화주사</option>
-              {clients.filter((c) => showAll || c.uses_slots).map((c) => (
+              {clients.filter((c) => c.uses_slots).map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
-          <button
-            onClick={() => setShowAll((v) => !v)}
-            className={`px-3.5 py-2 rounded-xl text-[13px] font-bold border transition-colors ${showAll ? "bg-[#1A202C] text-white border-[#1A202C]" : "bg-white text-[#4A5568] border-[#E2E8F0] hover:bg-[#F7FAFC]"}`}
-            title="슬롯 미사용 화주사 지점까지 표시"
-          >
-            전체 지점 보기
-          </button>
         </div>
       </div>
 
@@ -184,7 +178,7 @@ export function SlotBoard() {
         <div className="flex items-center justify-center py-20 text-[#A0AEC0]"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
       ) : visibleBranches.length === 0 ? (
         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-12 text-center text-[14px] text-[#718096]">
-          표시할 지점이 없어요. 확정슬롯을 사용하는 화주사·지점을 등록하거나 <button onClick={() => setShowAll(true)} className="text-[#3182CE] font-bold hover:underline">전체 지점 보기</button>를 켜보세요.
+          표시할 지점이 없어요. 슬롯 보드는 확정슬롯을 사용하는 화주사(비마트식 슬롯 구인) 전용이에요 — 화주사 설정에서 &lsquo;확정슬롯 사용&rsquo;을 켠 뒤 지점을 등록해 주세요.
         </div>
       ) : (
         <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">

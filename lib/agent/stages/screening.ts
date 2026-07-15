@@ -281,7 +281,8 @@ async function buildSystemPrompt(
   // 일반 라인: 공통 운영 정보(facts)는 비마트 기준(정산 주기 등)이라 주입하지 않는다 — FAQ(knowledge)가 대신한다.
   // 지점 ai_facts도 지원자의 비마트 1지망이 아니라 이 공고의 지점 기준으로만.
   const toneBranch = general ? ctx?.job?.branch ?? null : branchName;
-  const tone = await buildToneGuide(toneBranch, { includeCommonFacts: !general });
+  // general 라인은 비마트 대화 예시도 제외 — '비마트 금지' 규칙과 충돌 방지(톤 지침만 유지).
+  const tone = await buildToneGuide(toneBranch, { includeCommonFacts: !general, includeConversationExamples: !general });
   return `${body}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}${knowledgeBlock}\n\n${tone}`;
 }
 
