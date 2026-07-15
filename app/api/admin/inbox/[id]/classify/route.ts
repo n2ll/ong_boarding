@@ -1,12 +1,13 @@
 /**
  * POST /api/admin/inbox/[id]/classify
  *
- * body: { action: 'baemin' | 'other' | 'ongmanaging', reason?: string }
+ * body: { action: 'baemin' | 'job' | 'other' | 'ongmanaging', reason?: string, job_id?: number }
  *
- * - 'baemin': triage 재실행해 파싱 → applicants 생성 (source='baemin', status='스크리닝')
- *             + ensureBaeminSystemJob + job_candidates(stage='screening') 생성
- *             + router 호출 (AI 응대 즉시 시작)
- *             + 동일 phone의 다른 pending 메시지도 함께 classification='baemin' + applicant_id 연결
+ * - 'baemin': 배민 커넥트 자동 분류 shortcut. triage 파싱 → applicants(source='baemin')
+ *             + ensureBaeminSystemJob + job_candidates(stage='screening') + router 호출.
+ * - 'job'   : 매니저가 고른 실공고(라인)로 등록. applicants(source='inbound')
+ *             + 그 job의 job_candidates(stage='screening') + current_job_id 결속 + router 호출.
+ *             라인 형태(도시락 등 internal / 배민 external)는 스크리닝 스테이지가 recruit_mode로 분기.
  * - 'other' : classification='other'로만 마킹 (대상 메시지만)
  * - 'ongmanaging': 옹매니징(옹고잉 재직자·기존 계약자) 문의 이관.
  *             classification='ongmanaging' 마킹 + raw_payload에 이관 사유·시각 기록.
@@ -18,6 +19,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { triageInbound } from "@/lib/agent/baemin-triage";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { runAgentForCandidate } from "@/lib/agent/router";
+import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -26,13 +28,14 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { action, reason } = (await req.json()) as {
-      action?: "baemin" | "other" | "ongmanaging";
+    const { action, reason, job_id } = (await req.json()) as {
+      action?: "baemin" | "job" | "other" | "ongmanaging";
       reason?: string;
+      job_id?: number;
     };
-    if (action !== "baemin" && action !== "other" && action !== "ongmanaging") {
+    if (action !== "baemin" && action !== "job" && action !== "other" && action !== "ongmanaging") {
       return NextResponse.json(
-        { error: "action: 'baemin', 'other' or 'ongmanaging'" },
+        { error: "action: 'baemin', 'job', 'other' or 'ongmanaging'" },
         { status: 400 }
       );
     }
@@ -77,6 +80,74 @@ export async function POST(
         })
         .eq("id", msg.id);
       return NextResponse.json({ ok: true, action: "ongmanaging" });
+    }
+
+    // action === 'job' — 매니저가 고른 실공고(라인)로 등록.
+    if (action === "job") {
+      const jobId = Number(job_id);
+      if (!Number.isFinite(jobId)) {
+        return NextResponse.json({ error: "job 등록에는 job_id가 필요합니다." }, { status: 400 });
+      }
+      const { data: job } = await supabase
+        .from("jobs")
+        .select("id, title, status, closes_at")
+        .eq("id", jobId)
+        .maybeSingle();
+      if (!job || isSystemJobTitle(job.title as string) || isJobEffectivelyClosed(job.status as string | null, job.closes_at as string | null)) {
+        return NextResponse.json({ error: "진행 중인 실공고만 선택할 수 있어요." }, { status: 400 });
+      }
+
+      const phone = msg.applicant_phone as string;
+      const body = msg.body as string;
+
+      // 기존 applicant 재사용 or 생성(파싱은 라인 무관 추출 재사용, source='inbound')
+      const { data: existing } = await supabase
+        .from("applicants").select("id").eq("phone", phone)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      let appId: number | null = existing?.id ?? null;
+      if (!appId) {
+        const tri = await triageInbound({ phone, body });
+        const ext = tri.extracted;
+        const PH = "미확인";
+        const { data: newApp, error: appErr } = await supabase
+          .from("applicants")
+          .insert({
+            name: ext.name?.trim() || "(이름 미확인)", phone,
+            birth_date: PH, location: PH, own_vehicle: PH, license_type: PH,
+            vehicle_type: ext.vehicle?.trim() || PH, branch1: PH, branch: PH,
+            work_hours: ext.time_raw?.trim() || PH, available_date: PH, self_ownership: PH,
+            source: "inbound", status: "스크리닝 중", filter_pass: null,
+            introduction: ext.experience?.trim() || null,
+            note: `매니저 수동 분류 (공고 #${jobId} 등록)`,
+          })
+          .select("id").single();
+        if (appErr || !newApp) {
+          console.error("[inbox/classify job] applicant create error", appErr);
+          return NextResponse.json({ error: "applicant 생성 실패" }, { status: 500 });
+        }
+        appId = newApp.id as number;
+      }
+
+      // 그 공고 후보로 편입(중복이면 유지) + current_job_id 결속. 스크리닝 auto-true는 스테이지가 처리.
+      const { data: jc } = await supabase
+        .from("job_candidates")
+        .upsert({ job_id: jobId, applicant_id: appId, agent_stage: "screening", sent_at: new Date().toISOString() }, { onConflict: "job_id,applicant_id" })
+        .select("id").single();
+      await supabase.from("applicants").update({ current_job_id: jobId }).eq("id", appId);
+      await supabase
+        .from("messages")
+        .update({ classification: "matched", applicant_id: appId, job_id: jobId })
+        .eq("applicant_phone", phone).eq("direction", "inbound").eq("classification", "pending");
+
+      let agent = null;
+      if (jc?.id) {
+        agent = await runAgentForCandidate({
+          supabase, candidate_id: jc.id as number,
+          inbound_message_id: msg.id as string, inbound_text: body,
+          received_at: msg.created_at as string,
+        });
+      }
+      return NextResponse.json({ ok: true, action: "job", applicant_id: appId, job_id: jobId, agent_invoked: !!jc?.id, agent });
     }
 
     // action === 'baemin'
