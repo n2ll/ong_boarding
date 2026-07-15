@@ -159,27 +159,31 @@ async function loadBranchAiFacts(branchName: string | null | undefined): Promise
  */
 export async function buildToneGuide(
   branchName?: string | null,
-  opts?: { includeCommonFacts?: boolean }
+  opts?: { includeCommonFacts?: boolean; includeConversationExamples?: boolean }
 ): Promise<string> {
   const includeCommonFacts = opts?.includeCommonFacts ?? true;
+  // 대화 예시(conversation)는 비마트 맥락(배민 자기소개·주말 티오·08:00 배차·프로모션)이라
+  // general(internal) 라인 프롬프트의 '비마트 금지' 규칙과 충돌한다. general이면 예시 텍스트는 빼고
+  // 톤 지침(짧고 친근·매니저 어투)만 남긴다.
+  const includeConversationExamples = opts?.includeConversationExamples ?? true;
   const [conv, commonFacts, branchFacts, persona] = await Promise.all([
-    loadConversationExamples(),
+    includeConversationExamples ? loadConversationExamples() : Promise.resolve(""),
     includeCommonFacts ? loadFacts() : Promise.resolve(""),
     loadBranchAiFacts(branchName),
     loadPersonaGuidance(),
   ]);
   const lines = [
     "## 매니저 실제 대화 톤 — 반드시 모방",
-    "아래는 매니저 홍석범이 실제로 지원자에게 보낸 메시지 모음이다.",
+    "아래는 매니저가 실제로 지원자에게 보낸 메시지의 톤이다.",
     "이 톤·길이·이모지·맞춤법(가벼운 오타 포함)·말투를 그대로 따라라.",
     "- 짧고 친근하게. 한 메시지에 1~2문장이 기본.",
     '- "네 선생님!", "감사합니다", "ㅎㅎ", "ㅠ", "^^" 같은 매니저 어투를 자연스럽게 섞어라.',
     "- 격식 차린 AI 말투 금지 (예: \"안녕하세요, 저는 ~입니다. 몇 가지 확인해 드릴게요!\" 같은 정형문 X).",
     "- 이모지는 매니저 예시처럼 가끔만. ☺️/😊 같은 풍부한 이모지 남발 금지.",
-    "",
-    "[예시 — 매니저 실제 메시지]",
-    conv,
   ];
+  if (conv) {
+    lines.push("", "[예시 — 매니저 실제 메시지]", conv);
+  }
 
   if (commonFacts) {
     lines.push(
