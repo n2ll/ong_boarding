@@ -39,6 +39,7 @@ interface CandidateLink {
   job_status: string | null;
   job_start_date: string | null;
   job_effectively_closed: boolean;
+  job_recruit_mode: string | null;
   client_id: number | null;
   client_name: string | null;
 }
@@ -90,18 +91,19 @@ interface RecontactSummary {
   interest_jobs: RecontactInterestJob[];
 }
 
-// 선탑(동승) 완료 이력 — pool_events(suntop_done) 원장. 프리보딩 자산 배지·기록 UI용.
+// 선탑(동승) 이력 — pool_events(suntop_scheduled/suntop_done) 원장. 예정→완료 2단계 + 프리보딩 자산.
 interface SuntopEvent {
   id: number;
+  stage: "scheduled" | "done";
   created_at: string;
-  meta: { client?: string; line?: string; note?: string } | null;
+  meta: { client?: string; line?: string; note?: string; scheduled_at?: string } | null;
 }
 
 interface Detail {
   applicant: ApplicantFull;
   candidates: CandidateLink[];
   recontact?: RecontactSummary | null;
-  suntop?: { done: boolean; events: SuntopEvent[] } | null;
+  suntop?: { done: boolean; scheduled: boolean; events: SuntopEvent[] } | null;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -308,10 +310,12 @@ export function ApplicantDetailContent({
   const [excludeOpen, setExcludeOpen] = useState(false);
   // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
   const [sectionOpen, setSectionOpen] = useState<Partial<Record<"jobs" | "profile" | "manage", boolean>>>({});
-  // 선탑(동승) 완료 기록 폼 — 프리보딩 자산 원장(pool_events suntop_done) 수동 기록.
+  // 선탑(동승) 기록 폼 — 프리보딩 자산 원장(pool_events) 수동 기록. stage: 'scheduled'(예정) | 'done'(완료).
   const [suntopFormOpen, setSuntopFormOpen] = useState(false);
+  const [suntopStage, setSuntopStage] = useState<"scheduled" | "done">("done");
   const [suntopClient, setSuntopClient] = useState("");
   const [suntopLine, setSuntopLine] = useState("");
+  const [suntopSchedAt, setSuntopSchedAt] = useState("");
 
   useEffect(() => {
     setEdit({});
@@ -393,6 +397,10 @@ export function ApplicantDetailContent({
   // 확정 모달 열기 — 기존 확정 슬롯(있으면)을 미리 선택해 둔다.
   // 확정 대상 공고 후보 — 진행 중(비마감) 공고만. 확정은 마감 공고로 못 하게 여기서 거른다.
   const confirmableCands = cands.filter((c) => !c.job_effectively_closed && c.agent_stage !== "abort");
+  // 확정 대상 공고가 internal(도시락 등 정기배송) 라인인지 — 지점·슬롯은 배민/비마트 전용 개념이라
+  // internal 라인 확정 창에선 숨겨 혼동을 막는다(라인 형태별 조건부 UX).
+  const confirmTargetInternal =
+    (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.job_recruit_mode === "internal";
 
   const openConfirm = () => {
     setConfirmSlots(
@@ -403,7 +411,9 @@ export function ApplicantDetailContent({
     const target = focusOpen ?? confirmableCands[0] ?? null;
     setConfirmJobId(target?.job_id ?? null);
     setConfirmStartDate(String(a.start_date ?? target?.job_start_date ?? "").slice(0, 10));
-    setConfirmBranch(String(a.confirmed_branch ?? a.branch1 ?? target?.job_branch ?? ""));
+    // 지점 기본값 — '미지정'(지점 미보유 라인 자리값)은 채우지 않는다.
+    const seedBranch = a.confirmed_branch ?? a.branch1 ?? target?.job_branch ?? "";
+    setConfirmBranch(seedBranch === "미지정" ? "" : String(seedBranch));
     setConfirmSendAppGuide(false);
     setConfirmOpen(true);
   };
@@ -427,9 +437,12 @@ export function ApplicantDetailContent({
   const commitConfirm = async () => {
     const body: Record<string, unknown> = { status: "확정인력" };
     if (confirmJobId != null) body.current_job_id = confirmJobId;
-    if (confirmSlots.length > 0) body.confirmed_slot = confirmSlots.join(", ");
     if (confirmStartDate.trim()) body.start_date = confirmStartDate.trim();
-    if (confirmBranch.trim()) body.confirmed_branch = confirmBranch.trim();
+    // 지점·슬롯은 지점/슬롯 개념이 있는 라인(비internal)에서만 저장 — internal은 필드 자체가 숨겨짐.
+    if (!confirmTargetInternal) {
+      if (confirmSlots.length > 0) body.confirmed_slot = confirmSlots.join(", ");
+      if (confirmBranch.trim()) body.confirmed_branch = confirmBranch.trim();
+    }
     const ok = await patch(body, `${a.name}님을 확정인력으로 이동했어요.`);
     if (ok) {
       setConfirmOpen(false);
@@ -484,21 +497,29 @@ export function ApplicantDetailContent({
     );
   };
 
-  // 선탑(동승) 완료 기록/삭제 — pool_events(suntop_done) 원장. 기록하면 배지가 뜨고
-  // 새 공고 안내(announce-targets)에서 S그룹(최우선) 대상이 된다.
+  // 선탑(동승) 기록/삭제 — pool_events 원장. 예정(scheduled)·완료(done) 2단계.
+  // 완료 기록 시 배지가 뜨고 새 공고 안내(announce-targets)에서 S그룹(최우선) 대상이 된다.
+  const openSuntopForm = (stage: "scheduled" | "done") => {
+    setSuntopStage(stage);
+    setSuntopClient("");
+    setSuntopLine("");
+    setSuntopSchedAt("");
+    setSuntopFormOpen(true);
+  };
   const recordSuntop = async () => {
     setBusy(true);
     try {
       const res = await fetch(`/api/admin/applicants/${a.id}/suntop`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client: suntopClient, line: suntopLine }),
+        body: JSON.stringify({ stage: suntopStage, client: suntopClient, line: suntopLine, scheduled_at: suntopSchedAt }),
       });
       if (!res.ok) throw new Error();
-      toast.success("선탑 완료로 기록했어요. 새 공고 안내에서 최우선 대상이 됩니다.");
+      toast.success(suntopStage === "scheduled" ? "선탑 예정으로 기록했어요." : "선탑 완료로 기록했어요. 새 공고 안내에서 최우선 대상이 됩니다.");
       setSuntopFormOpen(false);
       setSuntopClient("");
       setSuntopLine("");
+      setSuntopSchedAt("");
       reload();
       onChanged?.();
     } catch {
@@ -847,34 +868,56 @@ export function ApplicantDetailContent({
               </label>
             </div>
 
-            {/* 선탑(동승) 이력 — 프리보딩 자산. 기록 즉시 원장(pool_events)에 남아 새 공고 안내 S그룹(최우선)이 된다. */}
+            {/* 선탑(동승) 이력 — 예정→완료 2단계 원장. 완료 기록 시 배지 + 새 공고 안내 S그룹(최우선). */}
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-[#A0AEC0]" title="선탑 완료 = 현장을 미리 경험한 프리보딩 인력 — 새 공고 안내 시 최우선으로 상정돼요">선탑(동승) 이력</span>
-                <button onClick={() => setSuntopFormOpen((v) => !v)} className="text-[11.5px] font-bold text-[#2B6CB0] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">
-                  {suntopFormOpen ? "닫기" : "+ 선탑 완료 기록"}
-                </button>
+                <span className="text-[11px] font-bold text-[#A0AEC0]" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
+                {!suntopFormOpen ? (
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => openSuntopForm("scheduled")} className="text-[11.5px] font-bold text-[#B7791F] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">+ 예정</button>
+                    <button onClick={() => openSuntopForm("done")} className="text-[11.5px] font-bold text-[#2F855A] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">+ 완료</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setSuntopFormOpen(false)} className="text-[11.5px] font-bold text-[#718096] hover:underline rounded">닫기</button>
+                )}
               </div>
-              {(detail.suntop?.events?.length ?? 0) > 0 ? (
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {detail.suntop!.events.map((ev) => (
-                    <span key={ev.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">
-                      {[ev.meta?.client, ev.meta?.line].filter(Boolean).join(" · ") || "선탑 완료"} · {new Date(ev.created_at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })}
-                      <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="text-[#2F855A] hover:text-[#E53E3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"><X size={11} /></button>
+              {/* 3단계 진행 표시 — 예정 → 완료 → 투입(status='확정인력') */}
+              <div className="flex items-center gap-1 mt-1.5 text-[11px] font-bold">
+                {([["예정", !!detail.suntop?.scheduled, "#B7791F"], ["완료", !!detail.suntop?.done, "#2F855A"], ["투입", a.status === "확정인력", "#2B6CB0"]] as [string, boolean, string][]).map(([label, on], i) => (
+                  <span key={label} className="flex items-center gap-1">
+                    {i > 0 && <span className="text-[#CBD5E0]">→</span>}
+                    <span className="px-2 py-0.5 rounded-md" style={on ? { backgroundColor: "#F0FFF4", color: "#2F855A", border: "1px solid #C6F6D5" } : { backgroundColor: "#F7FAFC", color: "#A0AEC0", border: "1px solid #E2E8F0" }}>
+                      {on ? "✓ " : ""}{label}
                     </span>
-                  ))}
+                  </span>
+                ))}
+              </div>
+              {(detail.suntop?.events?.length ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {detail.suntop!.events.map((ev) => {
+                    const isSched = ev.stage === "scheduled";
+                    const when = isSched && ev.meta?.scheduled_at ? ev.meta.scheduled_at : new Date(ev.created_at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+                    return (
+                      <span key={ev.id} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-bold border ${isSched ? "bg-[#FFFBEB] text-[#B7791F] border-[#FAF089]" : "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]"}`}>
+                        {isSched ? "예정" : "완료"} · {[ev.meta?.client, ev.meta?.line].filter(Boolean).join(" ") || "선탑"} · {when}
+                        <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="hover:text-[#E53E3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"><X size={11} /></button>
+                      </span>
+                    );
+                  })}
                 </div>
-              ) : !suntopFormOpen ? (
-                <div className="text-[11.5px] text-[#A0AEC0] mt-1">기록 없음 — 선탑을 진행했다면 기록해 두세요. 새 공고 안내 때 최우선으로 상정돼요.</div>
-              ) : null}
+              )}
               {suntopFormOpen && (
-                <div className="mt-2 space-y-1.5">
+                <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-[#F7FAFC] border border-[#E2E8F0]">
+                  <div className="text-[11px] font-bold text-[#4A5568]">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 용산·한남)" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
                   </div>
-                  <button onClick={recordSuntop} disabled={busy} className="w-full bg-[#2F855A] hover:bg-[#276749] text-white py-1.5 rounded-lg text-[12px] font-bold disabled:opacity-50 flex justify-center items-center gap-1.5">
-                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} 선탑 완료로 기록
+                  {suntopStage === "scheduled" && (
+                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                  )}
+                  <button onClick={recordSuntop} disabled={busy} className={`w-full py-1.5 rounded-lg text-[12px] font-bold text-white disabled:opacity-50 flex justify-center items-center gap-1.5 ${suntopStage === "scheduled" ? "bg-[#B7791F] hover:bg-[#975A16]" : "bg-[#2F855A] hover:bg-[#276749]"}`}>
+                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {suntopStage === "scheduled" ? "선탑 예정으로 기록" : "선탑 완료로 기록"}
                   </button>
                 </div>
               )}
@@ -936,41 +979,47 @@ export function ApplicantDetailContent({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className={confirmTargetInternal ? "" : "grid grid-cols-2 gap-3"}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
               <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점(선택)</span>
-              <input value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} placeholder="예: 강남" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-            </label>
-          </div>
-
-          <div>
-            <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯 (복수 선택 가능)</span>
-            <div className="flex gap-1.5 flex-wrap mt-1.5">
-              {SLOTS.map((s) => {
-                const on = confirmSlots.includes(s);
-                const hoped = matchesSlot(a.work_hours, s);
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => toggleConfirmSlot(s)}
-                    className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}
-                  >
-                    {s}{hoped && !on ? " ·희망" : ""}
-                  </button>
-                );
-              })}
-            </div>
-            {confirmSlots.length === 0 && (
-              <p className="text-[11.5px] text-[#D69E2E] mt-2 leading-relaxed">
-                슬롯 미선택 시 슬롯 보드에서는 희망 시간대로 <b>추정 표시</b>됩니다. 가능하면 슬롯을 지정해 주세요.
-              </p>
+            {/* 확정 지점 — 지점 개념이 있는 라인(배민/비마트 등)만. internal 정기배송 라인은 숨김. */}
+            {!confirmTargetInternal && (
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점(선택)</span>
+                <input value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} placeholder="예: 강남" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+              </label>
             )}
           </div>
+
+          {/* 확정 슬롯 — 시간대 슬롯 개념이 있는 라인(배민/비마트)만. internal 정기배송 라인은 숨김. */}
+          {!confirmTargetInternal && (
+            <div>
+              <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯 (복수 선택 가능)</span>
+              <div className="flex gap-1.5 flex-wrap mt-1.5">
+                {SLOTS.map((s) => {
+                  const on = confirmSlots.includes(s);
+                  const hoped = matchesSlot(a.work_hours, s);
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => toggleConfirmSlot(s)}
+                      className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}
+                    >
+                      {s}{hoped && !on ? " ·희망" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              {confirmSlots.length === 0 && (
+                <p className="text-[11.5px] text-[#D69E2E] mt-2 leading-relaxed">
+                  슬롯 미선택 시 슬롯 보드에서는 희망 시간대로 <b>추정 표시</b>됩니다. 가능하면 슬롯을 지정해 주세요.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* 확정 후 옹고잉 앱 안내 발송(옵션) — 문구는 두뇌 탭 'ongoing_app_guide'에서 관리 */}
           <label className="flex items-start gap-2 cursor-pointer">

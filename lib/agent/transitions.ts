@@ -149,11 +149,14 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
         })
         .eq("id", candidate_id);
       // 진행 포인터만 정리 — current_job_id가 이 공고를 가리키고 있었다면 해제(다른 공고 포인터는 유지).
+      // 단, 이미 '확정인력'이면 포인터를 유지한다 — 확정된 사람의 공고 결속을 사후 abort가 풀어
+      // '어느 공고에도 안 묶인 확정인력'(유령 확정)이 되는 것을 막는다.
       await supabase
         .from("applicants")
         .update({ current_job_id: null })
         .eq("id", applicant_id)
-        .eq("current_job_id", job_id);
+        .eq("current_job_id", job_id)
+        .neq("status", "확정인력");
       break;
 
     // ────────────────────────────────────────────────
