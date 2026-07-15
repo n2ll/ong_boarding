@@ -57,10 +57,16 @@ export function useBranchScope(): BranchScopeValue {
   return useContext(BranchScopeContext);
 }
 
-/** 지원자/카드의 지점 문자열이 선택된 스코프에 속하는지 (느슨한 매칭). */
+// 지점 값이 사실상 '없음'인 자리표시값 — 도시락 등 지점 개념이 없는 라인이 여기 해당.
+const BRANCHLESS_PLACEHOLDERS = new Set(["", "-", "미지정", "미확인"]);
+
+/** 지원자/카드의 지점 문자열이 선택된 스코프에 속하는지 (느슨한 매칭).
+ *  ⚠️ 지점이 없는 라인(도시락 등, branch=null/'미지정'/'-')은 지점 스코프와 무관하게 **항상 통과**시킨다.
+ *  (예전엔 false로 걸러 매니저가 지점을 고르는 순간 도시락 지원자가 목록·지도·지표에서 소리 없이 전멸했음.
+ *   지점은 배민식 조직 축이라 지점 없는 라인은 그 축에 속하지 않을 뿐, 숨길 대상이 아니다.) */
 export function matchesBranchScope(branchValue: string | null | undefined, scope: string | null): boolean {
   if (!scope) return true;
-  if (!branchValue) return false;
-  const a = branchValue.trim();
+  const a = (branchValue ?? "").trim();
+  if (BRANCHLESS_PLACEHOLDERS.has(a)) return true; // 지점 없는 라인 — 스코프 무관 항상 노출
   return a === scope || a.includes(scope) || scope.includes(a);
 }

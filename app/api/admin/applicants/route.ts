@@ -87,6 +87,19 @@ export async function GET(req: NextRequest) {
       ...a,
       agent_stage: stageByApplicant.get(a.id) ?? null,
     }));
+
+    // 현재 공고(current_job_id)의 라인 형태(recruit_mode)를 함께 내려준다 — 대시보드·목록의
+    // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
+    const jobIds = [...new Set(withStage.map((a) => a.current_job_id).filter((v): v is number => typeof v === "number"))];
+    if (jobIds.length > 0) {
+      const { data: jobRows } = await supabase.from("jobs").select("id, recruit_mode").in("id", jobIds);
+      const modeByJob = new Map<number, string | null>();
+      for (const j of jobRows ?? []) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
+      withStage = withStage.map((a) => ({
+        ...a,
+        current_recruit_mode: typeof a.current_job_id === "number" ? modeByJob.get(a.current_job_id) ?? null : null,
+      }));
+    }
   }
 
   return NextResponse.json({ data: withStage });
