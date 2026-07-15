@@ -23,6 +23,8 @@ function formatTime(iso: string): string {
     " " + d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 }
 
+interface ActiveJob { id: number; title: string; recruit_mode: string | null; status: string | null; closes_at: string | null; }
+
 export function Inbox() {
   const { data, isLoading, isValidating, mutate } = useSWR<{ data?: PendingMessage[] }>("/api/admin/inbox/pending");
   const messages = data?.data ?? [];
@@ -30,14 +32,31 @@ export function Inbox() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const confirm = useConfirm();
 
-  const classify = async (msg: PendingMessage, action: "baemin" | "other" | "ongmanaging") => {
+  // 등록 대상 공고 — 진행 중 실공고(시스템 더미·마감 제외). '지원자로 등록' 시 라인 선택용.
+  const { data: jobsData } = useSWR<{ data?: ActiveJob[] }>("/api/admin/jobs?status=active");
+  const activeJobs = (jobsData?.data ?? []).filter(
+    (j) => typeof j.title === "string" && !j.title.startsWith("__") &&
+      !(j.closes_at && new Date(j.closes_at).getTime() <= Date.now())
+  );
+
+  const classify = async (
+    msg: PendingMessage,
+    action: "baemin" | "job" | "other" | "ongmanaging",
+    opts?: { jobId?: number; jobLabel?: string }
+  ) => {
     if (busyId) return;
-    // 배민 분류는 등록 즉시 AI 스크리닝 문자가 나가므로 발송 사실을 확인받는다.
+    // 지원자 등록(배민·공고)은 등록 즉시 AI 스크리닝 문자가 나가므로 발송 사실을 확인받는다.
     if (action === "baemin") {
       if (!(await confirm({
-        title: `${msg.applicant_phone} — 배민 지원자로 분류할까요?`,
+        title: `${msg.applicant_phone} — 배민 커넥트로 등록할까요?`,
         description: "지원자로 등록되고 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
-        confirmText: "분류하고 발송",
+        confirmText: "등록하고 발송",
+      }))) return;
+    } else if (action === "job") {
+      if (!(await confirm({
+        title: `${msg.applicant_phone} — '${opts?.jobLabel ?? "선택 공고"}'로 등록할까요?`,
+        description: "이 공고 지원자로 등록되고 라인에 맞는 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
+        confirmText: "등록하고 발송",
       }))) return;
     } else if (action === "ongmanaging") {
       if (!(await confirm({
@@ -56,18 +75,19 @@ export function Inbox() {
       const res = await fetch(`/api/admin/inbox/${msg.id}/classify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(action === "job" ? { action, job_id: opts?.jobId } : { action }),
       });
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "분류에 실패했어요");
         return;
       }
-      if (action === "baemin") {
+      if (action === "baemin" || action === "job") {
+        const where = action === "job" ? (opts?.jobLabel ?? "선택 공고") : "배민 커넥트";
         toast.success(
           json.agent_invoked
-            ? "배민 지원자로 등록하고 AI 응대를 시작했어요."
-            : "배민 지원자로 등록했어요."
+            ? `${where}로 등록하고 AI 응대를 시작했어요.`
+            : `${where}로 등록했어요.`
         );
       } else if (action === "ongmanaging") {
         toast.success("옹매니징 이관 처리됐어요.");
@@ -156,14 +176,35 @@ export function Inbox() {
                 >
                   <ArrowRightLeft size={15} /> 옹매니징 이관
                 </button>
-                <button
-                  onClick={() => classify(msg, "baemin")}
-                  disabled={busy}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-                >
-                  {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} className="text-[#FFCB3C]" />}
-                  배민 지원자로 분류
-                </button>
+                {/* 지원자로 등록 — 어느 라인/공고로 보낼지 선택(도시락 등 실공고 or 배민 커넥트 자동). */}
+                <div className="relative flex items-center">
+                  {busy && <Loader2 size={15} className="animate-spin text-[#A0AEC0] mr-2" />}
+                  <select
+                    disabled={busy}
+                    value=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "baemin") classify(msg, "baemin");
+                      else if (v) {
+                        const j = activeJobs.find((x) => String(x.id) === v);
+                        classify(msg, "job", { jobId: Number(v), jobLabel: j?.title });
+                      }
+                    }}
+                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    title="이 문의를 지원자로 등록할 공고(라인)를 선택하세요"
+                  >
+                    <option value="">＋ 지원자로 등록…</option>
+                    {activeJobs.length > 0 && (
+                      <optgroup label="공고로 등록">
+                        {activeJobs.map((j) => (
+                          <option key={j.id} value={String(j.id)}>{j.title.replace(/\s*\([^)]*원\)\s*$/, "")}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="baemin">배민 커넥트(자동 분류)</option>
+                  </select>
+                  <Check size={14} className="absolute right-3 text-[#FFCB3C] pointer-events-none" />
+                </div>
               </div>
             </div>
           );
