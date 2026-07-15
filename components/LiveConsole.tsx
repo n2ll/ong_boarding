@@ -200,7 +200,7 @@ export function LiveConsole() {
   const [kbSaving, setKbSaving] = useState(false);
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
-  const { data: appsData, isLoading: appsLoading, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
   const appsLoaded = !!appsData;
   // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
   // 풀 응답자가 열람으로 unread가 리셋돼도 '마지막 inbound' 판별이 가능하게 살짝 넓게 잡는다.
@@ -636,6 +636,12 @@ export function LiveConsole() {
           </div>
         )}
         <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-3">
+          {/* 배경 갱신 표시 — 데이터가 있는데 새로 불러오는 중이면 '갱신 중'(전체 스켈레톤 대신 비침투적 힌트). */}
+          {appsValidating && !loadingList && chats.length > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#A0AEC0]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] animate-pulse" /> 최신 데이터로 갱신 중…
+            </div>
+          )}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
@@ -763,7 +769,23 @@ export function LiveConsole() {
           </div>
         ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-          {loadingList && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대화 목록 불러오는 중…</div>}
+          {/* 콜드 로드(데이터 아직 없음)일 때 스켈레톤 카드 — 옛 데이터를 진짜처럼 보여주는 혼동 방지.
+              배경 갱신(데이터 있음+isValidating)은 상단 '갱신 중' 표시로만 — 매 주기 전체 스켈레톤은 깜빡여서 안 씀. */}
+          {loadingList && (
+            <>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="p-3.5 rounded-xl border border-[#EDF2F7] bg-white animate-pulse">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-[#EDF2F7]" />
+                    <div className="h-3.5 w-24 rounded bg-[#EDF2F7]" />
+                    <div className="ml-auto h-3 w-10 rounded bg-[#F1F4F8]" />
+                  </div>
+                  <div className="h-3 w-3/4 rounded bg-[#F1F4F8] mb-2" />
+                  <div className="h-5 w-20 rounded-md bg-[#EDF2F7]" />
+                </div>
+              ))}
+            </>
+          )}
           {!loadingList && visibleChats.length === 0 && (
             <div className="text-[13px] text-[#A0AEC0] p-4 text-center">
               {search.trim()
