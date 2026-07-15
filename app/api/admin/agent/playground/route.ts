@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
         });
       }
     } else if (result.transition.to === "active") {
-      auto_messages_preview = [buildFirstDayRules(name)];
+      auto_messages_preview = [buildFirstDayRules(name, { general: generalLine })];
     }
   }
 

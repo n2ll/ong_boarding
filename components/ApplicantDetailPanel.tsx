@@ -136,6 +136,15 @@ const ONBOARDING_LABELS: Record<string, string> = {
 };
 const ONBOARDING_KEYS = Object.keys(ONBOARDING_LABELS);
 
+// internal(도시락 등 정기배송) 라인용 스크리닝 체크리스트 표시 — 비마트 전용 자동통과 항목
+// (프로모션 종료·정산주기·업무시간·공휴일)은 감추고, 라인에 유효한 3개만 라인 언어로 보여준다.
+const GENERAL_SCREENING_LABELS: Record<string, string> = {
+  자차_재확인: "차종 확인",
+  본인명의_정산_문제없음: "본인 명의 정산",
+  지원자_질문_해소: "지원자 질문 해소",
+};
+const GENERAL_SCREENING_KEYS = Object.keys(GENERAL_SCREENING_LABELS);
+
 // 표시 라벨만 실무 언어로 통일(LiveConsole·Jobs·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_LABEL: Record<string, string> = {
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
@@ -340,6 +349,9 @@ export function ApplicantDetailContent({
   // 표시 대상 후보 (jobId 지정 시 그 공고, 아니면 최신)
   const focusCand = (jobId != null ? cands.find((c) => c.job_id === jobId) : cands[0]) ?? null;
   const isPurePool = cands.length === 0;
+  // 표시 중인 공고가 internal(도시락 등) 라인인가 — 배민 전용 필드(슬롯·지점·배민ID·배민 온보딩)를
+  // 이 상세 패널 전반에서 숨기거나 라인 언어로 치환하는 단일 판정(확정 모달과 동일 규칙).
+  const detailInternal = focusCand?.job_recruit_mode === "internal";
 
   const val = <K extends keyof ApplicantFull>(k: K): ApplicantFull[K] =>
     (k in edit ? (edit[k] as ApplicantFull[K]) : a[k]);
@@ -746,15 +758,24 @@ export function ApplicantDetailContent({
             {/* 스크리닝 / 온보딩 진행 — 표시 중인 공고 기준 */}
             {focusCand && (
               <div className="grid grid-cols-1 gap-3 mt-3">
-                <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">스크리닝 체크리스트</h3>
-                    <span className="text-[12px] font-extrabold text-[#3182CE]">{screeningDone}/{SCREENING_KEYS.length}</span>
-                  </div>
-                  <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#3182CE] rounded-full" style={{ width: `${(screeningDone / SCREENING_KEYS.length) * 100}%` }} /></div>
-                  {SCREENING_KEYS.map((k) => <ChecklistRow key={k} label={SCREENING_LABELS[k]} done={screening[k] === true} />)}
-                </div>
-                {(focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
+                {(() => {
+                  // internal 라인은 비마트 전용 자동통과 항목을 감추고 유효 3개만 라인 언어로 표시.
+                  const keys = detailInternal ? GENERAL_SCREENING_KEYS : SCREENING_KEYS;
+                  const labels = detailInternal ? GENERAL_SCREENING_LABELS : SCREENING_LABELS;
+                  const done = keys.filter((k) => screening[k] === true).length;
+                  return (
+                    <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">스크리닝 체크리스트</h3>
+                        <span className="text-[12px] font-extrabold text-[#3182CE]">{done}/{keys.length}</span>
+                      </div>
+                      <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden mb-2"><div className="h-full bg-[#3182CE] rounded-full" style={{ width: `${(done / keys.length) * 100}%` }} /></div>
+                      {keys.map((k) => <ChecklistRow key={k} label={labels[k]} done={screening[k] === true} />)}
+                    </div>
+                  );
+                })()}
+                {/* 온보딩 체크리스트는 배민 커넥트 온보딩 전용 — internal 라인엔 표시하지 않는다(선탑 이력이 대체). */}
+                {!detailInternal && (focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
                   <div className="rounded-xl border border-[#E2E8F0] p-3.5 bg-white">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="text-[12.5px] font-extrabold text-[#1A202C]">온보딩 체크리스트</h3>
@@ -819,35 +840,47 @@ export function ApplicantDetailContent({
           onToggle={() => toggleSection("manage", manageOpen)}
         >
           <div className="space-y-3">
-            {/* 확정 슬롯 + 마지막 메시지 시점 */}
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯</span>
+            {/* 확정 슬롯(비마트 전용) + 마지막 메시지 시점. internal 라인은 슬롯 개념이 없어 시각만 표시. */}
+            {detailInternal ? (
+              <div className="flex items-center justify-end">
                 <span className="flex items-center gap-1 text-[11px] text-[#A0AEC0]" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
               </div>
-              <div className="flex gap-1.5 flex-wrap mt-1.5">
-                {SLOTS.map((s) => {
-                  const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
-                  return (
-                    <button key={s} onClick={() => toggleSlot(s)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}>{s}</button>
-                  );
-                })}
+            ) : (
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#A0AEC0]">확정 슬롯</span>
+                  <span className="flex items-center gap-1 text-[11px] text-[#A0AEC0]" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
+                </div>
+                <div className="flex gap-1.5 flex-wrap mt-1.5">
+                  {SLOTS.map((s) => {
+                    const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
+                    return (
+                      <button key={s} onClick={() => toggleSlot(s)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096]"}`}>{s}</button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점</span>
-                <input value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-              </label>
+              {/* 확정 지점 — 지점 개념 라인(배민/비마트)만. internal은 숨김. */}
+              {!detailInternal && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점</span>
+                  <input value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                </label>
+              )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
                 <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">배민 커넥트 ID</span>
-                <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
-              </label>
+              {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
+              {!detailInternal && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-[#A0AEC0]">배민 커넥트 ID</span>
+                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                </label>
+              )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-[#A0AEC0]">온보딩 통화</span>
                 <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white">
@@ -926,12 +959,15 @@ export function ApplicantDetailContent({
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
-                <span className="text-[12px] font-semibold text-[#4A5568]">가이드 전달</span>
+                <span className="text-[12px] font-semibold text-[#4A5568]">{detailInternal ? "앱 안내 전달" : "가이드 전달"}</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
-                <span className="text-[12px] font-semibold text-[#4A5568]">카카오 채널 친구</span>
-              </label>
+              {/* 카카오 채널 친구는 배민 온보딩 단계 — internal 라인엔 표시하지 않는다. */}
+              {!detailInternal && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} className="accent-[#FFCB3C] w-4 h-4" />
+                  <span className="text-[12px] font-semibold text-[#4A5568]">카카오 채널 친구</span>
+                </label>
+              )}
             </div>
 
             <button onClick={saveFields} disabled={!dirty || busy} className="w-full bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-40 transition-colors">
