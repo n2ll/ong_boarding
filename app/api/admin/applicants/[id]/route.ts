@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { isJobEffectivelyClosed } from "@/lib/jobs";
+import { isJobEffectivelyClosed, isSystemJobTitle } from "@/lib/jobs";
 import {
   VALID_STATUS,
   VALID_CALL_STATUS,
@@ -42,7 +42,7 @@ export async function GET(
     .select(
       `id, job_id, agent_stage, agent_state, paused_reason,
        sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
-       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at )`
+       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode )`
     )
     .eq("applicant_id", id)
     .order("created_at", { ascending: false });
@@ -70,7 +70,7 @@ export async function GET(
 
   const candidates = cands.map((c) => {
     const job = c.jobs as unknown as
-      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null }
+      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null; recruit_mode: string | null }
       | null;
     return {
       id: c.id,
@@ -90,6 +90,7 @@ export async function GET(
       job_status: job?.status ?? null,
       job_start_date: job?.start_date ?? null,
       job_effectively_closed: job ? isJobEffectivelyClosed(job.status, job.closes_at) : true,
+      job_recruit_mode: job?.recruit_mode ?? null,
       client_id: job?.client_id ?? null,
       client_name:
         job?.client_id != null ? clientNameById.get(job.client_id) ?? null : null,
@@ -144,16 +145,22 @@ export async function GET(
     }))
     .sort((a, b) => Date.parse(b.clicked_at) - Date.parse(a.clicked_at));
 
-  // 선탑(동승) 완료 이력 — 프리보딩 자산이라 기간 제한 없이 조회(90일 윈도우 미적용).
-  // 상세 패널 배지·이력 표시와 새 공고 안내 S그룹(최우선)의 근거.
+  // 선탑(동승) 이력 — 예정+완료 2단계. 프리보딩 자산이라 기간 제한 없이 조회.
+  // 상세 패널 타임라인·배지, 새 공고 안내 S그룹(최우선), 선탑→투입 전환율 지표의 근거.
   const { data: suntopRows, error: suntopErr } = await supabase
     .from("pool_events")
-    .select("id, job_id, meta, created_at")
+    .select("id, event_type, meta, created_at")
     .eq("applicant_id", id)
-    .eq("event_type", "suntop_done")
+    .in("event_type", ["suntop_scheduled", "suntop_done"])
     .order("created_at", { ascending: false })
-    .limit(10);
-  if (suntopErr) console.error("[applicant GET] suntop_done fetch failed", suntopErr);
+    .limit(20);
+  if (suntopErr) console.error("[applicant GET] suntop fetch failed", suntopErr);
+  const suntopEvents = (suntopRows ?? []).map((e) => ({
+    id: e.id,
+    stage: e.event_type === "suntop_scheduled" ? "scheduled" : "done",
+    created_at: e.created_at,
+    meta: e.meta ?? null,
+  }));
 
   return NextResponse.json({
     applicant,
@@ -164,8 +171,9 @@ export async function GET(
       interest_jobs: interestJobs,
     },
     suntop: {
-      done: (suntopRows ?? []).length > 0,
-      events: (suntopRows ?? []).map((e) => ({ id: e.id, created_at: e.created_at, meta: e.meta ?? null })),
+      done: suntopEvents.some((e) => e.stage === "done"),
+      scheduled: suntopEvents.some((e) => e.stage === "scheduled"),
+      events: suntopEvents,
     },
   });
 }
@@ -276,9 +284,12 @@ export async function PATCH(
       .eq("applicant_id", id)
       .eq("job_id", targetJobId)
       .maybeSingle();
-    const job = (link?.jobs ?? null) as unknown as { status: string | null; closes_at: string | null } | null;
+    const job = (link?.jobs ?? null) as unknown as { status: string | null; closes_at: string | null; title: string | null } | null;
     if (!link) {
       return NextResponse.json({ error: "current_job_id: 이 지원자의 후보 공고가 아닙니다." }, { status: 400 });
+    }
+    if (job && isSystemJobTitle(job.title)) {
+      return NextResponse.json({ error: "current_job_id: 시스템 예약 공고로는 확정할 수 없습니다." }, { status: 400 });
     }
     if (job && isJobEffectivelyClosed(job.status, job.closes_at)) {
       return NextResponse.json({ error: "current_job_id: 마감된 공고로는 확정할 수 없습니다." }, { status: 400 });
@@ -313,8 +324,9 @@ export async function PATCH(
   if (
     (updates.status === "확정인력" || updates.status === "대기자") &&
     !("confirmed_branch" in updates) &&
-    prev && !prev.confirmed_branch && prev.branch1
+    prev && !prev.confirmed_branch && prev.branch1 && prev.branch1 !== "미지정"
   ) {
+    // '미지정'은 지점 미보유 라인(도시락 등)의 자리값이라 확정 지점으로 복사하지 않는다(무의미 값 방지).
     updates.confirmed_branch = prev.branch1;
   }
 
