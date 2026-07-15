@@ -18,6 +18,7 @@ interface ApiBranch {
 interface ClientOption {
   id: number;
   name: string;
+  uses_slots?: boolean;
 }
 
 interface ApiApplicant {
@@ -104,7 +105,12 @@ export function Branches() {
   const { data: managersApi } = useSWR<{ data?: ApiManager[] }>("/api/admin/site-managers");
   const { data: clientsApi } = useSWR<{ data?: ClientOption[] }>("/api/admin/clients");
 
-  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name })), [clientsApi]);
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, uses_slots: c.uses_slots ?? false })), [clientsApi]);
+  // 편집 중인 지점의 화주사가 슬롯 구인을 쓰는지 — 슬롯 정원 편집기는 이 경우만 노출(비마트식 슬롯 전용).
+  const formClientUsesSlots = useMemo(
+    () => (form ? clients.find((c) => c.id === form.clientId)?.uses_slots ?? false : false),
+    [form, clients]
+  );
   const loading = isLoading && (branchesApi?.data?.length ?? 0) === 0;
   // 지점 추가/수정 후 목록 갱신은 지점 키만 재검증하면 충분(파생 계산이 자동 반영).
   const loadBranches = useCallback(() => { void mutateBranches(); }, [mutateBranches]);
@@ -448,6 +454,8 @@ export function Branches() {
 
               {form.id !== null && (
                 <>
+                  {/* 슬롯별 정원은 비마트식 슬롯 구인(uses_slots) 화주사만 — 도시락 등 비슬롯 라인은 숨김. */}
+                  {formClientUsesSlots && (
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">슬롯별 정원</label>
                     <div className="grid grid-cols-2 gap-3">
@@ -472,6 +480,7 @@ export function Branches() {
                     </div>
                     <p className="text-[11.5px] text-[#A0AEC0] mt-2">확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다.</p>
                   </div>
+                  )}
 
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">AI 참고 정보 (운영 정보)</label>
