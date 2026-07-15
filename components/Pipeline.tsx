@@ -803,7 +803,7 @@ export function Pipeline() {
 
   const exportCardsCsv = (cards: CardData[], stageOf: (c: CardData) => string, fileLabel: string) => {
     if (cards.length === 0) return toast.error("내보낼 지원자가 없어요.");
-    const headers = ["ID", "이름", "나이", "진행단계", "지원채널", "지점", "희망근무", "차량", "지역", "연락처", "최근활동"];
+    const headers = ["ID", "이름", "나이", "진행단계", "지원채널", "근무지", "희망근무", "차량", "지역", "연락처", "최근활동"];
     const rows = cards.map((c) => [
       c.id, c.name, c.age, stageOf(c), c.channel, c.branch, c.slot, c.tag, c.region, c.phone ?? "", c.lastActive,
     ]);
@@ -1169,7 +1169,7 @@ export function Pipeline() {
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" placeholder="이름, 연락처, 지점, 지역 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-[#E2E8F0] rounded-lg text-[13px] outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] shadow-sm" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-[#E2E8F0] rounded-lg text-[13px] outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] shadow-sm" />
           </div>
         </div>
 
@@ -1343,7 +1343,7 @@ export function Pipeline() {
                       value={segNameDraft}
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
-                      placeholder="현재 필터를 이름 붙여 저장 (예: 강서·자차·주말)"
+                      placeholder="현재 필터를 이름 붙여 저장 (예: 강남·자차·즉시가능)"
                       className="flex-1 max-w-[340px] px-3 py-1.5 border border-[#E2E8F0] rounded-lg text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white"
                     />
                     <button onClick={saveCurrentSegment} disabled={!segNameDraft.trim()} className="text-[12.5px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg">현재 필터 저장</button>
@@ -1483,7 +1483,7 @@ export function Pipeline() {
                       </th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">지원자 정보</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">진행 단계</th>
-                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">지원 채널 / 지점</th>
+                      <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">지원 채널 / 근무지</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">보유 차량 / 조건</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">거주 지역 / 희망 근무</th>
                       <th className="px-4 py-4 text-[13px] font-bold text-[#718096]">최근 활동</th>
@@ -1714,8 +1714,8 @@ export function Pipeline() {
               {[
                 { id: "applied", label: "지원 접수 / 대기", desc: "스크리닝 전" },
                 { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },
-                { id: "interview", label: "스크리닝 완료", desc: "온보딩 · 배민ID 수집" },
-                { id: "passed", label: "확정 인력", desc: "슬롯 확정" },
+                { id: "interview", label: "스크리닝 완료", desc: "온보딩 진행" },
+                { id: "passed", label: "확정 인력", desc: "투입 확정" },
                 { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
                 <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-[#E2E8F0] rounded-xl text-left hover:border-[#FFCB3C] hover:bg-[#FFFBEC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
@@ -2145,7 +2145,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
         <div className="text-[11px] font-bold px-2 py-0.5 rounded bg-[#EDF2F7] text-[#4A5568]">{card.channel}</div>
       </div>
       <div className="flex flex-col gap-1.5 mb-3">
-        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">지점:</span> <b>{card.branch}</b></div>
+        <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">근무지:</span> <b>{card.branch}</b></div>
         <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">수단:</span> {card.tag}</div>
         <div className="text-[12.5px] text-[#4A5568] flex items-center gap-1.5"><span className="text-[#A0AEC0]">희망:</span> {card.slot}</div>
       </div>
