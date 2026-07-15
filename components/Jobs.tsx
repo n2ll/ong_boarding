@@ -373,7 +373,7 @@ export function Jobs() {
   const [aiGlobalOn, setAiGlobalOn] = useState(true);
 
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; recruitMode: RecruitMode } | null>(null);
   const [candidates, setCandidates] = useState<JobCand[]>([]);
   const [candLoading, setCandLoading] = useState(false);
   // 보드 정렬 — 추천순(즉시가능 → 거리 → 지원일) / 최신순(API 순서 = created_at desc).
@@ -482,7 +482,7 @@ export function Jobs() {
   };
 
   const openCandidates = (job: JobRow) => {
-    setCandPanel({ jobId: Number(job.id), title: job.title });
+    setCandPanel({ jobId: Number(job.id), title: job.title, recruitMode: job.recruitMode });
     setCandidates([]);
     loadCandidates(Number(job.id));
   };
@@ -1615,14 +1615,24 @@ export function Jobs() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">근무시간</label>
-                          <select
-                            value={newJobSlot}
-                            onChange={(e) => setNewJobSlot(e.target.value)}
-                            className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
-                          >
-                            <option value="">미지정</option>
-                            {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                          </select>
+                          {/* 4-슬롯(평일오전 등)은 비마트 배차 전용. internal 정기배송 라인은 자유 텍스트로 입력. */}
+                          {newJobMode === "internal" ? (
+                            <input
+                              value={newJobSlot}
+                              onChange={(e) => setNewJobSlot(e.target.value)}
+                              placeholder="예: 월~토 오전 7시~"
+                              className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                            />
+                          ) : (
+                            <select
+                              value={newJobSlot}
+                              onChange={(e) => setNewJobSlot(e.target.value)}
+                              className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                            >
+                              <option value="">미지정</option>
+                              {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                            </select>
+                          )}
                         </div>
                         <div>
                           <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">시작일</label>
@@ -1882,10 +1892,15 @@ export function Jobs() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">근무시간</label>
-                    <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                      <option value="">미지정</option>
-                      {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                    </select>
+                    {/* internal 정기배송 라인은 4-슬롯 대신 자유 텍스트 근무시간. */}
+                    {editForm.recruitMode === "internal" ? (
+                      <input value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} placeholder="예: 월~토 오전 7시~" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                    ) : (
+                      <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                        <option value="">미지정</option>
+                        {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">시작일</label>
@@ -2125,8 +2140,8 @@ export function Jobs() {
                         ))}
                       </div>
                     </div>
-                    {/* 확정 슬롯 분포 */}
-                    {hasConfirmedSlot && (
+                    {/* 확정 슬롯 분포 — 슬롯은 비마트 배차 개념이라 internal 정기배송 라인은 표시하지 않는다. */}
+                    {hasConfirmedSlot && candPanel?.recruitMode !== "internal" && (
                       <div>
                         <div className="text-[11px] font-bold text-[#A0AEC0] mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
                         <div className="grid grid-cols-4 gap-1.5">
