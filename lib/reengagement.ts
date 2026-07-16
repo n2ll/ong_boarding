@@ -72,10 +72,11 @@ async function fetchApplicantPhones(): Promise<Set<string>> {
       .from("applicants")
       .select("phone")
       .not("phone", "is", null)
+      .order("id", { ascending: true }) // 무정렬 페이지네이션은 행 누락 → 이미 지원자를 재편입할 위험
       .range(from, from + 999);
     if (error) {
-      console.error("[reengagement] applicant phones load failed", error);
-      break;
+      // 부분 집합을 조용히 반환하면 이미 지원한 사람을 신규로 오인해 재편입한다 → 던진다(tms-sync 패턴).
+      throw new Error(`[reengagement] applicant phones load failed: ${error.message}`);
     }
     const batch = data ?? [];
     for (const r of batch) {

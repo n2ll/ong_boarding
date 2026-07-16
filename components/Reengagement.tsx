@@ -26,9 +26,12 @@ interface Resp {
 const SRC_LABEL: Record<string, string> = { tms: "옹고잉 배차", ongmanaging: "옹매니징 계약" };
 
 export function Reengagement() {
+  // 외부 DB(옹고잉 AWS RDS 등) 조회라 페이지 로드·포커스마다 자동 호출하지 않는다 — 매니저가 명시적으로 발굴.
+  const [triggered, setTriggered] = useState(false);
   const { data, error, isLoading, mutate } = useSWR<Resp>(
-    "/api/admin/reengagement",
-    jsonFetcher
+    triggered ? "/api/admin/reengagement" : null,
+    jsonFetcher,
+    { revalidateOnFocus: false, revalidateOnReconnect: false }
   );
   const [importing, setImporting] = useState(false);
 
@@ -72,13 +75,29 @@ export function Reengagement() {
             옹고잉·옹매니징 배송원 중 옹보딩 미지원자를 인력풀 후보로 (블랙리스트 제외)
           </p>
         </div>
-        <button
-          onClick={() => mutate()}
-          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold text-[#4A5568] border border-[#E2E8F0] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-        >
-          <RefreshCw size={14} /> 새로고침
-        </button>
+        {triggered && (
+          <button
+            onClick={() => mutate()}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold text-[#4A5568] border border-[#E2E8F0] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          >
+            <RefreshCw size={14} /> 다시 발굴
+          </button>
+        )}
       </div>
+
+      {!triggered && (
+        <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-5 text-center space-y-3">
+          <p className="text-[13px] text-[#4A5568] leading-relaxed">
+            옹고잉·옹매니징 DB를 조회해 재활용 후보를 발굴합니다. 외부 DB 접속이라 자동 실행하지 않아요.
+          </p>
+          <button
+            onClick={() => setTriggered(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          >
+            <RefreshCw size={15} /> 재활용 후보 발굴하기
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="px-4 py-3 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[13px] font-semibold text-[#C53030]">

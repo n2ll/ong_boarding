@@ -371,6 +371,12 @@ export async function fetchActiveContractWorkers(): Promise<OngmanagingWorker[]>
       .eq("month", month)
       .eq("status", CONFIG.settledStatus),
   ]);
+  // 조용한 부분 실패는 발굴 집계를 왜곡한다(활동자 누락) → 던져서 호출부가 500으로 드러내게.
+  if (contractsRes.error || settlementsRes.error) {
+    throw new Error(
+      `[ongmanaging] active workers lookup failed: ${(contractsRes.error ?? settlementsRes.error)?.message}`
+    );
+  }
   const ids = [
     ...new Set([
       ...uniqueWorkerIds(contractsRes.data as { worker_id: string | null }[] | null),
