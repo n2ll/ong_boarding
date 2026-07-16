@@ -272,3 +272,78 @@ export async function fetchWorkerDetailByPhone(phone: string): Promise<Ongmanagi
     lastSettledMonth: months.length ? months[months.length - 1] : null,
   };
 }
+
+/**
+ * 화주사 마스터 — 옹매니징 화주사(clients) + 배송라인(delivery_lines) + 집계(client_performance_view).
+ * 어드민 '화주사·라인 현황' 브라우징용(읽기 전용). 개인정보·금액 미반입 — 회사·라인 운영 데이터만.
+ * 미구성 시 빈 배열.
+ */
+export interface ClientMasterLine {
+  lineName: string;
+  workDays: string | null;
+  guaranteedDeliveries: number | null;
+  startDate: string | null;
+  endDate: string | null;
+}
+export interface ClientMaster {
+  id: string;
+  name: string;
+  lineCount: number;
+  workerCount: number;
+  lines: ClientMasterLine[];
+}
+
+export async function fetchClientsMaster(): Promise<ClientMaster[]> {
+  if (!isOngmanagingConfigured()) return [];
+  const client = createOngmanagingClient();
+
+  // 화주사별 라인수·배정인원 집계 뷰
+  const { data: perf, error: pErr } = await client
+    .from("client_performance_view")
+    .select("id, name, total_delivery_lines, assigned_workers");
+  if (pErr) throw new Error(`[ongmanaging] clients master lookup failed: ${pErr.message}`);
+
+  // 배송라인 상세 → 화주사별 그룹
+  const { data: dls } = await client
+    .from("delivery_lines")
+    .select("client_id, line_name, work_days, guaranteed_deliveries, start_date, end_date");
+  const linesByClient = new Map<string, ClientMasterLine[]>();
+  for (const r of dls ?? []) {
+    const row = r as {
+      client_id: string | null;
+      line_name: string | null;
+      work_days: string | null;
+      guaranteed_deliveries: number | null;
+      start_date: string | null;
+      end_date: string | null;
+    };
+    if (!row.client_id) continue;
+    const arr = linesByClient.get(row.client_id) ?? [];
+    arr.push({
+      lineName: row.line_name ?? "(이름 없음)",
+      workDays: row.work_days ?? null,
+      guaranteedDeliveries: row.guaranteed_deliveries ?? null,
+      startDate: row.start_date ?? null,
+      endDate: row.end_date ?? null,
+    });
+    linesByClient.set(row.client_id, arr);
+  }
+
+  return (perf ?? [])
+    .map((p) => {
+      const row = p as {
+        id: string;
+        name: string | null;
+        total_delivery_lines: number | null;
+        assigned_workers: number | null;
+      };
+      return {
+        id: row.id,
+        name: row.name ?? "(이름 없음)",
+        lineCount: Number(row.total_delivery_lines ?? 0),
+        workerCount: Number(row.assigned_workers ?? 0),
+        lines: linesByClient.get(row.id) ?? [],
+      };
+    })
+    .sort((a, b) => b.lineCount - a.lineCount || a.name.localeCompare(b.name));
+}

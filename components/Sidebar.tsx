@@ -14,7 +14,7 @@ import {
   Users,
   // CheckCircle,
   Briefcase,
-  // Building2,
+  Building2,
   // MapPin,
   // LayoutGrid,
   // Shield,
@@ -71,6 +71,7 @@ export function Sidebar() {
 
     { label: "채용 운영", type: "header" },
     { label: "채용공고 관리", icon: Briefcase, path: "/jobs" },
+    { label: "화주사 · 라인 현황", icon: Building2, path: "/shippers" },
     // { label: "화주사 관리", icon: Building2, path: "/clients" }, // 파일럿 기간 숨김
     // { label: "지점 관리", icon: MapPin, path: "/branches" }, // 파일럿 기간 숨김
     // { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" }, // 파일럿 기간 숨김
