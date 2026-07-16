@@ -510,7 +510,7 @@ export function Pipeline() {
 
   // 옹매니징 '현재 활동 중' 대조 — 벌크 문자 모달이 열릴 때 선택 인원을 1회 조회.
   // configured=false면 미연동(대조 불가, 발송은 허용), active[]는 현재 활동 중인 인원.
-  type ActiveCheck = { configured: boolean; checked: number; active: { id: number; name: string; reasons: string[] }[] };
+  type ActiveCheck = { configured: boolean; checked: number; active: { id: number; name: string; reasons: string[] }[]; unchecked?: number };
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
   const [activeCheckLoading, setActiveCheckLoading] = useState(false);
   useEffect(() => {
@@ -1297,7 +1297,7 @@ export function Pipeline() {
                       <button
                         onClick={() => setExcludeActive((v) => !v)}
                         className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${excludeActive ? 'bg-[#DD6B20] border-[#DD6B20] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
-                        title="옹매니징에서 현재 활동 중인 인원을 리스트에서 제외합니다"
+                        title="현재 활동 중인 인원을 리스트에서 제외합니다 (옹매니징 계약·정산 + 옹고잉 실배차)"
                       >
                         활동중 제외
                       </button>
@@ -1583,7 +1583,7 @@ export function Pipeline() {
                                     </span>
                                   )}
                                   {isActive && (
-                                    <span title="옹매니징에서 현재 활동 중" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]">
+                                    <span title="현재 활동 중 (옹매니징 계약·정산 또는 옹고잉 실배차)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]">
                                       활동중
                                     </span>
                                   )}
@@ -1762,19 +1762,19 @@ export function Pipeline() {
               {/* 옹매니징 현재 활동 중 대조 */}
               {activeCheckLoading && (
                 <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F7FAFC] border border-[#E2E8F0] text-[12.5px] font-bold text-[#718096]">
-                  <Loader2 size={14} className="animate-spin" /> 옹매니징에서 현재 활동 중인 인원을 확인하고 있어요...
+                  <Loader2 size={14} className="animate-spin" /> 현재 활동 중인 인원을 확인하고 있어요...
                 </div>
               )}
               {!activeCheckLoading && activeCheck && !activeCheck.configured && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#EDF2F7] border border-[#E2E8F0] text-[12.5px] font-bold text-[#718096]">
-                  옹매니징 미연동 — 활동 여부 확인 불가
+                  미연동 — 활동 여부 확인 불가
                 </div>
               )}
               {!activeCheckLoading && activeCheck && activeCheck.configured && activeCheck.active.length > 0 && (
                 <div className="rounded-xl bg-[#FFFBEB] border border-[#F6E05E] p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="text-[13px] font-extrabold text-[#B7791F]">
-                      옹매니징에서 현재 활동 중인 인원 {activeCheck.active.length}명이 포함되어 있어요
+                      현재 활동 중인 인원 {activeCheck.active.length}명이 포함되어 있어요
                     </div>
                     <button
                       onClick={excludeActiveFromSelection}
@@ -1799,6 +1799,9 @@ export function Pipeline() {
                           {p.reasons.includes("recent_settlement") && (
                             <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">지난달 정산</span>
                           )}
+                          {p.reasons.includes("tms_active") && (
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FEEBC8] text-[#C05621]">실배차(옹고잉)</span>
+                          )}
                         </span>
                       );
                     })}
@@ -1808,6 +1811,22 @@ export function Pipeline() {
                   </p>
                 </div>
               )}
+              {/* 미확인(TMS 동기 전) / 확인 상한 초과 — '대조했고 0명'이라는 거짓 안심 방지(NULL≠비활동) */}
+              {!activeCheckLoading && activeCheck && activeCheck.configured && (() => {
+                const unchecked = activeCheck.unchecked ?? 0;
+                const truncated = selectedRows.size > 500 ? selectedRows.size - 500 : 0;
+                if (unchecked === 0 && truncated === 0) return null;
+                return (
+                  <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12px] font-semibold text-[#C53030] leading-relaxed space-y-1">
+                    {unchecked > 0 && (
+                      <div>· 활동 미확인 {unchecked}명 — TMS 동기화 전이라 아직 대조되지 않았어요. 실제 활동 중일 수 있으니 발송 전 확인하세요.</div>
+                    )}
+                    {truncated > 0 && (
+                      <div>· 선택 {selectedRows.size}명 중 앞 500명만 활동 확인했어요. 나머지 {truncated}명은 미확인이에요.</div>
+                    )}
+                  </div>
+                );
+              })()}
               <div>
                 <label className="text-[13px] font-bold text-[#4A5568] block mb-2">메시지 템플릿</label>
                 <select

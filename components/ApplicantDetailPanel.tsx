@@ -75,6 +75,10 @@ interface ApplicantFull {
   availability_updated_at: string | null;
   sms_opt_out_at: string | null;
   access_token: string | null;
+  // 옹고잉 TMS 활동 신호 캐시(tms-sync cron) — NULL=미확인 / true / false
+  tms_active_signal: boolean | null;
+  tms_active_reason: string | null;
+  tms_active_checked_at: string | null;
 }
 
 // 재컨택 반응 요약(B2) — 상세 GET이 pool_events(최근 90일)로 계산해 내려준다.
@@ -635,6 +639,14 @@ export function ApplicantDetailContent({
           {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FAF5FF] text-[#805AD5]">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
           {detail.suntop?.done && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
+          )}
+          {a.tms_active_signal === true && (
+            <span
+              className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]"
+              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 재컨택 발송 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
+            >
+              활동 중(옹고잉)
+            </span>
           )}
           {a.sms_opt_out_at && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
