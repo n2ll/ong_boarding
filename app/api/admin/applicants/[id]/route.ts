@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { fetchWorkerDetailByPhone } from "@/lib/ongmanaging";
+import { isPhoneBlacklisted } from "@/lib/blacklist";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "@/lib/jobs";
 import {
   VALID_STATUS,
@@ -162,6 +164,24 @@ export async function GET(
     meta: e.meta ?? null,
   }));
 
+  // 옹매니징 인력 보강(단건, 전화 매칭) — 계약 배송원이면 차종·라인·정산개월 요약.
+  // advisory: 실패해도 상세 로딩을 막지 않는다(미구성 시 null). 개인정보·금액은 어댑터가 미반입.
+  let ongmanaging = null;
+  let blacklisted = false;
+  const applicantPhone = (applicant as { phone?: string | null }).phone;
+  if (typeof applicantPhone === "string" && applicantPhone) {
+    try {
+      ongmanaging = await fetchWorkerDetailByPhone(applicantPhone);
+    } catch (e) {
+      console.error("[applicant GET] ongmanaging enrich failed", e);
+    }
+    try {
+      blacklisted = await isPhoneBlacklisted(applicantPhone);
+    } catch (e) {
+      console.error("[applicant GET] blacklist check failed", e);
+    }
+  }
+
   return NextResponse.json({
     applicant,
     candidates,
@@ -175,6 +195,8 @@ export async function GET(
       scheduled: suntopEvents.some((e) => e.stage === "scheduled"),
       events: suntopEvents,
     },
+    ongmanaging,
+    blacklisted,
   });
 }
 

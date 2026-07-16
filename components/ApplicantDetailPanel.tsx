@@ -75,6 +75,10 @@ interface ApplicantFull {
   availability_updated_at: string | null;
   sms_opt_out_at: string | null;
   access_token: string | null;
+  // 옹고잉 TMS 활동 신호 캐시(tms-sync cron) — NULL=미확인 / true / false
+  tms_active_signal: boolean | null;
+  tms_active_reason: string | null;
+  tms_active_checked_at: string | null;
 }
 
 // 재컨택 반응 요약(B2) — 상세 GET이 pool_events(최근 90일)로 계산해 내려준다.
@@ -99,11 +103,23 @@ interface SuntopEvent {
   meta: { client?: string; line?: string; note?: string; scheduled_at?: string } | null;
 }
 
+// 옹매니징 인력 보강 — 계약 배송원 상세(차종·라인·정산 요약). [id] GET이 전화 매칭으로 내려준다.
+interface OngmanagingDetail {
+  vehicleType: string | null;
+  isBackupSpecialist: boolean;
+  managerName: string | null;
+  lines: { lineName: string; clientName: string | null }[];
+  settledMonths: number;
+  lastSettledMonth: string | null;
+}
+
 interface Detail {
   applicant: ApplicantFull;
   candidates: CandidateLink[];
   recontact?: RecontactSummary | null;
   suntop?: { done: boolean; scheduled: boolean; events: SuntopEvent[] } | null;
+  ongmanaging?: OngmanagingDetail | null;
+  blacklisted?: boolean;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -401,6 +417,61 @@ export function ApplicantDetailContent({
     }
   };
 
+  // 재채용 블랙리스트 등록/해제 — "절대 재채용 불가"(노무·커뮤니케이션 핏). 콜드 발송에서 하드 제외.
+  const toggleBlacklist = async () => {
+    if (busy) return;
+    const phone = a.phone;
+    if (!phone) {
+      toast.error("전화번호가 없어 블랙리스트 처리할 수 없어요");
+      return;
+    }
+    if (detail.blacklisted) {
+      const ok = await confirm({
+        title: "블랙리스트 해제",
+        description: `${a.name}님을 재채용 블랙리스트에서 해제할까요? 이후 캠페인 발송 대상에 다시 포함될 수 있어요.`,
+        confirmText: "해제",
+      });
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/admin/blacklist`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone }),
+        });
+        if (!res.ok) {
+          toast.error("해제에 실패했어요");
+          return;
+        }
+        toast.success("블랙리스트에서 해제했어요");
+        await reload();
+        onChanged?.();
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      const reason = window.prompt("재채용 블랙리스트 등록 — 사유 (노무 이슈·커뮤니케이션 핏 등)", "");
+      if (reason === null) return; // 취소
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/admin/blacklist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, name: a.name, reason }),
+        });
+        if (!res.ok) {
+          toast.error("등록에 실패했어요");
+          return;
+        }
+        toast.success("블랙리스트에 등록했어요 — 콜드 발송에서 제외됩니다");
+        await reload();
+        onChanged?.();
+      } finally {
+        setBusy(false);
+      }
+    }
+  };
+
   const saveFields = () => {
     if (!dirty) return;
     patch(edit, "저장했어요.");
@@ -636,10 +707,50 @@ export function ApplicantDetailContent({
           {detail.suntop?.done && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
           )}
+          {a.tms_active_signal === true && (
+            <span
+              className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]"
+              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 재컨택 발송 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
+            >
+              활동 중(옹고잉)
+            </span>
+          )}
           {a.sms_opt_out_at && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
           )}
+          {detail.blacklisted && (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#1A202C] text-white" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</span>
+          )}
+          <button
+            onClick={toggleBlacklist}
+            disabled={busy}
+            className="px-2 py-1 rounded-md text-[11px] font-bold border border-[#E2E8F0] text-[#718096] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-50"
+          >
+            {detail.blacklisted ? "블랙리스트 해제" : "블랙리스트 등록"}
+          </button>
         </div>
+
+        {/* 옹매니징 연동 — 전화 매칭된 계약 배송원의 차종·라인·정산 요약(개인정보·금액 미반입) */}
+        {detail.ongmanaging && (
+          <div className="rounded-xl border border-[#C6F6D5] bg-[#F0FFF4] p-3.5 space-y-2">
+            <h3 className="text-[12.5px] font-extrabold text-[#2F855A]">옹매니징 연동 · 계약 배송원</h3>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[#276749]">
+              {detail.ongmanaging.vehicleType && <span>차종 <b>{detail.ongmanaging.vehicleType}</b></span>}
+              {detail.ongmanaging.isBackupSpecialist && <span className="font-bold text-[#B7791F]">백업 전문가</span>}
+              <span>정산 <b>{detail.ongmanaging.settledMonths}개월</b>{detail.ongmanaging.lastSettledMonth ? ` · 최근 ${detail.ongmanaging.lastSettledMonth}` : ""}</span>
+              {detail.ongmanaging.managerName && <span>담당 {detail.ongmanaging.managerName}</span>}
+            </div>
+            {detail.ongmanaging.lines.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {detail.ongmanaging.lines.map((l, i) => (
+                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded bg-white border border-[#C6F6D5] text-[#2F855A]">
+                    {l.lineName}{l.clientName ? ` · ${l.clientName}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ② 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
         {hasRecontact && recontact && (

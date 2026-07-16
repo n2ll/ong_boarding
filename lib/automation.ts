@@ -209,18 +209,27 @@ export async function evaluateAutomation(
       .select("id", { count: "exact", head: true })
       .eq("classification", "pending")
       .eq("direction", "inbound"),
-    supabase.from("applicants").select("status, created_at"),
+    supabase.from("applicants").select("status, created_at, source"),
     isAgentDisabled(supabase).catch(() => false),
   ]);
 
   const inboxCount = inboxRes.count ?? 0;
-  const applicants = (applicantsRes.data ?? []) as { status: string; created_at: string | null }[];
+  const applicants = (applicantsRes.data ?? []) as {
+    status: string;
+    created_at: string | null;
+    source: string | null;
+  }[];
   const waitingCount = applicants.filter((a) => a.status === "대기자").length;
 
-  // 스크리닝 전 적체 — 접수 후 N시간이 지나도록 '스크리닝 전' 그대로인 지원자 수
+  // 스크리닝 전 적체 — 접수 후 N시간이 지나도록 '스크리닝 전' 그대로인 지원자 수.
+  // 재활용 편입(source='reengagement')은 의도적으로 파킹된 후보라 적체 알림 대상에서 제외한다.
   const backlogCutoffMs = Date.now() - SCREENING_BACKLOG_HOURS * 60 * 60 * 1000;
   const screeningBacklogCount = applicants.filter(
-    (a) => a.status === "스크리닝 전" && a.created_at && new Date(a.created_at).getTime() < backlogCutoffMs
+    (a) =>
+      a.status === "스크리닝 전" &&
+      a.source !== "reengagement" &&
+      a.created_at &&
+      new Date(a.created_at).getTime() < backlogCutoffMs
   ).length;
 
   const results: RuleResult[] = [];

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
+import { fetchBlacklistedPhones } from "@/lib/blacklist";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 재채용 블랙리스트 하드 가드 — "절대 재채용 불가" 명단은 어떤 발송에서도 제외(전화번호 정규화 매칭).
+    const blacklistedPhones = await fetchBlacklistedPhones();
+
     const baseUrl =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.VERCEL_PROJECT_PRODUCTION_URL ||
@@ -137,6 +141,11 @@ export async function POST(req: NextRequest) {
       const phone = (r.phone || "").replace(/\D/g, "");
       if (!/^\d{10,11}$/.test(phone)) {
         results.push({ phone, success: false, error: "잘못된 번호" });
+        continue;
+      }
+      // 블랙리스트 하드 가드 — 절대 재채용 불가 명단(수신거부와 동일 계층, 서버 강제).
+      if (blacklistedPhones.has(phone)) {
+        results.push({ phone, success: false, error: "블랙리스트(발송 제외)" });
         continue;
       }
 
