@@ -179,3 +179,96 @@ export async function fetchActiveContractPhones(phones: string[]): Promise<Set<s
   const active = await fetchAllActiveContractPhones();
   return new Set([...targets].filter((p) => active.has(p)));
 }
+
+/**
+ * 인력 보강(단건) — 전화번호로 옹매니징 배송원 상세를 조회. 지원자 상세 패널 표시용.
+ * **개인정보·금액은 반입하지 않는다**: resident_number·계좌·신분증URL·정산 금액 컬럼은 select 자체 금지.
+ * 반환은 차종·백업전문가·담당매니저·소속 배송라인·정산 개월 수(요약)뿐. 매칭 없으면 null.
+ * (delivery_workers는 소규모라 전량 로드 후 전화 정규화 매칭 — 포맷 차이 방어.)
+ */
+export interface OngmanagingWorkerDetail {
+  vehicleType: string | null;
+  isBackupSpecialist: boolean;
+  managerName: string | null;
+  lines: { lineName: string; clientName: string | null }[];
+  settledMonths: number;
+  lastSettledMonth: string | null; // 'YYYY-MM'
+}
+
+export async function fetchWorkerDetailByPhone(phone: string): Promise<OngmanagingWorkerDetail | null> {
+  if (!isOngmanagingConfigured()) return null;
+  const target = normalizePhone(phone);
+  if (!target) return null;
+  const client = createOngmanagingClient();
+
+  // 1) delivery_workers 매칭 (금액·주민번호·계좌 컬럼 제외)
+  const { data: workers, error: wErr } = await client
+    .from(CONFIG.workersTable)
+    .select("id, phone, vehicle_type, is_backup_specialist, manager_name");
+  if (wErr) throw new Error(`[ongmanaging] worker detail lookup failed: ${wErr.message}`);
+  const worker = (workers ?? []).find(
+    (w) => normalizePhone(String((w as { phone: string | null }).phone ?? "")) === target
+  ) as
+    | { id: string; vehicle_type: string | null; is_backup_specialist: boolean | null; manager_name: string | null }
+    | undefined;
+  if (!worker) return null;
+
+  // 2) 소속 배송라인 (worker_delivery_lines → delivery_lines → clients)
+  const lines: { lineName: string; clientName: string | null }[] = [];
+  const { data: wdl } = await client
+    .from("worker_delivery_lines")
+    .select("delivery_line_id")
+    .eq("worker_id", worker.id);
+  const lineIds = [
+    ...new Set(
+      (wdl ?? []).map((r) => (r as { delivery_line_id: string | null }).delivery_line_id).filter(Boolean)
+    ),
+  ] as string[];
+  if (lineIds.length > 0) {
+    const { data: dls } = await client
+      .from("delivery_lines")
+      .select("id, line_name, client_id")
+      .in("id", lineIds);
+    const clientIds = [
+      ...new Set(
+        (dls ?? []).map((r) => (r as { client_id: string | null }).client_id).filter(Boolean)
+      ),
+    ] as string[];
+    const clientNameById = new Map<string, string>();
+    if (clientIds.length > 0) {
+      const { data: cls } = await client.from("clients").select("id, name").in("id", clientIds);
+      for (const c of cls ?? []) {
+        const row = c as { id: string; name: string | null };
+        if (row.name) clientNameById.set(row.id, row.name);
+      }
+    }
+    for (const dl of dls ?? []) {
+      const row = dl as { line_name: string | null; client_id: string | null };
+      lines.push({
+        lineName: row.line_name ?? "(이름 없음)",
+        clientName: row.client_id ? clientNameById.get(row.client_id) ?? null : null,
+      });
+    }
+  }
+
+  // 3) 정산 개월 수 + 최근월 — year/month만 (금액 컬럼 select 금지)
+  const { data: settlements } = await client
+    .from(CONFIG.settlementsTable)
+    .select("year, month")
+    .eq("worker_id", worker.id);
+  const monthSet = new Set<string>();
+  for (const s of settlements ?? []) {
+    const row = s as { year: number | null; month: number | null };
+    if (row.year && row.month) monthSet.add(`${row.year}-${String(row.month).padStart(2, "0")}`);
+  }
+  const months = [...monthSet].sort();
+
+  return {
+    vehicleType: worker.vehicle_type ?? null,
+    isBackupSpecialist: worker.is_backup_specialist === true,
+    managerName: worker.manager_name ?? null,
+    lines,
+    settledMonths: months.length,
+    lastSettledMonth: months.length ? months[months.length - 1] : null,
+  };
+}

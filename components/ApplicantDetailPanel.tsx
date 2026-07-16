@@ -103,11 +103,22 @@ interface SuntopEvent {
   meta: { client?: string; line?: string; note?: string; scheduled_at?: string } | null;
 }
 
+// 옹매니징 인력 보강 — 계약 배송원 상세(차종·라인·정산 요약). [id] GET이 전화 매칭으로 내려준다.
+interface OngmanagingDetail {
+  vehicleType: string | null;
+  isBackupSpecialist: boolean;
+  managerName: string | null;
+  lines: { lineName: string; clientName: string | null }[];
+  settledMonths: number;
+  lastSettledMonth: string | null;
+}
+
 interface Detail {
   applicant: ApplicantFull;
   candidates: CandidateLink[];
   recontact?: RecontactSummary | null;
   suntop?: { done: boolean; scheduled: boolean; events: SuntopEvent[] } | null;
+  ongmanaging?: OngmanagingDetail | null;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -652,6 +663,28 @@ export function ApplicantDetailContent({
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
           )}
         </div>
+
+        {/* 옹매니징 연동 — 전화 매칭된 계약 배송원의 차종·라인·정산 요약(개인정보·금액 미반입) */}
+        {detail.ongmanaging && (
+          <div className="rounded-xl border border-[#C6F6D5] bg-[#F0FFF4] p-3.5 space-y-2">
+            <h3 className="text-[12.5px] font-extrabold text-[#2F855A]">옹매니징 연동 · 계약 배송원</h3>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[#276749]">
+              {detail.ongmanaging.vehicleType && <span>차종 <b>{detail.ongmanaging.vehicleType}</b></span>}
+              {detail.ongmanaging.isBackupSpecialist && <span className="font-bold text-[#B7791F]">백업 전문가</span>}
+              <span>정산 <b>{detail.ongmanaging.settledMonths}개월</b>{detail.ongmanaging.lastSettledMonth ? ` · 최근 ${detail.ongmanaging.lastSettledMonth}` : ""}</span>
+              {detail.ongmanaging.managerName && <span>담당 {detail.ongmanaging.managerName}</span>}
+            </div>
+            {detail.ongmanaging.lines.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {detail.ongmanaging.lines.map((l, i) => (
+                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded bg-white border border-[#C6F6D5] text-[#2F855A]">
+                    {l.lineName}{l.clientName ? ` · ${l.clientName}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ② 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
         {hasRecontact && recontact && (
