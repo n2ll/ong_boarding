@@ -347,3 +347,66 @@ export async function fetchClientsMaster(): Promise<ClientMaster[]> {
     })
     .sort((a, b) => b.lineCount - a.lineCount || a.name.localeCompare(b.name));
 }
+
+/**
+ * 활동 중(활성 계약 ∪ 지난달 확정 정산) 배송원의 {전화(정규화), 이름} — 재활용 후보 발굴용.
+ * ※ 이름(PII)은 '최소 필드만 반입' 정책 하에서만 사용. 미구성 시 빈 배열.
+ */
+export interface OngmanagingWorker {
+  phone: string;
+  name: string | null;
+}
+export async function fetchActiveContractWorkers(): Promise<OngmanagingWorker[]> {
+  if (!isOngmanagingConfigured()) return [];
+  const client = createOngmanagingClient();
+
+  // 활성 계약 + 지난달 확정 정산 worker_id 합집합
+  const { year, month } = kstLastMonth();
+  const [contractsRes, settlementsRes] = await Promise.all([
+    client.from(CONFIG.contractsTable).select("worker_id").in("contract_status", CONFIG.activeStatuses),
+    client
+      .from(CONFIG.settlementsTable)
+      .select("worker_id")
+      .eq("year", year)
+      .eq("month", month)
+      .eq("status", CONFIG.settledStatus),
+  ]);
+  const ids = [
+    ...new Set([
+      ...uniqueWorkerIds(contractsRes.data as { worker_id: string | null }[] | null),
+      ...uniqueWorkerIds(settlementsRes.data as { worker_id: string | null }[] | null),
+    ]),
+  ];
+  if (ids.length === 0) return [];
+
+  const out: OngmanagingWorker[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const { data: workers } = await client
+      .from(CONFIG.workersTable)
+      .select("phone, name")
+      .in("id", ids.slice(i, i + CHUNK_SIZE));
+    for (const w of workers ?? []) {
+      const row = w as { phone: string | null; name: string | null };
+      const p = normalizePhone(String(row.phone ?? ""));
+      if (p) out.push({ phone: p, name: row.name ?? null });
+    }
+  }
+  return out;
+}
+
+/** 전체 배송원 전화번호(정규화) 집합 — 재활용 모수(비활동 포함) 산정용. 이름 미조회(집계용). */
+export async function fetchAllWorkerPhones(): Promise<Set<string>> {
+  const result = new Set<string>();
+  if (!isOngmanagingConfigured()) return result;
+  const client = createOngmanagingClient();
+  const { data: workers, error } = await client.from(CONFIG.workersTable).select("phone");
+  if (error) {
+    console.error("[ongmanaging] all worker phones failed", error);
+    return result;
+  }
+  for (const w of workers ?? []) {
+    const p = normalizePhone(String((w as { phone: string | null }).phone ?? ""));
+    if (p) result.add(p);
+  }
+  return result;
+}

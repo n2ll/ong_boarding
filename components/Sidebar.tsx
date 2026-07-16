@@ -15,6 +15,7 @@ import {
   // CheckCircle,
   Briefcase,
   Building2,
+  RefreshCw,
   // MapPin,
   // LayoutGrid,
   // Shield,
@@ -67,6 +68,7 @@ export function Sidebar() {
 
     { label: "인재 관리", type: "header" },
     { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
+    { label: "재활용 · 재편입", icon: RefreshCw, path: "/reengagement" },
     // { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" }, // 파일럿 기간 숨김
 
     { label: "채용 운영", type: "header" },

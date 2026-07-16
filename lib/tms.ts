@@ -113,3 +113,54 @@ export async function fetchActiveDeliveryPhones(phones: string[]): Promise<Set<s
   }
   return result;
 }
+
+const ACTIVE_PREDICATE =
+  `s.date_to_work >= (CURRENT_DATE - make_interval(days => $1::int)) ` +
+  `AND s.status::text <> 'DELETED' AND u.status::text <> 'DELETED'`;
+
+/**
+ * 활동 중 배송원의 {전화(정규화), 이름} 목록 — 재활용(재편입) 후보 발굴용.
+ * ※ 이름(PII)을 함께 반환한다: 편입 대상은 '최소 필드(이름+전화)만' 반입한다는 정책에 한해서만 사용.
+ * 미구성 시 빈 배열.
+ */
+export interface TmsWorker {
+  phone: string;
+  name: string | null;
+}
+export async function fetchActiveWorkers(): Promise<TmsWorker[]> {
+  if (!isTmsConfigured()) return [];
+  const u = `"${CONFIG.userTable}"`;
+  const s = `"${CONFIG.scheduleTable}"`;
+  const np = `regexp_replace(u.phone,'[^0-9]','','g')`;
+  const sql =
+    `SELECT DISTINCT ${np} AS phone, u.name ` +
+    `FROM ${u} u JOIN ${s} s ON s.worker_id = u.id ` +
+    `WHERE ${ACTIVE_PREDICATE} AND u.phone IS NOT NULL`;
+  const client = createTmsClient();
+  try {
+    await client.connect();
+    const { rows } = await client.query(sql, [CONFIG.windowDays]);
+    return (rows as { phone: string | null; name: string | null }[])
+      .filter((r) => r.phone)
+      .map((r) => ({ phone: r.phone as string, name: r.name ?? null }));
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+/** 전체(비삭제) 배송원 전화번호(정규화) 집합 — 재활용 모수(비활동 포함) 산정용. 이름 미조회(집계용). */
+export async function fetchAllWorkerPhones(): Promise<Set<string>> {
+  const result = new Set<string>();
+  if (!isTmsConfigured()) return result;
+  const u = `"${CONFIG.userTable}"`;
+  const sql = `SELECT DISTINCT regexp_replace(phone,'[^0-9]','','g') AS phone FROM ${u} WHERE status::text <> 'DELETED' AND phone IS NOT NULL`;
+  const client = createTmsClient();
+  try {
+    await client.connect();
+    const { rows } = await client.query(sql);
+    for (const r of rows as { phone: string | null }[]) if (r.phone) result.add(r.phone);
+  } finally {
+    await client.end().catch(() => {});
+  }
+  return result;
+}
