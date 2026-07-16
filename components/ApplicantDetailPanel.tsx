@@ -119,6 +119,7 @@ interface Detail {
   recontact?: RecontactSummary | null;
   suntop?: { done: boolean; scheduled: boolean; events: SuntopEvent[] } | null;
   ongmanaging?: OngmanagingDetail | null;
+  blacklisted?: boolean;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -416,6 +417,61 @@ export function ApplicantDetailContent({
     }
   };
 
+  // 재채용 블랙리스트 등록/해제 — "절대 재채용 불가"(노무·커뮤니케이션 핏). 콜드 발송에서 하드 제외.
+  const toggleBlacklist = async () => {
+    if (busy) return;
+    const phone = a.phone;
+    if (!phone) {
+      toast.error("전화번호가 없어 블랙리스트 처리할 수 없어요");
+      return;
+    }
+    if (detail.blacklisted) {
+      const ok = await confirm({
+        title: "블랙리스트 해제",
+        description: `${a.name}님을 재채용 블랙리스트에서 해제할까요? 이후 캠페인 발송 대상에 다시 포함될 수 있어요.`,
+        confirmText: "해제",
+      });
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/admin/blacklist`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone }),
+        });
+        if (!res.ok) {
+          toast.error("해제에 실패했어요");
+          return;
+        }
+        toast.success("블랙리스트에서 해제했어요");
+        await reload();
+        onChanged?.();
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      const reason = window.prompt("재채용 블랙리스트 등록 — 사유 (노무 이슈·커뮤니케이션 핏 등)", "");
+      if (reason === null) return; // 취소
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/admin/blacklist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, name: a.name, reason }),
+        });
+        if (!res.ok) {
+          toast.error("등록에 실패했어요");
+          return;
+        }
+        toast.success("블랙리스트에 등록했어요 — 콜드 발송에서 제외됩니다");
+        await reload();
+        onChanged?.();
+      } finally {
+        setBusy(false);
+      }
+    }
+  };
+
   const saveFields = () => {
     if (!dirty) return;
     patch(edit, "저장했어요.");
@@ -662,6 +718,16 @@ export function ApplicantDetailContent({
           {a.sms_opt_out_at && (
             <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
           )}
+          {detail.blacklisted && (
+            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#1A202C] text-white" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</span>
+          )}
+          <button
+            onClick={toggleBlacklist}
+            disabled={busy}
+            className="px-2 py-1 rounded-md text-[11px] font-bold border border-[#E2E8F0] text-[#718096] hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-50"
+          >
+            {detail.blacklisted ? "블랙리스트 해제" : "블랙리스트 등록"}
+          </button>
         </div>
 
         {/* 옹매니징 연동 — 전화 매칭된 계약 배송원의 차종·라인·정산 요약(개인정보·금액 미반입) */}
