@@ -17,6 +17,13 @@ import { sendSlackText } from "@/lib/slack";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import {
+  isExposed,
+  normalizeRule,
+  fetchOverridesForApplicant,
+  fetchSuntopDone,
+  type ExposureApplicant,
+} from "@/lib/exposure";
+import {
   engageOutcomeLabel,
   hasEngageMessage,
   isNightKst,
@@ -46,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: applicant } = await supabase
     .from("applicants")
-    .select("id, name, availability")
+    .select("id, name, availability, sido, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
   if (!applicant) {
@@ -55,7 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, recruit_mode")
+    .select("id, title, status, closes_at, recruit_mode, exposure, exposure_rule")
     .eq("id", jobId)
     .maybeSingle();
   // pull 노출 대상(internal·both)이 아니면 접근 거부 — GET에서 안 보이는 공고에 관심 표시가 새는 걸 막는다.
@@ -67,6 +74,25 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     isJobEffectivelyClosed(job.status as string | null, job.closes_at as string | null);
   if (closed) {
     return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
+  }
+
+  // 지정 노출(targeted) 게이팅 — 이 지원자가 노출 대상이 아니면 GET과 동일하게 불투명 400(공고 존재 숨김).
+  if ((job as { exposure?: string }).exposure === "targeted") {
+    const [overrides, suntopDone] = await Promise.all([
+      fetchOverridesForApplicant(supabase, applicant.id as number, [jobId]),
+      fetchSuntopDone(supabase, applicant.id as number),
+    ]);
+    const exA: ExposureApplicant = {
+      id: applicant.id as number,
+      sido: (applicant as { sido?: string | null }).sido ?? null,
+      availability: (applicant as { availability?: string | null }).availability ?? null,
+      applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
+      created_at: (applicant as { created_at?: string | null }).created_at ?? null,
+      suntopDone,
+    };
+    if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId))) {
+      return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
+    }
   }
 
   // 1) 후보 연결 (이미 있으면 무시 — 중복 클릭 안전)

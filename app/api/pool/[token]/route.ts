@@ -10,6 +10,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import {
+  isExposed,
+  normalizeRule,
+  fetchOverridesForApplicant,
+  fetchSuntopDone,
+  type ExposureApplicant,
+  type ExposureMode,
+} from "@/lib/exposure";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   const supabase = createServiceClient();
   const { data: applicant, error } = await supabase
     .from("applicants")
-    .select("id, name, lat, lng, availability")
+    .select("id, name, lat, lng, availability, sido, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
 
@@ -52,7 +60,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   // recruit_mode는 DB NOT NULL DEFAULT 'external' — null은 발생하지 않지만, 안전 방향(비공개)으로 in-필터가 null을 자동 제외한다.
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at")
+    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at, exposure, exposure_rule")
     .eq("status", "active")
     .in("recruit_mode", ["internal", "both"])
     .not("title", "like", "\\_\\_%")
@@ -78,6 +86,30 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     .eq("event_type", "notify_request");
   const notifiedJobIds = new Set((notifies ?? []).map((r) => r.job_id as number));
 
+  // 지정 노출(targeted) 게이팅 — 이 지원자가 대상인 공고만 노출. 규칙(자동)+수동(include/exclude) 판정.
+  // exclude > include > 규칙. 대상 아니면 목록에서 제외(공고 존재 자체를 숨김).
+  const targetedJobIds = (jobs ?? [])
+    .filter((j) => (j as { exposure?: string }).exposure === "targeted")
+    .map((j) => j.id as number);
+  let exOverrides = new Map<number, ExposureMode>();
+  let exSuntopDone = false;
+  if (targetedJobIds.length > 0) {
+    exOverrides = await fetchOverridesForApplicant(supabase, applicant.id as number, targetedJobIds);
+    exSuntopDone = await fetchSuntopDone(supabase, applicant.id as number);
+  }
+  const exApplicant: ExposureApplicant = {
+    id: applicant.id as number,
+    sido: (applicant as { sido?: string | null }).sido ?? null,
+    availability: (applicant as { availability?: string | null }).availability ?? null,
+    applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
+    created_at: (applicant as { created_at?: string | null }).created_at ?? null,
+    suntopDone: exSuntopDone,
+  };
+  const jobExposed = (j: { id: number; exposure?: string; exposure_rule?: unknown }) => {
+    if (j.exposure !== "targeted") return true; // 전체 노출은 항상
+    return isExposed(exApplicant, normalizeRule(j.exposure_rule), exOverrides.get(j.id));
+  };
+
   // 맞춤 정렬 — 좌표가 있으면 가까운 순, 없으면 최신 등록순 유지
   const hasGeo = typeof applicant.lat === "number" && typeof applicant.lng === "number";
   const nowMs = Date.now();
@@ -88,6 +120,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     j.closes_at ? new Date(j.closes_at).getTime() : null;
   const list = (jobs ?? [])
     .filter((j) => {
+      if (!jobExposed(j as { id: number; exposure?: string; exposure_rule?: unknown })) return false;
       const e = expiredAt(j as { closes_at: string | null });
       return e === null || e > nowMs - EXPIRED_GRACE_MS;
     })
