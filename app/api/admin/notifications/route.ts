@@ -54,7 +54,7 @@ export async function GET() {
     items.push({
       id: "inbox",
       tone: "amber",
-      title: `미분류 문자함 ${inboxCount}건`,
+      title: `분류 대기 문자함 ${inboxCount}건`,
       desc: "어떤 지원자와도 매칭되지 않은 인입 메시지가 쌓였어요.",
       path: "/inbox",
     });

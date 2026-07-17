@@ -175,7 +175,11 @@ export function AgentBrain() {
   const [approvingIdx, setApprovingIdx] = useState<number | null>(null);
 
   // AI 사용량 카드 (R4-3) — 이번 달 ai_usage_daily 모델별 집계 (기존 usage API 재사용).
-  const { data: usageApi, isLoading: usageLoading } = useSWR<{ month?: { models?: UsageMonthModel[] } }>("/api/admin/usage");
+  const { data: usageApi, isLoading: usageLoading } = useSWR<{
+    month?: { models?: UsageMonthModel[] };
+    months?: { month: string; ai_cost_krw: number; sms_cost_krw: number; total_cost_krw: number }[];
+    projection?: { month: string; mtd_krw: number; projected_krw: number; elapsed_days: number; days_in_month: number };
+  }>("/api/admin/usage");
   const monthStats = useMemo(() => {
     const models = usageApi?.month?.models ?? [];
     let calls = 0;
@@ -1231,8 +1235,42 @@ export function AgentBrain() {
                     </div>
                   </div>
                 )}
+
+                {/* 월별 비용 추이(AI+SMS, 환율 1,500원) + 월말 예상 */}
+                {!usageLoading && (() => {
+                  const months = usageApi?.months ?? [];
+                  if (months.length === 0) return null;
+                  const max = Math.max(1, ...months.map((m) => m.total_cost_krw));
+                  const proj = usageApi?.projection;
+                  return (
+                    <div className="mt-4 pt-4 border-t border-[#EDF2F7]">
+                      <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                        <div className="text-[12.5px] font-bold text-[#4A5568]">월별 비용 · AI+문자 (환율 1,500원)</div>
+                        {proj && (
+                          <div className="text-[12px] text-[#718096]">
+                            이번 달 <b className="text-[#1A202C]">₩{proj.mtd_krw.toLocaleString()}</b>
+                            {" · "}월말 예상 <b className="text-[#D69E2E]">₩{proj.projected_krw.toLocaleString()}</b>
+                            <span className="text-[#A0AEC0]"> ({proj.elapsed_days}/{proj.days_in_month}일)</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        {months.map((mo) => (
+                          <div key={mo.month} className="flex items-center gap-2 text-[12px]">
+                            <span className="w-14 shrink-0 font-bold text-[#718096]">{mo.month}</span>
+                            <div className="flex-1 h-4 bg-[#F7FAFC] rounded overflow-hidden">
+                              <div className="h-full bg-[#FBD38D]" style={{ width: `${(mo.total_cost_krw / max) * 100}%` }} />
+                            </div>
+                            <span className="w-24 shrink-0 text-right font-bold text-[#1A202C]">₩{mo.total_cost_krw.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <p className="text-[11px] text-[#A0AEC0] mt-3 leading-relaxed">
-                  * 추정 비용 = 토큰 × 모델 단가 (Sonnet 4.6 입력 $3 · 출력 $15 / Haiku 4.5 입력 $1 · 출력 $5 per 1M tokens, 캐시 읽기는 입력 단가의 10%로 계산). 실제 청구액과 다를 수 있어요.
+                  * 추정 비용 = 토큰 × 모델 단가 (Sonnet 4.6 입력 $3 · 출력 $15 / Haiku 4.5 입력 $1 · 출력 $5 per 1M tokens, 캐시 읽기는 입력 단가의 10%로 계산). 월별 원화는 환율 1,500원 가정. 실제 청구액과 다를 수 있어요.
                 </p>
               </div>
 

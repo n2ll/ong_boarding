@@ -128,7 +128,7 @@ export function Automation() {
     { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-[#D69E2E]" },
     { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-[#3182CE]" },
     { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-[#718096]" },
-    { label: "미분류 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
+    { label: "분류 대기 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
     { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-[#1A202C]" },
   ];
 
