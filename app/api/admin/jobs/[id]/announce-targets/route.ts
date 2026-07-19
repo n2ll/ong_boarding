@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { haversineKm } from "@/lib/kakao-geocode";
 import { isNightKst, smsJobTitle } from "@/lib/agent/engage";
+import { isExposed, normalizeRule, type ExposureMode } from "@/lib/exposure";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,11 @@ interface ApplicantRow {
   own_vehicle: string | null;
   lat: number | null;
   lng: number | null;
+  // 지정 노출(targeted) 공고의 노출 판정용
+  sido: string | null;
+  availability: string | null;
+  applied_at: string | null;
+  created_at: string | null;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -58,7 +64,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = createServiceClient();
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, vehicle_required, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    .select("id, title, vehicle_required, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, exposure, exposure_rule")
     .eq("id", jobId)
     .maybeSingle();
   if (jobErr) {
@@ -156,7 +162,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: apps, error: appErr } = await supabase
     .from("applicants")
-    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, lat, lng")
+    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, lat, lng, sido, availability, applied_at, created_at")
     .in("id", unionIds);
   if (appErr) {
     console.error("[announce-targets] applicants", appErr);
@@ -164,6 +170,42 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
   const infoById = new Map<number, ApplicantRow>();
   for (const a of (apps ?? []) as ApplicantRow[]) infoById.set(a.id, a);
+
+  // 지정 노출(targeted) 공고 — 유효 노출 대상이 아닌 사람에겐 새 공고 안내를 보내지 않는다.
+  // (안내 문자에 공고명이 들어가므로 push 채널로 존재가 새는 것 방지. pull 게이팅과 동일 판정)
+  const targetedJob = (job as { exposure?: string | null }).exposure === "targeted";
+  const exposureRule = normalizeRule((job as { exposure_rule?: unknown }).exposure_rule);
+  const exposureOverrides = new Map<number, ExposureMode>();
+  if (targetedJob) {
+    const { data: ovRows, error: ovErr } = await supabase
+      .from("job_exposure_targets")
+      .select("applicant_id, mode")
+      .eq("job_id", jobId);
+    if (ovErr) {
+      console.error("[announce-targets] exposure overrides", ovErr);
+      return NextResponse.json({ error: ovErr.message }, { status: 500 });
+    }
+    for (const r of ovRows ?? []) {
+      const row = r as { applicant_id: number; mode: ExposureMode };
+      exposureOverrides.set(row.applicant_id, row.mode);
+    }
+  }
+  const suntopDoneSet = new Set(suntopIds); // S그룹 소스와 동일(pool_events suntop_done)
+  const exposedForAnnounce = (a: ApplicantRow): boolean => {
+    if (!targetedJob) return true;
+    return isExposed(
+      {
+        id: a.id,
+        sido: a.sido,
+        availability: a.availability,
+        applied_at: a.applied_at,
+        created_at: a.created_at,
+        suntopDone: suntopDoneSet.has(a.id),
+      },
+      exposureRule,
+      exposureOverrides.get(a.id)
+    );
+  };
 
   // 새 공고 안내 제외 상태: 인력풀 제외(부적합·이탈) + 이미 투입 확정된 인력(확정인력) —
   // 확정자는 재컨택 대상이 아니다(라우터 AI 침묵 PR#65와 대칭). waitlist_notice 보유자여도 제외.
@@ -174,6 +216,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     if (EXCLUDED_POOL_STATUS.has(a.status ?? "")) return false;
     if (candSet.has(a.id)) return false;
     if (fatigueSet.has(a.id)) return false;
+    if (!exposedForAnnounce(a)) return false; // 지정 노출 공고: 노출 대상만 안내
     return true;
   };
 

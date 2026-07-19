@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
+import { normalizeRule } from "@/lib/exposure";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -32,6 +33,9 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "site_manager_id",
   "work_period",
   "closes_at",
+  // J 타겟 노출 — 노출 범위(all/targeted) + 자동 노출 규칙(jsonb)
+  "exposure",
+  "exposure_rule",
 ]);
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -109,6 +113,25 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(update.pay_type)
   ) {
     return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (
+    "exposure" in update &&
+    (typeof update.exposure !== "string" || !["all", "targeted"].includes(update.exposure))
+  ) {
+    return NextResponse.json({ error: "exposure 값이 잘못되었습니다." }, { status: 400 });
+  }
+  // exposure_rule — 알 수 없는 키·타입은 정규화로 제거해 저장(쓰레기 규칙이 노출 판정을 오염하지 않게).
+  // 단 '내용이 있는데' 전부 무효(예: sido가 배열 아닌 문자열)면 기존 규칙을 조용히 지우는 대신 400 —
+  // 형식 오류가 200 OK로 규칙 소거가 되면 안 된다. null/{}는 정상적인 '규칙 없음'.
+  if ("exposure_rule" in update) {
+    const raw = update.exposure_rule;
+    const normalized = normalizeRule(raw);
+    const rawHasContent =
+      raw != null && (typeof raw !== "object" || Object.keys(raw as Record<string, unknown>).length > 0);
+    if (normalized === null && rawHasContent) {
+      return NextResponse.json({ error: "exposure_rule 형식이 잘못되었습니다." }, { status: 400 });
+    }
+    update.exposure_rule = normalized;
   }
   if (update.pay_type === "") update.pay_type = null;
   if (

@@ -10,6 +10,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
 import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
+import { normalizeRule } from "@/lib/exposure";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -143,6 +144,8 @@ export async function POST(req: NextRequest) {
     ai_facts,
     capacity,
     recruit_mode,
+    exposure,
+    exposure_rule,
     site_manager_id,
     created_by,
     work_period,
@@ -170,6 +173,8 @@ export async function POST(req: NextRequest) {
     ai_facts?: string | null;
     capacity?: number;
     recruit_mode?: string;
+    exposure?: string;
+    exposure_rule?: unknown;
     site_manager_id?: number | null;
     created_by?: string | null;
     work_period?: string | null;
@@ -195,6 +200,9 @@ export async function POST(req: NextRequest) {
   }
   if (recruit_mode && !RECRUIT_MODES.has(recruit_mode)) {
     return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (exposure && !["all", "targeted"].includes(exposure)) {
+    return NextResponse.json({ error: "exposure 값이 잘못되었습니다." }, { status: 400 });
   }
   if (pay_type && !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(pay_type)) {
     return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
@@ -267,6 +275,8 @@ export async function POST(req: NextRequest) {
       ai_facts: ai_facts ?? null,
       capacity: capacity ?? 1,
       recruit_mode: recruit_mode ?? "external",
+      exposure: exposure ?? "all",
+      exposure_rule: normalizeRule(exposure_rule),
       site_manager_id: site_manager_id ?? null,
       created_by: created_by ?? null,
       work_period: work_period || null,

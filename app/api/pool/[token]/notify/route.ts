@@ -11,6 +11,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
+import {
+  isExposed,
+  normalizeRule,
+  fetchOverridesForApplicant,
+  fetchSuntopDone,
+  type ExposureApplicant,
+} from "@/lib/exposure";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: applicant } = await supabase
     .from("applicants")
-    .select("id, name, availability")
+    .select("id, name, availability, sido, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
   if (!applicant) {
@@ -45,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const GRACE_MS = 3 * 24 * 60 * 60 * 1000;
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at")
+    .select("id, title, status, closes_at, recruit_mode, exposure, exposure_rule")
     .eq("id", jobId)
     .maybeSingle();
   const closesMs = job?.closes_at ? new Date(job.closes_at as string).getTime() : null;
@@ -53,12 +60,40 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const eligible =
     job &&
     !String(job.title).startsWith("__") &&
+    // pull 채널 공고(internal·both)만 — GET·interest와 대칭(external 공고 존재 프로브 방지)
+    ((job as { recruit_mode?: string | null }).recruit_mode === "internal" ||
+      (job as { recruit_mode?: string | null }).recruit_mode === "both") &&
     job.status === "active" &&
     closesMs !== null &&
     closesMs <= nowMs &&
     closesMs > nowMs - GRACE_MS;
   if (!eligible) {
     return NextResponse.json({ error: "확인할 수 없는 공고예요" }, { status: 400 });
+  }
+
+  // 지정 노출(targeted) 게이팅 — 노출 대상이 아니면 존재를 숨긴다(동일한 불투명 400).
+  // 판정 재료 조회 실패도 같은 400(fail-closed) — exclude 무시(fail-open) 방지.
+  if ((job as { exposure?: string }).exposure === "targeted") {
+    try {
+      const [overrides, suntopDone] = await Promise.all([
+        fetchOverridesForApplicant(supabase, applicant.id as number, [jobId]),
+        fetchSuntopDone(supabase, applicant.id as number),
+      ]);
+      const exA: ExposureApplicant = {
+        id: applicant.id as number,
+        sido: (applicant as { sido?: string | null }).sido ?? null,
+        availability: (applicant as { availability?: string | null }).availability ?? null,
+        applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
+        created_at: (applicant as { created_at?: string | null }).created_at ?? null,
+        suntopDone,
+      };
+      if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId))) {
+        return NextResponse.json({ error: "확인할 수 없는 공고예요" }, { status: 400 });
+      }
+    } catch (e) {
+      console.error("[pool notify] exposure gate load failed — 거부(fail-closed)", e);
+      return NextResponse.json({ error: "확인할 수 없는 공고예요" }, { status: 400 });
+    }
   }
 
   // 멱등 — 이미 알림 요청한 공고면 재기록·Slack 재발송 없이 성공 반환
