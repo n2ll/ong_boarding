@@ -60,9 +60,9 @@ export function Inbox() {
       }))) return;
     } else if (action === "ongmanaging") {
       if (!(await confirm({
-        title: "옹매니징으로 이관할까요?",
-        description: "옹고잉 재직자·기존 계약자 문의로 이관 처리할까요? 응대 대상에서 제외됩니다.",
-        confirmText: "이관 처리",
+        title: "기존 계약자 문의로 분류할까요?",
+        description: "옹고잉 재직자·기존 계약자 문의로 표시할까요? AI 응대 대상에서 제외돼요.",
+        confirmText: "분류",
       }))) return;
     } else {
       if (!(await confirm({
@@ -90,7 +90,7 @@ export function Inbox() {
             : `${where}로 등록했어요.`
         );
       } else if (action === "ongmanaging") {
-        toast.success("옹매니징 이관 처리됐어요.");
+        toast.success("기존 계약자 문의로 분류했어요.");
       } else {
         toast.success("기타로 분류해 종결했어요.");
       }
@@ -114,7 +114,7 @@ export function Inbox() {
             <InboxIcon size={24} className="text-[#1A202C]" />
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">미분류 문자함</h1>
+            <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">분류 대기 문자함</h1>
             <p className="text-[14px] text-[#718096]">어느 지원자의 문자인지 자동으로 연결하지 못한 수신 문자입니다. 아래 버튼으로 직접 분류해주세요.</p>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function Inbox() {
                   disabled={busy}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
                 >
-                  <ArrowRightLeft size={15} /> 옹매니징 이관
+                  <ArrowRightLeft size={15} /> 기존 계약자 문의
                 </button>
                 {/* 지원자로 등록 — 어느 라인/공고로 보낼지 선택(도시락 등 실공고 or 배민 커넥트 자동). */}
                 <div className="relative flex items-center">

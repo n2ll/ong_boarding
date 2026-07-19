@@ -236,7 +236,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-[#A0AEC0]">
                     <Check size={26} className="text-[#38A169] mb-2" />
                     <div className="text-[13px] font-bold text-[#4A5568]">새 알림이 없어요</div>
-                    <div className="text-[12px] mt-0.5">미분류 문자함·미답장·AI 중단이 발생하면 표시됩니다.</div>
+                    <div className="text-[12px] mt-0.5">분류 대기 문자함·미답장·AI 중단이 발생하면 표시됩니다.</div>
                   </div>
                 ) : (
                   notices.map((n) => (

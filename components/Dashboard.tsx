@@ -231,7 +231,7 @@ export function Dashboard() {
       });
     }
     if (inboxCount > 0) {
-      u.push({ id: "inbox", tone: "red", title: `미분류 문자함 ${inboxCount}건`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
+      u.push({ id: "inbox", tone: "red", title: `분류 대기 문자함 ${inboxCount}건`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
       u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live" });
@@ -336,7 +336,7 @@ export function Dashboard() {
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
                 <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">미분류 문자함·인계 대기·긴급 건이 발생하면 여기 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">분류 대기 문자함·인계 대기·긴급 건이 발생하면 여기 표시됩니다.</div>
                 <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
                   {[
                     { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },

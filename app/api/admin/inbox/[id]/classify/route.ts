@@ -73,7 +73,7 @@ export async function POST(
           raw_payload: {
             ...prev,
             ongmanaging_transfer: {
-              note: `옹매니징 이관 — ${trimmedReason || "옹고잉 재직자·기존 계약자 문의"}`,
+              note: `기존 계약자 문의 분류 — ${trimmedReason || "옹고잉 재직자·기존 계약자 문의"}`,
               transferred_at: new Date().toISOString(),
             },
           },
