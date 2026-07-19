@@ -112,3 +112,54 @@ export async function fetchSuntopDone(supabase: SupabaseClient, applicantId: num
     .maybeSingle();
   return Boolean(data);
 }
+
+/** 선탑 완료자 applicant_id 전체 집합 — 규칙 미리보기·유효 명단의 배치 평가용. */
+export async function fetchSuntopDoneSet(supabase: SupabaseClient): Promise<Set<number>> {
+  const out = new Set<number>();
+  const { data, error } = await supabase
+    .from("pool_events")
+    .select("applicant_id")
+    .eq("event_type", "suntop_done");
+  if (error) {
+    console.error("[exposure] suntop set fetch failed", error);
+    return out;
+  }
+  for (const r of data ?? []) {
+    const id = (r as { applicant_id: number | null }).applicant_id;
+    if (typeof id === "number") out.add(id);
+  }
+  return out;
+}
+
+/**
+ * 규칙 평가용 지원자 전량 로드(id·name·sido·availability·applied_at·created_at + suntopDone 주입).
+ * 페이지네이션·정렬 필수(PostgREST 행 상한/무정렬 누락 방지 — tms-sync 패턴).
+ */
+export async function fetchApplicantsForExposure(
+  supabase: SupabaseClient
+): Promise<(ExposureApplicant & { name: string | null })[]> {
+  const suntop = await fetchSuntopDoneSet(supabase);
+  const out: (ExposureApplicant & { name: string | null })[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("applicants")
+      .select("id, name, sido, availability, applied_at, created_at")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
+    const batch = data ?? [];
+    for (const r of batch) {
+      const row = r as {
+        id: number;
+        name: string | null;
+        sido: string | null;
+        availability: string | null;
+        applied_at: string | null;
+        created_at: string | null;
+      };
+      out.push({ ...row, suntopDone: suntop.has(row.id) });
+    }
+    if (batch.length < 1000) break;
+  }
+  return out;
+}

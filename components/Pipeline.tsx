@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
 import { useSearchParams } from "next/navigation";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye } from "lucide-react";
 import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -348,9 +348,9 @@ export function Pipeline() {
   const loadApplicants = () => { void mutateApplicants(); };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
-  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
+  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
-  const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null })), [visibleJobs]);
+  const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null, exposure: j.exposure ?? "all" })), [visibleJobs]);
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
 
   // 캠페인 퍼널 보드 — 퍼널 뷰에서만 조회(조건부 key). 기간(7/14/30일)은 캠페인 코호트 윈도우.
@@ -546,6 +546,41 @@ export function Pipeline() {
   // 세그먼트 → 공고 타겟 전환: 선택된 지원자를 공고 후보로 일괄 추가
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
   const [addingJobId, setAddingJobId] = useState<number | null>(null);
+
+  // J 타겟 노출 — 선택 인원을 여러 공고의 노출 대상(include/exclude)으로 한 번에 배정.
+  // 후보 추가(job_candidates)와 별개 레이어: 노출은 '공고를 보여줄 사람'일 뿐 스크리닝 후보가 아니다.
+  const [exposurePickerOpen, setExposurePickerOpen] = useState(false);
+  const [exposureJobIds, setExposureJobIds] = useState<Set<number>>(new Set());
+  const [exposureMode, setExposureMode] = useState<"include" | "exclude">("include");
+  const [exposureSaving, setExposureSaving] = useState(false);
+
+  const assignExposure = async () => {
+    const applicantIds = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
+    const jobIds = Array.from(exposureJobIds);
+    if (applicantIds.length === 0 || jobIds.length === 0 || exposureSaving) return;
+    setExposureSaving(true);
+    try {
+      const res = await fetch("/api/admin/exposure/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_ids: jobIds, applicant_ids: applicantIds, mode: exposureMode }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json.error || "노출 배정에 실패했어요");
+        return;
+      }
+      const nonTargeted: number[] = json.non_targeted ?? [];
+      toast.success(
+        `${applicantIds.length}명을 공고 ${jobIds.length}개에 ${exposureMode === "include" ? "노출 대상으로 추가" : "노출 제외로 지정"}했어요` +
+          (nonTargeted.length > 0 ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)` : "")
+      );
+      setExposurePickerOpen(false);
+      setExposureJobIds(new Set());
+    } finally {
+      setExposureSaving(false);
+    }
+  };
 
   const addSelectedToJob = async (jobId: number) => {
     const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
@@ -1408,6 +1443,9 @@ export function Pipeline() {
                     <button onClick={() => setJobPickerOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Briefcase size={16} /> 공고 후보로 추가
                     </button>
+                    <button onClick={() => setExposurePickerOpen(true)} title="지정 노출 공고의 노출 대상(맞춤링크에 공고를 보여줄 사람)으로 추가/제외 — 후보 등록과 별개" className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
+                      <Eye size={16} /> 노출 대상 지정
+                    </button>
                     <button onClick={() => setBulkMsgModalOpen(true)} className="bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all shadow-md">
                       <MessageCircle size={16} /> 알림톡/문자 캠페인 발송
                     </button>
@@ -1691,6 +1729,75 @@ export function Pipeline() {
             </div>
             <div className="px-5 py-3 border-t border-[#E2E8F0] text-[11.5px] text-[#A0AEC0]">
               추가 후 공고 상세에서 일괄 스크리닝 문자를 발송할 수 있어요.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* J 타겟 노출 — 선택 인원 × 다중 공고 일괄 노출 추가/제외 (후보 등록과 별개 레이어) */}
+      {exposurePickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setExposurePickerOpen(false)}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[460px] max-h-[80vh] flex flex-col border border-[#E2E8F0]">
+            <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-start justify-between">
+              <div>
+                <h2 className="text-[16px] font-bold text-[#1A202C]">노출 대상 지정</h2>
+                <div className="text-[12.5px] text-[#718096] mt-0.5">선택된 {selectedRows.size}명을 어느 공고의 노출 대상으로 할까요? (여러 공고 선택 가능)</div>
+              </div>
+              <button onClick={() => setExposurePickerOpen(false)} className="p-1.5 hover:bg-[#EDF2F7] rounded-lg text-[#A0AEC0]"><X size={18} /></button>
+            </div>
+            <div className="px-6 py-3 border-b border-[#F1F4F8] flex items-center gap-2">
+              {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
+                <button
+                  key={m}
+                  onClick={() => setExposureMode(m)}
+                  className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${
+                    exposureMode === m
+                      ? m === "include" ? "bg-[#1A202C] text-white border-[#1A202C]" : "bg-[#C53030] text-white border-[#C53030]"
+                      : "bg-white text-[#4A5568] border-[#E2E8F0] hover:border-[#CBD5E0]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="text-[11.5px] text-[#A0AEC0]">제외는 규칙보다 우선해요</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {activeJobs.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">진행 중인 공고가 없어요</div>}
+              {activeJobs.map((j) => {
+                const on = exposureJobIds.has(j.id);
+                return (
+                  <button
+                    key={j.id}
+                    onClick={() => setExposureJobIds((prev) => { const next = new Set(prev); if (next.has(j.id)) next.delete(j.id); else next.add(j.id); return next; })}
+                    className={`w-full text-left flex items-center gap-3 p-3.5 rounded-xl border transition-all ${on ? "border-[#1A202C] ring-1 ring-[#1A202C] bg-[#F7FAFC]" : "border-[#E2E8F0] hover:border-[#CBD5E0]"}`}
+                  >
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#1A202C] border-[#1A202C]" : "border-[#CBD5E0]"}`}>
+                      {on && <Check size={12} className="text-white" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-bold text-[#1A202C] truncate">{j.title}</div>
+                      {j.branch && <div className="text-[12px] text-[#718096]">{j.branch}</div>}
+                    </div>
+                    {j.exposure === "targeted" ? (
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] shrink-0">지정 노출</span>
+                    ) : (
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#A0AEC0] shrink-0" title="현재 전체 노출 — 배정은 저장되지만, 공고를 '지정 노출'로 바꿔야 배정이 효력을 가져요">전체 노출</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-5 py-3.5 border-t border-[#E2E8F0] flex items-center justify-between gap-3">
+              <span className="text-[11.5px] text-[#A0AEC0]">노출 대상은 후보 등록이 아니에요 — 맞춤링크에 공고가 보일 뿐, 배정·확정이 아닙니다.</span>
+              <button
+                onClick={assignExposure}
+                disabled={exposureSaving || exposureJobIds.size === 0}
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 transition-colors"
+              >
+                {exposureSaving ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
+                {exposureMode === "include" ? "노출 추가" : "노출 제외"} ({exposureJobIds.size})
+              </button>
             </div>
           </div>
         </div>

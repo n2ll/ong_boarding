@@ -10,6 +10,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
+import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
 
 interface JobRow {
   id: string;
@@ -20,6 +21,8 @@ interface JobRow {
   role: string;
   status: "active" | "closed";
   recruitMode: RecruitMode;
+  // 지정 노출(targeted) 여부 — 카드 '지정 노출' 배지.
+  targetedExposure: boolean;
   candidates: number;
   newCandidates: number;
   confirmed: number;
@@ -46,6 +49,8 @@ interface ApiJob {
   client_id: number | null;
   status: string;
   recruit_mode: string | null;
+  exposure?: string | null;
+  exposure_rule?: unknown;
   vehicle_required: boolean;
   capacity: number | null;
   created_at: string;
@@ -258,6 +263,8 @@ function toJobRow(j: ApiJob): JobRow {
     role: j.vehicle_required ? "배송원" : "도보 배달",
     status: j.status === "active" ? "active" : "closed",
     recruitMode: asRecruitMode(j.recruit_mode),
+    // 지정 노출 여부 — 카드 배지용. 미지 값은 안전 방향(전체 노출 취급 아님 — 배지만 안 띄움).
+    targetedExposure: j.exposure === "targeted",
     candidates: total,
     // "sent"는 agent_stage NULL의 집계 키(관심 표시·미발송 등 AI 응대 시작 전).
     // 키를 바꾸면 jobs/[id] GET·Recommendations 등 다른 소비처가 깨져 키는 유지하고 라벨만 정합.
@@ -353,11 +360,13 @@ export function Jobs() {
   const [newJobPolicyNotes, setNewJobPolicyNotes] = useState("");
   const [newJobAiFacts, setNewJobAiFacts] = useState("");
   const [newJobExtraOpen, setNewJobExtraOpen] = useState(false);
+  // J 타겟 노출 — 노출 범위(전체/지정) + 자동 규칙 draft. 등록 POST에 exposure·exposure_rule로 실림.
+  const [newJobExposure, setNewJobExposure] = useState<ExposureDraft>(EMPTY_EXPOSURE);
   // 긴급 건(SOS)에서 넘어온 공고 — 등록 시 sos_request_id로 저장 + 등록 후 '대상 선별' CTA용 권역/차종 보관.
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string } | null>(null);
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string; exposureDraft: ExposureDraft } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -718,6 +727,7 @@ export function Jobs() {
     setNewJobPayInfo("");
     setNewJobPolicyNotes("");
     setNewJobAiFacts("");
+    setNewJobExposure(EMPTY_EXPOSURE);
     setNewJobExtraOpen(false);
     setNewJobSosId(null);
     setNewJobSosRegion(null);
@@ -746,6 +756,11 @@ export function Jobs() {
       setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
       setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
       setNewJobMode(asRecruitMode(j.recruit_mode));
+      // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
+      setNewJobExposure({
+        exposure: j.exposure === "targeted" ? "targeted" : "all",
+        rule: ruleToDraft(j.exposure_rule),
+      });
       setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : 1);
       setNewJobPayType(j.pay_type ?? "");
       setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");
@@ -795,6 +810,8 @@ export function Jobs() {
           branch_id: newJobBranchId === "" ? null : newJobBranchId,
           ...(newJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
           recruit_mode: newJobMode,
+          exposure: newJobExposure.exposure,
+          exposure_rule: draftToRule(newJobExposure.rule),
           capacity: newJobCapacity,
           vehicle_required: newJobVehicleRequired,
           pay_type: newJobPayType || null,
@@ -870,7 +887,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "" });
+    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -900,6 +917,10 @@ export function Jobs() {
         startDate: j.start_date ?? "",
         pickupAddress: j.pickup_address ?? "",
         dropoffAddress: j.dropoff_address ?? "",
+        exposureDraft: {
+          exposure: j.exposure === "targeted" ? "targeted" : "all",
+          rule: ruleToDraft(j.exposure_rule),
+        },
       });
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -943,6 +964,8 @@ export function Jobs() {
           pay_amount: editForm.payAmount === "" ? null : Number(editForm.payAmount),
           ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
+          exposure: editForm.exposureDraft.exposure,
+          exposure_rule: draftToRule(editForm.exposureDraft.rule),
           work_period: editForm.workPeriod || null,
           closes_at: editForm.closesAt ? new Date(editForm.closesAt).toISOString() : null,
           slot: editForm.slot || null,
@@ -1340,6 +1363,9 @@ export function Jobs() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</span>
                     <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
+                    {job.targetedExposure && (
+                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
+                    )}
                   </div>
                   {job.capacity > 0 && (() => {
                     const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
@@ -1679,6 +1705,10 @@ export function Jobs() {
                           <textarea value={newJobAiFacts} onChange={(e) => setNewJobAiFacts(e.target.value)} rows={3} placeholder="예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
                         </div>
                       </div>
+                      {/* J 타겟 노출 — internal/both일 때만 의미(맞춤링크 노출 채널). external은 게시 링크 유통이라 비노출. */}
+                      {newJobMode !== "external" && (
+                        <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -1872,6 +1902,14 @@ export function Jobs() {
                     })}
                   </div>
                 </div>
+                {/* J 타겟 노출 — internal/both일 때만(맞춤링크 노출 채널). external은 게시 링크 유통이라 비노출. */}
+                {editForm.recruitMode !== "external" && (
+                  <ExposureEditor
+                    value={editForm.exposureDraft}
+                    onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
+                    jobId={Number(editForm.id)}
+                  />
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 기간</label>

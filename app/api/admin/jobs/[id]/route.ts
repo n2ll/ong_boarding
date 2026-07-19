@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
+import { normalizeRule } from "@/lib/exposure";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -32,6 +33,9 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "site_manager_id",
   "work_period",
   "closes_at",
+  // J 타겟 노출 — 노출 범위(all/targeted) + 자동 노출 규칙(jsonb)
+  "exposure",
+  "exposure_rule",
 ]);
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -109,6 +113,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     !["건당", "일당", "주급", "월급", "혼합", "협의"].includes(update.pay_type)
   ) {
     return NextResponse.json({ error: "pay_type 값이 잘못되었습니다." }, { status: 400 });
+  }
+  if (
+    "exposure" in update &&
+    (typeof update.exposure !== "string" || !["all", "targeted"].includes(update.exposure))
+  ) {
+    return NextResponse.json({ error: "exposure 값이 잘못되었습니다." }, { status: 400 });
+  }
+  // exposure_rule — 알 수 없는 키·타입은 정규화로 제거해 저장(쓰레기 규칙이 노출 판정을 오염하지 않게).
+  if ("exposure_rule" in update) {
+    update.exposure_rule = normalizeRule(update.exposure_rule);
   }
   if (update.pay_type === "") update.pay_type = null;
   if (
