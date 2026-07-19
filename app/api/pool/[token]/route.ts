@@ -93,9 +93,16 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     .map((j) => j.id as number);
   let exOverrides = new Map<number, ExposureMode>();
   let exSuntopDone = false;
+  let exGateFailed = false;
   if (targetedJobIds.length > 0) {
-    exOverrides = await fetchOverridesForApplicant(supabase, applicant.id as number, targetedJobIds);
-    exSuntopDone = await fetchSuntopDone(supabase, applicant.id as number);
+    try {
+      exOverrides = await fetchOverridesForApplicant(supabase, applicant.id as number, targetedJobIds);
+      exSuntopDone = await fetchSuntopDone(supabase, applicant.id as number);
+    } catch (e) {
+      // 판정 재료 조회 실패 — exclude를 무시(fail-open)하면 안 되므로 targeted 전부 숨김(fail-closed).
+      console.error("[pool GET] exposure gate load failed — targeted 공고 숨김(fail-closed)", e);
+      exGateFailed = true;
+    }
   }
   const exApplicant: ExposureApplicant = {
     id: applicant.id as number,
@@ -107,6 +114,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   };
   const jobExposed = (j: { id: number; exposure?: string; exposure_rule?: unknown }) => {
     if (j.exposure !== "targeted") return true; // 전체 노출은 항상
+    if (exGateFailed) return false; // 판정 불가 시 숨김(fail-closed)
     return isExposed(exApplicant, normalizeRule(j.exposure_rule), exOverrides.get(j.id));
   };
 

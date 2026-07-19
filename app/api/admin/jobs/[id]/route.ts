@@ -121,8 +121,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "exposure 값이 잘못되었습니다." }, { status: 400 });
   }
   // exposure_rule — 알 수 없는 키·타입은 정규화로 제거해 저장(쓰레기 규칙이 노출 판정을 오염하지 않게).
+  // 단 '내용이 있는데' 전부 무효(예: sido가 배열 아닌 문자열)면 기존 규칙을 조용히 지우는 대신 400 —
+  // 형식 오류가 200 OK로 규칙 소거가 되면 안 된다. null/{}는 정상적인 '규칙 없음'.
   if ("exposure_rule" in update) {
-    update.exposure_rule = normalizeRule(update.exposure_rule);
+    const raw = update.exposure_rule;
+    const normalized = normalizeRule(raw);
+    const rawHasContent =
+      raw != null && (typeof raw !== "object" || Object.keys(raw as Record<string, unknown>).length > 0);
+    if (normalized === null && rawHasContent) {
+      return NextResponse.json({ error: "exposure_rule 형식이 잘못되었습니다." }, { status: 400 });
+    }
+    update.exposure_rule = normalized;
   }
   if (update.pay_type === "") update.pay_type = null;
   if (

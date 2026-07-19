@@ -3,8 +3,8 @@
  *
  * 유효 노출 = (규칙 매칭 ∪ 수동 include) − 수동 exclude. lib/exposure.ts 판정과 동일 소스.
  * 응답: { exposure, rule, effective: [{id,name,via:'rule'|'include'|'both'}], excluded: [{id,name,via}], counts }
- *   - excluded = exclude 오버라이드로 빠진 사람 중 '원래 노출됐을' 사람만(규칙 매칭 or include 보유)
- *     — 매니저가 "누굴 제외해뒀는지"를 복원 판단과 함께 볼 수 있게.
+ *   - excluded = exclude 오버라이드 전원(규칙 매칭 여부 무관) — 숨기면 복원 경로가 사라진다.
+ *     via는 '제외가 없었다면 어떤 근거로 노출됐을지' 참고 표시(rule=규칙 매칭, include=비매칭).
  * 어드민 미들웨어 인증.
  */
 
@@ -67,8 +67,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     const via: "rule" | "include" | "both" | null =
       ruleHit && ov === "include" ? "both" : ov === "include" ? "include" : ruleHit ? "rule" : null;
     if (ov === "exclude") {
-      // 원래 노출됐을 사람만 '제외됨' 목록에 — 그 외 exclude 행은 사실상 no-op이라 노이즈 제거.
-      if (ruleHit) excluded.push({ id: a.id, name: a.name, via: "rule" });
+      // exclude 행은 전부 '제외됨' 목록에 — 규칙 비매칭이어도 숨기면 매니저가 복원할 방법이 없다
+      // (수동 include였다가 제외된 사람이 양쪽 목록에서 증발하는 사고 방지).
+      excluded.push({ id: a.id, name: a.name, via: ruleHit ? "rule" : "include" });
       continue;
     }
     if (via) effective.push({ id: a.id, name: a.name, via });

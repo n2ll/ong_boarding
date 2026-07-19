@@ -33,8 +33,11 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const out: ExposureRule = {};
+  // 배열은 중복 제거 + 원소 100자·50개 상한 — 거대 jsonb가 그대로 저장되는 것 방지.
   const strArr = (v: unknown) =>
-    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : undefined;
+    Array.isArray(v)
+      ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.trim() !== "" && x.length <= 100))].slice(0, 50)
+      : undefined;
   const sido = strArr(r.sido);
   const availability = strArr(r.availability);
   if (sido && sido.length) out.sido = sido;
@@ -77,7 +80,11 @@ export function isExposed(
   return matchesRule(a, rule, nowMs);
 }
 
-/** 특정 지원자의 job별 수동 오버라이드 조회 — Map<job_id, mode>. */
+/**
+ * 특정 지원자의 job별 수동 오버라이드 조회 — Map<job_id, mode>.
+ * 에러는 던진다 — 조용한 빈 Map은 exclude 오버라이드를 무시해 'exclude 최우선' 불변식이
+ * fail-open으로 깨진다. 호출부는 실패 시 targeted 공고를 숨기는 방향(fail-closed)으로 처리할 것.
+ */
 export async function fetchOverridesForApplicant(
   supabase: SupabaseClient,
   applicantId: number,
@@ -90,10 +97,7 @@ export async function fetchOverridesForApplicant(
     .select("job_id, mode")
     .eq("applicant_id", applicantId)
     .in("job_id", jobIds);
-  if (error) {
-    console.error("[exposure] overrides fetch failed", error);
-    return out;
-  }
+  if (error) throw new Error(`[exposure] overrides fetch failed: ${error.message}`);
   for (const r of data ?? []) {
     const row = r as { job_id: number; mode: ExposureMode };
     out.set(row.job_id, row.mode);
@@ -113,20 +117,27 @@ export async function fetchSuntopDone(supabase: SupabaseClient, applicantId: num
   return Boolean(data);
 }
 
-/** 선탑 완료자 applicant_id 전체 집합 — 규칙 미리보기·유효 명단의 배치 평가용. */
+/**
+ * 선탑 완료자 applicant_id 전체 집합 — 규칙 미리보기·유효 명단의 배치 평가용.
+ * 페이지네이션·정렬 필수(PostgREST 행 상한 절단 시 admin 판정이 pull 단건 판정과 어긋난다).
+ * 에러는 던진다 — 조용한 빈 집합은 suntop 규칙 명단을 통째로 0으로 보이게 한다.
+ */
 export async function fetchSuntopDoneSet(supabase: SupabaseClient): Promise<Set<number>> {
   const out = new Set<number>();
-  const { data, error } = await supabase
-    .from("pool_events")
-    .select("applicant_id")
-    .eq("event_type", "suntop_done");
-  if (error) {
-    console.error("[exposure] suntop set fetch failed", error);
-    return out;
-  }
-  for (const r of data ?? []) {
-    const id = (r as { applicant_id: number | null }).applicant_id;
-    if (typeof id === "number") out.add(id);
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("pool_events")
+      .select("applicant_id")
+      .eq("event_type", "suntop_done")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`[exposure] suntop set fetch failed: ${error.message}`);
+    const batch = data ?? [];
+    for (const r of batch) {
+      const id = (r as { applicant_id: number | null }).applicant_id;
+      if (typeof id === "number") out.add(id);
+    }
+    if (batch.length < 1000) break;
   }
   return out;
 }

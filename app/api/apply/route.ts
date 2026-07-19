@@ -339,11 +339,15 @@ export async function POST(req: NextRequest) {
       try {
         const { data: job } = await supabase
           .from("jobs")
-          .select("id, title")
+          .select("id, title, exposure")
           .eq("id", realJobId)
           .maybeSingle();
-        // 시스템 공고(__ 접두)는 제외
-        const isRealJob = job && !(typeof job.title === "string" && job.title.startsWith("__"));
+        // 시스템 공고(__ 접두)·지정 노출(targeted) 공고는 제외 — targeted는 공개 지원 표면에서
+        // 대상 검증이 불가하므로 후보 연결하지 않는다(지원서 자체는 인재풀로 정상 접수됨).
+        const isRealJob =
+          job &&
+          !(typeof job.title === "string" && job.title.startsWith("__")) &&
+          (job as { exposure?: string | null }).exposure !== "targeted";
         if (isRealJob) {
           const now = new Date().toISOString();
           await supabase.from("job_candidates").upsert(

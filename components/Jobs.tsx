@@ -757,10 +757,15 @@ export function Jobs() {
       setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
       setNewJobMode(asRecruitMode(j.recruit_mode));
       // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
+      const dupRule = ruleToDraft(j.exposure_rule);
       setNewJobExposure({
         exposure: j.exposure === "targeted" ? "targeted" : "all",
-        rule: ruleToDraft(j.exposure_rule),
+        rule: dupRule,
       });
+      // 수동 명단 전용(규칙 없는) 지정 노출 공고를 복제하면 노출 0명 공고가 될 수 있어 경고.
+      if (j.exposure === "targeted" && !draftToRule(dupRule)) {
+        toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
+      }
       setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : 1);
       setNewJobPayType(j.pay_type ?? "");
       setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");

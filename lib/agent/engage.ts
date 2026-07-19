@@ -26,6 +26,13 @@ import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
 import { haversineKm } from "../kakao-geocode";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
+import {
+  isExposed,
+  normalizeRule,
+  fetchOverridesForApplicant,
+  fetchSuntopDone,
+  type ExposureApplicant,
+} from "../exposure";
 
 /** messages.sent_by 값 — 이 공고로 자동 안내(첫 문자·대기 안내)를 이미 보냈는지 중복 판정에 쓴다. */
 export const ENGAGE_SENT_BY = "agent-engage";
@@ -333,6 +340,8 @@ export async function pickJobForCampaignReply(
     title: string;
     status: string | null;
     closes_at: string | null;
+    exposure: string | null;
+    exposure_rule: unknown;
     pickup_lat: number | null;
     pickup_lng: number | null;
     dropoff_lat: number | null;
@@ -340,7 +349,7 @@ export async function pickJobForCampaignReply(
   };
   const { data: jobRows, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    .select("id, title, status, closes_at, exposure, exposure_rule, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
     .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(200);
@@ -348,9 +357,40 @@ export async function pickJobForCampaignReply(
     console.error("[engage] campaign-reply jobs load failed", jobsErr);
     return null;
   }
-  const jobs = ((jobRows ?? []) as JobRow[]).filter(
+  let jobs = ((jobRows ?? []) as JobRow[]).filter(
     (j) => !isSystemJobTitle(j.title) && !isJobEffectivelyClosed(j.status, j.closes_at)
   );
+
+  // 지정 노출(targeted) 게이트 — 노출 대상이 아닌 공고로 자동 편입하면 AI 문자로 공고 상세가
+  // 미대상에게 새는 우회 경로가 된다(pull 게이팅과 동일 판정). 판정 실패 시 targeted 전부 제외(fail-closed).
+  if (jobs.some((j) => j.exposure === "targeted")) {
+    try {
+      const { data: appRow } = await supabase
+        .from("applicants")
+        .select("sido, availability, applied_at, created_at")
+        .eq("id", applicant.id)
+        .maybeSingle();
+      const targetedIds = jobs.filter((j) => j.exposure === "targeted").map((j) => j.id);
+      const [overrides, suntopDone] = await Promise.all([
+        fetchOverridesForApplicant(supabase, applicant.id, targetedIds),
+        fetchSuntopDone(supabase, applicant.id),
+      ]);
+      const exA: ExposureApplicant = {
+        id: applicant.id,
+        sido: (appRow as { sido?: string | null } | null)?.sido ?? null,
+        availability: (appRow as { availability?: string | null } | null)?.availability ?? null,
+        applied_at: (appRow as { applied_at?: string | null } | null)?.applied_at ?? null,
+        created_at: (appRow as { created_at?: string | null } | null)?.created_at ?? null,
+        suntopDone,
+      };
+      jobs = jobs.filter(
+        (j) => j.exposure !== "targeted" || isExposed(exA, normalizeRule(j.exposure_rule), overrides.get(j.id))
+      );
+    } catch (e) {
+      console.error("[engage] campaign-reply exposure gate failed — targeted 공고 제외(fail-closed)", e);
+      jobs = jobs.filter((j) => j.exposure !== "targeted");
+    }
+  }
   if (jobs.length === 0) return null;
 
   // ① 관심 클릭 이력(stage NULL 후보) — 지원자가 직접 고른 공고가 최우선(최신순)

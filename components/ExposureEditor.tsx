@@ -113,16 +113,20 @@ export function ExposureEditor({
   const ruleJson = useMemo(() => JSON.stringify(draftToRule(value.rule)), [value.rule]);
   const previewSeq = useRef(0);
   useEffect(() => {
+    // 매 실행마다 seq 증가 — 규칙을 비우거나 targeted를 끄는 early-return 경로도
+    // in-flight 응답을 무효화해야 stale 카운트·스피너 고착이 없다.
+    const seq = ++previewSeq.current;
     if (!targeted) {
       setPreview(null);
+      setPreviewLoading(false);
       return;
     }
     const rule = JSON.parse(ruleJson);
     if (!rule) {
       setPreview(null);
+      setPreviewLoading(false);
       return;
     }
-    const seq = ++previewSeq.current;
     setPreviewLoading(true);
     const timer = setTimeout(() => {
       fetch("/api/admin/exposure", {
@@ -156,24 +160,29 @@ export function ExposureEditor({
   );
   const [rosterBusy, setRosterBusy] = useState(false);
 
-  const overrideCall = async (applicantId: number, action: "exclude" | "restore") => {
+  // 제외의 두 갈래: 순수 수동 include(via='include')는 행 삭제(DELETE)로 되돌린다 — exclude로
+  // 덮어쓰면 include 이력이 소실돼 복원이 불가능해진다. 규칙 매칭(rule/both)은 exclude 오버라이드.
+  const overrideCall = async (applicantId: number, action: "exclude" | "remove-include" | "restore") => {
     if (!jobId || rosterBusy) return;
     setRosterBusy(true);
     try {
+      const isDelete = action !== "exclude";
       const res = await fetch("/api/admin/exposure/bulk", {
-        method: action === "exclude" ? "POST" : "DELETE",
+        method: isDelete ? "DELETE" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           job_ids: [jobId],
           applicant_ids: [applicantId],
-          ...(action === "exclude" ? { mode: "exclude" } : {}),
+          ...(isDelete ? {} : { mode: "exclude" }),
         }),
       });
       if (!res.ok) {
-        toast.error(action === "exclude" ? "제외에 실패했어요" : "복원에 실패했어요");
+        toast.error(action === "restore" ? "복원에 실패했어요" : "제외에 실패했어요");
         return;
       }
-      toast.success(action === "exclude" ? "이 공고에서 제외했어요" : "제외를 해제했어요");
+      toast.success(
+        action === "restore" ? "제외를 해제했어요" : action === "remove-include" ? "수동 추가를 해제했어요" : "이 공고에서 제외했어요"
+      );
       await mutateRoster();
     } finally {
       setRosterBusy(false);
@@ -259,7 +268,8 @@ export function ExposureEditor({
                 value={value.rule.cohortMonths}
                 onChange={(e) => {
                   const n = Number(e.target.value);
-                  setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.floor(n) });
+                  // 120 초과는 normalizeRule이 조용히 버리므로 입력 단계에서 클램프(표시-저장 불일치 방지)
+                  setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
                 }}
                 placeholder="없음"
                 className="w-16 bg-white border border-[#E2E8F0] rounded-lg px-2 py-1 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]"
@@ -317,8 +327,9 @@ export function ExposureEditor({
                       <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{VIA_LABEL[p.via]}</span>
                       <button
                         type="button"
-                        onClick={() => overrideCall(p.id, "exclude")}
+                        onClick={() => overrideCall(p.id, p.via === "include" ? "remove-include" : "exclude")}
                         disabled={rosterBusy}
+                        title={p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
                         className="ml-auto flex items-center gap-1 text-[11px] font-bold text-[#C53030] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
                       >
                         <UserX size={11} /> 제외

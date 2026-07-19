@@ -62,8 +62,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "대상 실공고가 없습니다." }, { status: 400 });
   }
 
+  // 존재하는 지원자만 — 삭제된 id가 섞이면 FK 위반으로 배치 전체가 죽는다.
+  const { data: appRows, error: appErr } = await supabase
+    .from("applicants")
+    .select("id")
+    .in("id", applicantIds);
+  if (appErr) {
+    console.error("[exposure bulk] applicants check failed", appErr);
+    return NextResponse.json({ error: "지원자 확인 실패" }, { status: 500 });
+  }
+  const validApplicantIds = (appRows ?? []).map((r) => (r as { id: number }).id);
+  if (validApplicantIds.length === 0) {
+    return NextResponse.json({ error: "대상 지원자가 없습니다." }, { status: 400 });
+  }
+
   const rows = jobs.flatMap((j) =>
-    applicantIds.map((aid) => ({ job_id: j.id, applicant_id: aid, mode, added_by: "manager" }))
+    validApplicantIds.map((aid) => ({ job_id: j.id, applicant_id: aid, mode, added_by: "manager" }))
   );
   // 같은 (job,applicant) 조합이 이미 있으면 mode를 덮어쓴다(include↔exclude 전환).
   const { error } = await supabase
@@ -80,6 +94,9 @@ export async function POST(req: NextRequest) {
     pairs: rows.length,
     jobs: jobs.map((j) => ({ id: j.id, title: j.title })),
     non_targeted: jobs.filter((j) => j.exposure !== "targeted").map((j) => j.id),
+    // 걸러진 것들 — 조용한 부분 성공으로 보이지 않게 명시(호출부가 안내 표시).
+    skipped_applicants: applicantIds.length - validApplicantIds.length,
+    skipped_jobs: jobIds.length - jobs.length,
   });
 }
 
