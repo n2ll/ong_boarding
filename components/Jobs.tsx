@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
+import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -452,6 +452,13 @@ export function Jobs() {
   // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
   const dispatchUnsent = async () => {
     if (!candPanel) return;
+    // 실제 SMS 대량 발송 — 확인 없이 원클릭이면 오클릭 사고. 같은 화면의 마감/새공고 안내처럼 확인 거친다.
+    const ok = await confirm({
+      title: `미발송 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
+      description: "이 공고의 미발송 후보 전원에게 공고 본문 문자가 즉시 발송돼요. 되돌릴 수 없어요.",
+      confirmText: "발송",
+    });
+    if (!ok) return;
     setDispatching(true);
     try {
       const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/dispatch`, {
@@ -636,11 +643,13 @@ export function Jobs() {
   }, [searchParams, router]);
 
   // 공고 목록은 SWR 캐시로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 loadJobs(=mutate)로.
-  const { data: jobsApi, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const { data: jobsApi, error: jobsError, isLoading: jobsLoading, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
   const jobs = useMemo(
     () => (jobsApi?.jobs ?? []).filter((j) => !isSystemJobTitle(j.title)).map(toJobRow),
     [jobsApi]
   );
+  // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
+  const jobsFirstLoad = jobsLoading && !jobsApi;
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
 
   // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
@@ -732,6 +741,22 @@ export function Jobs() {
     setNewJobSosId(null);
     setNewJobSosRegion(null);
     setNewJobSosVehicle(null);
+  };
+
+  // 등록 모달 닫기 — 작성 중(AI 초안 생성됨)이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
+  // 통째 사라지던 문제 방지. channelDrafts 유무를 '작업 있음' 프록시로 사용.
+  const closeRegisterModal = async () => {
+    if (channelDrafts) {
+      const ok = await confirm({
+        title: "작성 중인 내용을 버릴까요?",
+        description: "생성한 AI 초안과 입력한 내용이 모두 사라져요. 등록하지 않고 닫으면 복구할 수 없어요.",
+        confirmText: "버리고 닫기",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    setAiModalOpen(false);
+    resetNewJobForm();
   };
 
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
@@ -997,7 +1022,9 @@ export function Jobs() {
   };
 
   const handleToggleClose = async (job: JobRow) => {
-    if (job.status === "active") {
+    // 실질 마감(effectivelyClosed) 기준으로 분기 — status='active'라도 마감시각이 지났으면 이미
+    // 마감 상태라, 이 버튼은 '재개'여야 한다(예전엔 raw status로 판단해 이미 마감된 걸 또 마감).
+    if (!job.effectivelyClosed) {
       // 마감 확인은 전용 모달 — 마감이 "떨어진 분들이 아무 연락도 못 받는" 순간이 되지 않게
       // 미선발 관심자 안내 발송 체크박스(기본 ON)와 문구 미리보기를 함께 보여준다.
       setCloseModal({ job, targets: [], loading: true, send: true });
@@ -1013,15 +1040,24 @@ export function Jobs() {
       }
       return;
     }
-    // 재개(closed → active)는 기존 확인 다이얼로그 유지.
-    const ok = await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    // 재개 — 마감시각이 지나 있으면 status만 active로 바꿔도 여전히 '실질 마감'이라 재개가 무효다.
+    // 이 경우 마감시각을 함께 해제(closes_at=null)해 정말로 다시 진행되게 한다(수정 모달로 가서
+    // 마감시각을 지워야 하던 숨은 단계 제거).
+    const closesPast = !!job.closesAt && new Date(job.closesAt).getTime() <= Date.now();
+    const ok = await confirm({
+      title: "공고를 다시 진행할까요?",
+      description: closesPast
+        ? `'${job.title}' 공고를 재개합니다. 마감시각이 이미 지나 있어 함께 해제돼요(상시 진행). 필요하면 수정에서 새 마감시각을 정하세요.`
+        : `'${job.title}' 공고를 재개합니다.`,
+      confirmText: "재개하기",
+    });
     if (!ok) return;
     setStatusBusyId(job.id);
     try {
       const res = await fetch(`/api/admin/jobs/${job.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active" }),
+        body: JSON.stringify({ status: "active", ...(closesPast ? { closes_at: null } : {}) }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -1355,7 +1391,26 @@ export function Jobs() {
 
         {/* Table Body */}
         <div className="flex flex-col flex-1">
-          {filteredJobs.length > 0 ? (
+          {jobsError ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
+              <div className="w-16 h-16 bg-[#FFF5F5] rounded-full flex items-center justify-center mb-4">
+                <Briefcase size={24} className="text-[#C53030]" />
+              </div>
+              <h3 className="text-[16px] font-bold text-[#1A202C] mb-2">공고를 불러오지 못했어요</h3>
+              <p className="text-[14px] text-[#718096] mb-6">일시적인 문제일 수 있어요. 다시 시도해주세요.</p>
+              <button
+                onClick={() => mutateJobs()}
+                className="flex items-center gap-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                <RefreshCw size={16} /> 다시 시도
+              </button>
+            </div>
+          ) : jobsFirstLoad ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-[#A0AEC0]">
+              <Loader2 size={28} className="animate-spin mb-3" />
+              <div className="text-[14px] font-bold">공고를 불러오는 중…</div>
+            </div>
+          ) : filteredJobs.length > 0 ? (
             filteredJobs.map(job => (
               <div key={job.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
@@ -1372,7 +1427,9 @@ export function Jobs() {
                       <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
-                  {job.capacity > 0 && (() => {
+                  {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
+                      0/N으로 왜곡 표시되므로 숨긴다(마감 배지가 상태를 대신 전달). */}
+                  {job.capacity > 0 && !job.effectivelyClosed && (() => {
                     const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
                     const done = job.confirmed >= job.capacity;
                     return (
@@ -1489,8 +1546,9 @@ export function Jobs() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
-                  {/* 대기자에게 안내 — 진행 중 공고만(마감 공고에 '새 공고' 문자는 모순). 등록 직후 모달과 같은 모달 재사용. */}
-                  {!job.effectivelyClosed && (
+                  {/* 대기자에게 안내 — 진행 중 + pull 채널 공고(internal·both)만. external은 맞춤링크(pull)에
+                      안 떠서 안내 문자의 링크가 죽은 링크가 되므로 버튼 자체를 숨긴다(게시 링크 규칙과 대칭). */}
+                  {!job.effectivelyClosed && job.recruitMode !== "external" && (
                     <button
                       onClick={() => openAnnounce(job)}
                       disabled={announceBusyId === job.id}
@@ -1515,9 +1573,9 @@ export function Jobs() {
                     onClick={() => handleToggleClose(job)}
                     disabled={statusBusyId === job.id}
                     className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50"
-                    title={job.status === "active" ? "공고 마감" : "공고 재개"}
+                    title={job.effectivelyClosed ? "공고 재개" : "공고 마감"}
                   >
-                    {statusBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : job.status === "active" ? <Pause size={16} /> : <Play size={16} />}
+                    {statusBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : job.effectivelyClosed ? <Play size={16} /> : <Pause size={16} />}
                   </button>
                 </div>
               </div>
@@ -1554,7 +1612,7 @@ export function Jobs() {
                   <p className="text-[13px] text-[#718096] mt-0.5">간단한 조건만 입력하면 시니어에 최적화된 공고 초안을 생성합니다.</p>
                 </div>
               </div>
-              <button onClick={() => { setAiModalOpen(false); resetNewJobForm(); }} className="text-[#A0AEC0] hover:text-[#4A5568] transition-colors">
+              <button onClick={closeRegisterModal} className="text-[#A0AEC0] hover:text-[#4A5568] transition-colors">
                 <X size={24} />
               </button>
             </div>
@@ -1834,7 +1892,7 @@ export function Jobs() {
                 </span>
               )}
               <button
-                onClick={() => { setAiModalOpen(false); resetNewJobForm(); }}
+                onClick={closeRegisterModal}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
               >
                 닫기
@@ -1853,9 +1911,10 @@ export function Jobs() {
         </div>
       )}
 
-      {/* 공고 수정 모달 */}
+      {/* 공고 수정 모달 — backdrop 클릭으로 닫지 않는다(긴 편집 중 오클릭 한 번에 수정분이 소리 없이
+          날아가던 문제). 닫기는 명시적으로 X·취소 버튼으로만. */}
       {editForm && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !editSaving && setEditForm(null)}>
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white w-full max-w-[640px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-7 py-5 border-b border-[#E2E8F0]">
               <h2 className="text-[18px] font-extrabold text-[#1A202C]">공고 수정</h2>
