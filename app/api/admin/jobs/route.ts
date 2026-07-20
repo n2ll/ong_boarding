@@ -195,8 +195,10 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (slot && !["평일오전", "평일오후", "주말오전", "주말오후"].includes(slot)) {
-    return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
+  // slot(근무시간) — 길이만 검증(4-슬롯 enum 강제 제거). internal 정기 라인은 자유 텍스트 입력,
+  // 비마트/배민은 UI select가 4-슬롯을 제약. 서버 enum은 internal 등록을 막던 막다른 길이었음.
+  if (typeof slot === "string" && slot.length > 80) {
+    return NextResponse.json({ error: "근무시간이 너무 깁니다(최대 80자)." }, { status: 400 });
   }
   if (recruit_mode && !RECRUIT_MODES.has(recruit_mode)) {
     return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });

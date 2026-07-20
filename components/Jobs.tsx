@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus } from "lucide-react";
+import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -636,11 +636,13 @@ export function Jobs() {
   }, [searchParams, router]);
 
   // 공고 목록은 SWR 캐시로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 loadJobs(=mutate)로.
-  const { data: jobsApi, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const { data: jobsApi, error: jobsError, isLoading: jobsLoading, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
   const jobs = useMemo(
     () => (jobsApi?.jobs ?? []).filter((j) => !isSystemJobTitle(j.title)).map(toJobRow),
     [jobsApi]
   );
+  // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
+  const jobsFirstLoad = jobsLoading && !jobsApi;
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
 
   // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
@@ -997,7 +999,9 @@ export function Jobs() {
   };
 
   const handleToggleClose = async (job: JobRow) => {
-    if (job.status === "active") {
+    // 실질 마감(effectivelyClosed) 기준으로 분기 — status='active'라도 마감시각이 지났으면 이미
+    // 마감 상태라, 이 버튼은 '재개'여야 한다(예전엔 raw status로 판단해 이미 마감된 걸 또 마감).
+    if (!job.effectivelyClosed) {
       // 마감 확인은 전용 모달 — 마감이 "떨어진 분들이 아무 연락도 못 받는" 순간이 되지 않게
       // 미선발 관심자 안내 발송 체크박스(기본 ON)와 문구 미리보기를 함께 보여준다.
       setCloseModal({ job, targets: [], loading: true, send: true });
@@ -1013,15 +1017,24 @@ export function Jobs() {
       }
       return;
     }
-    // 재개(closed → active)는 기존 확인 다이얼로그 유지.
-    const ok = await confirm({ title: "공고를 다시 진행할까요?", description: `'${job.title}' 공고를 재개합니다.`, confirmText: "재개하기" });
+    // 재개 — 마감시각이 지나 있으면 status만 active로 바꿔도 여전히 '실질 마감'이라 재개가 무효다.
+    // 이 경우 마감시각을 함께 해제(closes_at=null)해 정말로 다시 진행되게 한다(수정 모달로 가서
+    // 마감시각을 지워야 하던 숨은 단계 제거).
+    const closesPast = !!job.closesAt && new Date(job.closesAt).getTime() <= Date.now();
+    const ok = await confirm({
+      title: "공고를 다시 진행할까요?",
+      description: closesPast
+        ? `'${job.title}' 공고를 재개합니다. 마감시각이 이미 지나 있어 함께 해제돼요(상시 진행). 필요하면 수정에서 새 마감시각을 정하세요.`
+        : `'${job.title}' 공고를 재개합니다.`,
+      confirmText: "재개하기",
+    });
     if (!ok) return;
     setStatusBusyId(job.id);
     try {
       const res = await fetch(`/api/admin/jobs/${job.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active" }),
+        body: JSON.stringify({ status: "active", ...(closesPast ? { closes_at: null } : {}) }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -1355,7 +1368,26 @@ export function Jobs() {
 
         {/* Table Body */}
         <div className="flex flex-col flex-1">
-          {filteredJobs.length > 0 ? (
+          {jobsError ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
+              <div className="w-16 h-16 bg-[#FFF5F5] rounded-full flex items-center justify-center mb-4">
+                <Briefcase size={24} className="text-[#C53030]" />
+              </div>
+              <h3 className="text-[16px] font-bold text-[#1A202C] mb-2">공고를 불러오지 못했어요</h3>
+              <p className="text-[14px] text-[#718096] mb-6">일시적인 문제일 수 있어요. 다시 시도해주세요.</p>
+              <button
+                onClick={() => mutateJobs()}
+                className="flex items-center gap-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              >
+                <RefreshCw size={16} /> 다시 시도
+              </button>
+            </div>
+          ) : jobsFirstLoad ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-[#A0AEC0]">
+              <Loader2 size={28} className="animate-spin mb-3" />
+              <div className="text-[14px] font-bold">공고를 불러오는 중…</div>
+            </div>
+          ) : filteredJobs.length > 0 ? (
             filteredJobs.map(job => (
               <div key={job.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
@@ -1372,7 +1404,9 @@ export function Jobs() {
                       <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
-                  {job.capacity > 0 && (() => {
+                  {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
+                      0/N으로 왜곡 표시되므로 숨긴다(마감 배지가 상태를 대신 전달). */}
+                  {job.capacity > 0 && !job.effectivelyClosed && (() => {
                     const pct = Math.min(100, Math.round((job.confirmed / job.capacity) * 100));
                     const done = job.confirmed >= job.capacity;
                     return (
@@ -1515,9 +1549,9 @@ export function Jobs() {
                     onClick={() => handleToggleClose(job)}
                     disabled={statusBusyId === job.id}
                     className="p-2 text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50"
-                    title={job.status === "active" ? "공고 마감" : "공고 재개"}
+                    title={job.effectivelyClosed ? "공고 재개" : "공고 마감"}
                   >
-                    {statusBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : job.status === "active" ? <Pause size={16} /> : <Play size={16} />}
+                    {statusBusyId === job.id ? <Loader2 size={16} className="animate-spin" /> : job.effectivelyClosed ? <Play size={16} /> : <Pause size={16} />}
                   </button>
                 </div>
               </div>

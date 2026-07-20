@@ -95,12 +95,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   ) {
     return NextResponse.json({ error: "status 값이 잘못되었습니다." }, { status: 400 });
   }
-  if (
-    typeof update.slot === "string" &&
-    !["평일오전", "평일오후", "주말오전", "주말오후"].includes(update.slot)
-  ) {
-    return NextResponse.json({ error: "slot 값이 잘못되었습니다." }, { status: 400 });
+  // slot(근무시간) — 길이만 검증. 4-슬롯 enum 강제는 제거: internal 정기 라인은 자유 텍스트로
+  // 근무시간을 입력하고(PR #74 UI), 비마트/배민 라인은 UI가 select로 4-슬롯을 제약하므로
+  // 서버 enum 검증은 internal 등록을 막기만 했다(막다른 길). (값은 표시용 문자열.)
+  if (typeof update.slot === "string" && update.slot.length > 80) {
+    return NextResponse.json({ error: "근무시간이 너무 깁니다(최대 80자)." }, { status: 400 });
   }
+  if (update.slot === "") update.slot = null;
   if (
     typeof update.recruit_mode === "string" &&
     !["external", "internal", "both"].includes(update.recruit_mode)
@@ -163,9 +164,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       update.branch = (b.name as string) ?? update.branch ?? null;
       update.client_id = (b.client_id as number | null) ?? null;
     }
-  } else if (update.branch_id === null) {
-    update.client_id = null;
   }
+  // ⚠️ branch_id === null(지점 미지정)일 때 client_id를 자동으로 null 하지 않는다.
+  // 수정 모달엔 화주사 셀렉트가 없어 branch_id=null이 항상 전송되는데, 예전엔 이때 client_id까지
+  // 지워 '화주사만 귀속' 공고가 제목만 고쳐도 화주사 필터에서 증발했다. 지점을 비워도 화주사는 보존.
 
   // 상차지 주소가 바뀌었고 좌표를 함께 안 넘겼으면 지오코딩 (거리 정렬 근거). 주소를 비우면 좌표도 클리어.
   if (typeof update.pickup_address === "string" && update.pickup_address.trim() && update.pickup_lat === undefined) {
