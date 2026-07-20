@@ -452,6 +452,13 @@ export function Jobs() {
   // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
   const dispatchUnsent = async () => {
     if (!candPanel) return;
+    // 실제 SMS 대량 발송 — 확인 없이 원클릭이면 오클릭 사고. 같은 화면의 마감/새공고 안내처럼 확인 거친다.
+    const ok = await confirm({
+      title: `미발송 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
+      description: "이 공고의 미발송 후보 전원에게 공고 본문 문자가 즉시 발송돼요. 되돌릴 수 없어요.",
+      confirmText: "발송",
+    });
+    if (!ok) return;
     setDispatching(true);
     try {
       const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/dispatch`, {
@@ -734,6 +741,22 @@ export function Jobs() {
     setNewJobSosId(null);
     setNewJobSosRegion(null);
     setNewJobSosVehicle(null);
+  };
+
+  // 등록 모달 닫기 — 작성 중(AI 초안 생성됨)이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
+  // 통째 사라지던 문제 방지. channelDrafts 유무를 '작업 있음' 프록시로 사용.
+  const closeRegisterModal = async () => {
+    if (channelDrafts) {
+      const ok = await confirm({
+        title: "작성 중인 내용을 버릴까요?",
+        description: "생성한 AI 초안과 입력한 내용이 모두 사라져요. 등록하지 않고 닫으면 복구할 수 없어요.",
+        confirmText: "버리고 닫기",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    setAiModalOpen(false);
+    resetNewJobForm();
   };
 
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
@@ -1523,8 +1546,9 @@ export function Jobs() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
-                  {/* 대기자에게 안내 — 진행 중 공고만(마감 공고에 '새 공고' 문자는 모순). 등록 직후 모달과 같은 모달 재사용. */}
-                  {!job.effectivelyClosed && (
+                  {/* 대기자에게 안내 — 진행 중 + pull 채널 공고(internal·both)만. external은 맞춤링크(pull)에
+                      안 떠서 안내 문자의 링크가 죽은 링크가 되므로 버튼 자체를 숨긴다(게시 링크 규칙과 대칭). */}
+                  {!job.effectivelyClosed && job.recruitMode !== "external" && (
                     <button
                       onClick={() => openAnnounce(job)}
                       disabled={announceBusyId === job.id}
@@ -1588,7 +1612,7 @@ export function Jobs() {
                   <p className="text-[13px] text-[#718096] mt-0.5">간단한 조건만 입력하면 시니어에 최적화된 공고 초안을 생성합니다.</p>
                 </div>
               </div>
-              <button onClick={() => { setAiModalOpen(false); resetNewJobForm(); }} className="text-[#A0AEC0] hover:text-[#4A5568] transition-colors">
+              <button onClick={closeRegisterModal} className="text-[#A0AEC0] hover:text-[#4A5568] transition-colors">
                 <X size={24} />
               </button>
             </div>
@@ -1868,7 +1892,7 @@ export function Jobs() {
                 </span>
               )}
               <button
-                onClick={() => { setAiModalOpen(false); resetNewJobForm(); }}
+                onClick={closeRegisterModal}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
               >
                 닫기
@@ -1887,9 +1911,10 @@ export function Jobs() {
         </div>
       )}
 
-      {/* 공고 수정 모달 */}
+      {/* 공고 수정 모달 — backdrop 클릭으로 닫지 않는다(긴 편집 중 오클릭 한 번에 수정분이 소리 없이
+          날아가던 문제). 닫기는 명시적으로 X·취소 버튼으로만. */}
       {editForm && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !editSaving && setEditForm(null)}>
+        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white w-full max-w-[640px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-7 py-5 border-b border-[#E2E8F0]">
               <h2 className="text-[18px] font-extrabold text-[#1A202C]">공고 수정</h2>
