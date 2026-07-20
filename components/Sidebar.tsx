@@ -19,9 +19,11 @@ import {
   // MapPin,
   // LayoutGrid,
   // Shield,
-  Settings
+  Settings,
+  LogOut
 } from "lucide-react";
 import { LogoMark } from "./Logo";
+import { getAuthBrowserClient } from "@/lib/supabase";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -131,7 +133,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 동작 없는 화살표는 제거 */}
+      {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 로그아웃(I-2 Supabase Auth) */}
       <div className="m-3.5 p-3 rounded-xl bg-white/5 flex items-center gap-[11px]">
         <div className="w-[38px] h-[38px] rounded-[10px] bg-[#3C2414] flex items-center justify-center font-bold text-[15px] text-[#FFCB3C] shrink-0">
           옹
@@ -140,6 +142,20 @@ export function Sidebar() {
           <div className="font-semibold text-[14px] leading-tight text-white truncate">옹고잉 채용팀</div>
           <div className="text-[12px] text-white/50 truncate">관리자 콘솔</div>
         </div>
+        <button
+          onClick={async () => {
+            try {
+              await getAuthBrowserClient().auth.signOut();
+            } catch {
+              /* 세션 정리 실패해도 로그인 페이지로 — 미들웨어가 재검증 */
+            }
+            window.location.href = "/login";
+          }}
+          title="로그아웃"
+          className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+        >
+          <LogOut size={16} />
+        </button>
       </div>
     </aside>
   );
