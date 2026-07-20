@@ -83,7 +83,18 @@ export async function middleware(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  // 심층 방어 — ADMIN_ALLOWED_EMAILS(CSV) 설정 시 그 이메일만 허용. 대시보드의 '가입 차단'이
+  // 실수로 풀려도(anon 키는 공개) 임의 가입 계정이 어드민에 들어오지 못한다. 미설정 시 세션만 검사.
+  const allowedEmails = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const emailAllowed =
+    allowedEmails.length === 0
+      ? Boolean(user)
+      : Boolean(user?.email && allowedEmails.includes(user.email.toLowerCase()));
+
+  if (!user || !emailAllowed) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
