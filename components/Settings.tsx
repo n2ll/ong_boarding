@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, Building2 } from "lucide-react";
+import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, Building2, MapPin, Shield } from "lucide-react";
 import { DemoBanner } from "./DemoBanner";
 import { Clients } from "./Clients";
+import { Branches } from "./Branches";
+import { Team } from "./Team";
 
 interface Integration {
   key: string;
@@ -22,9 +24,11 @@ const INTEGRATION_META: Record<string, { name: string; desc: string; badge: stri
 export function Settings() {
   // 실동작인 '외부 연동' 탭을 기본으로 승격 — 프로필/알림/보안은 인증 도입 전 미리보기.
   const [activeTab, setActiveTab] = useState("integrations");
-  // /settings#clients 딥링크 — 다른 화면(예: /shippers 안내 배너)에서 '화주사 관리' 서브탭으로 바로 진입.
+  // /settings#clients|#branches|#team 딥링크 — 다른 화면·공고 폼에서 해당 관리 서브탭으로 바로 진입.
   useEffect(() => {
-    if (typeof window !== "undefined" && window.location.hash === "#clients") setActiveTab("clients");
+    if (typeof window === "undefined") return;
+    const h = window.location.hash;
+    if (h === "#clients" || h === "#branches" || h === "#team") setActiveTab(h.slice(1));
   }, []);
   // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
   const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
@@ -73,12 +77,26 @@ export function Settings() {
           >
             <Building2 size={18} /> 화주사 관리
           </button>
+          <button
+            onClick={() => setActiveTab("branches")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'branches' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <MapPin size={18} /> 지점 관리
+          </button>
+          <button
+            onClick={() => setActiveTab("team")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'team' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <Shield size={18} /> 팀 · 권한
+          </button>
         </div>
 
         {/* Content Area */}
-        {activeTab === 'clients' ? (
+        {(activeTab === 'clients' || activeTab === 'branches' || activeTab === 'team') ? (
           <div className="flex-1 min-w-0">
-            <Clients embedded />
+            {activeTab === 'clients' && <Clients embedded />}
+            {activeTab === 'branches' && <Branches embedded />}
+            {activeTab === 'team' && <Team embedded />}
           </div>
         ) : (
         <div className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-8">
