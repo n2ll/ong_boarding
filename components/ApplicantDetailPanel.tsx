@@ -11,6 +11,7 @@ import useSWR from "swr";
 import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
+import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -70,6 +71,7 @@ interface ApplicantFull {
   confirmed_slot: string | null;
   confirmed_branch: string | null;
   current_branch: string | null;
+  current_job_id: number | null;
   start_date: string | null;
   last_message_at: string | null;
   availability: string | null;
@@ -332,6 +334,8 @@ export function ApplicantDetailContent({
   const [confirmJobId, setConfirmJobId] = useState<number | null>(null);
   const [confirmStartDate, setConfirmStartDate] = useState("");
   const [confirmBranch, setConfirmBranch] = useState("");
+  // 확정 후속 안내 발송 모달 — 어떤 종류(만남장소/첫날규칙/앱안내)를 열지. null=닫힘.
+  const [followup, setFollowup] = useState<FollowupKind | null>(null);
   // 확정 후 옹고잉 앱 설치·가이드 안내 발송 옵션 — 문구는 두뇌 탭 'ongoing_app_guide'에서 관리.
   // 문구가 아직 준비되지 않았을 때 자리표시 문안이 나가지 않도록 기본 꺼짐(문구 설정 후 사용).
   const [confirmSendAppGuide, setConfirmSendAppGuide] = useState(false);
@@ -495,6 +499,9 @@ export function ApplicantDetailContent({
   // 편집 폼은 이 지원자가 연결된 모든 화주사(병행 투입 포함)의 활성 지점 — 확정 화주사가 focus와 달라도 값이 '미등록'으로 오표기되지 않게.
   const editClientIds = new Set(cands.map((c) => c.client_id).filter((id): id is number => id != null));
   const editBranchNames = allBranches.filter((b) => b.active && b.client_id != null && editClientIds.has(b.client_id)).map((b) => b.name);
+  // 후속 안내(만남장소 등) 발송 대상 공고 — 매니저 확정이 결속한 current_job_id(권위 소스, 서버 검증)를 1순위로.
+  // confirmed_at은 에이전트 스크리닝→온보딩 마커라 병행 후보에선 확정 공고와 다를 수 있어 폴백으로만.
+  const confirmedJobId = a.current_job_id ?? (cands.find((c) => c.confirmed_at != null) ?? focusCand)?.job_id ?? null;
 
   const openConfirm = () => {
     setConfirmSlots(
@@ -996,6 +1003,18 @@ export function ApplicantDetailContent({
           onToggle={() => toggleSection("manage", manageOpen)}
         >
           <div className="space-y-3">
+            {/* 확정 후속 안내 — 확정인력에 지속 노출. 확정하면 '확정 대기' 큐에서 빠져 만남장소·첫날규칙 발송 경로가 끊기던 문제(주제 C1) 해소. 발송·문구는 공용 send 라우트(미리보기·편집) 재사용. */}
+            {a.status === "확정인력" && (
+              <div className="rounded-xl border border-[#C6F6D5] bg-[#F0FFF4] p-3">
+                <div className="text-[12px] font-bold text-[#276749] mb-2">확정 후속 안내 발송</div>
+                <div className="flex gap-1.5 flex-wrap">
+                  <button onClick={() => setFollowup("venue")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">만남장소</button>
+                  <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">첫날규칙</button>
+                  <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EDF2F7] text-[#4A5568] border border-[#E2E8F0] hover:bg-[#E2E8F0] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">앱안내</button>
+                </div>
+                <p className="text-[10.5px] text-[#718096] mt-1.5">신입에게 만남장소·첫날 규칙을 발송하세요. 내용은 발송 전 미리보기에서 수정할 수 있어요.</p>
+              </div>
+            )}
             {/* 확정 슬롯(비마트 전용) + 마지막 메시지 시점. internal 라인은 슬롯 개념이 없어 시각만 표시. */}
             {detailInternal ? (
               <div className="flex items-center justify-end">
@@ -1136,6 +1155,19 @@ export function ApplicantDetailContent({
           </div>
         </CollapsibleSection>
       </div>
+
+      {/* 확정 후속 안내 발송 모달 — 미리보기·편집·발송(공용 send 라우트) */}
+      {followup && (
+        <FollowupSendModal
+          applicantId={a.id}
+          applicantName={a.name}
+          jobId={confirmedJobId}
+          kind={followup}
+          defaultStartDate={a.start_date}
+          onClose={() => setFollowup(null)}
+          onSent={reload}
+        />
+      )}
 
       {/* 확정 모달 — 확정 시점에 슬롯을 함께 지정해 슬롯 보드 정확도를 확보 */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
