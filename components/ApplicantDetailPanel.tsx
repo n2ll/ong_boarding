@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import {
   X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle, ChevronDown,
-  Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap,
+  Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap, RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -505,6 +505,34 @@ export function ApplicantDetailContent({
     setConfirmSlots((cur) => (cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot]));
   };
 
+  // 투입 확정 취소 — 잘못된 공고로 확정했을 때 정정. 서버가 공고 결속·확정 필드 해제 + 그 공고 AI 재개.
+  const doUnconfirm = async () => {
+    if (busy) return;
+    const ok = await confirm({
+      title: "투입 확정을 취소할까요?",
+      description: `${a.name}님의 확정을 취소해요. 대상 공고 결속·시작일·확정 지점이 해제되고, 그 공고의 AI 응대가 다시 시작돼요.`,
+      confirmText: "확정 취소",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/applicants/${a.id}/unconfirm`, { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || "확정 취소에 실패했어요");
+        return;
+      }
+      toast.success(`${a.name}님의 투입 확정을 취소했어요.`);
+      await reload();
+      onChanged?.();
+    } catch {
+      toast.error("확정 취소에 실패했어요");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // 확정 대상 공고 선택 시 시작일·지점 기본값도 그 공고 기준으로 갱신.
   const pickConfirmJob = (jid: number) => {
     setConfirmJobId(jid);
@@ -836,7 +864,11 @@ export function ApplicantDetailContent({
           >
             <MessageSquare size={14} /> 맞춤링크
           </button>
-          <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+          {a.status === "확정인력" ? (
+            <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="flex-1 bg-white border border-[#DD6B20] text-[#DD6B20] hover:bg-[#FFFAF0] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
+          ) : (
+            <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+          )}
           <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
         </div>
       </div>
