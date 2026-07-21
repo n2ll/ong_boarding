@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
 /**
- * 어드민 표면 보호 (P0-1b, 임시 공유 비밀번호).
+ * 어드민 표면 보호 (I-2, Supabase Auth 로그인 — Basic Auth 클린 컷).
  *
- * `/(admin)` 대시보드 페이지 + `/api/admin/*`(cron 제외)를 HTTP Basic Auth로 보호한다.
- * 공개로 둬야 하는 경로(지원 폼·공개 API·인입 웹훅·머신 cron)는 통과시킨다.
+ * `/(admin)` 대시보드 페이지 + `/api/admin/*`(cron 제외)를 Supabase 세션(쿠키)으로 보호한다.
+ * 미인증: 페이지 → /login?next=… 리다이렉트, API → 401 JSON.
+ * 공개로 둬야 하는 경로(지원 폼·공개 API·인입 웹훅·머신 cron·/login)는 통과시킨다.
  *
- * 자격증명: env `ADMIN_PASSWORD`(필수), `ADMIN_USER`(선택, 기본 'ongoing').
- * 프로덕션에서 ADMIN_PASSWORD 미설정 시 fail-closed(503). 개발 환경에선 경고 없이 통과.
+ * 쿠키 갱신 규칙(@supabase/ssr 표준): setAll에서 request·response **양쪽**에 기록해야 한다 —
+ * 어기면 세션 갱신이 유실돼 로그아웃 루프가 생긴다.
  *
- * 브라우저는 최초 1회 네이티브 프롬프트로 자격증명을 받고 이후 같은 오리진 요청
- * (페이지 내 fetch 포함)에 자동 첨부하므로 어드민 UI 버튼도 코드 변경 없이 동작한다.
+ * 프로덕션에서 Supabase env 미설정 시 fail-closed(503). 개발 환경은 통과(로컬 편의).
+ * 계정 정책: Supabase 대시보드에서 신규 가입 차단 + 공용 계정만 발급(파일럿 — 감사추적 없음 수용).
  *
- * 참고: `/api/agent/*`, `/api/messages/*` 등 비-admin API는 이 미들웨어 범위 밖이다(별도 처리).
+ * 참고: `/api/agent/*`, `/api/messages/*` 등 비-admin API는 이 미들웨어 범위 밖이다(별도 처리 —
+ * SMS 게이트웨이 인입 등 머신 콜러가 있어 세션을 요구하면 안 된다).
  */
 
 // 공개(비보호) 경로 — 지원자·SMS Gateway·Vercel cron이 접근.
@@ -24,34 +27,7 @@ const PUBLIC_API_PREFIXES = [
   "/api/admin/cron", // 머신 트리거 — 자체 Bearer(CRON_SECRET)로 인증
 ];
 
-function unauthorized(): NextResponse {
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Ongboarding Admin", charset="UTF-8"' },
-  });
-}
-
-function checkBasicAuth(req: NextRequest): boolean {
-  const password = process.env.ADMIN_PASSWORD;
-  if (!password) {
-    // 미설정: 프로덕션은 호출부에서 503으로 차단. 개발 환경은 통과.
-    return process.env.NODE_ENV !== "production";
-  }
-  const user = process.env.ADMIN_USER || "ongoing";
-  const header = req.headers.get("authorization");
-  if (!header?.startsWith("Basic ")) return false;
-  let decoded = "";
-  try {
-    decoded = atob(header.slice(6));
-  } catch {
-    return false;
-  }
-  const idx = decoded.indexOf(":");
-  if (idx < 0) return false;
-  return decoded.slice(0, idx) === user && decoded.slice(idx + 1) === password;
-}
-
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // 정적 자산(확장자 있는 경로)은 통과.
@@ -66,24 +42,69 @@ export function middleware(req: NextRequest) {
     // /api/admin/*(cron 제외)만 보호. 그 외 API는 범위 밖 → 통과.
     if (!pathname.startsWith("/api/admin/")) return NextResponse.next();
   } else {
-    // 페이지: 지원 폼 + 맞춤 공고(pull 링크)만 공개, 나머지(어드민 루트 포함) 보호.
+    // 페이지: 지원 폼 + 맞춤 공고(pull 링크) + 로그인만 공개, 나머지(어드민 루트 포함) 보호.
     if (
       pathname === "/apply" || pathname.startsWith("/apply/") ||
-      pathname === "/p" || pathname.startsWith("/p/")
+      pathname === "/p" || pathname.startsWith("/p/") ||
+      pathname === "/login"
     ) {
       return NextResponse.next();
     }
   }
 
   // 여기 도달 = 보호 대상.
-  if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
-    return NextResponse.json(
-      { error: "admin auth not configured (ADMIN_PASSWORD 미설정)" },
-      { status: 503 }
-    );
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        { error: "admin auth not configured (Supabase env 미설정)" },
+        { status: 503 }
+      );
+    }
+    return NextResponse.next(); // 개발 환경 편의
   }
-  if (!checkBasicAuth(req)) return unauthorized();
-  return NextResponse.next();
+
+  // 세션 검증 — 갱신된 쿠키를 request·response 양쪽에 기록(표준 패턴, 어기면 로그아웃 루프).
+  let res = NextResponse.next({ request: req });
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
+        res = NextResponse.next({ request: req });
+        cookiesToSet.forEach(({ name, value, options }) => res.cookies.set(name, value, options));
+      },
+    },
+  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // 심층 방어 — ADMIN_ALLOWED_EMAILS(CSV) 설정 시 그 이메일만 허용. 대시보드의 '가입 차단'이
+  // 실수로 풀려도(anon 키는 공개) 임의 가입 계정이 어드민에 들어오지 못한다. 미설정 시 세션만 검사.
+  const allowedEmails = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const emailAllowed =
+    allowedEmails.length === 0
+      ? Boolean(user)
+      : Boolean(user?.email && allowedEmails.includes(user.email.toLowerCase()));
+
+  if (!user || !emailAllowed) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    const loginUrl = req.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = `?next=${encodeURIComponent(pathname + (req.nextUrl.search || ""))}`;
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return res;
 }
 
 export const config = {
