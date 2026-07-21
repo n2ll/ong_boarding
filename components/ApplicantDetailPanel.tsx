@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
@@ -318,6 +319,9 @@ export function ApplicantDetailContent({
   const loading = externalDetail !== undefined ? false : local.loading;
 
   const confirm = useConfirm();
+  // '확정 지점' 드롭다운 소스 — 활성 지점(화주사 결속). 자유텍스트 오타로 충원율 집계가 누락되던 문제(A5) 방지.
+  const { data: branchesApi } = useSWR<{ data?: { id: number; name: string; client_id: number | null; active: boolean }[] }>("/api/admin/branches");
+  const allBranches = branchesApi?.data ?? [];
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Partial<ApplicantFull>>({});
   const [dirty, setDirty] = useState(false);
@@ -484,6 +488,13 @@ export function ApplicantDetailContent({
   // internal 라인 확정 창에선 숨겨 혼동을 막는다(라인 형태별 조건부 UX).
   const confirmTargetInternal =
     (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.job_recruit_mode === "internal";
+  // '확정 지점' 드롭다운 옵션 — 대상 공고 화주사의 활성 지점 이름(정확일치 집계와 맞게 branches.name 사용).
+  // client_id=null(화주사 미결속 공고)이면 무소속 지점을 끌어오지 않게 빈 목록.
+  const confirmClientId = (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.client_id ?? null;
+  const confirmBranchNames = confirmClientId == null ? [] : allBranches.filter((b) => b.active && b.client_id === confirmClientId).map((b) => b.name);
+  // 편집 폼은 이 지원자가 연결된 모든 화주사(병행 투입 포함)의 활성 지점 — 확정 화주사가 focus와 달라도 값이 '미등록'으로 오표기되지 않게.
+  const editClientIds = new Set(cands.map((c) => c.client_id).filter((id): id is number => id != null));
+  const editBranchNames = allBranches.filter((b) => b.active && b.client_id != null && editClientIds.has(b.client_id)).map((b) => b.name);
 
   const openConfirm = () => {
     setConfirmSlots(
@@ -539,7 +550,9 @@ export function ApplicantDetailContent({
     const c = confirmableCands.find((x) => x.job_id === jid);
     if (c) {
       if (!confirmStartDate && c.job_start_date) setConfirmStartDate(String(c.job_start_date).slice(0, 10));
-      if (!confirmBranch && c.job_branch) setConfirmBranch(c.job_branch);
+      // 대상 공고 전환 시 현재 지점값이 새 공고 화주사의 활성 지점에 없으면 그 공고 지점(또는 공백)으로 정정 — 타 화주사 지점 잔류로 오집계되는 것 방지.
+      const nb = c.client_id == null ? [] : allBranches.filter((b) => b.active && b.client_id === c.client_id).map((b) => b.name);
+      if (!nb.includes(confirmBranch)) setConfirmBranch(c.job_branch && c.job_branch !== "미지정" ? c.job_branch : "");
     }
   };
 
@@ -1006,11 +1019,15 @@ export function ApplicantDetailContent({
             )}
 
             <div className="grid grid-cols-2 gap-3">
-              {/* 확정 지점 — 지점 개념 라인(배민/비마트)만. internal은 숨김. */}
-              {!detailInternal && (
+              {/* 확정 지점 — 등록 지점 드롭다운. 지점 개념 라인·등록 지점 있을 때만(internal·미보유 숨김). */}
+              {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점</span>
-                  <input value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-[#FFCB3C]">
+                    <option value="">미지정</option>
+                    {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
+                  </select>
                 </label>
               )}
               <label className="flex flex-col gap-1">
@@ -1158,16 +1175,20 @@ export function ApplicantDetailContent({
             )}
           </div>
 
-          <div className={confirmTargetInternal ? "" : "grid grid-cols-2 gap-3"}>
+          <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-[#A0AEC0]">근무 시작일</span>
               <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
             </label>
-            {/* 확정 지점 — 지점 개념이 있는 라인(배민/비마트 등)만. internal 정기배송 라인은 숨김. */}
-            {!confirmTargetInternal && (
+            {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). 지점 개념 라인·등록 지점 있을 때만. */}
+            {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-[#A0AEC0]">확정 지점(선택)</span>
-                <input value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} placeholder="예: 강남" className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]" />
+                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-[#FFCB3C]">
+                  <option value="">미지정</option>
+                  {confirmBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {confirmBranch.trim() !== "" && !confirmBranchNames.includes(confirmBranch) && <option value={confirmBranch}>{confirmBranch} (미등록)</option>}
+                </select>
               </label>
             )}
           </div>
