@@ -195,7 +195,7 @@ const BULK_LABEL_TO_STATUS: Record<string, string> = {
   "지원 접수 / 대기": "스크리닝 전",
   "AI 스크리닝 중": "스크리닝 중",
   "스크리닝 완료": "스크리닝 완료",
-  "확정 인력": "확정인력",
+  // '확정 인력'은 일괄 매핑에서 제외 — 확정은 상세 모달 단일 경로(공고 결속 필요). 방어적으로 미매핑.
   부적합: "부적합",
 };
 
@@ -867,6 +867,14 @@ export function Pipeline() {
 
   const moveCard = (cardId: string, sourceColId: string, destColId: string) => {
     if (sourceColId === destColId) return;
+
+    // 확정은 드래그로 처리하지 않는다 — status만 바뀌면 공고 미결속·AI 미정지의 '반쪽 확정'이 된다.
+    // 상세 패널을 열어 정식 확정 모달(대상 공고·시작일·지점)로 유도한다(단일 경로 수렴).
+    if (COLUMN_TO_STATUS[destColId] === "확정인력") {
+      setSelectedApplicantId(Number(cardId));
+      toast.info("확정은 상세에서 대상 공고를 지정해 완료해요 — 상세 패널을 열었어요.");
+      return;
+    }
 
     setColumns(prev => {
       const sourceCol = prev.find(col => col.id === sourceColId);
@@ -1822,7 +1830,8 @@ export function Pipeline() {
                 { id: "applied", label: "지원 접수 / 대기", desc: "스크리닝 전" },
                 { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },
                 { id: "interview", label: "스크리닝 완료", desc: "온보딩 진행" },
-                { id: "passed", label: "확정 인력", desc: "투입 확정" },
+                // '확정 인력'은 일괄 옵션에서 제외 — 확정은 대상 공고·시작일 결속이 필요해 개인 단위
+                // 상세 확정 모달로만 한다(일괄 원클릭 오확정·통계 오염 방지).
                 { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
                 <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-[#E2E8F0] rounded-xl text-left hover:border-[#FFCB3C] hover:bg-[#FFFBEC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
