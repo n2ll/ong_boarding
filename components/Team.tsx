@@ -30,7 +30,7 @@ function emptyForm(): TeamForm {
   return { id: null, name: "", phone: "", branch: "", role: "현장", note: "", active: true };
 }
 
-export function Team() {
+export function Team({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   // 담당자 목록은 SWR로 — 변경 후 갱신은 loadMembers(=mutate). 지점 목록은 읽기 전용 derive.
   const { data: membersApi, isLoading, mutate: mutateMembers } = useSWR<{ data?: SiteManager[] }>("/api/admin/site-managers");
@@ -118,10 +118,10 @@ export function Team() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">팀 · 권한</h1>
+          {!embedded && <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">팀 · 권한</h1>}
           <p className="text-[14px] text-[#718096]">현장 담당자와 지점 관리자 연락처·권한을 관리합니다. 만남장소 안내·확정 알림에 사용됩니다.</p>
         </div>
         <button
