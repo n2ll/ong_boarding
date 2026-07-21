@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import useSWR from "swr";
+import Link from "next/link";
 import { Building2, Search, ChevronRight, ChevronDown, Loader2, Truck, Users } from "lucide-react";
 import { jsonFetcher } from "@/lib/swr";
 
@@ -49,6 +50,11 @@ export function Shippers() {
         <p className="text-[13px] text-[#718096] mt-1">
           옹매니징 계약 화주사와 배송라인 (읽기 전용 미러)
         </p>
+      </div>
+
+      {/* A3 관계 안내 — 여기 화주사를 공고에 쓰려면 로컬로 동기화가 필요하다(설정 > 화주사 관리). */}
+      <div className="px-4 py-3 rounded-xl bg-[#F0F7FF] border border-[#BEE3F8] text-[12.5px] text-[#2C5282] leading-relaxed">
+        이 화면은 <b>옹매니징 계약 원본</b>을 읽기 전용으로 보여줍니다. 여기 화주사를 <b>공고에 쓰려면</b> <Link href="/settings#clients" className="font-bold underline hover:text-[#2B6CB0] rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">설정 › 화주사 관리</Link>에서 <b>‘옹매니징 동기화’</b>를 실행하세요.
       </div>
 
       {error && (

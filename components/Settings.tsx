@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, Building2 } from "lucide-react";
 import { DemoBanner } from "./DemoBanner";
+import { Clients } from "./Clients";
 
 interface Integration {
   key: string;
@@ -21,6 +22,10 @@ const INTEGRATION_META: Record<string, { name: string; desc: string; badge: stri
 export function Settings() {
   // 실동작인 '외부 연동' 탭을 기본으로 승격 — 프로필/알림/보안은 인증 도입 전 미리보기.
   const [activeTab, setActiveTab] = useState("integrations");
+  // /settings#clients 딥링크 — 다른 화면(예: /shippers 안내 배너)에서 '화주사 관리' 서브탭으로 바로 진입.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#clients") setActiveTab("clients");
+  }, []);
   // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
   const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
     activeTab === "integrations" ? "/api/admin/settings/integrations" : null
@@ -56,15 +61,26 @@ export function Settings() {
           >
             <Lock size={18} /> 보안 및 인증
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab("integrations")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'integrations' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
             <LinkIcon size={18} /> 외부 연동
           </button>
+          <button
+            onClick={() => setActiveTab("clients")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'clients' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <Building2 size={18} /> 화주사 관리
+          </button>
         </div>
 
         {/* Content Area */}
+        {activeTab === 'clients' ? (
+          <div className="flex-1 min-w-0">
+            <Clients embedded />
+          </div>
+        ) : (
         <div className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-8">
           {activeTab === 'profile' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -192,6 +208,7 @@ export function Settings() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

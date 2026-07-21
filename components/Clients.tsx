@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { Building2, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4, ChevronRight, MapPin } from "lucide-react";
+import { Building2, Plus, Search, Pencil, Trash2, X, Loader2, Save, Clock4, ChevronRight, MapPin, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
 import { CLIENT_TYPE_LABEL, type ClientType } from "@/lib/admin/types";
@@ -58,7 +58,7 @@ function emptyForm(): ClientForm {
   };
 }
 
-export function Clients() {
+export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const confirm = useConfirm();
   // 화주사 목록은 SWR로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 load(=mutate)로.
@@ -69,6 +69,7 @@ export function Clients() {
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ClientForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   // 지점 목록(읽기 전용 표시) — 타 탭과 동일 키라 dedup.
@@ -101,6 +102,42 @@ export function Clients() {
       toast.error("재백필에 실패했어요");
     } finally {
       setIntegRunning(false);
+    }
+  };
+
+  // 옹매니징(외부 프로젝트) 화주사를 로컬 clients로 동기화 — 공고 폼에서 실제 화주사를 고를 수 있게 미러링.
+  const runSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/admin/clients/sync-ongmanaging", { method: "POST" });
+      const json = await res.json();
+      if (json.configured === false) {
+        toast.error(json.error || "옹매니징 연동이 설정되지 않았어요.");
+        return;
+      }
+      if (!res.ok) {
+        toast.error(json.error || "동기화에 실패했어요");
+        return;
+      }
+      const changed = (json.created ?? 0) + (json.renamed ?? 0) + (json.linked ?? 0);
+      const failed = json.errors?.length ?? 0;
+      if (failed > 0) {
+        // 부분 실패(이름 중복 등)를 성공으로 오표시하지 않는다 — 데이터 정합 민감.
+        console.error("[sync-ongmanaging]", json.errors);
+        toast.warning(`옹매니징 ${json.total}곳 중 ${failed}곳 동기화 실패(이름 중복 등) — 신규 ${json.created}·연결 ${json.linked}·이름갱신 ${json.renamed}. 로그 확인.`);
+      } else {
+        toast.success(
+          changed > 0
+            ? `옹매니징 화주사 ${json.total}곳 동기화 — 신규 ${json.created}·연결 ${json.linked}·이름갱신 ${json.renamed}.`
+            : `이미 최신 상태예요(옹매니징 ${json.total}곳).`
+        );
+      }
+      await load();
+    } catch {
+      toast.error("동기화에 실패했어요");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -183,18 +220,28 @@ export function Clients() {
   const activeCount = clients.filter((c) => c.active).length;
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">화주사 관리</h1>
-          <p className="text-[14px] text-[#718096]">화주사(고객사)별로 소속 지점과 공고를 묶어 관리합니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
+          {!embedded && <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">화주사 관리</h1>}
+          <p className="text-[14px] text-[#718096]">공고가 참조하는 화주사입니다. 실제 화주사는 옹매니징이 원본이라 <b>‘옹매니징 동기화’</b>로 가져옵니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-        >
-          <Plus size={18} /> 신규 화주사 등록
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runSync}
+            disabled={syncing}
+            title="옹매니징(계약·정산)에 등록된 화주사를 공고용으로 가져옵니다"
+            className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          >
+            {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 옹매니징 동기화
+          </button>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          >
+            <Plus size={18} /> 신규 화주사 등록
+          </button>
+        </div>
       </div>
 
       {integ && (
