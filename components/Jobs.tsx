@@ -67,6 +67,7 @@ interface ApiJob {
 
 interface ClientOpt { id: number; name: string; uses_slots?: boolean }
 interface BranchOpt { id: number; name: string; client_id: number | null }
+interface SiteManagerOpt { id: number; name: string; active?: boolean }
 
 interface JobCand {
   id: number;
@@ -341,6 +342,8 @@ export function Jobs() {
   const [branchFilter, setBranchFilter] = useState<number | "">("");
   const [newJobClientId, setNewJobClientId] = useState<number | "">("");
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
+  // 현장매니저(site_manager) — external 만남장소·첫날 안내 발송 담당. 서버 POST/PATCH가 site_manager_id 수용.
+  const [newJobSiteManagerId, setNewJobSiteManagerId] = useState<number | "">("");
   // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, external 기본이면 등록해도 지원자에게 안 보이는 함정이 된다.
   const [newJobMode, setNewJobMode] = useState<RecruitMode>("internal");
   const [newJobCapacity, setNewJobCapacity] = useState(1);
@@ -366,7 +369,7 @@ export function Jobs() {
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; branchId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string; exposureDraft: ExposureDraft } | null>(null);
+  const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; clientId: number | ""; branchId: number | ""; siteManagerId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string; exposureDraft: ExposureDraft } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
@@ -655,8 +658,16 @@ export function Jobs() {
   // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
   const { data: clientsApi } = useSWR<{ data?: ClientOpt[] }>("/api/admin/clients");
   const { data: branchesApi } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const { data: siteManagersApi } = useSWR<{ data?: SiteManagerOpt[] }>("/api/admin/site-managers");
   const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, uses_slots: c.uses_slots })), [clientsApi]);
   const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })), [branchesApi]);
+  const siteManagers = useMemo(() => (siteManagersApi?.data ?? []).map((m) => ({ id: m.id, name: m.name, active: m.active ?? true })), [siteManagersApi]);
+  // 편집 모달 지점 셀렉터 노출 — 지점 개념 화주사(슬롯/지점보유)이거나, 이미 지점이 붙은 공고(고아 방지)면 노출.
+  const editShowBranch = !!editForm && (
+    Boolean(clients.find((c) => c.id === editForm.clientId)?.uses_slots) ||
+    branches.some((b) => b.client_id === editForm.clientId) ||
+    editForm.branchId !== ""
+  );
 
   const handleGenerateJD = async () => {
     if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");
@@ -722,6 +733,7 @@ export function Jobs() {
     setPostingTitle("");
     setNewJobClientId("");
     setNewJobBranchId("");
+    setNewJobSiteManagerId("");
     setNewJobMode("internal");
     setNewJobCapacity(1);
     setNewJobPayType("");
@@ -780,6 +792,7 @@ export function Jobs() {
       setPostingTitle((j.title ?? "").slice(0, 80));
       setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
       setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
+      setNewJobSiteManagerId(typeof j.site_manager_id === "number" ? j.site_manager_id : "");
       setNewJobMode(asRecruitMode(j.recruit_mode));
       // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
       const dupRule = ruleToDraft(j.exposure_rule);
@@ -845,6 +858,7 @@ export function Jobs() {
           // 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 막는다(지점 선택 시 서버가 소속 화주사로 역채움).
           branch_id: effNewJobBranchId === "" ? null : effNewJobBranchId,
           ...(effNewJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
+          ...(newJobSiteManagerId !== "" ? { site_manager_id: newJobSiteManagerId } : {}),
           recruit_mode: newJobMode,
           exposure: newJobExposure.exposure,
           exposure_rule: draftToRule(newJobExposure.rule),
@@ -923,7 +937,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", branchId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -938,7 +952,9 @@ export function Jobs() {
         id,
         title: j.title ?? "",
         body: j.body ?? "",
+        clientId: typeof j.client_id === "number" ? j.client_id : "",
         branchId: j.branch_id ?? "",
+        siteManagerId: typeof j.site_manager_id === "number" ? j.site_manager_id : "",
         capacity: j.capacity ?? 1,
         vehicleRequired: !!j.vehicle_required,
         payInfo: j.pay_info ?? "",
@@ -992,6 +1008,7 @@ export function Jobs() {
           title,
           body: editForm.body,
           branch_id: editForm.branchId === "" ? null : editForm.branchId,
+          site_manager_id: editForm.siteManagerId === "" ? null : editForm.siteManagerId,
           capacity: editForm.capacity,
           vehicle_required: editForm.vehicleRequired,
           pay_info: editForm.payInfo.trim() || null,
@@ -1824,6 +1841,16 @@ export function Jobs() {
                   {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
                 )}
+                {/* 현장매니저 — external 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
+                <select
+                  value={newJobSiteManagerId}
+                  onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
+                  title="현장매니저 — 만남장소·첫날 안내 발송 담당(설정 › 팀·권한에서 등록)"
+                >
+                  <option value="">현장매니저(선택)</option>
+                  {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
                 <select
                   value={newJobMode}
                   onChange={(e) => setNewJobMode(e.target.value as RecruitMode)}
@@ -1937,18 +1964,29 @@ export function Jobs() {
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#E53E3E]">*</span></label>
                   <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
+                  {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. 옵션은 이 공고 화주사 소속 지점 + 현재 붙은 지점. */}
+                  {editShowBranch && (
                   <div className="col-span-2">
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점</label>
                     <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
                       <option value="">미지정</option>
-                      {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
+                  )}
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 인원</label>
                     <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                   </div>
+                </div>
+                {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
+                <div>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">현장매니저</label>
+                  <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                    <option value="">미지정</option>
+                    {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
                   <div className="text-[14px] font-bold text-[#1A202C]">차량(이륜/사륜) 필요</div>

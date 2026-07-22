@@ -92,7 +92,7 @@ function sumCapacity(cap: Record<string, number> | null): number {
   return Object.values(cap).reduce((acc, v) => acc + (typeof v === "number" ? v : 0), 0);
 }
 
-export function Branches() {
+export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<BranchForm | null>(null);
@@ -252,11 +252,11 @@ export function Branches() {
   ].filter((g) => g.branches.length > 0 || g.clientId !== null);
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
+    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
       {/* Header & Tools */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">지점 관리</h1>
+          {!embedded && <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">지점 관리</h1>}
           <p className="text-[14px] text-[#718096]">운영 중 {activeRows.length}개 · 전체 {rows.length}개 지점의 인력 현황과 정원을 관리합니다.</p>
         </div>
         <div className="flex items-center gap-3">
