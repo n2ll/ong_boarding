@@ -240,8 +240,8 @@ function closedKind(closedReason: string | null | undefined): ClosedKind {
 type RecruitMode = "external" | "internal" | "both";
 const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
   external: { label: "공개 모집", desc: "지원 폼·광고로 새 지원자 모집 — 맞춤링크(pull)에는 안 보여요", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
-  internal: { label: "인재풀 진행", desc: "보유 인재풀 대상 — 지원자 맞춤링크에 노출", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
-  both: { label: "병행", desc: "공개 모집 + 맞춤링크 노출 동시", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
+  internal: { label: "인재풀 진행", desc: "보유 인재풀 대상 — 지원자 맞춤링크에 표시", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
+  both: { label: "병행", desc: "공개 모집 + 맞춤링크 표시 동시", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
 };
 function asRecruitMode(v: unknown): RecruitMode {
   return v === "internal" || v === "both" ? v : "external";
@@ -804,15 +804,16 @@ export function Jobs() {
       setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
       setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
       setNewJobSiteManagerId(typeof j.site_manager_id === "number" ? j.site_manager_id : "");
+      const dupExternal = asRecruitMode(j.recruit_mode) === "external";
       setNewJobMode(asRecruitMode(j.recruit_mode));
       // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
+      // 단 external은 pull 미노출 → 지정 노출이 고아로 복제되지 않게 전체 노출로 리셋(D10 일관성).
       const dupRule = ruleToDraft(j.exposure_rule);
-      setNewJobExposure({
-        exposure: j.exposure === "targeted" ? "targeted" : "all",
-        rule: dupRule,
-      });
+      setNewJobExposure(
+        dupExternal ? EMPTY_EXPOSURE : { exposure: j.exposure === "targeted" ? "targeted" : "all", rule: dupRule }
+      );
       // 수동 명단 전용(규칙 없는) 지정 노출 공고를 복제하면 노출 0명 공고가 될 수 있어 경고.
-      if (j.exposure === "targeted" && !draftToRule(dupRule)) {
+      if (!dupExternal && j.exposure === "targeted" && !draftToRule(dupRule)) {
         toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
       }
       setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : 1);
@@ -1460,7 +1461,7 @@ export function Jobs() {
                     <span className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</span>
                     <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
                     {job.targetedExposure && (
-                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#FFFAF0] text-[#DD6B20] border-[#FEEBC8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
                   {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
@@ -1805,12 +1806,16 @@ export function Jobs() {
                           <textarea value={newJobAiFacts} onChange={(e) => setNewJobAiFacts(e.target.value)} rows={3} placeholder="예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
                         </div>
                       </div>
-                      {/* J 타겟 노출 — internal/both일 때만 의미(맞춤링크 노출 채널). external은 게시 링크 유통이라 비노출. */}
-                      {newJobMode !== "external" && (
-                        <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />
-                      )}
                     </div>
                   )}
+                </div>
+              )}
+              {/* J 타겟 노출 — 접이식 밖 독립 섹션(D9): 등록 시에도 항상 보이게. internal/both만(external은 pull 미노출). */}
+              {channelDrafts && newJobMode !== "external" && (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
+                  <div className="text-[13px] font-bold text-[#1A202C] mb-0.5">노출 범위 — 이 공고를 누구에게 보여줄까요</div>
+                  <div className="text-[11.5px] text-[#A0AEC0] mb-3">맞춤링크(pull)에 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
+                  <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />
                 </div>
               )}
             </div>
@@ -1867,7 +1872,12 @@ export function Jobs() {
                 </select>
                 <select
                   value={newJobMode}
-                  onChange={(e) => setNewJobMode(e.target.value as RecruitMode)}
+                  onChange={(e) => {
+                    const m = e.target.value as RecruitMode;
+                    setNewJobMode(m);
+                    // external은 맞춤링크(pull) 미노출 → 지정 노출이 켜진 채 고아가 되지 않게 전체 노출로 리셋(D10).
+                    if (m === "external") setNewJobExposure(EMPTY_EXPOSURE);
+                  }}
                   className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
                   title="모집 방식"
                 >
@@ -2017,7 +2027,7 @@ export function Jobs() {
                         <button
                           key={m}
                           type="button"
-                          onClick={() => setEditForm({ ...editForm, recruitMode: m })}
+                          onClick={() => setEditForm({ ...editForm, recruitMode: m, ...(m === "external" ? { exposureDraft: EMPTY_EXPOSURE } : {}) })}
                           className={`text-left p-3 rounded-xl border transition-colors ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
                         >
                           <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>{RECRUIT_MODE_META[m].label}</div>
