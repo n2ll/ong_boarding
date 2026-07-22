@@ -1722,6 +1722,14 @@ export function Jobs() {
                 </div>
               )}
 
+              {/* E15 · 공고 제목 — pull 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
+              {channelDrafts && (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#A0AEC0] font-semibold">— pull 카드·안내 문자에 그대로 표시돼요</span></label>
+                  <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                </div>
+              )}
+
               {/* 근무 상세 + AI 응대 근거 — 접이식. pull 카드 표시 필드(근무시간·시작일·집결지)와
                   단가·정책 참고정보를 등록 단계에서 함께 채워 편집 모달 2단계 강제를 없앤다. */}
               {channelDrafts && (
