@@ -110,6 +110,8 @@ export function ExposureEditor({
   // "규칙 해당 N명" 미리보기 — draft 규칙 변경을 500ms 디바운스해 POST
   const [preview, setPreview] = useState<{ count: number; total: number; sample: string[] } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // 미리보기 조회 실패를 '규칙 비어 있음'과 구분(D12) — 에러를 빈 규칙으로 위장하지 않는다.
+  const [previewError, setPreviewError] = useState(false);
   const ruleJson = useMemo(() => JSON.stringify(draftToRule(value.rule)), [value.rule]);
   const previewSeq = useRef(0);
   useEffect(() => {
@@ -119,15 +121,18 @@ export function ExposureEditor({
     if (!targeted) {
       setPreview(null);
       setPreviewLoading(false);
+      setPreviewError(false);
       return;
     }
     const rule = JSON.parse(ruleJson);
     if (!rule) {
       setPreview(null);
       setPreviewLoading(false);
+      setPreviewError(false);
       return;
     }
     setPreviewLoading(true);
+    setPreviewError(false);
     const timer = setTimeout(() => {
       fetch("/api/admin/exposure", {
         method: "POST",
@@ -136,10 +141,11 @@ export function ExposureEditor({
       })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((json) => {
-          if (previewSeq.current === seq) setPreview(json);
+          if (previewSeq.current === seq) { setPreview(json); setPreviewError(false); }
         })
         .catch(() => {
-          if (previewSeq.current === seq) setPreview(null);
+          // 실패는 '규칙 비어 있음'이 아니라 '조회 오류'로 구분 표시(D12).
+          if (previewSeq.current === seq) { setPreview(null); setPreviewError(true); }
         })
         .finally(() => {
           if (previewSeq.current === seq) setPreviewLoading(false);
@@ -281,10 +287,15 @@ export function ExposureEditor({
           <div className="text-[12px] font-bold border-t border-[#EDF2F7] pt-2.5">
             {previewLoading ? (
               <span className="flex items-center gap-1.5 text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
+            ) : previewError ? (
+              <span className="text-[#C53030]">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
             ) : preview ? (
               <span className="text-[#2B6CB0]">
-                규칙 해당 {preview.count}명 <span className="text-[#A0AEC0] font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""}</span>
+                규칙 해당 {preview.count}명 <span className="text-[#A0AEC0] font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>
               </span>
+            ) : !jobId ? (
+              // 등록 시점(jobId 없음)엔 수동 명단이 없어 빈 규칙=노출 0명 → 강한 경고(D11).
+              <span className="text-[#DD6B20]">⚠️ 지정 노출인데 규칙이 비어 있어요 — 등록 후 파이프라인에서 노출 대상을 추가하지 않으면 아무에게도 안 보입니다.</span>
             ) : (
               <span className="text-[#A0AEC0]">규칙이 비어 있어요 — 수동 지정 대상에게만 노출됩니다.</span>
             )}
@@ -307,12 +318,12 @@ export function ExposureEditor({
               type="button"
               onClick={() => mutateRoster()}
               className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] hover:text-[#1A202C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
-              title="저장된 규칙 기준 명단을 다시 불러옵니다 — 규칙을 바꿨다면 먼저 저장하세요"
+              title="저장된 기준 명단을 다시 불러옵니다(파이프라인에서 추가한 인원 등 반영). 편집 중 규칙 변경은 저장 후 다음에 열 때 반영돼요."
             >
               <RefreshCw size={12} /> 새로고침
             </button>
           </div>
-          <p className="text-[11px] text-[#A0AEC0] leading-snug">저장된 규칙 기준이에요. 위에서 규칙을 바꿨다면 저장 후 새로고침하세요. 수동 추가는 파이프라인에서 인원 선택 → &lsquo;노출 대상으로 추가&rsquo;.</p>
+          <p className="text-[11px] text-[#A0AEC0] leading-snug">이 명단은 <b className="text-[#718096]">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-[#718096]">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는 파이프라인에서 인원 선택 → &lsquo;노출 대상으로 추가&rsquo;.</p>
           {rosterLoading ? (
             <div className="flex items-center gap-2 text-[12px] text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</div>
           ) : roster ? (
