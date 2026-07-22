@@ -20,9 +20,13 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   let prompt = "";
+  let clientId: number | null = null;
+  let branchId: number | null = null;
   try {
     const body = await req.json();
     prompt = String(body?.prompt ?? "").trim();
+    if (typeof body?.client_id === "number") clientId = body.client_id;
+    if (typeof body?.branch_id === "number") branchId = body.branch_id;
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
@@ -30,9 +34,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "채용 조건을 입력해주세요." }, { status: 400 });
   }
 
+  const supabase = createServiceClient();
+  // 선택된 화주사·지점 마스터에서 검증된 사실(화주사명·지점 집결지/시급 등 ai_facts)을 모아 초안 생성에 주입(D2).
+  const masterContext = await buildMasterContext(supabase, clientId, branchId);
+
   // 1) Claude 우선
   try {
-    const ai = await generateMultiPlatformPosting(prompt, createServiceClient());
+    const ai = await generateMultiPlatformPosting(prompt, supabase, masterContext);
     if (ai && ai.danggeun?.body && ai.albamon?.body && ai.sms?.body) {
       return NextResponse.json({ ok: true, source: "ai", posting: ai });
     }
@@ -42,6 +50,30 @@ export async function POST(req: NextRequest) {
 
   // 2) 목업 폴백
   return NextResponse.json({ ok: true, source: "mock", posting: buildMockPosting(prompt) });
+}
+
+// 화주사(clients.name) + 지점(branches.name·ai_facts)에서 '검증된 사실'을 조립. 없으면 undefined.
+async function buildMasterContext(
+  supabase: ReturnType<typeof createServiceClient>,
+  clientId: number | null,
+  branchId: number | null
+): Promise<string | undefined> {
+  const facts: string[] = [];
+  try {
+    if (clientId != null) {
+      const { data } = await supabase.from("clients").select("name").eq("id", clientId).maybeSingle();
+      if (data?.name) facts.push(`화주사(고객사): ${data.name}`);
+    }
+    if (branchId != null) {
+      const { data } = await supabase.from("branches").select("name, ai_facts").eq("id", branchId).maybeSingle();
+      if (data?.name) facts.push(`지점: ${data.name}`);
+      const aiFacts = data?.ai_facts ? String(data.ai_facts).trim() : "";
+      if (aiFacts) facts.push(`지점 상세(집결지·시급·특이사항): ${aiFacts}`);
+    }
+  } catch (e) {
+    console.error("[generate-posting] master context lookup failed", e);
+  }
+  return facts.length ? facts.join("\n") : undefined;
 }
 
 // ──────────────────────────────────────────────────────────────────────────

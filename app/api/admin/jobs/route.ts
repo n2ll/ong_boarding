@@ -151,6 +151,7 @@ export async function POST(req: NextRequest) {
     work_period,
     closes_at,
     sos_request_id,
+    channel_bodies,
   } = body as {
     title?: string;
     body?: string;
@@ -180,6 +181,7 @@ export async function POST(req: NextRequest) {
     work_period?: string | null;
     closes_at?: string | null;
     sos_request_id?: number | null;
+    channel_bodies?: { danggeun?: string; albamon?: string; sms?: string } | null;
   };
 
   if (!title?.trim() || !jobBody?.trim()) {
@@ -285,6 +287,8 @@ export async function POST(req: NextRequest) {
       closes_at: closes_at ?? null,
       // 긴급 건(SOS)에서 파생된 공고면 그 id를 보관 — 파생 관계 영속(자동 해결 연동은 범위 밖).
       sos_request_id: typeof sos_request_id === "number" ? sos_request_id : null,
+      // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
+      channel_bodies: channel_bodies && typeof channel_bodies === "object" ? channel_bodies : null,
     })
     .select()
     .single();

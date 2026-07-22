@@ -166,7 +166,10 @@ generate_multi_posting 도구로만 응답해라. 줄바꿈은 실제 개행(\\n
 
 export async function generateMultiPlatformPosting(
   rough: string,
-  supabase?: SupabaseClient
+  supabase?: SupabaseClient,
+  // 화주사/지점 마스터에서 서버가 조회한 '검증된 사실'(집결지·시급 등). 있으면 초안에 반영한다
+  // — '지어내지 마라' 규칙과 충돌 없이(제공된 사실이므로) 채널 초안 정확도를 높인다(주제 D2).
+  masterContext?: string
 ): Promise<MultiPlatformPosting | null> {
   const apiKey = process.env.CLAUDE_API;
   if (!apiKey) {
@@ -235,7 +238,14 @@ export async function generateMultiPlatformPosting(
       },
     ],
     tool_choice: { type: "tool", name: "generate_multi_posting" },
-    messages: [{ role: "user", content: rough }],
+    messages: [
+      {
+        role: "user",
+        content: masterContext
+          ? `${rough}\n\n[검증된 마스터 사실 — 시스템이 화주사·지점 마스터에서 확인한 정보다. 초안에 반영해도 되고, 여기 없는 건 지어내지 마라]\n${masterContext}`
+          : rough,
+      },
+    ],
   };
 
   // 시연 안정성: 25초 안에 응답 없으면 abort → 라우트가 목업으로 폴백.
