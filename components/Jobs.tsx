@@ -678,7 +678,12 @@ export function Jobs() {
       const res = await fetch("/api/admin/jobs/generate-posting", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt.trim() }),
+        // 선택된 화주사·지점을 함께 보내 서버가 마스터(화주사명·지점 집결지/시급)를 초안에 반영(D2).
+        body: JSON.stringify({
+          prompt: aiPrompt.trim(),
+          ...(newJobClientId !== "" ? { client_id: newJobClientId } : {}),
+          ...(newJobBranchId !== "" ? { branch_id: newJobBranchId } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok || !json.posting) {
@@ -786,8 +791,14 @@ export function Jobs() {
       const j = json.job;
       resetNewJobForm();
       const body = (j.body ?? "").trim();
-      // 등록 모달은 channelDrafts로 구동 — 세 채널 모두 원본 본문으로 채운다(등록 시 알바몬 본문이 캐논).
-      setChannelDrafts({ danggeun: body, albamon: body, sms: body });
+      // 채널별 본문이 저장돼 있으면 채널 특화를 보존해 복제(D1). 없으면(레거시) 캐논 본문으로 3채널 채움.
+      const cb = (j.channel_bodies ?? null) as { danggeun?: string; albamon?: string; sms?: string } | null;
+      setChannelDrafts({
+        danggeun: cb?.danggeun || body,
+        // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
+        albamon: body,
+        sms: cb?.sms || body,
+      });
       setActiveChannel("albamon");
       setPostingTitle((j.title ?? "").slice(0, 80));
       setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
@@ -852,6 +863,8 @@ export function Jobs() {
         body: JSON.stringify({
           title,
           body,
+          // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
+          ...(channelDrafts ? { channel_bodies: channelDrafts } : {}),
           // 긴급 건에서 파생된 공고면 sos_request_id로 연결 저장(자동 해결 연동은 범위 밖).
           ...(newJobSosId && /^\d+$/.test(newJobSosId) ? { sos_request_id: Number(newJobSosId) } : {}),
           // 선택 화주사에 실제 속한 지점만 유효로 취급 — 복제 등으로 남은 타 화주사 stale 지점이 숨겨진 채 재전송돼 조용히 다른 화주사로 귀속되는 것을 막는다.
@@ -1660,6 +1673,7 @@ export function Jobs() {
                     {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
                   </button>
                 </div>
+                <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">화주사·지점</b>을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
               </div>
 
               {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
