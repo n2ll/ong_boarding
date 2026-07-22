@@ -65,7 +65,7 @@ interface ApiJob {
   unread_total?: number;
 }
 
-interface ClientOpt { id: number; name: string }
+interface ClientOpt { id: number; name: string; uses_slots?: boolean }
 interface BranchOpt { id: number; name: string; client_id: number | null }
 
 interface JobCand {
@@ -655,7 +655,7 @@ export function Jobs() {
   // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
   const { data: clientsApi } = useSWR<{ data?: ClientOpt[] }>("/api/admin/clients");
   const { data: branchesApi } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
-  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name })), [clientsApi]);
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, uses_slots: c.uses_slots })), [clientsApi]);
   const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })), [branchesApi]);
 
   const handleGenerateJD = async () => {
@@ -826,6 +826,11 @@ export function Jobs() {
     }
     // resetNewJobForm()이 SOS 상태를 지우기 전에, 등록 후 CTA용으로 스냅샷을 잡아둔다.
     const sosSnapshot = { id: newJobSosId, region: newJobSosRegion, vehicle: newJobSosVehicle };
+    // 선택 화주사에 실제 속한 지점만 유효 지점으로 취급(숨겨졌거나 타 화주사에 속한 stale 지점은 무시).
+    const effNewJobBranchId =
+      newJobBranchId !== "" && branches.some((b) => b.id === newJobBranchId && b.client_id === newJobClientId)
+        ? newJobBranchId
+        : "";
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
@@ -836,9 +841,10 @@ export function Jobs() {
           body,
           // 긴급 건에서 파생된 공고면 sos_request_id로 연결 저장(자동 해결 연동은 범위 밖).
           ...(newJobSosId && /^\d+$/.test(newJobSosId) ? { sos_request_id: Number(newJobSosId) } : {}),
+          // 선택 화주사에 실제 속한 지점만 유효로 취급 — 복제 등으로 남은 타 화주사 stale 지점이 숨겨진 채 재전송돼 조용히 다른 화주사로 귀속되는 것을 막는다.
           // 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 막는다(지점 선택 시 서버가 소속 화주사로 역채움).
-          branch_id: newJobBranchId === "" ? null : newJobBranchId,
-          ...(newJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
+          branch_id: effNewJobBranchId === "" ? null : effNewJobBranchId,
+          ...(effNewJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
           recruit_mode: newJobMode,
           exposure: newJobExposure.exposure,
           exposure_rule: draftToRule(newJobExposure.rule),
@@ -1798,6 +1804,8 @@ export function Jobs() {
                   <option value="">화주사 선택</option>
                   {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                {/* 지점 셀렉터는 지점 개념이 있는 화주사에만 — 확정슬롯 화주사이거나 실제 등록 지점이 있는 경우. 대부분 화주사는 지점이 없어 숨겨진다(복제로 지점이 승계된 경우도 노출됨). */}
+                {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
                 <select
                   value={newJobBranchId}
                   onChange={(e) => {
@@ -1813,8 +1821,9 @@ export function Jobs() {
                   title="공고를 등록할 지점"
                 >
                   <option value="">지점 선택(선택)</option>
-                  {(newJobClientId === "" ? branches : branches.filter((b) => b.client_id === newJobClientId)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
+                )}
                 <select
                   value={newJobMode}
                   onChange={(e) => setNewJobMode(e.target.value as RecruitMode)}
