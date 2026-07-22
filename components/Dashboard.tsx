@@ -56,6 +56,8 @@ export function Dashboard() {
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 인계 대기(paused)·AI 전역 중단 카운트
   const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");
+  // 확정 대기 큐(스크리닝 완료·미확정) — 사이드바 배지·LiveConsole '확정 대기' 탭과 동일 소스. '오늘의 할 일'에 합류(주제 C1 발견성).
+  const { data: confirmRes } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
   const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
@@ -209,6 +211,7 @@ export function Dashboard() {
   );
   const interestCount = interestRes?.count ?? 0;
   const interestImmediate = interestRes?.immediate_count ?? 0;
+  const confirmPendingCount = confirmRes?.total ?? confirmRes?.pending?.length ?? 0;
   const urgent = useMemo(() => {
     const u: UrgentItem[] = [];
     if (notiCounts?.aiDisabled) {
@@ -236,11 +239,14 @@ export function Dashboard() {
     if ((notiCounts?.interventions ?? 0) > 0) {
       u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live" });
     }
+    if (confirmPendingCount > 0) {
+      u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live" });
+    }
     if (poolReplies > 0) {
       u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "답장 대기 처리로", path: "#reply-queue" });
     }
     return u;
-  }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, nowTick]);
+  }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, confirmPendingCount, nowTick]);
 
   // 문자 발송폰(법인폰) 상태 칩 — 최신 기기 1건 기준. 10분 무신호 또는 발송 대기 적체 시 경고색.
   const gateway = useMemo(() => {

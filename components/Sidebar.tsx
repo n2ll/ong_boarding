@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import useSWR from "swr";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -29,6 +30,9 @@ export function Sidebar() {
   const pathname = usePathname();
   const [inbox, setInbox] = useState(0);
   const [interventions, setInterventions] = useState(0);
+  // 확정 대기 큐 건수 — useSWR로 Dashboard·LiveConsole과 캐시 공유(중복 폴링 방지). 소스=confirm/pending.
+  const { data: cpData } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
+  const confirmPending = cpData?.total ?? cpData?.pending?.length ?? 0;
   // const [aiDisabled, setAiDisabled] = useState(false); // 파일럿 기간 숨김('자동화 현황' 배지 전용) — 복원 시 주석 해제
 
   // 헤더 알림과 동일 소스(/notifications)에서 실시간 카운트를 가져와 배지에 반영한다.
@@ -63,7 +67,7 @@ export function Sidebar() {
     // { label: "리포트 · 분석", icon: BarChart2, path: "/reports" }, // 파일럿 기간 숨김
 
     { label: "AI 에이전트", type: "header" },
-    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
+    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions, confirmCount: confirmPending },
     { label: "분류 대기 문자함", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
     // 자동 응대(auto) 가동으로 재노출 (2026-07-12) — AI 모드 전환·일반 라인 FAQ 편집 진입점
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
@@ -126,6 +130,11 @@ export function Sidebar() {
               {item.badge === "count" && (item.count ?? 0) > 0 && (
                 <span className="bg-[#E53E3E] text-white text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight">
                   {item.count}
+                </span>
+              )}
+              {(item.confirmCount ?? 0) > 0 && (
+                <span title="확정 대기" className="bg-[#2F855A] text-white text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight shrink-0">
+                  {item.confirmCount}
                 </span>
               )}
             </Link>
