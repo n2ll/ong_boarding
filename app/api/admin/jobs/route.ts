@@ -278,7 +278,9 @@ export async function POST(req: NextRequest) {
       pay_amount: typeof pay_amount === "number" ? pay_amount : null,
       ai_facts: ai_facts ?? null,
       capacity: capacity ?? 1,
-      recruit_mode: recruit_mode ?? "external",
+      // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, 미전송 시 external이면 지원자에게 안 보이는 함정.
+      // (유일 호출자 등록 모달은 recruit_mode를 항상 전송하므로 이 기본값은 방어용.) asRecruitMode의 레거시 파싱 fallback은 별개로 external 유지.
+      recruit_mode: recruit_mode ?? "internal",
       exposure: exposure ?? "all",
       exposure_rule: normalizeRule(exposure_rule),
       site_manager_id: site_manager_id ?? null,

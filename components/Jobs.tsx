@@ -247,6 +247,9 @@ function asRecruitMode(v: unknown): RecruitMode {
   return v === "internal" || v === "both" ? v : "external";
 }
 
+// 단가 형태 옵션 — 등록/수정 모달 급여 그룹 공용(서버 pay_type enum과 일치, app/api/admin/jobs POST/PATCH 검증).
+const PAY_TYPES = ["건당", "일당", "주급", "월급", "혼합", "협의"] as const;
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -372,6 +375,9 @@ export function Jobs() {
   const [editForm, setEditForm] = useState<{ id: string; title: string; body: string; clientId: number | ""; branchId: number | ""; siteManagerId: number | ""; capacity: number; vehicleRequired: boolean; payInfo: string; policyNotes: string; payType: string; payAmount: number | ""; aiFacts: string; recruitMode: RecruitMode; workPeriod: string; closesAt: string; slot: string; startDate: string; pickupAddress: string; dropoffAddress: string; exposureDraft: ExposureDraft } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  // E17 · 수정 모달 접이식 섹션 열림 상태. 자주 고치는 제목·기간·마감은 접이식 밖 상단 상시 표시,
+  // 나머지는 섹션으로 접어 ~2,100px 평면 스크롤을 없앤다. 기본 정보만 열고 시작.
+  const [editOpenSections, setEditOpenSections] = useState({ basic: true, exposure: false, work: false, content: false });
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
   const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
@@ -706,9 +712,10 @@ export function Jobs() {
       // AI 초안이 뽑아낸 급여·근무 정보로 참고정보 필드를 프리필해 재입력을 줄인다(사용자가 비운 필드만).
       const payText = p.fields?.pay?.trim();
       const schedText = p.fields?.schedule?.trim();
-      if (payText || schedText) {
-        if (payText) setNewJobPayInfo((prev) => prev || payText);
-        if (schedText) setNewJobAiFacts((prev) => prev || `근무: ${schedText}`);
+      // pay_info는 항상 보이는 '급여' 그룹이라 채우기만 하면 됨. ai_facts는 접이식 안이라 값이 있을 때만 펼친다.
+      if (payText) setNewJobPayInfo((prev) => prev || payText);
+      if (schedText) {
+        setNewJobAiFacts((prev) => prev || `근무: ${schedText}`);
         setNewJobExtraOpen(true);
       }
       setActiveChannel("danggeun");
@@ -828,7 +835,8 @@ export function Jobs() {
       setNewJobPayInfo(j.pay_info ?? "");
       setNewJobPolicyNotes(j.policy_notes ?? "");
       setNewJobAiFacts(j.ai_facts ?? "");
-      if (j.pay_info || j.policy_notes || j.ai_facts || j.slot || j.start_date || j.pickup_address || j.dropoff_address) setNewJobExtraOpen(true);
+      // 접이식(근무상세·정책)은 그 안 필드가 있을 때만 연다. pay_info는 항상 보이는 급여 그룹이라 트리거에서 제외.
+      if (j.policy_notes || j.ai_facts || j.slot || j.start_date || j.pickup_address || j.dropoff_address) setNewJobExtraOpen(true);
       setAiModalOpen(true);
     } catch {
       toast.error("공고를 불러오지 못했어요");
@@ -879,7 +887,9 @@ export function Jobs() {
           capacity: newJobCapacity,
           vehicle_required: newJobVehicleRequired,
           pay_type: newJobPayType || null,
-          pay_amount: newJobPayAmount === "" ? null : Number(newJobPayAmount),
+          // 금액은 단가형태가 있고 '협의'가 아닐 때만 저장. '협의'/미지정이면 화면에 숨긴 stale 금액이 실려
+          // AI 응대에 '협의 3,500원' 같은 모순 단가가 주입되지 않게 null 정규화(등록·수정 공통 규칙).
+          pay_amount: newJobPayType && newJobPayType !== "협의" && newJobPayAmount !== "" ? Number(newJobPayAmount) : null,
           pay_info: newJobPayInfo.trim() || null,
           policy_notes: newJobPolicyNotes.trim() || null,
           ai_facts: newJobAiFacts.trim() || null,
@@ -951,7 +961,8 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
-    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "external", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: "internal", workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
+    setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -1028,7 +1039,9 @@ export function Jobs() {
           pay_info: editForm.payInfo.trim() || null,
           policy_notes: editForm.policyNotes.trim() || null,
           pay_type: editForm.payType || null,
-          pay_amount: editForm.payAmount === "" ? null : Number(editForm.payAmount),
+          // '협의'/미지정이면 pay_amount=null 정규화 — 조건부로 숨긴 금액칸의 stale 값이 저장돼 AI가 모순 단가를
+          // 인용하는 것을 막고, 레거시 '협의+금액' 데이터도 다음 저장 시 자동 교정된다(등록 POST와 동일 규칙).
+          pay_amount: editForm.payType && editForm.payType !== "협의" && editForm.payAmount !== "" ? Number(editForm.payAmount) : null,
           ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
           exposure: editForm.exposureDraft.exposure,
@@ -1674,7 +1687,181 @@ export function Jobs() {
                     {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
                   </button>
                 </div>
-                <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">화주사·지점</b>을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
+                <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">공고 설정</b>에서 화주사·지점을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
+              </div>
+
+              {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
+                  모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 범위 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
+              <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+                <div className="text-[13px] font-bold text-[#1A202C]">공고 설정</div>
+
+                {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 범위가 이 값에 따라 달라진다 */}
+                <div>
+                  <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">모집 방식</label>
+                  <select
+                    value={newJobMode}
+                    onChange={(e) => {
+                      const m = e.target.value as RecruitMode;
+                      setNewJobMode(m);
+                      // external은 맞춤링크(pull) 미노출 → 지정 노출이 켜진 채 고아가 되지 않게 전체 노출로 리셋(D10).
+                      if (m === "external") setNewJobExposure(EMPTY_EXPOSURE);
+                    }}
+                    className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                  >
+                    {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => (
+                      <option key={m} value={m}>{RECRUIT_MODE_META[m].label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[11.5px] text-[#A0AEC0] mt-1">{RECRUIT_MODE_META[newJobMode].desc}</p>
+                </div>
+
+                {/* 화주사 → 지점 2단 선택 — 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 방어. 화주사·지점은 초안 생성에 반영(D2). */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">화주사</label>
+                    <select
+                      value={newJobClientId}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? "" : Number(e.target.value);
+                        setNewJobClientId(v);
+                        // 화주사 변경 시 하위와 맞지 않는 지점 선택은 해제
+                        if (newJobBranchId !== "" && branches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
+                          setNewJobBranchId("");
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    >
+                      <option value="">화주사 선택</option>
+                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  {/* 지점 셀렉터는 지점 개념이 있는 화주사에만(확정슬롯이거나 등록 지점 존재). 대부분 화주사는 지점이 없어 숨겨진다. */}
+                  {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
+                    <div>
+                      <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">지점 <span className="text-[#A0AEC0] font-semibold">(선택)</span></label>
+                      <select
+                        value={newJobBranchId}
+                        onChange={(e) => {
+                          const v = e.target.value === "" ? "" : Number(e.target.value);
+                          setNewJobBranchId(v);
+                          // 지점 선택 시 소속 화주사를 상위 셀렉트에 동기화
+                          if (v !== "") {
+                            const cid = branches.find((b) => b.id === v)?.client_id;
+                            if (typeof cid === "number") setNewJobClientId(cid);
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                      >
+                        <option value="">지점 선택</option>
+                        {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">현장매니저 <span className="text-[#A0AEC0] font-semibold">(선택)</span></label>
+                    <select
+                      value={newJobSiteManagerId}
+                      onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    >
+                      <option value="">미지정</option>
+                      {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 정원 · 기간 · 마감시각 */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">모집 인원(정원)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newJobCapacity}
+                      onChange={(e) => setNewJobCapacity(Math.max(1, Number(e.target.value) || 1))}
+                      className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">모집 기간</label>
+                    <select
+                      value={newJobPeriod}
+                      onChange={(e) => setNewJobPeriod(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    >
+                      <option value="">기간 미지정</option>
+                      <option value="하루">하루(당일 단기)</option>
+                      <option value="단기">단기(며칠~몇 주)</option>
+                      <option value="정기">정기(상시 라인)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">모집 마감시각</label>
+                    <input
+                      type="datetime-local"
+                      value={newJobClosesAt}
+                      min={nowLocalInput()}
+                      onChange={(e) => setNewJobClosesAt(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                    />
+                  </div>
+                </div>
+                {/* 하루/단기인데 마감시각이 비면(특히 복제 시) 상시 게시로 남는 함정 — 등록 전 힌트. */}
+                {(newJobPeriod === "하루" || newJobPeriod === "단기") && !newJobClosesAt && (
+                  <span className="text-[11.5px] font-bold text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-2.5 py-1.5 self-start">
+                    마감시각 미설정 — 상시 게시됩니다
+                  </span>
+                )}
+
+                {/* 차량 필요 — pull 공고 카드에 표시 */}
+                <label className="flex items-center gap-2 cursor-pointer w-fit">
+                  <input
+                    type="checkbox"
+                    checked={newJobVehicleRequired}
+                    onChange={(e) => setNewJobVehicleRequired(e.target.checked)}
+                    className="accent-[#FFCB3C] w-4 h-4"
+                  />
+                  <span className="text-[13px] font-bold text-[#4A5568]">차량(이륜/사륜) 필요</span>
+                </label>
+
+                {/* E18 · 급여 (선택) — 예전엔 단가형태·금액(푸터)과 정산정보(접이식)로 분산. 한 그룹으로 일원화. 채우면 AI가 단가·정산 문의에 직접 답한다. */}
+                <div className="p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl flex flex-col gap-4">
+                  <div className="text-[12px] font-bold text-[#4A5568]">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">대표 단가 형태</label>
+                      <select
+                        value={newJobPayType}
+                        onChange={(e) => setNewJobPayType(e.target.value)}
+                        className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                      >
+                        <option value="">미지정</option>
+                        {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    {newJobPayType && newJobPayType !== "협의" && (
+                      <div>
+                        <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">대표 금액(원)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={newJobPayAmount}
+                          onChange={(e) => setNewJobPayAmount(e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0))}
+                          placeholder="예: 3500"
+                          className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">급여·정산 정보</label>
+                    <textarea value={newJobPayInfo} onChange={(e) => setNewJobPayInfo(e.target.value)} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                  </div>
+                </div>
+
+                {/* 긴급 건(SOS)에서 파생된 공고 추적용 — 화면 비표시(향후 공고↔긴급건 연결) */}
+                {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
 
               {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
@@ -1741,7 +1928,7 @@ export function Jobs() {
                   >
                     <div>
                       <div className="text-[13px] font-bold text-[#1A202C]">근무 상세 · AI 응대 근거 (선택)</div>
-                      <div className="text-[11.5px] text-[#A0AEC0] mt-0.5">근무시간·시작일·집결지와 단가·정책을 채우면 pull 공고에 표시되고 AI가 문의에 직접 답합니다.</div>
+                      <div className="text-[11.5px] text-[#A0AEC0] mt-0.5">근무시간·시작일·집결지와 정책·참고정보를 채우면 pull 공고에 표시되고 AI가 문의에 직접 답합니다.</div>
                     </div>
                     <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${newJobExtraOpen ? "rotate-90" : ""}`} />
                   </button>
@@ -1800,11 +1987,7 @@ export function Jobs() {
                         />
                       </div>
                       <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
-                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 — 채우면 단가·정책 문의를 AI가 직접 안내해 인계가 줄어듭니다</div>
-                        <div>
-                          <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">급여·정산 정보</label>
-                          <textarea value={newJobPayInfo} onChange={(e) => setNewJobPayInfo(e.target.value)} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
-                        </div>
+                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 인계가 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
                         <div>
                           <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">고용·정책 안내</label>
                           <textarea value={newJobPolicyNotes} onChange={(e) => setNewJobPolicyNotes(e.target.value)} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
@@ -1828,137 +2011,8 @@ export function Jobs() {
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
-              <div className="flex items-center gap-2 flex-wrap">
-                <MapPin size={15} className="text-[#A0AEC0]" />
-                {/* 화주사→지점 2단 선택 — 지점 미선택 시 client_id=null로 화주사 필터에서 유실되던 문제 방어(화주사만 골라도 저장). */}
-                <select
-                  value={newJobClientId}
-                  onChange={(e) => {
-                    const v = e.target.value === "" ? "" : Number(e.target.value);
-                    setNewJobClientId(v);
-                    // 화주사 변경 시 하위와 맞지 않는 지점 선택은 해제
-                    if (newJobBranchId !== "" && branches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
-                      setNewJobBranchId("");
-                    }
-                  }}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="공고 화주사 — 지점을 안 골라도 필터 귀속을 위해 선택 권장"
-                >
-                  <option value="">화주사 선택</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                {/* 지점 셀렉터는 지점 개념이 있는 화주사에만 — 확정슬롯 화주사이거나 실제 등록 지점이 있는 경우. 대부분 화주사는 지점이 없어 숨겨진다(복제로 지점이 승계된 경우도 노출됨). */}
-                {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
-                <select
-                  value={newJobBranchId}
-                  onChange={(e) => {
-                    const v = e.target.value === "" ? "" : Number(e.target.value);
-                    setNewJobBranchId(v);
-                    // 지점 선택 시 소속 화주사를 상위 셀렉트에 동기화
-                    if (v !== "") {
-                      const cid = branches.find((b) => b.id === v)?.client_id;
-                      if (typeof cid === "number") setNewJobClientId(cid);
-                    }
-                  }}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="공고를 등록할 지점"
-                >
-                  <option value="">지점 선택(선택)</option>
-                  {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-                )}
-                {/* 현장매니저 — external 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
-                <select
-                  value={newJobSiteManagerId}
-                  onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="현장매니저 — 만남장소·첫날 안내 발송 담당(설정 › 팀·권한에서 등록)"
-                >
-                  <option value="">현장매니저(선택)</option>
-                  {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-                <select
-                  value={newJobMode}
-                  onChange={(e) => {
-                    const m = e.target.value as RecruitMode;
-                    setNewJobMode(m);
-                    // external은 맞춤링크(pull) 미노출 → 지정 노출이 켜진 채 고아가 되지 않게 전체 노출로 리셋(D10).
-                    if (m === "external") setNewJobExposure(EMPTY_EXPOSURE);
-                  }}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="모집 방식"
-                >
-                  {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => (
-                    <option key={m} value={m}>{RECRUIT_MODE_META[m].label}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  value={newJobCapacity}
-                  onChange={(e) => setNewJobCapacity(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-[72px] bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
-                  title="모집 인원(정원) — 충원율의 분모"
-                />
-                <select
-                  value={newJobPayType}
-                  onChange={(e) => setNewJobPayType(e.target.value)}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="대표 단가 형태 — 채우면 AI가 단가 문의에 직접 답합니다"
-                >
-                  <option value="">단가 형태(선택)</option>
-                  {["건당", "일당", "주급", "월급", "혼합", "협의"].map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                {newJobPayType && newJobPayType !== "협의" && (
-                  <input
-                    type="number"
-                    min={0}
-                    value={newJobPayAmount}
-                    onChange={(e) => setNewJobPayAmount(e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0))}
-                    placeholder="금액(원)"
-                    className="w-[110px] bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
-                    title="대표 금액(원)"
-                  />
-                )}
-                <select
-                  value={newJobPeriod}
-                  onChange={(e) => setNewJobPeriod(e.target.value)}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C] cursor-pointer"
-                  title="모집 기간"
-                >
-                  <option value="">기간 미지정</option>
-                  <option value="하루">하루(당일 단기)</option>
-                  <option value="단기">단기(며칠~몇 주)</option>
-                  <option value="정기">정기(상시 라인)</option>
-                </select>
-                <input
-                  type="datetime-local"
-                  value={newJobClosesAt}
-                  min={nowLocalInput()}
-                  onChange={(e) => setNewJobClosesAt(e.target.value)}
-                  className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] focus:outline-none focus:border-[#FFCB3C]"
-                  title="모집 마감시각 — 지나면 지원자 페이지에서 자동 마감"
-                />
-                <label className="flex items-center gap-1.5 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-[13px] font-semibold text-[#4A5568] cursor-pointer" title="차량(이륜/사륜) 필요 여부 — pull 공고 카드에 표시">
-                  <input
-                    type="checkbox"
-                    checked={newJobVehicleRequired}
-                    onChange={(e) => setNewJobVehicleRequired(e.target.checked)}
-                    className="accent-[#FFCB3C]"
-                  />
-                  차량 필요
-                </label>
-                {/* 긴급 건에서 넘어온 공고 표시 — sos_id는 향후 공고↔긴급건 연결용으로만 보관 */}
-                {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
-              </div>
-              <div className="flex items-center gap-3">
-              {/* 하루/단기인데 마감시각이 비면(특히 복제 시 마감시각은 비워짐) 상시 게시로 남는 함정 — 등록 전 힌트. */}
-              {channelDrafts && (newJobPeriod === "하루" || newJobPeriod === "단기") && !newJobClosesAt && (
-                <span className="text-[11.5px] font-bold text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-2.5 py-1.5 whitespace-nowrap">
-                  마감시각 미설정 — 상시 게시됩니다
-                </span>
-              )}
+            {/* E16 · 푸터 — 라벨 없는 컨트롤 벽은 본문 '공고 설정'으로 승격. 여기는 닫기/등록만. */}
+            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
               <button
                 onClick={closeRegisterModal}
                 className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] transition-colors"
@@ -1973,7 +2027,6 @@ export function Jobs() {
                 {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1991,68 +2044,12 @@ export function Jobs() {
             {editLoading ? (
               <div className="flex items-center justify-center py-16 text-[#A0AEC0]"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
             ) : (
-              <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-5">
+              <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-4">
+                {/* 상단 상시 표시(E17) — 가장 자주 고치는 제목·기간·마감을 접이식 밖 최상단으로. */}
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#E53E3E]">*</span></label>
                   <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                 </div>
-                <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
-                  {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. 옵션은 이 공고 화주사 소속 지점 + 현재 붙은 지점. */}
-                  {editShowBranch && (
-                  <div className="col-span-2">
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점</label>
-                    <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                      <option value="">미지정</option>
-                      {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </div>
-                  )}
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 인원</label>
-                    <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                  </div>
-                </div>
-                {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
-                <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">현장매니저</label>
-                  <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                    <option value="">미지정</option>
-                    {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
-                  <div className="text-[14px] font-bold text-[#1A202C]">차량(이륜/사륜) 필요</div>
-                  <button onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`w-12 h-7 rounded-full relative transition-colors ${editForm.vehicleRequired ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}>
-                    <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
-                  </button>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 방식</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
-                      const sel = editForm.recruitMode === m;
-                      return (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, recruitMode: m, ...(m === "external" ? { exposureDraft: EMPTY_EXPOSURE } : {}) })}
-                          className={`text-left p-3 rounded-xl border transition-colors ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
-                        >
-                          <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>{RECRUIT_MODE_META[m].label}</div>
-                          <div className="text-[11px] text-[#A0AEC0] mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* J 타겟 노출 — internal/both일 때만(맞춤링크 노출 채널). external은 게시 링크 유통이라 비노출. */}
-                {editForm.recruitMode !== "external" && (
-                  <ExposureEditor
-                    value={editForm.exposureDraft}
-                    onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
-                    jobId={Number(editForm.id)}
-                  />
-                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 기간</label>
@@ -2069,65 +2066,174 @@ export function Jobs() {
                     <p className="text-[11px] text-[#A0AEC0] mt-1">지나면 지원자 페이지에서 자동 마감</p>
                   </div>
                 </div>
-                {/* 근무 상세 — pull(/p/[token]) 카드 표시 필드 (근무시간·시작일·집결지) */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">근무시간</label>
-                    {/* internal 정기배송 라인은 4-슬롯 대신 자유 텍스트 근무시간. */}
-                    {editForm.recruitMode === "internal" ? (
-                      <input value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} placeholder="예: 월~토 오전 7시~" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                    ) : (
-                      <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                        <option value="">미지정</option>
-                        {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                      </select>
+
+                {/* 기본 정보 [접이식, 기본 열림] — 지점·정원·현장매니저·차량·모집방식 */}
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
+                  <button type="button" onClick={() => setEditOpenSections((s) => ({ ...s, basic: !s.basic }))} className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                    <div className="text-[13px] font-bold text-[#1A202C]">기본 정보</div>
+                    <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${editOpenSections.basic ? "rotate-90" : ""}`} />
+                  </button>
+                  {editOpenSections.basic && (
+                    <div className="px-5 pb-5 flex flex-col gap-4 border-t border-[#F1F4F8] pt-4">
+                      <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
+                        {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
+                        {editShowBranch && (
+                        <div className="col-span-2">
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점</label>
+                          <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                            <option value="">미지정</option>
+                            {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        </div>
+                        )}
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 인원</label>
+                          <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                        </div>
+                      </div>
+                      {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">현장매니저</label>
+                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                          <option value="">미지정</option>
+                          {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+                        <div className="text-[14px] font-bold text-[#1A202C]">차량(이륜/사륜) 필요</div>
+                        <button onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`w-12 h-7 rounded-full relative transition-colors ${editForm.vehicleRequired ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}>
+                          <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">모집 방식</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
+                            const sel = editForm.recruitMode === m;
+                            return (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setEditForm({ ...editForm, recruitMode: m, ...(m === "external" ? { exposureDraft: EMPTY_EXPOSURE } : {}) })}
+                                className={`text-left p-3 rounded-xl border transition-colors ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                              >
+                                <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>{RECRUIT_MODE_META[m].label}</div>
+                                <div className="text-[11px] text-[#A0AEC0] mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* J 타겟 노출 [접이식] — internal/both일 때만(맞춤링크 노출 채널). external은 게시 링크 유통이라 섹션 자체 비노출. */}
+                {editForm.recruitMode !== "external" && (
+                  <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
+                    <button type="button" onClick={() => setEditOpenSections((s) => ({ ...s, exposure: !s.exposure }))} className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                      <div className="text-[13px] font-bold text-[#1A202C]">타겟 노출</div>
+                      <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${editOpenSections.exposure ? "rotate-90" : ""}`} />
+                    </button>
+                    {editOpenSections.exposure && (
+                      <div className="px-5 pb-5 border-t border-[#F1F4F8] pt-4">
+                        <ExposureEditor
+                          value={editForm.exposureDraft}
+                          onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
+                          jobId={Number(editForm.id)}
+                        />
+                      </div>
                     )}
                   </div>
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">시작일</label>
-                    <input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">집결지</label>
-                  <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">마지막 경유지(배송 종료 지점)</label>
-                  <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>
-                  <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
-                </div>
-                {/* AI 응대 근거 — 채워두면 단가·정책 질문을 AI가 직접 답해 매니저 인계가 줄어든다 */}
-                <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
-                  <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 단가·정책 문의를 AI가 직접 안내해 인계가 줄어듭니다</div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 단가 형태</label>
-                      <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                        <option value="">미지정</option>
-                        {["건당", "일당", "주급", "월급", "혼합", "협의"].map((t) => <option key={t} value={t}>{t}</option>)}
-                      </select>
+                )}
+
+                {/* 근무 상세 [접이식] — pull(/p/[token]) 카드 표시 필드(근무시간·시작일·집결지·경유지) */}
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
+                  <button type="button" onClick={() => setEditOpenSections((s) => ({ ...s, work: !s.work }))} className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                    <div className="text-[13px] font-bold text-[#1A202C]">근무 상세</div>
+                    <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${editOpenSections.work ? "rotate-90" : ""}`} />
+                  </button>
+                  {editOpenSections.work && (
+                    <div className="px-5 pb-5 flex flex-col gap-4 border-t border-[#F1F4F8] pt-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">근무시간</label>
+                          {/* internal 정기배송 라인은 4-슬롯 대신 자유 텍스트 근무시간. */}
+                          {editForm.recruitMode === "internal" ? (
+                            <input value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} placeholder="예: 월~토 오전 7시~" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                          ) : (
+                            <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                              <option value="">미지정</option>
+                              {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                            </select>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">시작일</label>
+                          <input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">집결지</label>
+                        <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">마지막 경유지(배송 종료 지점)</label>
+                        <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 금액(원)</label>
-                      <input type="number" min={0} value={editForm.payAmount} onChange={(e) => setEditForm({ ...editForm, payAmount: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="예: 3500" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] bg-white" />
+                  )}
+                </div>
+
+                {/* 공고 본문 · 급여 · AI 근거 [접이식] */}
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
+                  <button type="button" onClick={() => setEditOpenSections((s) => ({ ...s, content: !s.content }))} className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                    <div className="text-[13px] font-bold text-[#1A202C]">공고 본문 · 급여 · AI 근거</div>
+                    <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${editOpenSections.content ? "rotate-90" : ""}`} />
+                  </button>
+                  {editOpenSections.content && (
+                    <div className="px-5 pb-5 flex flex-col gap-4 border-t border-[#F1F4F8] pt-4">
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 내용</label>
+                        <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                      </div>
+                      {/* E18 · 급여 (선택) — 등록 모달과 동일 그룹 구성(단가형태·금액·정산정보) */}
+                      <div className="p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl flex flex-col gap-4">
+                        <div className="text-[12px] font-bold text-[#4A5568]">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 단가 형태</label>
+                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                              <option value="">미지정</option>
+                              {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          {editForm.payType && editForm.payType !== "협의" && (
+                            <div>
+                              <label className="block text-[13px] font-bold text-[#4A5568] mb-2">대표 금액(원)</label>
+                              <input type="number" min={0} value={editForm.payAmount} onChange={(e) => setEditForm({ ...editForm, payAmount: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="예: 3500" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] bg-white" />
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">급여·정산 정보</label>
+                          <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                        </div>
+                      </div>
+                      {/* AI 응대 근거 — 정책·근무 문의(급여는 위 급여 그룹에서) */}
+                      <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
+                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 정책·근무 문의를 AI가 직접 안내해 인계가 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">고용·정책 안내</label>
+                          <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">기타 참고정보 (근무·차량 정책 등)</label>
+                          <textarea value={editForm.aiFacts} onChange={(e) => setEditForm({ ...editForm, aiFacts: e.target.value })} rows={3} placeholder={"예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가"} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">급여·정산 정보</label>
-                    <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">고용·정책 안내</label>
-                    <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-bold text-[#4A5568] mb-2">기타 참고정보 (근무·차량 정책 등)</label>
-                    <textarea value={editForm.aiFacts} onChange={(e) => setEditForm({ ...editForm, aiFacts: e.target.value })} rows={3} placeholder={"예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가"} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />
-                  </div>
+                  )}
                 </div>
               </div>
             )}
