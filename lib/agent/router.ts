@@ -17,6 +17,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed } from "../jobs";
 import { isGeneralLineJob } from "./general-line";
+import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
+import { getSystemMessage } from "./system-messages";
 import { applyTransition } from "./transitions";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
@@ -259,7 +261,36 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // (충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환). 응대를 멈추지 않는다.
   const jobClosed = !!job && isJobEffectivelyClosed(job.status ?? null, job.closes_at ?? null);
 
-  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs, jobClosed };
+  // 배민 비마트 임시중단 — 배민 시스템 공고 후보이면서 'baemin_suspended' 플래그가 켜져 있을 때만.
+  // 켜지면 스크리닝이 '중단·인재풀 동의 모드'로 동작한다(비마트 진행 뉘앙스·onboarding 전이 금지).
+  const baeminSuspended =
+    !!job && job.title === BAEMIN_SYSTEM_JOB_TITLE &&
+    !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
+
+  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs, jobClosed, baeminSuspended };
+
+  // 배민 비마트 임시중단 + exploration/onboarding/active — 이 stage들은 비마트 진행/모집
+  // (배민ID 수집·앱설치·배차·SCREENING_ANNOUNCE)을 전제하므로 어떤 자동 응답도 내보내면 안 된다.
+  // (screening만 위 baeminSuspended로 자체 중단모드 응대 — 여기서 제외.)
+  // 여기서 막으면 웹훅·inbound-sweeper·agent-recovery(모두 이 함수 경유)가 한 번에 커버된다.
+  // exploration을 포함해야 exploration 자동응대 + exploration→screening 자동 announce까지 함께 차단된다.
+  // paused로 파킹 → 이후 인입은 위 stage=paused 가드로 skip, 리마인더 cron의 onboarding 필터도 회피.
+  if (
+    baeminSuspended &&
+    (stageName === "exploration" || stageName === "onboarding" || stageName === "active")
+  ) {
+    if (!simulate) {
+      await supabase
+        .from("job_candidates")
+        .update({
+          agent_stage: "paused",
+          paused_reason: "배민 비마트 임시중단 — 비마트 진행 stage 자동 응대 보류, 매니저 확인 필요",
+        })
+        .eq("id", jc.id);
+    }
+    return { ok: true, skipped: "baemin suspended — non-screening stage parked to paused" };
+  }
+
   const result = await stage.process(ctx, cleanInbound);
 
   // Claude 사용량 → ai_usage_daily 적재. stage 이름 = purpose.

@@ -549,38 +549,62 @@ async function processInbound(
       })
       .eq("id", msg.id);
 
-    // 3) 지원자에게 apply 폼 URL을 SMS로 안내. system_message 'baemin_apply_invite' 본문 사용,
-    //    없으면 fallback. {{이름}}/{{지원폼주소}} placeholder 치환.
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-      "https://ong-boarding-pi.vercel.app";
-    const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
-    const applyUrl = `${normalizedBase}/apply?source=baemin`;
-    const nameForFill = ext.name?.trim() ? ` ${ext.name.trim()}` : "";
+    // 3) 지원자에게 안내 SMS 발송.
+    //    평시: apply 폼 URL 안내(baemin_apply_invite) — 정식 지원 유도.
+    //    비마트 임시중단(baemin_suspended ON): 폼 링크를 보내지 않고 '중단 + 인재풀 동의'(baemin_start) 안내.
+    //    ⚠️ 중단 기간엔 B마트 지원서 링크를 절대 보내지 않는다(모집 중처럼 안내 금지).
+    const baeminSuspended = !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
+    let sendBody: string;
+    let sentByLabel: string;
 
-    const stored = (await getSystemMessage(supabase, "baemin_apply_invite"))?.trim();
-    const fallback = [
-      `안녕하세요${nameForFill}님, 옹고잉 배송원 지원 감사드립니다!`,
-      "",
-      "정식 지원을 위해 아래 폼 작성을 부탁드릴게요^^",
-      applyUrl,
-      "",
-      "작성 완료되시면 영업일 기준 1~2일 내 안내드리겠습니다.",
-    ].join("\n");
-    const sendBody = stored
-      ? fillTemplate(stored, { 이름: nameForFill, 지원폼주소: applyUrl })
-      : fallback;
+    if (baeminSuspended) {
+      const nameFill =
+        ext.name?.trim() && ext.name.trim() !== "(이름 미확인)" ? ext.name.trim() : "";
+      const storedStart = (await getSystemMessage(supabase, "baemin_start"))?.trim();
+      const suspendedFallback = [
+        `안녕하세요${nameFill ? ` ${nameFill}님` : ""}, 지원해 주셔서 감사합니다!`,
+        "",
+        "현재 배민 비마트 배송 업무가 배민 측 사정으로 잠시 중단된 상태라, 지금 바로 진행은 어려운 점 양해 부탁드려요.",
+        "",
+        "다만 지원해 주신 분들은 인재풀에 등록해 두고, 다른 배송·물류 업무 수요가 생기면 가장 먼저 안내드리고 있어요.",
+        "",
+        `괜찮으시면 다른 업무가 생겼을 때 연락드려도 될까요? "네"라고만 답장 주시면 등록해 둘게요 😊`,
+      ].join("\n");
+      sendBody = storedStart ? fillTemplate(storedStart, { 이름: nameFill }) : suspendedFallback;
+      sentByLabel = "system-baemin-suspended";
+    } else {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+        "https://ong-boarding-pi.vercel.app";
+      const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
+      const applyUrl = `${normalizedBase}/apply?source=baemin`;
+      const nameForFill = ext.name?.trim() ? ` ${ext.name.trim()}` : "";
+
+      const stored = (await getSystemMessage(supabase, "baemin_apply_invite"))?.trim();
+      const fallback = [
+        `안녕하세요${nameForFill}님, 옹고잉 배송원 지원 감사드립니다!`,
+        "",
+        "정식 지원을 위해 아래 폼 작성을 부탁드릴게요^^",
+        applyUrl,
+        "",
+        "작성 완료되시면 영업일 기준 1~2일 내 안내드리겠습니다.",
+      ].join("\n");
+      sendBody = stored
+        ? fillTemplate(stored, { 이름: nameForFill, 지원폼주소: applyUrl })
+        : fallback;
+      sentByLabel = "system-baemin-invite";
+    }
 
     let inviteMessageId: string | null = null;
     try {
       const r = await sendSms(phone, sendBody);
       inviteMessageId = r.messageId ?? null;
       if (!r.success) {
-        console.error("[supabase-webhook] baemin apply invite SMS fail", r.error);
+        console.error("[supabase-webhook] baemin invite/suspended SMS fail", r.error);
       }
     } catch (e) {
-      console.error("[supabase-webhook] baemin apply invite SMS exception", e);
+      console.error("[supabase-webhook] baemin invite/suspended SMS exception", e);
     }
 
     // 4) outbound messages 기록
@@ -590,7 +614,7 @@ async function processInbound(
       direction: "outbound",
       body: sendBody,
       status: "sent",
-      sent_by: "system-baemin-invite",
+      sent_by: sentByLabel,
       solapi_msg_id: inviteMessageId,
       message_type: "sms",
     });
@@ -600,7 +624,8 @@ async function processInbound(
       classification: "baemin",
       applicant_id: applicantId,
       triage,
-      apply_url_sent: true,
+      apply_url_sent: !baeminSuspended,
+      baemin_suspended: baeminSuspended,
       agent_invoked: false,
     };
   }

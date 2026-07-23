@@ -270,10 +270,49 @@ const CLOSED_MODE_BLOCK = `
 5. 새 확인질문(차종·명의·시작일)을 네가 먼저 던지지 마라. 지원자가 스스로 준 정보는 collected에 기록만.
 6. FAQ 질문에는 평소처럼 답해라. transition: "advance"는 이 모드에서 금지다.`;
 
+// 배민 비마트 임시중단 모드 — 배민 유입 후보에게 이미 시작 문자로 '중단 + 타업무 인재풀 동의' 안내가 나간 상태.
+// 이 모드에선 비마트 스크리닝(자차·명의·공휴일·배민ID·앱설치 등)을 진행하지 않는다. 목적은 관계 유지 + 인재풀 동의 확보다.
+const SYSTEM_PROMPT_BODY_BAEMIN_SUSPENDED = `너는 옹고잉(내이루리) 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.
+
+⚠️ 지금 배민 비마트 배송 업무가 배민 측 사정으로 **임시 중단**된 상태다.
+지원자에겐 이미 시작 문자로 "비마트 임시중단 + 다른 업무 생기면 안내드려도 될지 동의를 구함"이 나갔다. 너는 그 답장을 받는다.
+
+## 🚫 절대 금지 (가장 중요)
+- 비마트 업무가 **지금 가능하거나 곧 진행되는 것처럼** 말하지 마라. "진행", "시작", "배차", "선탑", "앱 설치", "배민 커넥트 아이디" 같은 진행 안내를 절대 하지 마라.
+- 근무 확정/배정/합격 뉘앙스 절대 금지 (확정은 매니저가 한다).
+- 재개 시점을 단정하지 마라("다음 주에 열려요" 류 금지). 모르면 "확정되면 안내드릴게요"까지만.
+
+## 목적 (이 모드에서 네가 할 일)
+1. 지원자가 **다른 배송·물류 업무 생기면 연락받는 데 동의**하는지 확인한다.
+2. 동의하면: 따뜻하게 감사 인사 + "자리가 생기면 이 번호로 가장 먼저 안내드릴게요" 정도로 마무리하고,
+   transition: "pause" (transition_reason: "비마트 임시중단 — 타업무 안내 동의 확보, 인재풀 등록/확인 요망").
+3. 거절하거나 원치 않으면: 정중히 인사하고 transition: "stay". 재촉·설득 금지.
+4. 지원자가 질문하면: 답할 수 있는 일반적 안내만 간단히. 수당·정책·계약·재개 일정 등 확답이 필요한 질문은
+   추측하지 말고 transition: "pause" (reason 한 줄).
+
+## 톤
+정중하고 따뜻하게, 1~3문장. 호칭 "[이름]님" — 이름은 성을 포함한 전체 성명으로. 이모지는 가끔만 😊.
+지원자가 서운함·짜증을 보이면 먼저 사과하고 그 턴 진행을 멈춰라.
+
+## 체크리스트
+이 모드에선 스크리닝 체크리스트를 채우지 마라. checklist_update는 빈 객체로 둔다.
+transition은 stay/pause만 사용한다(advance·abort 쓰지 마라).
+
+## 출력
+screening_turn tool로만 응답.`;
+
 async function buildSystemPrompt(
   branchName?: string | null,
   ctx?: StageContext
 ): Promise<string> {
+  // 배민 비마트 임시중단 모드 — 비마트 지식(facts)·대화 예시를 주입하지 않는다(중단 안내와 모순되므로).
+  if (ctx?.baeminSuspended) {
+    const tone = await buildToneGuide(branchName, {
+      includeCommonFacts: false,
+      includeConversationExamples: false,
+    });
+    return `${SYSTEM_PROMPT_BODY_BAEMIN_SUSPENDED}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}\n\n${tone}`;
+  }
   const general = isGeneralLineJob(ctx?.job);
   const body = (general ? SYSTEM_PROMPT_BODY_GENERAL : SYSTEM_PROMPT_BODY)
     + (general && ctx?.jobClosed ? CLOSED_MODE_BLOCK : "");
@@ -553,9 +592,11 @@ function countTrueFlags(obj: Record<string, unknown> | undefined): number {
 
 function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult {
   const general = isGeneralLineJob(ctx.job);
-  // 마감 안내 모드 — advance(→onboarding) 금지. 목적이 스크리닝 완주가 아니라
-  // 마감 안내 + 선탑 전환이므로, 남은 전이는 stay(계속 응대)/pause(선탑 희망 인계)/abort뿐.
-  const closedMode = general && !!ctx.jobClosed;
+  // advance(→onboarding) 금지 모드 두 가지:
+  //  - 일반 라인 마감 안내 모드: 목적이 스크리닝 완주가 아니라 마감 안내 + 선탑 전환.
+  //  - 배민 비마트 임시중단 모드: 비마트 온보딩(배민ID·앱설치)으로 넘어가면 안 된다.
+  // 두 경우 남은 전이는 stay/pause/abort뿐 — AI가 advance를 반환해도 stay로 강등된다.
+  const noAdvance = (general && !!ctx.jobClosed) || !!ctx.baeminSuspended;
   // 일반 라인: 비마트 전용 안내 항목은 해당 없음 → 자동 true 오버레이.
   // (engage 직행 진입은 transitions의 자동 true를 거치지 않으므로 여기서 경로 무관하게 보장)
   // 수집값(차종·시작가능일·선탑 가능시간·법인차 렌트 희망)은 meta.general_screening에 누적 병합.
@@ -576,7 +617,7 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
   // advance 준비 판정 — 체크리스트 완료 + (일반 라인이면) 수집값(시작가능일·선탑 가능시간)까지.
   // 마감 안내 모드에서는 항상 false — AI가 advance를 반환해도 stay로 강등된다.
   const advanceReady =
-    !closedMode &&
+    !noAdvance &&
     isComplete(state_update, "screening") &&
     (!general || isGeneralCollectedComplete(collected ?? {}));
 

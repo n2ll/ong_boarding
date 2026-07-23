@@ -26,6 +26,8 @@ const NON_MANUAL_SENT_BY = new Set([
   "system-reminder",
   "danggeun-start",
   "baemin-start",
+  "system-baemin-invite",
+  "system-baemin-suspended",
   "danggeun-practice-start",
   "danggeun-recommend",
 ]);

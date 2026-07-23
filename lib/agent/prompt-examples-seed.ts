@@ -107,6 +107,20 @@ export const PROMPT_EXAMPLES_SEED: SeedExample[] = [
 읽어보시고 괜찮으시면 몇 가지만 짧게 여쭤볼게요^^`,
   },
   {
+    // 배민 비마트 임시중단 기간 전용 시작 멘트 — 'baemin_suspended' 플래그가 켜졌을 때만 배민 유입에 발송.
+    // 재개 시 플래그를 끄면 배민도 danggeun_start로 자동 복귀한다.
+    category: "system_message",
+    sort_order: 15,
+    title: "baemin_start",
+    body: `안녕하세요 {{이름}}님, 지원해 주셔서 감사합니다!
+
+먼저 안내드릴 게 있어요. 현재 배민 비마트 배송 업무가 배민 측 사정으로 잠시 중단된 상태라, 지금 바로 진행은 어려운 점 양해 부탁드려요.
+
+다만 지원해 주신 분들은 인재풀에 등록해 두고, 다른 배송·물류 업무 수요가 생기면 가장 먼저 안내드리고 있어요.
+
+괜찮으시면 다른 업무가 생겼을 때 연락드려도 될까요? "네"라고만 답장 주시면 등록해 둘게요 😊`,
+  },
+  {
     category: "system_message",
     sort_order: 20,
     title: "apply_received",

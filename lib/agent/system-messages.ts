@@ -6,7 +6,11 @@
  * apply route / agent route 등 서버 측이 동일 출처에서 멘트를 가져온다.
  *
  * 사용 키:
- *  - 'danggeun_start'      : 당근 유입 후보에게 첫 발송할 시작 멘트
+ *  - 'danggeun_start'      : 당근 유입 후보에게 첫 발송할 시작 멘트 (배민 유입도 평시엔 이 멘트를 공유)
+ *  - 'baemin_start'        : 배민 비마트 임시중단 기간 전용 시작 멘트 — 'baemin_suspended' 플래그가 켜져 있을 때만 배민 유입에 발송
+ *  - 'baemin_suspended'    : 배민 비마트 업무 임시중단 플래그. body가 비어있지 않으면 중단 상태.
+ *                            켜지면 배민 유입 시작 멘트가 'baemin_start'로 바뀌고, 배민 옹봇이 '중단·인재풀 동의' 모드로 응대한다.
+ *                            비마트 재개 시 body를 비우면 평시 흐름(danggeun_start + 일반 스크리닝)으로 자동 복귀.
  *  - 'apply_received'      : apply 폼 접수 안내 (기본 fallback)
  *  - 'screening_announce'  : 스크리닝 진입 시 안내 묶음 (정산·프로모션·업무시간)
  *  - 'onboarding_guide'    : 온보딩 진입 시 앱설치·교육 안내
@@ -23,6 +27,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type SystemMessageKey =
   | "danggeun_start"
+  | "baemin_start"
+  | "baemin_suspended"
   | "apply_received"
   | "baemin_apply_invite"
   | "screening_announce"

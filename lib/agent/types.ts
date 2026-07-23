@@ -153,6 +153,9 @@ export interface StageContext {
   /** 현재 공고가 실질 마감 상태 — 일반 라인 스크리닝이 '마감 안내 모드'(신규 진행 대신
    *  충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환)로 동작하는 근거. */
   jobClosed?: boolean;
+  /** 배민 비마트 임시중단 상태(배민 시스템 공고 + 'baemin_suspended' 플래그 ON).
+   *  배민 스크리닝이 '중단·인재풀 동의 모드'로 동작 — 비마트 진행 뉘앙스 금지, onboarding 전이 금지. */
+  baeminSuspended?: boolean;
 }
 
 export type StageTransition =
