@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendNotification } from "../solapi";
 import { sendSlackPausedAlert } from "../slack";
 import { getSystemMessage, fillTemplate } from "./system-messages";
+import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { mergeAgentState } from "./checklist";
 import {
   buildGeneralCollectedSummary,
@@ -341,6 +342,33 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
 
         // (온보딩 진입 슬랙은 제거 — '준비 완료'(배민 아이디 수신) 시점에
         //  onboarding stage에서 발송한다.)
+
+        // ─── 배민 비마트 임시중단: 온보딩 진입 시 앱·아이디 GUIDE(비마트 진행 신호) 발송 금지 ───
+        // AI 자동 advance는 screening 중단모드가 이미 막지만, 매니저 수동 set-stage로 여기 도달 가능.
+        // GUIDE 없이 paused로 파킹해 매니저가 직접 판단하게 한다(비마트 재개 전 온보딩 진행 불가).
+        const baeminSuspendedTx =
+          job?.title === BAEMIN_SYSTEM_JOB_TITLE &&
+          !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
+        if (baeminSuspendedTx) {
+          const reason = "배민 비마트 임시중단 — 온보딩 진행 보류(앱·아이디 안내 미발송), 매니저 확인 필요";
+          nextStage = "paused";
+          extraStateUpdate = {
+            meta: {
+              paused_from_stage: "screening",
+              paused_at: now,
+              pause: {
+                category: "auto",
+                summary: reason,
+                suggested_action: "비마트 재개 전까지 온보딩 진행 불가. 인재풀 안내 등은 매니저가 직접 처리하세요.",
+              },
+            },
+          };
+          await supabase
+            .from("job_candidates")
+            .update({ paused_reason: reason })
+            .eq("id", candidate_id);
+          break;
+        }
 
         // 앱·교육 안내 (가이드 알림톡 ⑥) — 본문은 아래 buildOnboardingGuide 참조
         // 본문 뒤에 발송시각+24h 마감 안내를 자동 부착. 24h 미회신 시 cron으로 리마인더 발송.

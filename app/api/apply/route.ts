@@ -214,10 +214,16 @@ export async function POST(req: NextRequest) {
       let useTemplate: "danggeun" | "apply_received" = "apply_received";
 
       if (inserted.source === "danggeun" || inserted.source === "baemin") {
-        const danggeunStart = (await getSystemMessage(supabase, "danggeun_start"))?.trim();
-        if (danggeunStart) {
+        // 배민 비마트 임시중단 기간엔 배민 유입만 'baemin_start'(중단·인재풀 동의)로 시작 멘트를 바꾼다.
+        // 플래그가 꺼져 있으면(=재개) 배민도 평시대로 danggeun_start를 공유한다.
+        const baeminSuspended =
+          inserted.source === "baemin" &&
+          !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
+        const startKey = baeminSuspended ? "baemin_start" : "danggeun_start";
+        const startMsg = (await getSystemMessage(supabase, startKey))?.trim();
+        if (startMsg) {
           // 시작 멘트 {{이름}}/{{지점}}/{{시간대}} 치환
-          sendBody = fillTemplate(danggeunStart, {
+          sendBody = fillTemplate(startMsg, {
             이름: inserted.name,
             지점: inserted.branch ?? "",
             시간대: shortWorkHours(inserted.work_hours),

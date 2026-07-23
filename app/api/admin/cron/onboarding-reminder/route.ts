@@ -50,6 +50,10 @@ export async function GET(req: NextRequest) {
   const remindCutoff = new Date(now - DEADLINE_MS).toISOString();
   const handoffCutoff = new Date(now - HANDOFF_DELAY_MS).toISOString();
 
+  // 배민 비마트 임시중단 — 단계 A 리마인더('배민 커넥트 아이디 회신')는 비마트 진행 신호라 배민 유입엔 억제.
+  // (source=baemin만 대상 — 당근/일반 라인은 회귀 없이 그대로. 재개 시 플래그를 비우면 자동 복구된다.)
+  const baeminSuspended = !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
+
   // 후보 후보군 로드 — onboarding 단계 전체 로드 후 JS에서 단계별 분기.
   const { data: rows, error } = await supabase
     .from("job_candidates")
@@ -117,6 +121,11 @@ export async function GET(req: NextRequest) {
       !meta.onboarding_reminder_sent_at &&
       meta.onboarding_entered_at <= remindCutoff
     ) {
+      // 배민 비마트 중단 중엔 배민 유입 리마인더 스킵(발송·마킹 X → 재개 시 자연 복구).
+      if (baeminSuspended && applicant.source === "baemin") {
+        results.push({ candidate_id: row.id as number, stage: "skip", success: true, reason: "baemin suspended — reminder held" });
+        continue;
+      }
       if (applicant.source === "danggeun_practice") {
         const merged = mergeAgentState(state, {
           meta: { onboarding_reminder_sent_at: new Date().toISOString() },
