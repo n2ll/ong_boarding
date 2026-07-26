@@ -65,7 +65,7 @@ export async function GET() {
       tone: "amber",
       title: `사람 확인 필요 ${interventions}건`,
       desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.",
-      path: "/live",
+      path: "/live?tab=intervention",
     });
   }
 

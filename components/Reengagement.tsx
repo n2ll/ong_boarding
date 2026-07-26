@@ -69,7 +69,7 @@ export function Reengagement() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold text-[#1A202C] flex items-center gap-2">
-            <RefreshCw size={20} /> 다시 부르기 (배송원 재편입)
+            <RefreshCw size={20} /> 다시 부르기 (외부 인력)
           </h1>
           <p className="text-[13px] text-[#718096] mt-1">
             옹고잉·옹매니징 배송원 중 옹보딩 미지원자를 인력풀 후보로 (블랙리스트 제외)

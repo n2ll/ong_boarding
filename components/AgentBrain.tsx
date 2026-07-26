@@ -602,7 +602,7 @@ export function AgentBrain() {
               <div className="p-5 border border-[#E2E8F0] rounded-2xl bg-white">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2 text-[#1A202C] text-[14px] font-bold"><TrendingUp size={16} className="text-[#805AD5]" /> 사람 확인 필요 사유 분포 (현재 {ovHandoffTotal}건 대기)</div>
-                  <button onClick={() => router.push("/live")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
+                  <button onClick={() => router.push("/live?tab=intervention")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
                 </div>
                 <p className="text-[12px] text-[#718096] mb-4">사람 확인이 자주 필요한 분류는 위 ①②③ 사실을 채우면 건수가 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
                 {ovLoading ? (

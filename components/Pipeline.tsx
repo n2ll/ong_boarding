@@ -134,7 +134,7 @@ function channelLabel(source: string | null | undefined): string {
   return CHANNEL_LABEL[source] ?? source;
 }
 
-// 다시 연락 A안 (2026-07-10 다이어트, 전체 기본) — 지원 시점 뭉갬(오래된 발송 묶음 안전), 문의 답장 유도, 짧게.
+// 다시 연락 A안 (2026-07-10 다이어트, 전체 기본) — 지원 시점 뭉갬(오래된 지원자 안전), 문의 답장 유도, 짧게.
 // 치환: #{이름}, #{맞춤링크}. 제목은 bulk-send subject로 분리(인사말 중복 방지). 확정 뉘앙스 금지·정보성.
 const DEFAULT_BULK_BODY = `[옹고잉] #{이름}님, 안녕하세요. 예전에 배송 지원 설문을 남겨주셔서 연락드려요.
 
@@ -1321,7 +1321,7 @@ export function Pipeline() {
 
                   {/* 발송 대상 좁히기 — 다시 연락할 대상 정밀화(원지원 시기/주소 확정/활동중 제외) */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="발송 대상 좁히기 — 다시 연락할 사람을 조건으로 걸러내는 필터예요">발송 대상 좁히기</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="발송 대상 좁히기 — 다시 연락할 사람을 조건으로 걸러냅니다(‘수신거부만’은 반대로 발송 불가자만 봅니다)">발송 대상 좁히기</label>
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         onClick={() => setRecentAppliedOnly((v) => !v)}
@@ -2078,7 +2078,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       ) : members.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
           <div className="text-[14px] font-bold text-[#4A5568]">최근 {data.window_days}일 캠페인 발송이 없어요</div>
-          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 캠페인 단계별 현황이 쌓여요.</div>
+          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 단계별로 반응이 쌓여요.</div>
         </div>
       ) : (
         <div className="flex gap-6 flex-1 overflow-x-auto px-8 pb-8">
