@@ -156,7 +156,7 @@ export function AgentBrain() {
   const [kbBusy, setKbBusy] = useState(false);
   const [kbSeeding, setKbSeeding] = useState(false);
 
-  // 응대 시뮬레이터 상태
+  // 응대 미리보기 상태
   const [simInbound, setSimInbound] = useState("");
   const [simPosting, setSimPosting] = useState("");
   const [simRunning, setSimRunning] = useState(false);
@@ -418,7 +418,7 @@ export function AgentBrain() {
         toast.error(json.error || "저장에 실패했어요");
         return;
       }
-      toast.success("페르소나를 저장했어요. 60초 이내 AI 응대에 반영됩니다. (예외 처리 규칙은 별도 데모)");
+      toast.success("말투·성격을 저장했어요. 60초 이내 AI 응대에 반영됩니다. (예외 처리 규칙은 별도 데모)");
     } catch {
       toast.error("저장에 실패했어요");
     } finally {
@@ -441,12 +441,12 @@ export function AgentBrain() {
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error || "시뮬레이션에 실패했어요");
+        toast.error(json.error || "미리보기에 실패했어요");
         return;
       }
       setSimResult(json.draft as SimDraft);
     } catch {
-      toast.error("시뮬레이션에 실패했어요");
+      toast.error("미리보기에 실패했어요");
     } finally {
       setSimRunning(false);
     }
@@ -462,26 +462,26 @@ export function AgentBrain() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">에이전트 두뇌</h1>
-            {/* '여기서 바꾸면 바로 적용'은 과장이었다 — 탭마다 반영 시점이 다르다(페르소나=저장 후 60초 이내,
+            {/* '여기서 바꾸면 바로 적용'은 과장이었다 — 탭마다 반영 시점이 다르다(말투·성격=저장 후 60초 이내,
                 지식·규칙=목록 편집 즉시, AI 모드=5초 이내). 단언 대신 각 탭 안내에 맡긴다. */}
-            <p className="text-[14px] text-[#718096]">AI가 응대할 때 쓰는 말투·지식·인계 규칙을 관리합니다.</p>
+            <p className="text-[14px] text-[#718096]">AI가 응대할 때 쓰는 말투·지식과 예외 처리 규칙을 관리합니다.</p>
           </div>
         </div>
-        {/* 이 두 버튼은 '페르소나 및 어조' 탭만 저장·초기화한다 — 모든 탭에서 보이면 지금 보고 있는 탭이
+        {/* 이 두 버튼은 '말투·성격' 탭만 저장·초기화한다 — 모든 탭에서 보이면 지금 보고 있는 탭이
             저장되는 줄 오해한다(지식·규칙은 각 항목에서 즉시 저장, 고급 설정은 미연동). 해당 탭에서만 노출. */}
         {activeTab === "persona" && (
         <div className="flex items-center gap-3">
           <button
             onClick={async () => {
-              // 편집 중인 페르소나를 한 번에 날리므로 확인을 받는다(저장 전이라 서버 반영은 아직 없음).
+              // 편집 중인 말투·성격 설정을 한 번에 날리므로 확인을 받는다(저장 전이라 서버 반영은 아직 없음).
               if (!(await confirm({
-                title: "기본 페르소나로 되돌릴까요?",
+                title: "기본 말투·성격으로 되돌릴까요?",
                 description: "편집 중인 역할·지시·어조·이모지 설정이 기본값으로 초기화됩니다. (저장하기 전이라 서버에는 아직 반영되지 않아요)",
                 confirmText: "초기화",
                 destructive: true,
               }))) return;
               setPersona(DEFAULT_PERSONA);
-              toast.info("기본 페르소나로 되돌렸어요. 저장해야 반영됩니다.");
+              toast.info("기본 말투·성격으로 되돌렸어요. 저장해야 반영됩니다.");
             }}
             className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
           >
@@ -493,7 +493,7 @@ export function AgentBrain() {
             className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-6 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-70"
           >
             {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-            {isSaving ? '저장 중...' : '페르소나 저장'}
+            {isSaving ? '저장 중...' : '말투·성격 저장'}
           </button>
         </div>
         )}
@@ -512,7 +512,7 @@ export function AgentBrain() {
             onClick={() => setActiveTab("persona")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'persona' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
-            <MessageSquare size={18} className={activeTab === 'persona' ? 'text-[#FFCB3C]' : ''} /> 페르소나 및 어조
+            <MessageSquare size={18} className={activeTab === 'persona' ? 'text-[#FFCB3C]' : ''} /> 말투·성격
           </button>
           <button
             onClick={() => setActiveTab("knowledge")}
@@ -536,7 +536,7 @@ export function AgentBrain() {
             onClick={() => setActiveTab("simulator")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'simulator' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
-            <FlaskConical size={18} className={activeTab === 'simulator' ? 'text-[#805AD5]' : ''} /> 응대 시뮬레이터
+            <FlaskConical size={18} className={activeTab === 'simulator' ? 'text-[#805AD5]' : ''} /> 응대 미리보기
           </button>
           <button
             onClick={() => setActiveTab("improve")}
@@ -558,7 +558,7 @@ export function AgentBrain() {
                   {ovLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 새로고침
                 </button>
               </div>
-              <p className="text-sm text-[#718096] mb-6">옹봇은 응대할 때 <b>① 공통 운영정보 · ② 지점별 정보 · ③ 공고별 단가·정책</b> 세 곳의 사실만 인용합니다. 비어 있는 곳은 인용할 수 없어 매니저 인계가 늘어납니다. 빈칸을 채우면 인계가 줄어요.</p>
+              <p className="text-sm text-[#718096] mb-6">옹봇은 응대할 때 <b>① 공통 운영정보 · ② 지점별 정보 · ③ 공고별 단가·정책</b> 세 곳의 사실만 인용합니다. 비어 있는 곳은 인용할 수 없어 매니저가 직접 답해야 하는 일이 늘어납니다. 빈칸을 채우면 그만큼 줄어요.</p>
 
               {/* 3계층 커버리지 카드 */}
               <div className="grid grid-cols-3 gap-4 mb-6">
@@ -579,10 +579,10 @@ export function AgentBrain() {
                 </button>
               </div>
 
-              {/* 단가 미입력 공고 — 인계 위험 */}
+              {/* 단가 미입력 공고 — 매니저가 직접 답해야 할 위험 */}
               {payGapJobs.length > 0 && (
                 <div className="p-4 border border-[#FBD38D] bg-[#FFFAF0] rounded-2xl mb-6">
-                  <div className="flex items-center gap-2 text-[#C05621] mb-3 text-[13.5px] font-bold"><AlertTriangle size={16} /> 단가 미입력 공고 {payGapJobs.length}개 — 단가 문의가 오면 매니저 인계됩니다</div>
+                  <div className="flex items-center gap-2 text-[#C05621] mb-3 text-[13.5px] font-bold"><AlertTriangle size={16} /> 단가 미입력 공고 {payGapJobs.length}개 — 단가 문의가 오면 매니저가 직접 답해야 합니다</div>
                   <div className="flex flex-col gap-1.5">
                     {payGapJobs.slice(0, 6).map((j) => (
                       <div key={j.id} className="flex items-center justify-between gap-2 bg-white border border-[#FEEBC8] rounded-lg px-3 py-2">
@@ -598,17 +598,17 @@ export function AgentBrain() {
                 </div>
               )}
 
-              {/* 인계 분포(개선3) — 어떤 질문이 자주 매니저로 넘어가나 */}
+              {/* 사람 확인 필요 분포(개선3) — 어떤 질문이 자주 매니저로 넘어가나 */}
               <div className="p-5 border border-[#E2E8F0] rounded-2xl bg-white">
                 <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2 text-[#1A202C] text-[14px] font-bold"><TrendingUp size={16} className="text-[#805AD5]" /> 인계 사유 분포 (현재 대기 {ovHandoffTotal}건)</div>
-                  <button onClick={() => router.push("/live")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">인계 큐 열기 <ExternalLink size={11} /></button>
+                  <div className="flex items-center gap-2 text-[#1A202C] text-[14px] font-bold"><TrendingUp size={16} className="text-[#805AD5]" /> 사람 확인 필요 사유 분포 (현재 {ovHandoffTotal}건 대기)</div>
+                  <button onClick={() => router.push("/live")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
                 </div>
-                <p className="text-[12px] text-[#718096] mb-4">자주 인계되는 카테고리는 위 ①②③ 사실을 채우면 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
+                <p className="text-[12px] text-[#718096] mb-4">자주 사람 확인이 필요한 분류는 위 ①②③ 사실을 채우면 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
                 {ovLoading ? (
                   <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
                 ) : Object.keys(ovByCategory).length === 0 ? (
-                  <div className="text-[13px] text-[#A0AEC0] py-2">대기 중인 인계가 없어요.</div>
+                  <div className="text-[13px] text-[#A0AEC0] py-2">사람 확인이 필요한 건이 없어요.</div>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {Object.entries(ovByCategory).sort((a, b) => b[1] - a[1]).map(([cid, count]) => {
@@ -657,7 +657,7 @@ export function AgentBrain() {
                     disabled={!personaLoaded}
                     className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] disabled:bg-[#F7FAFC]"
                   />
-                  <p className="text-[12px] text-[#A0AEC0] mt-2">‘설정 저장’을 누르면 60초 이내 실제 AI 응대(시뮬레이터 포함)에 반영됩니다. 안전 규칙(민감 질문 매니저 인계 등)은 항상 유지됩니다.</p>
+                  <p className="text-[12px] text-[#A0AEC0] mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-6 pt-4 border-t border-[#E2E8F0]">
@@ -850,9 +850,9 @@ export function AgentBrain() {
           {activeTab === 'rules' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-[#1A202C] mb-6 flex items-center gap-2">
-                <SlidersHorizontal size={20} className="text-[#38A169]" /> 예외 처리 및 폴백(Fallback) 규칙
+                <SlidersHorizontal size={20} className="text-[#38A169]" /> 예외 처리 및 모를 때 대응 규칙
               </h2>
-              <p className="text-sm text-[#718096] mb-6">옹봇이 <b>스스로 답하지 않고 매니저에게 인계(pause)</b>하는 실제 사유 분류입니다. 안전을 위해 항상 작동하며, 각 카테고리 옆 숫자는 <b>현재 대기 중인 인계 건수</b>입니다. ‘정보 채우면 자동화 가능’ 항목은 위 ①②③ 사실을 채우면 인계가 줄어듭니다.</p>
+              <p className="text-sm text-[#718096] mb-6">옹봇이 <b>스스로 답하지 않고 매니저에게 넘기는</b> 실제 사유 분류입니다. 안전을 위해 항상 작동하며, 각 분류 옆 숫자는 <b>현재 사람 확인을 기다리는 건수</b>입니다. ‘정보 채우면 자동화 가능’ 항목은 위 ①②③ 사실을 채우면 매니저가 직접 답할 일이 줄어듭니다.</p>
 
               <div className="space-y-2.5">
                 {AGENT_CATEGORY_IDS.map((cid) => {
@@ -877,7 +877,7 @@ export function AgentBrain() {
               </div>
 
               <div className="mt-5 p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">항상 적용되는 안전 규칙:</b> 항의·법적 표현(취소/불법/신고 등), 반복 재촉·감정 격화, 계약·세금·보험 질문은 카테고리와 무관하게 즉시 인계됩니다. 이 안전 규칙은 끌 수 없습니다.
+                <b className="text-[#4A5568]">항상 적용되는 안전 규칙:</b> 항의·법적 표현(취소/불법/신고 등), 반복 재촉·감정 격화, 계약·세금·보험 질문은 분류와 무관하게 즉시 매니저에게 넘깁니다. 이 안전 규칙은 끌 수 없습니다.
               </div>
             </div>
           )}
@@ -996,11 +996,11 @@ export function AgentBrain() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-[#1A202C] flex items-center gap-2">
-                  <FlaskConical size={20} className="text-[#805AD5]" /> 응대 시뮬레이터
+                  <FlaskConical size={20} className="text-[#805AD5]" /> 응대 미리보기
                 </h2>
                 <span className="text-[12px] font-bold bg-[#FAF5FF] text-[#805AD5] px-3 py-1 rounded-full">실제 Claude 호출</span>
               </div>
-              <p className="text-sm text-[#718096] mb-6">지원자가 보낼 법한 문자를 입력하면, 현재 페르소나·지식 베이스로 옹봇이 어떤 답변 초안을 생성하는지 미리 확인할 수 있어요. <b>실제 발송은 되지 않습니다.</b></p>
+              <p className="text-sm text-[#718096] mb-6">지원자가 보낼 법한 문자를 입력하면, 지금 설정된 말투·성격과 지식 베이스로 옹봇이 어떤 답변 초안을 만드는지 미리 확인할 수 있어요. <b>실제 발송은 되지 않습니다.</b></p>
 
               <div className="grid grid-cols-2 gap-6">
                 {/* Input */}
@@ -1031,7 +1031,7 @@ export function AgentBrain() {
                     className="flex items-center justify-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white py-3 rounded-xl text-[14px] font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {simRunning ? <Loader2 size={18} className="animate-spin" /> : <PlayCircle size={18} className="text-[#FFCB3C]" />}
-                    {simRunning ? "옹봇이 답변을 생각 중..." : "응대 시뮬레이션 실행"}
+                    {simRunning ? "옹봇이 답변을 생각 중..." : "응대 미리보기 실행"}
                   </button>
                 </div>
 
@@ -1067,7 +1067,7 @@ export function AgentBrain() {
                   {simResult && simResult.status === 'need_info' && (
                     <div className="flex flex-col gap-4">
                       <div className="bg-[#FFFAF0] border border-[#FBD38D] rounded-xl p-4">
-                        <div className="text-[13px] font-bold text-[#C05621] mb-1.5 flex items-center gap-1.5"><AlertTriangle size={15} /> 매니저 인계 필요 (need_info)</div>
+                        <div className="text-[13px] font-bold text-[#C05621] mb-1.5 flex items-center gap-1.5"><AlertTriangle size={15} /> 사람 확인 필요</div>
                         <div className="text-[12.5px] text-[#7B341E] leading-relaxed">AI가 자체 답변하지 않고 매니저에게 넘기는 상황이에요. 실제 운영에선 자동 응답이 중단되고 슬랙 알림이 발송됩니다.</div>
                       </div>
                       {simResult.missing_info && (
@@ -1166,7 +1166,7 @@ export function AgentBrain() {
                 <Lightbulb size={20} className="text-[#D69E2E]" /> 🔁 개선 제안
               </h2>
               <p className="text-sm text-[#718096] mb-5">
-                최근 7일간 <b>매니저가 고쳐 보낸 AI 초안 · 매니저 인계 사유 · 정보 부족 사례</b>에서 AI가 배울 거리를 찾아 제안합니다.
+                최근 7일간 <b>매니저가 고쳐 보낸 AI 초안 · AI가 매니저에게 넘긴 사유 · 정보 부족 사례</b>에서 AI가 배울 거리를 찾아 제안합니다.
                 제안은 <b>매니저가 승인해야만</b> 지식베이스에 반영돼요 — 자동으로 지식이 바뀌지 않습니다.
               </p>
 
@@ -1182,7 +1182,7 @@ export function AgentBrain() {
 
               {improveRan && !improveLoading && proposals.length === 0 && (
                 <div className="mt-5 text-center text-[13px] text-[#A0AEC0] border border-dashed border-[#E2E8F0] rounded-xl p-8">
-                  아직 배울 재료가 없어요 — 코파일럿 초안 수정·인계 사례가 쌓이면 제안을 만들어요.
+                  아직 배울 재료가 없어요 — 코파일럿 초안 수정·매니저에게 넘어간 사례가 쌓이면 제안을 만들어요.
                 </div>
               )}
 

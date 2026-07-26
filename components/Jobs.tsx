@@ -366,7 +366,7 @@ export function Jobs() {
   const [newJobPolicyNotes, setNewJobPolicyNotes] = useState("");
   const [newJobAiFacts, setNewJobAiFacts] = useState("");
   const [newJobExtraOpen, setNewJobExtraOpen] = useState(false);
-  // J 타겟 노출 — 노출 범위(전체/지정) + 자동 규칙 draft. 등록 POST에 exposure·exposure_rule로 실림.
+  // J 타겟 노출 — 노출 대상(전체/지정) + 자동 규칙 draft. 등록 POST에 exposure·exposure_rule로 실림.
   const [newJobExposure, setNewJobExposure] = useState<ExposureDraft>(EMPTY_EXPOSURE);
   // 긴급 건(SOS)에서 넘어온 공고 — 등록 시 sos_request_id로 저장 + 등록 후 '대상 선별' CTA용 권역/차종 보관.
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
@@ -489,7 +489,7 @@ export function Jobs() {
           r.no_consent ? `수신 미동의 ${r.no_consent}명` : "",
           r.opt_out ? `수신거부 ${r.opt_out}명` : "",
           r.no_phone ? `연락처 없음 ${r.no_phone}명` : "",
-          r.no_token ? `맞춤링크 토큰 없음 ${r.no_token}명` : "",
+          r.no_token ? `맞춤 공고 링크 토큰 없음 ${r.no_token}명` : "",
           r.send_fail ? `발송 실패 ${r.send_fail}명` : "",
         ].filter(Boolean);
         toast.success(`${json.sent}명에게 발송 완료`, {
@@ -914,7 +914,7 @@ export function Jobs() {
         const params = sosToPipelineParams(sosSnapshot.region, sosSnapshot.vehicle);
         params.set("status", "스크리닝 전");
         toast.success("새 공고가 등록되었어요.", {
-          description: [geoNote, "이 조건에 맞는 인력풀에서 재컨택 대상을 선별하세요."].filter(Boolean).join(" · "),
+          description: [geoNote, "이 조건에 맞는 인력풀에서 다시 연락할 대상을 선별하세요."].filter(Boolean).join(" · "),
           action: {
             label: "이 조건으로 대상 선별 →",
             onClick: () => router.push(`/pipeline?${params.toString()}`),
@@ -1416,7 +1416,7 @@ export function Jobs() {
               onClick={openApplicantPreview}
               disabled={previewLoading}
               className="flex items-center gap-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-              title="테스트 지원자의 맞춤링크(/p)를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
+              title="테스트 지원자의 맞춤 공고 링크를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
             >
               {previewLoading ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />} 지원자 화면
             </button>
@@ -1474,7 +1474,7 @@ export function Jobs() {
                     <span className="text-[12px] text-[#A0AEC0] font-mono">{job.id}</span>
                     <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
                     {job.targetedExposure && (
-                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#FFFAF0] text-[#DD6B20] border-[#FEEBC8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤링크에 표시됩니다">지정 노출</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-[#FFFAF0] text-[#DD6B20] border-[#FEEBC8]" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
                   {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
@@ -1524,7 +1524,7 @@ export function Jobs() {
                     {(job.interestCount > 0 || job.unreadTotal > 0) && (
                       <div className="flex items-center gap-1 mt-1">
                         {job.interestCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title="pull 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
                         )}
                         {job.unreadTotal > 0 && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#FFF5F5] text-[#E53E3E] border border-[#FED7D7]" title="후보 미읽음 답장 합계 — 수동 응대 필요">
@@ -1691,11 +1691,11 @@ export function Jobs() {
               </div>
 
               {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
-                  모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 범위 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
+                  모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
               <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5 flex flex-col gap-4">
                 <div className="text-[13px] font-bold text-[#1A202C]">공고 설정</div>
 
-                {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 범위가 이 값에 따라 달라진다 */}
+                {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 대상이 이 값에 따라 달라진다 */}
                 <div>
                   <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">모집 방식</label>
                   <select
@@ -1909,10 +1909,10 @@ export function Jobs() {
                 </div>
               )}
 
-              {/* E15 · 공고 제목 — pull 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
+              {/* E15 · 공고 제목 — 맞춤 공고 링크 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
               {channelDrafts && (
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#A0AEC0] font-semibold">— pull 카드·안내 문자에 그대로 표시돼요</span></label>
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#A0AEC0] font-semibold">— 맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span></label>
                   <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
                 </div>
               )}
@@ -1928,7 +1928,7 @@ export function Jobs() {
                   >
                     <div>
                       <div className="text-[13px] font-bold text-[#1A202C]">근무 상세 · AI 응대 근거 (선택)</div>
-                      <div className="text-[11.5px] text-[#A0AEC0] mt-0.5">근무시간·시작일·집결지와 정책·참고정보를 채우면 pull 공고에 표시되고 AI가 문의에 직접 답합니다.</div>
+                      <div className="text-[11.5px] text-[#A0AEC0] mt-0.5">근무시간·시작일·집결지와 정책·참고정보를 채우면 맞춤 공고 링크에 표시되고 AI가 문의에 직접 답합니다.</div>
                     </div>
                     <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${newJobExtraOpen ? "rotate-90" : ""}`} />
                   </button>
@@ -1987,7 +1987,7 @@ export function Jobs() {
                         />
                       </div>
                       <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
-                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 인계가 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
+                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 매니저가 직접 답해야 하는 일이 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
                         <div>
                           <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">고용·정책 안내</label>
                           <textarea value={newJobPolicyNotes} onChange={(e) => setNewJobPolicyNotes(e.target.value)} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
@@ -2004,8 +2004,8 @@ export function Jobs() {
               {/* J 타겟 노출 — 접이식 밖 독립 섹션(D9): 등록 시에도 항상 보이게. internal/both만(external은 pull 미노출). */}
               {channelDrafts && newJobMode !== "external" && (
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
-                  <div className="text-[13px] font-bold text-[#1A202C] mb-0.5">노출 범위 — 이 공고를 누구에게 보여줄까요</div>
-                  <div className="text-[11.5px] text-[#A0AEC0] mb-3">맞춤링크(pull)에 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
+                  <div className="text-[13px] font-bold text-[#1A202C] mb-0.5">노출 대상 — 이 공고를 누구에게 보여줄까요</div>
+                  <div className="text-[11.5px] text-[#A0AEC0] mb-3">맞춤 공고 링크에서 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
                   <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />
                 </div>
               )}
@@ -2132,7 +2132,7 @@ export function Jobs() {
                 {editForm.recruitMode !== "external" && (
                   <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
                     <button type="button" onClick={() => setEditOpenSections((s) => ({ ...s, exposure: !s.exposure }))} className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
-                      <div className="text-[13px] font-bold text-[#1A202C]">타겟 노출</div>
+                      <div className="text-[13px] font-bold text-[#1A202C]">노출 대상</div>
                       <ChevronRight size={18} className={`text-[#A0AEC0] transition-transform ${editOpenSections.exposure ? "rotate-90" : ""}`} />
                     </button>
                     {editOpenSections.exposure && (
@@ -2222,7 +2222,7 @@ export function Jobs() {
                       </div>
                       {/* AI 응대 근거 — 정책·근무 문의(급여는 위 급여 그룹에서) */}
                       <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
-                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 정책·근무 문의를 AI가 직접 안내해 인계가 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
+                        <div className="text-[12px] font-bold text-[#B7791F]">AI 응대 근거 (선택) — 채우면 정책·근무 문의를 AI가 직접 안내해 매니저가 직접 답해야 하는 일이 줄어듭니다 (급여는 위 ‘급여’ 그룹에서)</div>
                         <div>
                           <label className="block text-[13px] font-bold text-[#4A5568] mb-2">고용·정책 안내</label>
                           <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none bg-white" />

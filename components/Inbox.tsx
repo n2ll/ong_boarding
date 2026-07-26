@@ -119,7 +119,7 @@ export function Inbox() {
           ? "AI 첫 응답 초안을 실시간 응대에서 확인하고 보내세요."
           : "AI 초안이 만들어지지 않았어요 — 실시간 응대에서 직접 답해주세요.";
         const handoff = json.handed_off
-          ? " AI 자동 응대는 멈춤 상태예요(실시간 응대 › 인계 대기) — 보낸 뒤 필요하면 AI를 재개하세요."
+          ? " AI 자동 응대는 멈춤 상태예요(실시간 응대 › 사람 확인 필요) — 보낸 뒤 필요하면 AI를 재개하세요."
           : "";
         toast.success(`${where}로 등록했어요. ${next}${handoff}`, { duration: 10000 });
       } else if (action === "ongmanaging") {

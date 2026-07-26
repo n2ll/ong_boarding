@@ -146,7 +146,7 @@ const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 // 미리보기 조회 대상 상한 — 목록 후보가 많아져도 최근 활동순 상위만 조회(URL 길이·메시지 스캔 부하 방지)
 const PREVIEW_TARGET_CAP = 150;
 
-// '답 대기' 판정: 마지막 메시지가 매니저 수동 발신(14일 내) — 내가 보내고 회신을 기다리는 대화.
+// '답 대기'(표시 라벨 '상대 답 기다림') 판정: 마지막 메시지가 매니저 수동 발신(14일 내) — 내가 보내고 회신을 기다리는 대화.
 // 캠페인 벌크 핑(system-bulk)·AI 발송은 서버(preview API)가 manual_outbound=false로 걸러준다.
 function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
   return !!pv?.manual_outbound && !!pv.created_at && Date.now() - new Date(pv.created_at).getTime() < RECENT_INBOUND_MS;
@@ -155,7 +155,7 @@ function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
 // 카드 상태를 '누구 차례냐' 단일 축 배지 하나로 압축(간소화).
 // 이전엔 카드당 최대 6개 배지(미답·개입필요·풀응답·초안대기·수동응대·AI응대중 + 가용성·수신거부)가
 // 겹쳐 무엇을 먼저 봐야 할지 헷갈렸다. 실무자의 질문은 하나 — "지금 내가 답할 것이 뭐지?".
-// 우선순위: 수신거부 > 초안 검토 > 답장 필요 > 수동 응대 > AI 응대 중 > 답 대기 > (그 외).
+// 우선순위: 수신거부 > 초안 검토 > 내가 답할 차례 > 수동 응대 > AI 응대 중 > 상대 답 기다림 > (그 외).
 interface TurnBadge { label: string; cls: string; sub?: string }
 function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBadge {
   const unanswered = pv?.direction === "inbound" || (chat.unread_count ?? 0) > 0;
@@ -164,10 +164,10 @@ function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBad
   if (unanswered) {
     // 활성 대화 없이 답장 온 재컨택 응답자 = 스크리닝 스코프 밖 답장. 서브라벨로만 구분(별도 색 배지 X).
     const isPool = (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
-    return { label: "답장 필요", cls: "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]", sub: isPool ? "풀 밖 답장" : undefined };
+    return { label: "내가 답할 차례", cls: "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]", sub: isPool ? "풀 밖 답장" : undefined };
   }
   if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-[#EDF2F7] text-[#4A5568]" };
-  if (isAwaitingPreview(pv)) return { label: "답 대기", cls: "bg-[#EDF2F7] text-[#718096]" };
+  if (isAwaitingPreview(pv)) return { label: "상대 답 기다림", cls: "bg-[#EDF2F7] text-[#718096]" };
   if (chat.agent_stage && chat.agent_stage !== "abort") return { label: "AI 응대 중", cls: "bg-[#EBF8FF] text-[#3182CE] border border-[#BEE3F8]" };
   return { label: chat.status, cls: "bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]" };
 }
@@ -611,14 +611,15 @@ export function LiveConsole() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
           </div>
-          <div className="flex gap-1.5">
+          {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
+          <div className="flex gap-1.5 flex-wrap">
             <button onClick={() => setActiveTab("all")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
-            <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>인계 대기 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
+            <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
             <button onClick={() => setActiveTab("confirm")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-[#2F855A] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
-          {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(답장 필요→AI→답 대기)로 대체(간소화).
+          {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(내가 답할 차례→AI→상대 답 기다림)로 대체(간소화).
               '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
-              인계 대기 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
+              사람 확인 필요 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
           {activeTab === "all" ? (
             unansweredCount > 0 ? (
               <div className="text-[12px] font-bold text-[#E53E3E] flex items-center gap-1.5">
@@ -645,10 +646,10 @@ export function LiveConsole() {
           </Link>
         </div>
 
-        {/* 인계 대기 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
+        {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">대기 중인 인계가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
+            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
             {visibleHandoffs.map((h) => {
               const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
               return (
@@ -902,7 +903,7 @@ export function LiveConsole() {
             </div>
             <div className="p-6 flex flex-col gap-4">
               <div className="text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문을 AI가 직접 답해 인계가 줄어듭니다.
+                <b className="text-[#4A5568]">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
                 <button onClick={() => setPromoteField("pay_info")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "pay_info" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>급여·정산</button>
@@ -936,7 +937,7 @@ export function LiveConsole() {
             </div>
             <div className="p-6 flex flex-col gap-4">
               <div className="text-[12.5px] text-[#718096] leading-relaxed">
-                매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문을 AI가 직접 답해 인계가 줄어듭니다.
+                매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
                 <button onClick={() => setKbTarget("common")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${kbTarget === "common" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>공통(전 지점)</button>

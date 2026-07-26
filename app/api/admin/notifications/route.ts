@@ -63,7 +63,7 @@ export async function GET() {
     items.push({
       id: "live",
       tone: "amber",
-      title: `매니저 인계 대기 ${interventions}건`,
+      title: `사람 확인 필요 ${interventions}건`,
       desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.",
       path: "/live",
     });

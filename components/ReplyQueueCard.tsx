@@ -5,7 +5,7 @@ import { MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 /**
- * 답장 대기 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
+ * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
  * 미답 지원자('마지막 메시지가 inbound' 또는 unread_count>0)를 카드로 나열해,
  * 가장 hot한 신호가 흩어지지 않게 모은다. (열람만으로는 큐에서 빠지지 않는다)
  * 카드에서 대화 스레드를 바로 열어(상세 드로어의 대화 탭) 매니저가 즉시 수동 응대할 수 있다.
@@ -15,7 +15,7 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
  *
  * 미착수 / 응대중 구분:
  *   - 응대중 = agent_stage === "paused" (매니저가 이미 개입해 수동 응대 중인 건).
- *   - 미착수 = 그 외(활성 대화 없이 답장만 온 재컨택 응답자 등). 매니저 착수가 아직 없는 상태.
+ *   - 미착수 = 그 외(활성 대화 없이 다시 연락 문자에 답장만 온 사람 등). 매니저 착수가 아직 없는 상태.
  */
 
 interface AppRow {
@@ -156,7 +156,7 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
-            <MessageCircle size={15} className="text-[#3182CE]" /> 답장 대기
+            <MessageCircle size={15} className="text-[#3182CE]" /> 내가 답할 차례
           </h2>
           <div className="text-[12px] text-[#718096] mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
         </div>
@@ -167,7 +167,7 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
               value={jobFilter === "all" ? "all" : String(jobFilter)}
               onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
               className="max-w-[180px] text-[12px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1 outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40"
-              title="진행 중 공고별로 답장 대기를 필터링합니다"
+              title="진행 중 공고별로 답할 차례인 지원자를 걸러 봅니다"
             >
               <option value="all">전체 공고</option>
               {jobOptions.map((o) => (
@@ -193,7 +193,7 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">답장 대기 중인 지원자가 없어요. 재컨택 문자에 답장이 오면 여기에 표시됩니다.</div>
+        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {

@@ -54,7 +54,7 @@ export function Dashboard() {
   // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
   const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
-  // 헤더 벨·사이드바 배지와 동일 소스 — 인계 대기(paused)·AI 전역 중단 카운트
+  // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
   const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");
   // 확정 대기 큐(스크리닝 완료·미확정) — 사이드바 배지·LiveConsole '확정 대기' 탭과 동일 소스. '오늘의 할 일'에 합류(주제 C1 발견성).
   const { data: confirmRes } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
@@ -132,7 +132,7 @@ export function Dashboard() {
 
   const trend7Sum = useMemo(() => trend.slice(7).reduce((s, d) => s + d.유입, 0), [trend]);
 
-  // 단계 간 전환율을 강조한 가로형 퍼널
+  // 단계 간 전환율을 강조한 가로형 단계별 현황
   const funnel = useMemo(() => {
     const screened = stats.screening + stats.interview + stats.passed;
     const passed1 = stats.interview + stats.passed;
@@ -200,11 +200,11 @@ export function Dashboard() {
     return { top, unknownCount: unknown, max: top[0]?.count ?? 1 };
   }, [apps]);
 
-  // 죽은 unread_count 대신 /notifications counts(인계 대기·AI 중단)와 /sos open(진행 중 긴급 건) 기반
+  // 죽은 unread_count 대신 /notifications counts(사람 확인 필요·AI 중단)와 /sos open(진행 중 긴급 건) 기반
   const notiCounts = notiRes?.counts;
   const sosOpen = sosRes?.open ?? [];
-  // 풀 응답 = 답장(unread>0)이 왔지만 인계 대기(paused)로는 집계되지 않는 건.
-  // 활성 대화 없는 재컨택 응답자가 여기 잡힌다. interventions(paused)와 중복되지 않게 paused 제외.
+  // 풀 응답 = 답장(unread>0)이 왔지만 사람 확인 필요(paused)로는 집계되지 않는 건.
+  // 활성 대화 없이 다시 연락 문자에 답장한 사람이 여기 잡힌다. interventions(paused)와 중복되지 않게 paused 제외.
   const poolReplies = useMemo(
     () => apps.filter((a) => (a.unread_count ?? 0) > 0 && a.agent_stage !== "paused").length,
     [apps]
@@ -228,7 +228,7 @@ export function Dashboard() {
         id: "interest-queue",
         tone: interestImmediate > 0 ? "red" : "amber",
         title: `관심 표시 처리 대기 ${interestCount}건${interestImmediate > 0 ? ` (바로가능 ${interestImmediate}건)` : ""}`,
-        desc: "맞춤 공고에 관심을 누른 후보가 컨택을 기다리고 있어요.",
+        desc: "맞춤 공고 링크에서 관심을 누른 후보가 연락을 기다리고 있어요.",
         cta: "관심 표시 처리로",
         path: "#interest-queue",
       });
@@ -238,13 +238,13 @@ export function Dashboard() {
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
       // 목적 탭으로 딥링크 — 예전엔 둘 다 '전체' 탭으로 떨어져 매니저가 탭을 다시 찾아야 했다.
-      u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live?tab=intervention" });
+      u.push({ id: "live", tone: "amber", title: `사람 확인 필요 ${notiCounts!.interventions}건`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "실시간 응대로", path: "/live?tab=intervention" });
     }
     if (confirmPendingCount > 0) {
       u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
-      u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "답장 대기 처리로", path: "#reply-queue" });
+      u.push({ id: "pool-reply", tone: "amber", title: `내가 답할 차례 ${poolReplies}건`, desc: "다시 연락 문자에 답장이 왔는데 아직 아무도 답하지 않았어요. '사람 확인 필요' 건과는 별개로 응대가 필요합니다.", cta: "내가 답할 차례 보기", path: "#reply-queue" });
     }
     return u;
   }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, confirmPendingCount, nowTick]);
@@ -343,7 +343,7 @@ export function Dashboard() {
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
                 <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">분류 대기 문자함·인계 대기·긴급 건이 발생하면 여기 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
                 <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
                   {[
                     { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },
@@ -386,15 +386,15 @@ export function Dashboard() {
           </div>
       </motion.div>
 
-      {/* 재컨택 응답 큐 — 관심 표시(pull 클릭)와 답장 대기(문자 답장)를 대칭 병렬 배치.
+      {/* 다시 연락 응답 큐 — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치.
           '오늘의 할 일' 바로 아래, 긴급 건 기록 위. */}
       <div className="grid grid-cols-2 gap-6 items-start">
         <InterestQueueCard />
         <ReplyQueueCard />
       </div>
 
-      {/* 재컨택 캠페인 현황 — 발송 코호트의 열람/관심/답장 퍼널. 발송 이력 없으면 카드 스스로 숨김.
-          관심/답장 큐 아래·긴급 건 기록 위 배치(퍼널에서 처리 큐로 앵커 이동). */}
+      {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김.
+          관심/답장 큐 아래·긴급 건 기록 위 배치(단계별 현황에서 처리 큐로 앵커 이동). */}
       <CampaignStatsCard />
 
       {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
@@ -402,7 +402,7 @@ export function Dashboard() {
         <SosLedgerCard />
       </div>
 
-      {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·전환 퍼널·스크리닝 현황·지역 분포를 한곳에 모음.
+      {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
           접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-[#E2E8F0] rounded-[16px] shadow-sm overflow-hidden">
         <button
@@ -530,11 +530,11 @@ export function Dashboard() {
               </div>
             </div>
 
-            {/* 전환 퍼널 (가로형 · 단계 간 전환율 강조) */}
+            {/* 단계별 전환율 (가로형 · 단계 간 전환율 강조) */}
             <div className="border border-[#E2E8F0] rounded-[16px] p-6 flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-[15px] font-bold text-[#1A202C]">파이프라인 전환 퍼널</h3>
+                  <h3 className="text-[15px] font-bold text-[#1A202C]">파이프라인 단계별 현황</h3>
                   <div className="text-[12px] text-[#718096] mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
                 </div>
                 <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">

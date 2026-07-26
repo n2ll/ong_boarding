@@ -149,7 +149,7 @@ export function Reengagement() {
               <div className="text-[10.5px] text-[#68A17F]">이름+전화 반입</div>
             </div>
             <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-3">
-              <div className="text-[11px] font-bold text-[#718096]">비활동 옵트인후보</div>
+              <div className="text-[11px] font-bold text-[#718096]">비활동 사전 동의 후보</div>
               <div className="text-[20px] font-extrabold text-[#4A5568]">{data.inactiveCount}</div>
               <div className="text-[10.5px] text-[#A0AEC0]">집계만 (동의 후 반입)</div>
             </div>
@@ -170,7 +170,7 @@ export function Reengagement() {
             <ShieldAlert size={15} className="shrink-0 mt-0.5" />
             <span>
               비지원자에게 보내는 첫 안내입니다. <b>활동자는 바로 안내(+수신거부 고지)</b>, 비활동자는{" "}
-              <b>옵트인 먼저</b>. 실발송 전 <b>법적 근거 검토</b>를 권합니다.
+              <b>사전 동의를 먼저</b> 받아야 해요. 실발송 전 <b>법적 근거 검토</b>를 권합니다.
             </span>
           </div>
 
@@ -196,7 +196,7 @@ export function Reengagement() {
               <div className="text-[12px] text-[#4A5568] leading-relaxed">{data.templates.offer}</div>
             </div>
             <div className="rounded-xl border border-[#E2E8F0] bg-[#FAFCFF] p-3 space-y-1">
-              <div className="text-[11.5px] font-bold text-[#718096]">비활동자 · 옵트인 문구</div>
+              <div className="text-[11.5px] font-bold text-[#718096]">비활동자 · 사전 동의 요청 문구</div>
               <div className="text-[12px] text-[#4A5568] leading-relaxed">{data.templates.optin}</div>
             </div>
           </div>
