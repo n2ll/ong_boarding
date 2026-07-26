@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap, Lightbulb, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useConfirm } from "./ConfirmDialog";
-import { DemoBanner } from "./DemoBanner";
 import { AGENT_CATEGORY_IDS, getCategory } from "@/lib/agent/handoff-category";
 
 interface OverviewBranch {
@@ -148,9 +147,6 @@ export function AgentBrain() {
     void mutateOvHandoffs();
   }, [mutateOvBranches, mutateOvJobs, mutateOvHandoffs]);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'vectorizing' | 'complete'>('idle');
-  const [uploadProgress, setUploadProgress] = useState(0);
   const { data: examplesApi, isLoading: examplesLoading, mutate: mutateExamples } = useSWR<{ data?: PromptExample[] }>("/api/admin/prompt-examples");
   const examples = useMemo(() => examplesApi?.data ?? [], [examplesApi]);
   const kbLoading = examplesLoading && examples.length === 0;
@@ -166,7 +162,6 @@ export function AgentBrain() {
   const [simRunning, setSimRunning] = useState(false);
   const [simResult, setSimResult] = useState<SimDraft | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 🔁 개선 제안 (R4-2) — 최근 7일 재료에서 배울 거리 추출. 반영은 매니저 승인으로만.
   const [improveLoading, setImproveLoading] = useState(false);
@@ -457,50 +452,6 @@ export function AgentBrain() {
     }
   };
 
-  const simulateUploadAndVectorize = () => {
-    if (uploadState !== 'idle') return;
-
-    setUploadState('uploading');
-    setUploadProgress(0);
-
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setUploadState('vectorizing');
-          simulateVectorization();
-          return 100;
-        }
-        return prev + 15;
-      });
-    }, 200);
-  };
-
-  const simulateVectorization = () => {
-    setTimeout(() => {
-      // 데모 시연 — 실제 학습(RAG 인덱싱)은 일어나지 않으므로 성공 토스트를 띄우지 않는다.
-      setUploadState('complete');
-      setTimeout(() => setUploadState('idle'), 3000);
-    }, 2500);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      simulateUploadAndVectorize();
-    }
-  };
-
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
       {/* Header */}
@@ -511,9 +462,14 @@ export function AgentBrain() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">에이전트 두뇌</h1>
-            <p className="text-[14px] text-[#718096]">AI가 응대할 때 쓰는 말투·지식·인계 규칙을 관리합니다. 여기서 바꾸면 바로 적용돼요.</p>
+            {/* '여기서 바꾸면 바로 적용'은 과장이었다 — 탭마다 반영 시점이 다르다(페르소나=저장 후 60초 이내,
+                지식·규칙=목록 편집 즉시, AI 모드=5초 이내). 단언 대신 각 탭 안내에 맡긴다. */}
+            <p className="text-[14px] text-[#718096]">AI가 응대할 때 쓰는 말투·지식·인계 규칙을 관리합니다.</p>
           </div>
         </div>
+        {/* 이 두 버튼은 '페르소나 및 어조' 탭만 저장·초기화한다 — 모든 탭에서 보이면 지금 보고 있는 탭이
+            저장되는 줄 오해한다(지식·규칙은 각 항목에서 즉시 저장, 고급 설정은 미연동). 해당 탭에서만 노출. */}
+        {activeTab === "persona" && (
         <div className="flex items-center gap-3">
           <button
             onClick={async () => {
@@ -537,9 +493,10 @@ export function AgentBrain() {
             className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-6 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-70"
           >
             {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-            {isSaving ? '저장 중...' : '설정 저장'}
+            {isSaving ? '저장 중...' : '페르소나 저장'}
           </button>
         </div>
+        )}
       </div>
 
       <div className="flex gap-8">
@@ -752,79 +709,17 @@ export function AgentBrain() {
                 </h2>
                 <span className="text-[12px] font-bold bg-[#F0FFF4] text-[#38A169] px-3 py-1 rounded-full">prompt_examples 연동됨</span>
               </div>
-              <p className="text-sm text-[#718096] mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다. 파일 업로드(RAG)는 데모입니다.</p>
+              <p className="text-sm text-[#718096] mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다.</p>
 
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => uploadState === 'idle' && fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center text-center mb-8 transition-all relative overflow-hidden ${isDragging
-                    ? 'border-[#FFCB3C] bg-[#FFFBEC] scale-[1.01]'
-                    : uploadState !== 'idle'
-                      ? 'border-[#CBD5E0] bg-white cursor-default'
-                      : 'border-[#CBD5E0] bg-[#F7FAFC] hover:bg-[#EDF2F7] hover:border-[#A0AEC0] cursor-pointer'
-                  }`}
-              >
-                <input type="file" ref={fileInputRef} className="hidden" onChange={simulateUploadAndVectorize} accept=".pdf,.doc,.docx,.txt" />
-
-                <AnimatePresence mode="wait">
-                  {uploadState === 'idle' && (
-                    <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
-                      <div className={`w-14 h-14 rounded-full shadow-sm flex items-center justify-center mb-4 transition-colors ${isDragging ? 'bg-[#FFCB3C] text-white' : 'bg-white text-[#4A5568]'}`}>
-                        <UploadCloud size={28} />
-                      </div>
-                      <h3 className="text-[16px] font-extrabold text-[#1A202C] mb-1.5">파일 업로드 (데모) <span className="text-[10px] font-bold text-[#1A202C] bg-[#FEFCBF] px-1.5 py-0.5 rounded align-middle">데모</span></h3>
-                      <p className="text-[13px] font-medium text-[#718096]">RAG 벡터 스토어는 아직 연동되지 않았어요. 실제 지식은 아래 목록을 참고하세요.</p>
-                    </motion.div>
-                  )}
-
-                  {uploadState === 'uploading' && (
-                    <motion.div key="uploading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center w-full max-w-md">
-                      <FileText size={32} className="text-[#3182CE] mb-4" />
-                      <h3 className="text-[15px] font-bold text-[#1A202C] mb-4">파일 업로드 중...</h3>
-                      <div className="w-full h-2.5 bg-[#EDF2F7] rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full bg-[#3182CE] rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${uploadProgress}%` }}
-                        />
-                      </div>
-                      <div className="w-full flex justify-between mt-2 text-[11px] font-bold text-[#718096]">
-                        <span>2026_면접가이드.pdf</span>
-                        <span>{Math.min(uploadProgress, 100)}%</span>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {uploadState === 'vectorizing' && (
-                    <motion.div key="vectorizing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
-                      <div className="relative mb-6">
-                        <Brain size={48} className="text-[#805AD5]" />
-                        <Sparkles size={20} className="text-[#FFCB3C] absolute -top-1 -right-1 animate-pulse" />
-                        <div className="absolute inset-0 border-4 border-[#805AD5] border-t-transparent rounded-full animate-spin opacity-20 scale-125"></div>
-                      </div>
-                      <h3 className="text-[16px] font-extrabold text-[#1A202C] mb-2">AI 두뇌에 지식 주입 중...</h3>
-                      <p className="text-[13px] text-[#718096]">문서를 텍스트 청크(Chunk)로 분해하고 벡터 스토어에 인덱싱하고 있습니다.</p>
-
-                      <div className="mt-5 bg-[#FAF5FF] border border-[#E9D8FD] rounded-lg p-3 text-[11.5px] font-mono text-[#553C9A] w-full max-w-md text-left">
-                        <div className="flex items-center gap-2 mb-1 opacity-70"><CheckCircle2 size={12} /> Text Extraction... Done</div>
-                        <div className="flex items-center gap-2 mb-1 opacity-70"><CheckCircle2 size={12} /> Chunking 1024 tokens... Done</div>
-                        <div className="flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Generating Embeddings (text-embedding-3-small)...</div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {uploadState === 'complete' && (
-                    <motion.div key="complete" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center">
-                      <div className="w-16 h-16 bg-[#FFFBEC] rounded-full flex items-center justify-center mb-4">
-                        <AlertTriangle size={32} className="text-[#B7791F]" />
-                      </div>
-                      <h3 className="text-[18px] font-extrabold text-[#1A202C] mb-1">데모 시연입니다 — 실제로 학습되지 않습니다</h3>
-                      <p className="text-[13px] text-[#718096]">옹봇이 실제로 참고하는 지식은 아래 지식 베이스 목록에 직접 추가해주세요.</p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+              {/* 파일 업로드(RAG)는 백엔드가 없어 가짜 진행바·"벡터 인덱싱 중"까지 보여준 뒤 마지막에야
+                  데모임을 알리는 화면이었다 — 매니저의 시간을 쓰게 하고 그 사이 학습된다고 믿게 만든다.
+                  실제 경로(아래 지식 목록 직접 추가)만 남긴다. */}
+              <div className="border border-[#E2E8F0] bg-[#F7FAFC] rounded-2xl px-5 py-4 mb-8 flex items-start gap-3">
+                <UploadCloud size={20} className="text-[#A0AEC0] shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-[13.5px] font-bold text-[#4A5568]">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-[#A0AEC0] bg-[#EDF2F7] px-1.5 py-0.5 rounded align-middle">준비중</span></div>
+                  <div className="text-[12.5px] text-[#718096] mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 1분 안에 응대에 반영돼요.</div>
+                </div>
               </div>
 
               {/* 카테고리 탭 + 액션 */}
@@ -1072,42 +967,24 @@ export function AgentBrain() {
                       고급 설정
                       <span className="text-[10px] font-bold text-[#975A16] bg-[#FEFCBF] px-1.5 py-0.5 rounded">준비중</span>
                     </h2>
-                    <p className="text-[13px] text-[#718096]">LLM 모델 교체 및 데이터 보존 정책을 관리합니다.</p>
+                    <p className="text-[13px] text-[#718096]">지금 쓰는 AI 모델과 개인정보 처리 상태를 확인합니다.</p>
                   </div>
                 </div>
 
-                <DemoBanner variant="soon" note="LLM 모델 선택과 PII 마스킹 토글은 아직 백엔드에 연동되지 않은 미리보기입니다. 현재 응대는 기본 모델로 동작하며, 이 화면에서 바꿔도 실제 설정은 변경되지 않습니다." />
-
-                <div className="space-y-6 opacity-60 pointer-events-none select-none" aria-disabled="true">
+                {/* 실제로는 Claude(응대 Sonnet / 분류 Haiku)로 동작하는데 화면에는 존재하지 않는 모델명
+                    (Ongbot-Core·GPT-4o)이 선택지로 있었다 — 비활성이라도 "우리가 GPT를 쓴다"는 오정보가 된다.
+                    목업을 지우고 현재 사실만 적는다. */}
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-5 space-y-3">
                   <div>
-                    <h3 className="text-[14px] font-bold text-[#1A202C] mb-3">기본 LLM 모델 엔진</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="flex items-start gap-3 p-4 border border-[#FFCB3C] bg-[#FFFBEB] rounded-xl cursor-not-allowed">
-                        <input type="radio" name="llm" defaultChecked disabled className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
-                        <div>
-                          <div className="text-[14px] font-bold text-[#1A202C]">Ongbot-Core (권장)</div>
-                          <div className="text-[12px] text-[#718096] mt-1">시니어 채용에 특화 파인튜닝된 자체 모델. 속도가 가장 빠릅니다.</div>
-                        </div>
-                      </label>
-                      <label className="flex items-start gap-3 p-4 border border-[#E2E8F0] bg-white rounded-xl cursor-not-allowed">
-                        <input type="radio" name="llm" disabled className="mt-1 w-4 h-4 text-[#FFCB3C] focus:ring-[#FFCB3C]" />
-                        <div>
-                          <div className="text-[14px] font-bold text-[#1A202C]">GPT-4o (OpenAI)</div>
-                          <div className="text-[12px] text-[#718096] mt-1">범용성이 뛰어나고 복잡한 문맥 추론에 강합니다. (비용 증가)</div>
-                        </div>
-                      </label>
-                    </div>
+                    <div className="text-[13.5px] font-bold text-[#4A5568] mb-1">지금 쓰는 AI</div>
+                    <p className="text-[12.5px] text-[#718096] leading-relaxed">
+                      지원자 응대는 Claude Sonnet, 문자 분류는 Claude Haiku로 동작해요. 모델을 화면에서 바꾸는 기능은 아직 없어요(변경이 필요하면 개발팀에 요청).
+                    </p>
                   </div>
-
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-[14px] font-bold text-[#1A202C]">개인정보 마스킹 (PII 필터링)</h3>
-                      <div className="w-11 h-6 bg-[#CBD5E0] rounded-full relative flex items-center px-1">
-                        <div className="w-4 h-4 bg-white rounded-full translate-x-5 transition-transform" />
-                      </div>
-                    </div>
-                    <p className="text-[12.5px] text-[#718096]">
-                      지원자가 대화 중 주민등록번호, 계좌번호 등 민감한 개인정보를 입력할 경우 즉시 별표(*) 처리하여 DB에 저장되지 않도록 방지합니다.
+                  <div>
+                    <div className="text-[13.5px] font-bold text-[#4A5568] mb-1">개인정보 처리</div>
+                    <p className="text-[12.5px] text-[#718096] leading-relaxed">
+                      민감정보 자동 마스킹은 아직 준비 중이에요. 지원자가 주민등록번호·계좌번호를 보내면 매니저가 직접 확인해 주세요.
                     </p>
                   </div>
                 </div>

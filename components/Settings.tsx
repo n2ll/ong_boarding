@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, Building2, MapPin, Shield } from "lucide-react";
-import { DemoBanner } from "./DemoBanner";
 import { Clients } from "./Clients";
 import { Branches } from "./Branches";
 import { Team } from "./Team";
@@ -38,10 +37,12 @@ export function Settings() {
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <DemoBanner variant="soon" note="프로필·알림·보안 설정은 화면 미리보기입니다(사용자/인증 테이블 도입 후 실저장). 단, ‘외부 연동’ 탭은 실제 서버 연결 상태를 보여줍니다." />
+      {/* 페이지 전체에 '준비중' 배너·배지를 달면, 실제로 동작하는 화주사·지점·팀·외부연동까지
+          미완성으로 오해된다(채용·확정 전 반드시 세팅해야 하는 것들이 여기 있다).
+          준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}
       <div className="mb-8">
-        <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1 flex items-center gap-2">설정 <span className="text-[11px] font-bold text-[#718096] bg-[#EDF2F7] px-2 py-0.5 rounded align-middle">준비중</span></h1>
-        <p className="text-[14px] text-[#718096]">개인 프로필과 시스템 환경설정을 관리합니다.</p>
+        <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">설정</h1>
+        <p className="text-[14px] text-[#718096]">화주사·지점·팀과 외부 연동을 관리합니다. (프로필·알림·보안은 준비 중)</p>
       </div>
 
       <div className="flex gap-8">
@@ -51,19 +52,19 @@ export function Settings() {
             onClick={() => setActiveTab("profile")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'profile' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
-            <User size={18} /> 프로필 설정
+            <User size={18} /> 프로필 설정 <span className="ml-auto text-[10px] font-bold text-[#A0AEC0] bg-[#EDF2F7] px-1.5 py-0.5 rounded shrink-0">준비중</span>
           </button>
           <button 
             onClick={() => setActiveTab("notifications")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'notifications' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
-            <Bell size={18} /> 알림 설정
+            <Bell size={18} /> 알림 설정 <span className="ml-auto text-[10px] font-bold text-[#A0AEC0] bg-[#EDF2F7] px-1.5 py-0.5 rounded shrink-0">준비중</span>
           </button>
           <button 
             onClick={() => setActiveTab("security")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'security' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
-            <Lock size={18} /> 보안 및 인증
+            <Lock size={18} /> 보안 및 인증 <span className="ml-auto text-[10px] font-bold text-[#A0AEC0] bg-[#EDF2F7] px-1.5 py-0.5 rounded shrink-0">준비중</span>
           </button>
           <button
             onClick={() => setActiveTab("integrations")}
@@ -130,15 +131,20 @@ export function Settings() {
 
           {activeTab === 'notifications' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-[#1A202C] mb-6 border-b border-[#E2E8F0] pb-4">알림 설정</h2>
-              <div className="space-y-6 max-w-2xl">
+              <h2 className="text-lg font-bold text-[#1A202C] mb-2 border-b border-[#E2E8F0] pb-4">알림 설정</h2>
+              {/* 토글이 눈으로는 켜지는데 저장되지 않는 '거짓 어포던스'였다 — 켜둔 줄 알고 알림을 기다리게 된다.
+                  저장 경로가 생길 때까지 비활성 + 사유 명시. 실제 운영 알림은 Slack 웹훅으로 나간다. */}
+              <p className="text-[12.5px] text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-3 py-2 mb-6">
+                아직 저장되지 않는 화면이에요(계정 알림 설정 준비 중). 지금 운영 알림은 Slack으로 받고 있어요.
+              </p>
+              <div className="space-y-6 max-w-2xl opacity-60">
                 <div className="flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
                   <div>
                     <div className="text-[14px] font-bold text-[#1A202C] mb-1">AI 응대 실패 (Human Takeover) 알림</div>
                     <div className="text-[13px] text-[#718096]">AI가 답변하지 못하거나 지원자가 매니저 연결을 요청할 때 즉시 알림을 받습니다.</div>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" defaultChecked className="sr-only peer" />
+                  <label className="relative inline-flex items-center cursor-not-allowed">
+                    <input type="checkbox" defaultChecked disabled className="sr-only peer" />
                     <div className="w-11 h-6 bg-[#CBD5E0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#38A169]"></div>
                   </label>
                 </div>
@@ -147,8 +153,8 @@ export function Settings() {
                     <div className="text-[14px] font-bold text-[#1A202C] mb-1">신규 지원자 발생 알림</div>
                     <div className="text-[13px] text-[#718096]">새로운 지원서가 접수되었을 때 데일리 리포트 형태로 알림을 받습니다.</div>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" />
+                  <label className="relative inline-flex items-center cursor-not-allowed">
+                    <input type="checkbox" disabled className="sr-only peer" />
                     <div className="w-11 h-6 bg-[#CBD5E0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#38A169]"></div>
                   </label>
                 </div>
@@ -162,15 +168,15 @@ export function Settings() {
               <div className="space-y-6 max-w-md">
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">현재 비밀번호</label>
-                  <input type="password" placeholder="••••••••" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  <input type="password" disabled placeholder="••••••••" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">새 비밀번호</label>
-                  <input type="password" placeholder="영문, 숫자, 특수문자 조합 8자 이상" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  <input type="password" disabled placeholder="영문, 숫자, 특수문자 조합 8자 이상" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-bold text-[#4A5568] mb-2">새 비밀번호 확인</label>
-                  <input type="password" placeholder="비밀번호 다시 입력" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                  <input type="password" disabled placeholder="비밀번호 다시 입력" className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-sm bg-[#F7FAFC] text-[#A0AEC0] cursor-not-allowed" />
                 </div>
                 <div className="pt-4">
                   <button disabled className="bg-white border border-[#E2E8F0] text-[#A0AEC0] px-6 py-2.5 rounded-xl font-bold shadow-sm cursor-not-allowed">
@@ -185,7 +191,7 @@ export function Settings() {
           {activeTab === 'integrations' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-[#1A202C] mb-1 border-b-0 pb-0">외부 서비스 연동</h2>
-              <p className="text-[13px] text-[#718096] mb-6">서버 환경변수 설정 여부로 판단한 실제 연결 상태입니다. (키 값은 표시되지 않습니다)</p>
+              <p className="text-[13px] text-[#718096] mb-6">서버에 연결 정보가 들어가 있는지로 판단한 실제 연결 상태입니다. (비밀 키는 표시되지 않아요)</p>
               {intLoading ? (
                 <div className="flex items-center gap-2 text-[#A0AEC0] py-8"><Loader2 size={18} className="animate-spin" /> 연동 상태 확인 중…</div>
               ) : (
@@ -205,7 +211,11 @@ export function Settings() {
                               </div>
                             )}
                             {!it.configured && (
-                              <div className="text-[11px] text-[#A0AEC0] mt-1">필요: {it.required.join(", ")}</div>
+                              // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
+                              // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
+                              <div className="text-[11px] text-[#A0AEC0] mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
+                                아직 연결 정보가 없어요 — 개발팀에 연결 요청이 필요해요
+                              </div>
                             )}
                           </div>
                         </div>
