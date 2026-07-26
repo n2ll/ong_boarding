@@ -237,10 +237,11 @@ export function Dashboard() {
       u.push({ id: "inbox", tone: "red", title: `분류 대기 문자함 ${inboxCount}건`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
-      u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live" });
+      // 목적 탭으로 딥링크 — 예전엔 둘 다 '전체' 탭으로 떨어져 매니저가 탭을 다시 찾아야 했다.
+      u.push({ id: "live", tone: "amber", title: `매니저 인계 대기 ${notiCounts!.interventions}건`, desc: "AI가 매니저에게 넘긴 대화가 처리를 기다리고 있어요.", cta: "실시간 응대로", path: "/live?tab=intervention" });
     }
     if (confirmPendingCount > 0) {
-      u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live" });
+      u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
       u.push({ id: "pool-reply", tone: "amber", title: `새 문자 답장 ${poolReplies}건 — 확인 필요`, desc: "활성 대화 없이 답장 온 재컨택 응답자예요. 인계 대기와 별개로 응대가 필요합니다.", cta: "답장 대기 처리로", path: "#reply-queue" });

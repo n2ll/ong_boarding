@@ -70,6 +70,10 @@ export async function GET() {
   for (const c of (cands ?? []) as unknown as Cand[]) {
     const job = c.jobs ?? null;
     if (!job || isSystemJobTitle(job.title) || isJobEffectivelyClosed(job.status, job.closes_at)) continue;
+    // abort(공고 단위 종료) 후보도 폴백으로는 남긴다 — 확정 모달은 abort를 확정 대상에서 빼므로
+    // '큐엔 뜨는데 그 공고로는 확정 못 하는' 상태가 되지만, 여기서 제외하면 스크리닝을 끝낸 사람이
+    // 큐에서 사라져 아예 잊혀진다(더 나쁨). 모달이 "인재풀에서 공고 후보로 추가한 뒤 확정하세요"로
+    // 다음 행동을 안내하므로 보이게 두는 편이 낫다.
     const slot = byApplicant.get(c.applicant_id) ?? { primary: null, fallback: null };
     if (IN_PROGRESS_STAGES.has(c.agent_stage ?? "")) {
       if (!slot.primary) slot.primary = c;

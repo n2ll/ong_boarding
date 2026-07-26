@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
-import { useConfirm } from "./ConfirmDialog";
 import { getBrowserClient } from "@/lib/supabase";
 
 interface Applicant {
@@ -173,8 +173,21 @@ function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBad
 }
 
 export function LiveConsole() {
-  const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState<"all" | "intervention" | "confirm">("all");
+  // 탭은 URL(?tab=confirm|intervention)이 단일 소스다 — useState 초기값으로만 시드하면
+  // 쿼리만 바뀌는 소프트 내비게이션(사이드바 '확정할 지원자' 클릭 등)은 컴포넌트를 리마운트하지 않아
+  // 초기값이 재평가되지 않고 탭이 그대로 남는다(= 승격한 진입점이 무동작). 반대로 탭 클릭이 URL을 안 바꾸면
+  // 새로고침·공유 시 보던 화면과 URL이 어긋난다. 그래서 읽기는 URL에서, 쓰기는 router로 통일한다.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tabParam = searchParams.get("tab");
+  const activeTab: "all" | "intervention" | "confirm" =
+    tabParam === "confirm" || tabParam === "intervention" ? tabParam : "all";
+  const setActiveTab = useCallback(
+    (t: "all" | "intervention" | "confirm") => {
+      router.replace(t === "all" ? "/live" : `/live?tab=${t}`, { scroll: false });
+    },
+    [router]
+  );
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [previewById, setPreviewById] = useState<Record<number, LastMessagePreview>>({});
@@ -275,9 +288,11 @@ export function LiveConsole() {
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
   const copilotMode = !globalKill && killData?.mode === "draft";
 
-  // 우측 상세 재조회 신호 — 확정 대기 큐에서 확정했을 때 상세의 낡은 status를 갱신해
-  // '확정 후속 안내'(확정 후에만 가능) 섹션이 즉시 나타나게 한다.
-  const [detailRefreshKey, setDetailRefreshKey] = useState(0);
+  // 확정 모달 오픈 신호 — 큐의 '확정' 버튼이 상세 패널의 확정 모달(지점·슬롯·시작일 수집)을 열게 한다.
+  // 대상 지원자 id를 함께 실어야 한다: 패널은 applicantId가 key라 지원자를 바꾸면 리마운트되므로
+  // 단순 카운터는 신호가 유실된다. 열리면 패널이 소비 콜백으로 알려 신호를 비운다.
+  const [confirmSignal, setConfirmSignal] = useState<{ id: number; n: number } | null>(null);
+  const confirmSignalSeq = useRef(0);
 
   // 대화 상태가 바뀌면(재개/보류/발송/브로드캐스트) 목록·인계·확정 큐를 함께 새로고침.
   // 발송 후 onChanged와 DB 브로드캐스트가 거의 동시에 도착하므로 800ms 디바운스로 1회만 조회한다.
@@ -502,29 +517,12 @@ export function LiveConsole() {
   // ── 확정 대기 액션 ──
   // 후속 안내(만남장소·첫날규칙·앱안내) 발송은 이 큐에 없다 — 확정 전이라 확정 통보로 읽히기 때문.
   // 발송은 확정 후 지원자 상세의 FollowupSendModal(공용 /api/admin/confirm/send)이 담당한다.
-  const confirmHire = async (p: ConfirmPending) => {
-    if (!(await confirm({
-      title: `${p.name}님을 '확정인력'으로 전환할까요?`,
-      confirmText: "확정",
-    }))) return;
-    try {
-      const res = await fetch(`/api/admin/applicants/${p.applicant_id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // 확정을 대상 공고에 결속 — confirm/pending이 내려준 job_id로 current_job_id 이관.
-        // 서버가 잔여 후보 자동 정리·충원율 반영을 그 공고 기준으로 처리한다.
-        body: JSON.stringify(p.job_id != null ? { status: "확정인력", current_job_id: p.job_id } : { status: "확정인력" }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success(`${p.name}님을 확정인력으로 전환했어요. 이제 오른쪽 상세에서 만남장소·첫날 안내를 보낼 수 있어요.`, { duration: 8000 });
-      // 확정한 사람을 우측 상세로 띄우고 재조회 — 큐에서 빠지기만 하고 낡은 status가 남아
-      // '확정 후속 안내' 섹션이 안 나타나던 흐름 단절 방지(후속 안내는 확정 후에만 가능하므로 더 중요).
-      setSelectedChatId(p.applicant_id);
-      setDetailRefreshKey((n) => n + 1);
-      handleChanged();
-    } catch {
-      toast.error("확정 처리에 실패했어요.");
-    }
+  // 큐의 '확정'은 상세 패널의 확정 모달을 연다 — 예전엔 여기서 status만 바꾸는 '빠른 확정'이라
+  // 지점·슬롯·시작일이 비어 확정 데이터 품질이 경로마다 갈렸다. 이제 어디서 확정하든 같은 정보를 받는다.
+  const openConfirmFor = (p: ConfirmPending) => {
+    setSelectedChatId(p.applicant_id);
+    confirmSignalSeq.current += 1;
+    setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current });
   };
 
   // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지,
@@ -710,7 +708,7 @@ export function LiveConsole() {
                       '확정'만 남긴다. 확정하면 이 큐에서 빠지고, 후속 안내는 지원자 상세의 '확정 후속 안내'에서 보낸다. */}
                   <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
                     <span className="mr-auto text-[11px] text-[#A0AEC0]">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
-                    <button onClick={() => confirmHire(p)} title="확정인력으로 전환" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
+                    <button onClick={() => openConfirmFor(p)} title="확정 — 대상 공고·시작일·지점을 확인하고 확정합니다" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
                   </div>
                 </div>
               );
@@ -860,13 +858,17 @@ export function LiveConsole() {
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
       {activeChat && (
         <div className="w-[340px] shrink-0 bg-white border-l border-[#E2E8F0] flex flex-col">
+          {/* key에 selectedJobId를 넣지 않는다 — 그 값은 /active-jobs 응답이 온 뒤 비동기로 채워져
+              패널을 한 번 더 리마운트시킨다. 큐에서 확정 모달을 열었을 때 그 리마운트가 모달 state를
+              날려 '버튼이 씹힌 것처럼' 보이던 경합의 원인이었다. jobId는 prop으로 반응적으로 읽힌다. */}
           <ApplicantDetailContent
-            key={`${activeChat.id}:${selectedJobId ?? "all"}`}
+            key={activeChat.id}
             applicantId={activeChat.id}
             jobId={selectedJobId}
             variant="panel"
             onChanged={handleChanged}
-            refreshKey={detailRefreshKey}
+            autoOpenConfirm={confirmSignal}
+            onAutoOpenConfirmConsumed={() => setConfirmSignal(null)}
           />
         </div>
       )}

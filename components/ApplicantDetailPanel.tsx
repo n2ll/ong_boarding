@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
+import { isSystemJobTitle } from "@/lib/jobs";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
 import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
@@ -42,6 +43,9 @@ interface CandidateLink {
   job_start_date: string | null;
   job_effectively_closed: boolean;
   job_recruit_mode: string | null;
+  /** 만남장소 발송 요건 — 서버가 픽업주소를 요구하고, 비internal 라인은 현장매니저까지 필요. */
+  job_pickup_address: string | null;
+  job_site_manager_id: number | null;
   client_id: number | null;
   client_name: string | null;
 }
@@ -308,6 +312,8 @@ export function ApplicantDetailContent({
   detail: externalDetail,
   reload: externalReload,
   refreshKey,
+  autoOpenConfirm,
+  onAutoOpenConfirmConsumed,
 }: {
   applicantId: number;
   jobId?: number | null;
@@ -318,6 +324,12 @@ export function ApplicantDetailContent({
   /** 값이 바뀌면 상세를 다시 불러온다 — 이 패널 밖에서 상태가 바뀐 경우(예: 확정 대기 큐에서 확정)
    *  낡은 status를 들고 있어 '확정 후속 안내' 섹션이 나타나지 않던 문제 방어. */
   refreshKey?: number;
+  /** 이 지원자(id 일치)의 확정 모달을 자동으로 연다 — '확정 대기' 큐의 확정 버튼이 이 패널의 확정 모달을
+   *  쓰게 해서 지점·슬롯·시작일 없이 확정되던 '빠른 확정' 경로를 없앤다. 상세 로드 후에 1회만 열고,
+   *  열면 onAutoOpenConfirmConsumed로 신호를 소비해 이후 리마운트에서 다시 열리지 않게 한다.
+   *  (패널은 applicantId가 key라 지원자 전환 시 리마운트되므로 단순 카운터로는 신호가 유실된다.) */
+  autoOpenConfirm?: { id: number; n: number } | null;
+  onAutoOpenConfirmConsumed?: () => void;
 }) {
   const local = useApplicantDetail(externalDetail !== undefined ? null : applicantId);
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
@@ -331,6 +343,18 @@ export function ApplicantDetailContent({
       reload();
     }
   }, [refreshKey, reload]);
+  // 확정 모달 외부 오픈 — openConfirm은 아래(상세 로드 이후 구간)에서 정의되므로 최신 함수를 ref로 받는다.
+  // 상세가 로드되기 전에는 확정 대상 후보를 알 수 없어 열지 않고, 로드되면 그때 연다.
+  const openConfirmRef = useRef<() => void>(() => {});
+  const consumedAutoOpen = useRef<number | null>(null);
+  useEffect(() => {
+    if (!autoOpenConfirm || autoOpenConfirm.id !== applicantId) return;
+    if (consumedAutoOpen.current === autoOpenConfirm.n) return;
+    if (!detail) return; // 후보·지점을 알아야 대상 공고를 시드할 수 있다
+    consumedAutoOpen.current = autoOpenConfirm.n;
+    openConfirmRef.current();
+    onAutoOpenConfirmConsumed?.();
+  }, [autoOpenConfirm, applicantId, detail, onAutoOpenConfirmConsumed]);
 
   const confirm = useConfirm();
   // '확정 지점' 드롭다운 소스 — 활성 지점(화주사 결속). 자유텍스트 오타로 충원율 집계가 누락되던 문제(A5) 방지.
@@ -499,7 +523,11 @@ export function ApplicantDetailContent({
 
   // 확정 모달 열기 — 기존 확정 슬롯(있으면)을 미리 선택해 둔다.
   // 확정 대상 공고 후보 — 진행 중(비마감) 공고만. 확정은 마감 공고로 못 하게 여기서 거른다.
-  const confirmableCands = cands.filter((c) => !c.job_effectively_closed && c.agent_stage !== "abort");
+  // 시스템 예약 공고(__ 접두)도 제외 — 서버 PATCH가 '시스템 예약 공고로는 확정할 수 없습니다'로 400을
+  // 내므로, 선택지에 남겨두면 확정을 눌러야 실패를 알게 된다(큐는 이미 시스템 공고를 제외한다).
+  const confirmableCands = cands.filter(
+    (c) => !c.job_effectively_closed && c.agent_stage !== "abort" && !isSystemJobTitle(c.job_title ?? "")
+  );
   // 확정 대상 공고가 internal(도시락 등 정기배송) 라인인지 — 지점·슬롯은 배민/비마트 전용 개념이라
   // internal 라인 확정 창에선 숨겨 혼동을 막는다(라인 형태별 조건부 UX).
   const confirmTargetInternal =
@@ -530,6 +558,21 @@ export function ApplicantDetailContent({
     setConfirmSendAppGuide(false);
     setConfirmOpen(true);
   };
+  // '확정 대기' 큐 등 외부에서 이 모달을 열 수 있게 최신 함수를 ref에 담아둔다(위 자동 오픈 effect가 호출).
+  openConfirmRef.current = openConfirm;
+
+  // 확정 후속 안내 발송 대상 공고 — 만남장소는 서버가 픽업주소(+비internal이면 현장매니저)를 요구한다.
+  // PR1에서 큐의 disabled+툴팁 안내가 사라져 발송 실패를 400으로만 알게 됐던 것을 여기서 복원.
+  const followupCand = cands.find((c) => c.job_id === confirmedJobId) ?? null;
+  const venueBlockReason = !confirmedJobId
+    ? "확정된 공고가 없어 만남장소를 만들 수 없어요. 확정 시 대상 공고를 지정해 주세요."
+    : !followupCand
+      ? "확정된 공고의 후보 정보를 찾지 못했어요. 공고를 다시 확인해 주세요."
+      : !followupCand.job_pickup_address
+        ? "공고에 집결지가 없어요. 공고 수정에서 집결지를 입력한 뒤 발송하세요."
+        : followupCand.job_recruit_mode !== "internal" && followupCand.job_site_manager_id == null
+          ? "공고에 현장매니저가 없어요. 공고 수정에서 현장매니저를 지정한 뒤 발송하세요."
+          : null;
 
   const toggleConfirmSlot = (slot: string) => {
     setConfirmSlots((cur) => (cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot]));
@@ -1020,11 +1063,16 @@ export function ApplicantDetailContent({
               <div className="rounded-xl border border-[#C6F6D5] bg-[#F0FFF4] p-3">
                 <div className="text-[12px] font-bold text-[#276749] mb-2">확정 후속 안내 발송</div>
                 <div className="flex gap-1.5 flex-wrap">
-                  <button onClick={() => setFollowup("venue")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">만남장소</button>
+                  <button onClick={() => setFollowup("venue")} disabled={!!venueBlockReason} title={venueBlockReason ?? "만남장소 안내 발송 (내용 확인·수정)"} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-40 disabled:cursor-not-allowed">만남장소</button>
                   <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">첫날규칙</button>
                   <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EDF2F7] text-[#4A5568] border border-[#E2E8F0] hover:bg-[#E2E8F0] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">앱안내</button>
                 </div>
-                <p className="text-[10.5px] text-[#718096] mt-1.5">신입에게 만남장소·첫날 규칙을 발송하세요. 내용은 발송 전 미리보기에서 수정할 수 있어요.</p>
+                {/* 만남장소가 왜 안 눌리는지 그 자리에서 알려준다 — 발송 후 400으로만 알게 되던 문제. */}
+                {venueBlockReason ? (
+                  <p className="text-[10.5px] text-[#B7791F] mt-1.5 leading-relaxed">만남장소 발송 불가 — {venueBlockReason}</p>
+                ) : (
+                  <p className="text-[10.5px] text-[#718096] mt-1.5">신입에게 만남장소·첫날 규칙을 발송하세요. 내용은 발송 전 미리보기에서 수정할 수 있어요.</p>
+                )}
               </div>
             )}
             {/* 확정 슬롯(비마트 전용) + 마지막 메시지 시점. internal 라인은 슬롯 개념이 없어 시각만 표시. */}
@@ -1168,14 +1216,16 @@ export function ApplicantDetailContent({
         </CollapsibleSection>
       </div>
 
-      {/* 확정 후속 안내 발송 모달 — 미리보기·편집·발송(공용 send 라우트) */}
+      {/* 확정 후속 안내 발송 모달 — 미리보기·편집·발송(공용 send 라우트).
+          defaultStartDate: 지원자 시작일이 없으면 확정 공고의 시작일로 시드 — 큐에서 확정하면
+          지원자 start_date가 비어 있을 수 있어 만남장소 미리보기가 빈 날짜로 열리던 마찰 제거. */}
       {followup && (
         <FollowupSendModal
           applicantId={a.id}
           applicantName={a.name}
           jobId={confirmedJobId}
           kind={followup}
-          defaultStartDate={a.start_date}
+          defaultStartDate={a.start_date ?? followupCand?.job_start_date ?? null}
           onClose={() => setFollowup(null)}
           onSent={reload}
         />

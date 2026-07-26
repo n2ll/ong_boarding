@@ -44,7 +44,7 @@ export async function GET(
     .select(
       `id, job_id, agent_stage, agent_state, paused_reason,
        sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
-       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode )`
+       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode, pickup_address, site_manager_id )`
     )
     .eq("applicant_id", id)
     .order("created_at", { ascending: false });
@@ -72,7 +72,7 @@ export async function GET(
 
   const candidates = cands.map((c) => {
     const job = c.jobs as unknown as
-      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null; recruit_mode: string | null }
+      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null; recruit_mode: string | null; pickup_address: string | null; site_manager_id: number | null }
       | null;
     return {
       id: c.id,
@@ -93,6 +93,10 @@ export async function GET(
       job_start_date: job?.start_date ?? null,
       job_effectively_closed: job ? isJobEffectivelyClosed(job.status, job.closes_at) : true,
       job_recruit_mode: job?.recruit_mode ?? null,
+      // 만남장소 발송 가능 여부 판정용 — 서버 send 라우트가 픽업주소(+현장매니저, internal은 면제)를
+      // 요구하므로, 상세에서 미리 안내해 400을 보고 나서야 알게 되는 것을 막는다.
+      job_pickup_address: job?.pickup_address ?? null,
+      job_site_manager_id: job?.site_manager_id ?? null,
       client_id: job?.client_id ?? null,
       client_name:
         job?.client_id != null ? clientNameById.get(job.client_id) ?? null : null,
