@@ -80,12 +80,12 @@ export function Sidebar() {
 
     { label: "인재 관리", type: "header" },
     { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
-    { label: "재활용 · 재편입", icon: RefreshCw, path: "/reengagement" },
+    { label: "다시 부르기", icon: RefreshCw, path: "/reengagement" },
     // { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" }, // 파일럿 기간 숨김
 
     { label: "채용 운영", type: "header" },
     { label: "채용공고 관리", icon: Briefcase, path: "/jobs" },
-    { label: "화주사 · 라인 현황", icon: Building2, path: "/shippers" },
+    { label: "화주사", icon: Building2, path: "/shippers" },
     // { label: "화주사 관리", icon: Building2, path: "/clients" }, // 파일럿 기간 숨김
     // { label: "지점 관리", icon: MapPin, path: "/branches" }, // 파일럿 기간 숨김
     // { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" }, // 파일럿 기간 숨김

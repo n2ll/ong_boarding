@@ -19,7 +19,9 @@ function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/pipeline")) return { pageTitle: "인재풀 · 파이프라인", crumb: "인재 관리 > 인재풀 · 파이프라인" };
   if (pathname.startsWith("/recommendations")) return { pageTitle: "AI 인재 추천", crumb: "인재 관리 > AI 인재 추천" };
   if (pathname.startsWith("/jobs")) return { pageTitle: "채용공고 관리", crumb: "채용 운영 > 채용공고 관리" };
-  if (pathname.startsWith("/clients")) return { pageTitle: "화주사 관리", crumb: "채용 운영 > 화주사 관리" };
+  // /shippers = 합쳐진 화주사 화면(공고용 목록 + 계약 원본). 매핑이 없어 상단 제목이 '대시보드'로 뜨던 문제.
+  if (pathname.startsWith("/shippers")) return { pageTitle: "화주사", crumb: "채용 운영 > 화주사" };
+  if (pathname.startsWith("/clients")) return { pageTitle: "화주사", crumb: "채용 운영 > 화주사" };
   if (pathname.startsWith("/branches")) return { pageTitle: "지점 관리", crumb: "채용 운영 > 지점 관리" };
   if (pathname.startsWith("/slots")) return { pageTitle: "확정/희망 슬롯", crumb: "채용 운영 > 확정/희망 슬롯" };
   if (pathname.startsWith("/team")) return { pageTitle: "팀 · 권한", crumb: "채용 운영 > 팀 · 권한" };

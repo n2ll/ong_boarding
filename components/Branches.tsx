@@ -435,7 +435,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {clients.length === 0 && (
-                  <p className="text-[11.5px] text-[#A0AEC0] mt-1.5">먼저 화주사 관리에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
+                  <p className="text-[11.5px] text-[#A0AEC0] mt-1.5">먼저 ‘화주사’ 화면에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
                 )}
               </div>
 

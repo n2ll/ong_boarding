@@ -59,7 +59,7 @@ export async function POST() {
     return NextResponse.json({
       enabled: false,
       imported: 0,
-      note: "재활용 스위치 OFF — 편입 잠금(미리보기만 가능). 법적 검토·승인 후 스위치 ON.",
+      note: "‘다시 부르기’가 꺼져 있어요 — 편입 잠금(미리보기만). 설정 › 기능 스위치에서 켤 수 있어요.",
     });
   }
   try {
