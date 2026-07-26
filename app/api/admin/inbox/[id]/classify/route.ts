@@ -38,8 +38,9 @@ export const maxDuration = 90;
 //   ★ 라우터 '앞에서' 찍는다 — 뒤에서 찍으면 함수 타임아웃·예외로 요청이 죽을 때 아무 흔적이 없어
 //     게이트가 통째로 열린다. 앞에서 찍으면 그 뒤 라우터가 정상 진행해 더 최신 값으로 덮어쓰므로 손실 없다
 //     (failResult 경로도 router가 DB state와 병합해 저장하므로 이 스탬프가 유지된다).
-//   대상은 inbound-sweeper가 고르는 후보와 동일하게 '활성 단계 최신 1건'만 — 지원자의 다른 공고 후보까지
-//   찍으면 무관한 라인의 48h 정체 백스톱 시계를 리셋해버린다.
+//   대상은 '활성 단계 최신 1건'만 — 지원자의 다른 공고 후보까지 찍으면 무관한 라인의 48h 정체 백스톱
+//   시계를 리셋해버린다. 이 후보가 그 턴에 paused/abort로 빠져 sweeper가 '다른 활성 후보'를 고르는
+//   경우는 sweeper 쪽 가드(d)가 지원자의 모든 후보 중 최신 실행 시각으로 판정해 함께 막는다.
 //   sweeper 가드: meta.last_run_at >= 인바운드 created_at 이면 스킵 → 등록 시각은 항상 그보다 늦다.
 //   등록 이후 지원자가 새로 보낸 문자는 created_at이 더 늦어 정상적으로 AI가 응대한다(억제 아님).
 const ACTIVE_AGENT_STAGES = ["exploration", "screening", "onboarding", "active"];

@@ -364,7 +364,12 @@ export function LiveConsole() {
     };
   }, [selectedChatId]);
 
-  const activeChat = chats.find((c) => c.id === selectedChatId) ?? null;
+  // 선택한 사람이 목록 필터에서 빠져도(확정 직후 상태 변화·14일 넘은 대화 등) 열어둔 상세는 유지한다 —
+  // 확정 후 "오른쪽 상세에서 만남장소를 보내세요"라고 안내했는데 패널이 사라지던 문제 방어.
+  const activeChat =
+    chats.find((c) => c.id === selectedChatId) ??
+    (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
+    null;
 
   // 인계 큐: 카테고리 필터 적용(이미 오래된 순으로 서버 정렬됨)
   const visibleHandoffs = handoffCat === "all" ? handoffs : handoffs.filter((h) => h.category === handoffCat);

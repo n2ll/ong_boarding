@@ -145,9 +145,21 @@ export async function GET(req: NextRequest) {
         .limit(1);
       if (drafts && drafts.length > 0) continue;
 
-      // d) AI가 이 인바운드 이후 이미 실행됐으면(빈 응답 stay 등) 제외 — 재응답 루프 방지
-      const state = (jc.agent_state ?? {}) as AgentState;
-      const lastRunAt = typeof state.meta?.last_run_at === "string" ? state.meta.last_run_at : null;
+      // d) AI가 이 인바운드 이후 이미 실행됐으면(빈 응답 stay 등) 제외 — 재응답 루프 방지.
+      //    판정은 위에서 고른 후보 1건이 아니라 **그 지원자의 모든 후보 중 최신 실행 시각**으로 한다.
+      //    한 사람이 여러 라인에 병행 투입되는 것이 정상이고, 실행된 후보가 그 턴에 paused/abort로
+      //    빠지면(문자함 등록의 매니저 인계·advance 보류 등) 위 (a)가 '다른 활성 후보'를 고르게 되는데,
+      //    그 행만 보면 실행 흔적이 없어 같은 인바운드에 auto로 다시 응답해버린다
+      //    (= 문자함 등록의 '자동 발송 안 함' 게이트가 cron으로 우회되던 경로).
+      const { data: allCands } = await supabase
+        .from("job_candidates")
+        .select("agent_state")
+        .eq("applicant_id", applicantId);
+      const lastRunAt = (allCands ?? []).reduce<string | null>((max, c) => {
+        const st = (c.agent_state ?? {}) as AgentState;
+        const v = typeof st.meta?.last_run_at === "string" ? st.meta.last_run_at : null;
+        return v && (!max || Date.parse(v) > Date.parse(max)) ? v : max;
+      }, null);
       if (lastRunAt && Date.parse(lastRunAt) >= Date.parse(inbound.created_at)) continue;
 
       // 회수 — 웹훅과 동일 라우터 경로. received_at이 과거라 답장 텀 sleep 없이 즉시,
