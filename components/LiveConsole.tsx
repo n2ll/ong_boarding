@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
@@ -173,21 +173,28 @@ function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBad
 }
 
 export function LiveConsole() {
-  // 탭은 URL(?tab=confirm|intervention)이 단일 소스다 — useState 초기값으로만 시드하면
-  // 쿼리만 바뀌는 소프트 내비게이션(사이드바 '확정할 지원자' 클릭 등)은 컴포넌트를 리마운트하지 않아
-  // 초기값이 재평가되지 않고 탭이 그대로 남는다(= 승격한 진입점이 무동작). 반대로 탭 클릭이 URL을 안 바꾸면
-  // 새로고침·공유 시 보던 화면과 URL이 어긋난다. 그래서 읽기는 URL에서, 쓰기는 router로 통일한다.
+  // 탭 ↔ URL(?tab=confirm|intervention) 양방향 동기화.
+  // 딥링크(사이드바 '확정할 지원자'·대시보드 CTA)로 들어와도 탭이 열리고, 탭을 바꾸면 URL도 따라가
+  // 새로고침·공유가 보던 화면과 일치한다.
   const searchParams = useSearchParams();
-  const router = useRouter();
   const tabParam = searchParams.get("tab");
-  const activeTab: "all" | "intervention" | "confirm" =
+  const urlTab: "all" | "intervention" | "confirm" =
     tabParam === "confirm" || tabParam === "intervention" ? tabParam : "all";
-  const setActiveTab = useCallback(
-    (t: "all" | "intervention" | "confirm") => {
-      router.replace(t === "all" ? "/live" : `/live?tab=${t}`, { scroll: false });
-    },
-    [router]
-  );
+  const [activeTab, setActiveTabState] = useState<"all" | "intervention" | "confirm">(urlTab);
+  // URL → 상태: 사이드바 '확정할 지원자'·대시보드 CTA처럼 쿼리만 바뀌는 이동에도 탭이 따라간다
+  // (쿼리 변경은 리마운트가 아니라 re-render라 useState 초기값만으로는 반영되지 않는다).
+  useEffect(() => {
+    setActiveTabState(urlTab);
+  }, [urlTab]);
+  // 상태 → URL: router.replace는 RSC 왕복을 유발해 (a) 응답까지 탭이 안 바뀌고 (b) 그 요청이 실패하면
+  // 전체 페이지 리로드로 폴백해 작성 중인 문자 초안·편집이 날아간다. 탭은 즉시 바꾸고 URL만 얕게 맞춘다
+  // (Next 14는 history.replaceState를 패치해 useSearchParams도 함께 갱신한다). 선례: Pipeline·Jobs 탭.
+  const setActiveTab = useCallback((t: "all" | "intervention" | "confirm") => {
+    setActiveTabState(t);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", t === "all" ? "/live" : `/live?tab=${t}`);
+    }
+  }, []);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [previewById, setPreviewById] = useState<Record<number, LastMessagePreview>>({});
@@ -523,6 +530,15 @@ export function LiveConsole() {
     setSelectedChatId(p.applicant_id);
     confirmSignalSeq.current += 1;
     setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current });
+    // 확정 모달은 우측 상세 패널 안에 있어, 목록·상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다
+    // (예전 빠른 확정은 직접 PATCH라 실패 토스트가 떴다). 잠시 뒤에도 안 열렸으면 원인을 알려준다.
+    window.setTimeout(() => {
+      setConfirmSignal((cur) => {
+        if (!cur || cur.id !== p.applicant_id) return cur; // 이미 열려 소비됐음
+        toast.error(`${p.name}님 상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.`);
+        return null;
+      });
+    }, 6000);
   };
 
   // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지,

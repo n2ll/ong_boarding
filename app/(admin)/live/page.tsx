@@ -16,8 +16,9 @@ export default function Page() {
             <div className="h-8 rounded-lg bg-[#F1F4F8] mb-2" />
             {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-16 rounded-xl bg-[#F7FAFC] mb-2" />)}
           </div>
+          {/* 우측 340px 상세 레일은 대화를 고른 뒤에만 렌더된다 — fallback에서 미리 그리면
+              하이드레이션 직후 사라지며 오히려 폭 점프가 생긴다. 좌측 목록 + 중앙만 흉내 낸다. */}
           <div className="flex-1 bg-[#EEF1F5]" />
-          <div className="w-[340px] shrink-0 border-l border-[#E2E8F0] bg-white" />
         </div>
       }
     >
