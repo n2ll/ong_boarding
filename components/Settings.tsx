@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, Building2, MapPin, Shield } from "lucide-react";
-import { Clients } from "./Clients";
+import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, MapPin, Shield, ToggleRight, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Branches } from "./Branches";
 import { Team } from "./Team";
+import { useConfirm } from "./ConfirmDialog";
 
 interface Integration {
   key: string;
@@ -23,17 +24,55 @@ const INTEGRATION_META: Record<string, { name: string; desc: string; badge: stri
 export function Settings() {
   // 실동작인 '외부 연동' 탭을 기본으로 승격 — 프로필/알림/보안은 인증 도입 전 미리보기.
   const [activeTab, setActiveTab] = useState("integrations");
-  // /settings#clients|#branches|#team 딥링크 — 다른 화면·공고 폼에서 해당 관리 서브탭으로 바로 진입.
+  // /settings#branches|#team|#switches 딥링크 — 다른 화면·공고 폼에서 해당 서브탭으로 바로 진입.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const h = window.location.hash;
-    if (h === "#clients" || h === "#branches" || h === "#team") setActiveTab(h.slice(1));
+    // #clients는 화주사 화면을 /shippers로 합치면서 옮겨갔다 — 기존 링크·북마크를 깨지 않게 리다이렉트.
+    if (h === "#clients") {
+      window.location.replace("/shippers");
+      return;
+    }
+    if (h === "#branches" || h === "#team" || h === "#switches") setActiveTab(h.slice(1));
   }, []);
   // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
   const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
     activeTab === "integrations" ? "/api/admin/settings/integrations" : null
   );
   const integrations = intData?.data ?? [];
+  // '다시 부르기' 기능 스위치 — 화면은 "스위치를 켜세요"라고 안내하는데 콘솔에 스위치가 없어
+  // DB를 직접 고쳐야 했다. 매니저가 여기서 켜고 끈다.
+  const confirm = useConfirm();
+  const { data: reSwitch, mutate: mutateSwitch, isLoading: switchLoading } = useSWR<{ enabled?: boolean }>(
+    activeTab === "switches" ? "/api/admin/reengagement/switch" : null
+  );
+  const [switchSaving, setSwitchSaving] = useState(false);
+  const reEnabled = !!reSwitch?.enabled;
+  const toggleReengagement = async () => {
+    const next = !reEnabled;
+    // 켜는 쪽만 확인 — 과거 인력에게 문자가 나갈 수 있게 되는 결정이다(끄는 건 안전 방향).
+    if (next && !(await confirm({
+      title: "‘다시 부르기’를 켤까요?",
+      description: "과거에 함께 일한 분들을 인력풀로 불러올 수 있게 됩니다. 실제 문자는 인재풀에서 매니저가 보낼 때만 나가요. 법적 검토·승인이 끝났는지 확인해 주세요.",
+      confirmText: "켜기",
+    }))) return;
+    setSwitchSaving(true);
+    try {
+      const res = await fetch("/api/admin/reengagement/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "저장 실패");
+      toast.success(next ? "‘다시 부르기’를 켰어요." : "‘다시 부르기’를 껐어요. (편입 잠금 — 미리보기만)");
+      void mutateSwitch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "저장 실패");
+    } finally {
+      setSwitchSaving(false);
+    }
+  };
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
@@ -42,7 +81,7 @@ export function Settings() {
           준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">설정</h1>
-        <p className="text-[14px] text-[#718096]">화주사·지점·팀과 외부 연동을 관리합니다. (프로필·알림·보안은 준비 중)</p>
+        <p className="text-[14px] text-[#718096]">지점·팀과 외부 연동을 관리합니다. 화주사는 ‘화주사’ 화면에서 관리해요. (프로필·알림·보안은 준비 중)</p>
       </div>
 
       <div className="flex gap-8">
@@ -73,12 +112,6 @@ export function Settings() {
             <LinkIcon size={18} /> 외부 연동
           </button>
           <button
-            onClick={() => setActiveTab("clients")}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'clients' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
-          >
-            <Building2 size={18} /> 화주사 관리
-          </button>
-          <button
             onClick={() => setActiveTab("branches")}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'branches' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
           >
@@ -90,12 +123,17 @@ export function Settings() {
           >
             <Shield size={18} /> 팀 · 권한
           </button>
+          <button
+            onClick={() => setActiveTab("switches")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'switches' ? 'bg-white border-2 border-[#1A202C] text-[#1A202C] shadow-sm' : 'border-2 border-transparent text-[#718096] hover:bg-white hover:border-[#E2E8F0]'}`}
+          >
+            <ToggleRight size={18} /> 기능 스위치
+          </button>
         </div>
 
         {/* Content Area */}
-        {(activeTab === 'clients' || activeTab === 'branches' || activeTab === 'team') ? (
+        {(activeTab === 'branches' || activeTab === 'team') ? (
           <div className="flex-1 min-w-0">
-            {activeTab === 'clients' && <Clients embedded />}
             {activeTab === 'branches' && <Branches embedded />}
             {activeTab === 'team' && <Team embedded />}
           </div>
@@ -183,6 +221,46 @@ export function Settings() {
                     비밀번호 변경
                   </button>
                   <p className="text-[12px] text-[#A0AEC0] mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'switches' && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="text-lg font-bold text-[#1A202C] mb-1 border-b border-[#E2E8F0] pb-4">기능 스위치</h2>
+              <p className="text-[13px] text-[#718096] mt-4 mb-6">위험할 수 있는 기능을 매니저가 직접 켜고 끕니다.</p>
+              <div className="rounded-xl border border-[#E2E8F0] bg-white p-5 max-w-2xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-[14px] font-bold text-[#1A202C] mb-1">다시 부르기 (과거 인력 재편입)</div>
+                    <p className="text-[13px] text-[#718096] leading-relaxed">
+                      과거에 함께 일한 분들을 인력풀로 불러오는 기능이에요. 꺼져 있으면 <b>미리보기만</b> 되고 아무 것도 편입되지 않아요.
+                      켜도 문자가 저절로 나가지는 않아요 — 실제 발송은 인재풀에서 매니저가 보낼 때만 됩니다.
+                    </p>
+                    <p className="text-[12px] text-[#A0AEC0] mt-2">법적 검토·승인이 끝난 뒤에 켜 주세요.</p>
+                  </div>
+                  {switchLoading ? (
+                    <Loader2 size={18} className="animate-spin text-[#A0AEC0] shrink-0 mt-1" />
+                  ) : (
+                    <button
+                      onClick={toggleReengagement}
+                      disabled={switchSaving}
+                      title={reEnabled ? "끄면 편입이 잠기고 미리보기만 됩니다" : "켜면 과거 인력을 인력풀로 편입할 수 있어요"}
+                      className={`w-12 h-7 rounded-full relative transition-colors shrink-0 mt-1 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${reEnabled ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                    >
+                      <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${reEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  )}
+                </div>
+                <div className="mt-4 pt-4 border-t border-[#F1F4F8] flex items-center gap-2 text-[12.5px] font-bold">
+                  {switchSaving ? (
+                    <span className="flex items-center gap-1.5 text-[#718096]"><RefreshCw size={13} className="animate-spin" /> 저장 중…</span>
+                  ) : reEnabled ? (
+                    <span className="text-[#2F855A]">지금 켜져 있어요 — 인력풀에서 편입할 수 있어요</span>
+                  ) : (
+                    <span className="text-[#718096]">지금 꺼져 있어요 — 편입 잠금(미리보기만)</span>
+                  )}
                 </div>
               </div>
             </div>

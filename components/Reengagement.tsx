@@ -126,9 +126,19 @@ export function Reengagement() {
             }`}
           >
             <Lock size={14} />
-            {data.enabled
-              ? "재활용 스위치 ON — 편입 가능"
-              : "재활용 스위치 OFF — 편입 잠금(미리보기만). 법적 검토·승인 후 스위치를 켜세요."}
+            {/* 예전엔 "스위치를 켜세요"라고만 안내하고 콘솔에 그 스위치가 없어 DB를 고쳐야 했다 →
+                설정 › 기능 스위치로 링크해 그 자리에서 켤 수 있게 한다. */}
+            {data.enabled ? (
+              <span>다시 부르기 켜짐 — 인력풀에 편입할 수 있어요</span>
+            ) : (
+              <span>
+                다시 부르기 꺼짐 — 편입 잠금(미리보기만). 법적 검토·승인이 끝났으면{" "}
+                <a href="/settings#switches" className="underline font-extrabold hover:text-[#975A16] rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B7791F]/40">
+                  설정 › 기능 스위치
+                </a>
+                에서 켜 주세요.
+              </span>
+            )}
           </div>
 
           {/* 요약 */}

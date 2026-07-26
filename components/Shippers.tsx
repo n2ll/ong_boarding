@@ -2,9 +2,9 @@
 
 import { useState, useMemo } from "react";
 import useSWR from "swr";
-import Link from "next/link";
 import { Building2, Search, ChevronRight, ChevronDown, Loader2, Truck, Users } from "lucide-react";
 import { jsonFetcher } from "@/lib/swr";
+import { Clients } from "./Clients";
 
 interface Line {
   lineName: string;
@@ -45,17 +45,35 @@ export function Shippers() {
     <div className="p-6 max-w-4xl mx-auto space-y-5">
       <div>
         <h1 className="text-[20px] font-extrabold text-[#1A202C] flex items-center gap-2">
-          <Building2 size={20} /> 화주사 · 라인 현황
+          <Building2 size={20} /> 화주사
         </h1>
         <p className="text-[13px] text-[#718096] mt-1">
-          옹매니징 계약 화주사와 배송라인 (읽기 전용 미러)
+          공고에 쓰는 화주사를 관리하고, 계약 원본(옹매니징)의 배송라인·운행 인원을 함께 확인합니다.
         </p>
       </div>
 
-      {/* A3 관계 안내 — 여기 화주사를 공고에 쓰려면 로컬로 동기화가 필요하다(설정 > 화주사 관리). */}
-      <div className="px-4 py-3 rounded-xl bg-[#F0F7FF] border border-[#BEE3F8] text-[12.5px] text-[#2C5282] leading-relaxed">
-        이 화면은 <b>옹매니징 계약 원본</b>을 읽기 전용으로 보여줍니다. 여기 화주사를 <b>공고에 쓰려면</b> <Link href="/settings#clients" className="font-bold underline hover:text-[#2B6CB0] rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">설정 › 화주사 관리</Link>에서 <b>‘옹매니징 동기화’</b>를 실행하세요.
-      </div>
+      {/* 화주사 화면이 둘(여기 = 계약 원본 현황 / 설정 › 화주사 관리 = 공고용 목록)이라 어디가 원본인지
+          헷갈렸다 → 한 화면으로 합친다. 위=공고에 쓰는 목록(편집·동기화), 아래=계약 원본(읽기 전용). */}
+      <section className="space-y-2">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-[#1A202C]">공고에 쓰는 화주사</h2>
+          <p className="text-[12.5px] text-[#718096] mt-0.5">
+            공고를 등록할 때 고르는 목록이에요. 계약 원본에 있는 화주사를 여기로 가져오려면 <b>‘옹매니징 동기화’</b>를 누르세요.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4">
+          <Clients embedded />
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-[#1A202C]">계약 원본 (옹매니징)</h2>
+          <p className="text-[12.5px] text-[#718096] mt-0.5">
+            계약·배송라인의 원본 시스템에서 그대로 읽어옵니다(여기서는 수정할 수 없어요).
+            ‘운행 인원’은 그 라인에서 실제 운행 중인 인원으로, 이 콘솔의 <b>확정</b>과는 다른 값이에요.
+          </p>
+        </div>
 
       {error && (
         <div className="px-4 py-3 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[13px] font-semibold text-[#C53030]">
@@ -65,7 +83,7 @@ export function Shippers() {
 
       {!error && data && !data.configured && (
         <div className="px-4 py-3 rounded-xl bg-[#EDF2F7] border border-[#E2E8F0] text-[13px] font-semibold text-[#718096]">
-          옹매니징 미연동 — 화주사 정보를 표시할 수 없어요.
+          계약 원본(옹매니징)에 연결되지 않아 배송라인·운행 인원을 표시할 수 없어요. 위 목록은 정상 사용할 수 있어요.
         </div>
       )}
 
@@ -80,7 +98,7 @@ export function Shippers() {
           <div className="flex flex-wrap gap-2 text-[12.5px] font-bold text-[#4A5568]">
             <span className="px-3 py-1.5 rounded-lg bg-[#EBF8FF] text-[#3182CE]">화주사 {clients.length}</span>
             <span className="px-3 py-1.5 rounded-lg bg-[#F0FFF4] text-[#2F855A]">배송라인 {totalLines}</span>
-            <span className="px-3 py-1.5 rounded-lg bg-[#FFFBEB] text-[#B7791F]">배정 인원 {totalWorkers}</span>
+            <span className="px-3 py-1.5 rounded-lg bg-[#FFFBEB] text-[#B7791F]">운행 인원 {totalWorkers}</span>
           </div>
 
           <div className="relative">
@@ -153,6 +171,7 @@ export function Shippers() {
           </div>
         </>
       )}
+      </section>
     </div>
   );
 }

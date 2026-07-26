@@ -39,6 +39,28 @@ export async function isReengagementEnabled(): Promise<boolean> {
   return (data?.body ?? "off").trim().toLowerCase() === "on";
 }
 
+/** 스위치 켜기/끄기 — 매니저가 설정 화면에서 직접 조작한다(예전엔 DB를 직접 고쳐야 했다).
+ *  '켜기'는 과거 인력에게 문자를 보낼 수 있게 되는 결정이라, 호출부에서 확인을 받는다. */
+export async function setReengagementEnabled(on: boolean): Promise<void> {
+  const supabase = createServiceClient();
+  const body = on ? "on" : "off";
+  const { data: existing } = await supabase
+    .from("prompt_examples")
+    .select("id")
+    .eq("category", SWITCH_CATEGORY)
+    .eq("title", SWITCH_TITLE)
+    .maybeSingle();
+  if (existing?.id) {
+    const { error } = await supabase.from("prompt_examples").update({ body }).eq("id", existing.id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const { error } = await supabase
+    .from("prompt_examples")
+    .insert({ category: SWITCH_CATEGORY, title: SWITCH_TITLE, body });
+  if (error) throw new Error(error.message);
+}
+
 // ── 첫 접촉 문구(자리표시 — 실운영 전 매니저 검토/편집. 확정 뉘앙스 금지) ──
 export const REENGAGEMENT_OFFER_TEMPLATE =
   "안녕하세요 #{이름}님, 내이루리 옹보딩입니다. 시간대가 겹치지 않는 추가 배송 라인 기회가 있어 안내드려요. " +
