@@ -315,10 +315,19 @@ export function ConversationThread({
     }
   };
 
-  const handleToggleAi = async (checked: boolean) => {
+  // AI 끄기는 지원자가 무응답으로 방치될 수 있어 확인을 받는다 — 단 작은 토글을 잘못 누르는 경우만 대상.
+  // [개입] 버튼은 매니저가 지금 직접 답하려고 명시적으로 누르는 것이라(즉시 개입이 설계 의도) 확인을 건너뛴다.
+  const handleToggleAi = async (checked: boolean, opts?: { skipConfirm?: boolean }) => {
     if (!hasActiveFlow) {
       toast.info("이 지원자는 활성 AI 대화 흐름이 없어요. 매니저가 직접 응대합니다.");
       return;
+    }
+    if (!checked && !opts?.skipConfirm) {
+      if (!(await confirm({
+        title: `${applicantName}님 AI를 끌까요?`,
+        description: "이 대화의 자동 응대가 멈추고 매니저가 직접 답해야 해요. 잊으면 지원자가 답을 못 받습니다. 다시 켜면 재개돼요.",
+        confirmText: "AI 끄기",
+      }))) return;
     }
     const endpoint = checked ? "/api/admin/agent/resume" : "/api/admin/agent/pause";
     try {
@@ -584,7 +593,7 @@ export function ConversationThread({
               <Switch checked={isAiEnabled} onCheckedChange={handleToggleAi} disabled={!hasActiveFlow} className="data-[state=checked]:bg-[#38A169] data-[state=unchecked]:bg-[#E53E3E]" />
             </div>
             {isAiEnabled && (
-              <button onClick={() => handleToggleAi(false)} className="bg-[#1A202C] text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
+              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="bg-[#1A202C] text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
             )}
           </div>
         </div>

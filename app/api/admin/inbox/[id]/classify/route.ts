@@ -12,6 +12,9 @@
  * - 'ongmanaging': 옹매니징(옹고잉 재직자·기존 계약자) 문의 이관.
  *             classification='ongmanaging' 마킹 + raw_payload에 이관 사유·시각 기록.
  *             새 applicant 생성/AI 발송 없음 ('other'와 동일하되 값·이관 기록으로 구분).
+ * - 'undo'  : 되돌리기 — classification을 'pending'으로 복구해 목록에 다시 띄운다.
+ *             **가역 분류(other·ongmanaging)만** 허용. baemin/job은 지원자 생성·초안까지 진행돼
+ *             단순 마킹 해제로는 원복되지 않으므로 거부한다.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,6 +25,53 @@ import { runAgentForCandidate } from "@/lib/agent/router";
 import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
+// 등록 1건은 한 요청에서 Claude를 최대 2회(triage Haiku + 스크리닝 Sonnet) 부른다 — 플랫폼 기본
+// 타임아웃(10~15초)에 걸리면 지원자·후보는 이미 생성됐는데 초안·스탬프가 없어 cron이 대신 답하는
+// 최악의 조합이 된다. 같은 라우터를 쓰는 웹훅(maxDuration=90)과 같은 기준으로 늘린다.
+export const maxDuration = 90;
+
+// 등록 시 자동발송 억제를 '지속'시키는 스탬프.
+//   문자함 등록은 AI 첫 응답을 초안까지만 만들고 발송은 매니저가 한다(forceDraft). 그런데 두 cron
+//   (inbound-sweeper 10분 · agent-recovery 30분)은 항상 forceDraft 없이 라우터를 부르므로, 등록 턴이
+//   흔적(초안 or meta.last_run_at)을 못 남기면 그 cron이 auto 모드로 대신 답해 시니어에게 검수 없는
+//   문자가 나간다.
+//   ★ 라우터 '앞에서' 찍는다 — 뒤에서 찍으면 함수 타임아웃·예외로 요청이 죽을 때 아무 흔적이 없어
+//     게이트가 통째로 열린다. 앞에서 찍으면 그 뒤 라우터가 정상 진행해 더 최신 값으로 덮어쓰므로 손실 없다
+//     (failResult 경로도 router가 DB state와 병합해 저장하므로 이 스탬프가 유지된다).
+//   대상은 inbound-sweeper가 고르는 후보와 동일하게 '활성 단계 최신 1건'만 — 지원자의 다른 공고 후보까지
+//   찍으면 무관한 라인의 48h 정체 백스톱 시계를 리셋해버린다.
+//   sweeper 가드: meta.last_run_at >= 인바운드 created_at 이면 스킵 → 등록 시각은 항상 그보다 늦다.
+//   등록 이후 지원자가 새로 보낸 문자는 created_at이 더 늦어 정상적으로 AI가 응대한다(억제 아님).
+const ACTIVE_AGENT_STAGES = ["exploration", "screening", "onboarding", "active"];
+async function stampAgentRun(
+  supabase: ReturnType<typeof createServiceClient>,
+  applicantId: number
+): Promise<void> {
+  try {
+    const { data: cands, error: selErr } = await supabase
+      .from("job_candidates")
+      .select("id, agent_state")
+      .eq("applicant_id", applicantId)
+      .in("agent_stage", ACTIVE_AGENT_STAGES)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (selErr) {
+      console.error("[inbox/classify] agent run stamp select failed", selErr);
+      return;
+    }
+    const c = cands?.[0];
+    if (!c) return;
+    const state = (c.agent_state ?? {}) as Record<string, unknown>;
+    const meta = (state.meta ?? {}) as Record<string, unknown>;
+    const { error: updErr } = await supabase
+      .from("job_candidates")
+      .update({ agent_state: { ...state, meta: { ...meta, last_run_at: new Date().toISOString() } } })
+      .eq("id", c.id as number);
+    if (updErr) console.error("[inbox/classify] agent run stamp update failed", updErr);
+  } catch (e) {
+    console.error("[inbox/classify] agent run stamp failed", e);
+  }
+}
 
 export async function POST(
   req: NextRequest,
@@ -29,13 +79,13 @@ export async function POST(
 ) {
   try {
     const { action, reason, job_id } = (await req.json()) as {
-      action?: "baemin" | "job" | "other" | "ongmanaging";
+      action?: "baemin" | "job" | "other" | "ongmanaging" | "undo";
       reason?: string;
       job_id?: number;
     };
-    if (action !== "baemin" && action !== "job" && action !== "other" && action !== "ongmanaging") {
+    if (action !== "baemin" && action !== "job" && action !== "other" && action !== "ongmanaging" && action !== "undo") {
       return NextResponse.json(
-        { error: "action: 'baemin', 'job', 'other' or 'ongmanaging'" },
+        { error: "action: 'baemin', 'job', 'other', 'ongmanaging' or 'undo'" },
         { status: 400 }
       );
     }
@@ -43,11 +93,28 @@ export async function POST(
     const supabase = createServiceClient();
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
-      .select("id, applicant_phone, body, created_at, raw_payload")
+      .select("id, applicant_phone, body, created_at, raw_payload, classification")
       .eq("id", params.id)
       .single();
     if (msgErr || !msg) {
       return NextResponse.json({ error: "message not found" }, { status: 404 });
+    }
+    // 되돌리기 — 아래 '이미 분류됨' 가드보다 먼저 처리해야 한다(되돌릴 대상이 곧 분류된 문자).
+    if (action === "undo") {
+      if (msg.classification !== "other" && msg.classification !== "ongmanaging") {
+        return NextResponse.json(
+          { error: "기타·옹매니징으로 분류한 문자만 되돌릴 수 있어요. (지원자로 등록한 건은 지원자 상세에서 처리하세요)" },
+          { status: 400 }
+        );
+      }
+      await supabase.from("messages").update({ classification: "pending" }).eq("id", msg.id);
+      return NextResponse.json({ ok: true, action: "undo" });
+    }
+
+    // 이미 분류된 문자는 재분류하지 않는다 — 같은 번호의 형제 문자가 목록에 남아 있을 때(유령 카드)
+    // 다시 누르면 지원자·후보가 또 만들어지고 AI 응답이 중복 발송되던 문제 방어.
+    if (msg.classification !== "pending") {
+      return NextResponse.json({ ok: true, action, noop: true, reason: "already_classified" });
     }
 
     if (action === "other") {
@@ -134,20 +201,34 @@ export async function POST(
         .upsert({ job_id: jobId, applicant_id: appId, agent_stage: "screening", sent_at: new Date().toISOString() }, { onConflict: "job_id,applicant_id" })
         .select("id").single();
       await supabase.from("applicants").update({ current_job_id: jobId }).eq("id", appId);
-      await supabase
+      // 인입 문자 ↔ 지원자·공고 링크. AI 호출보다 **먼저** 하고 에러를 확인한다 —
+      // 이 링크가 없으면 실시간 응대 목록의 '초안 검토' 신호가 뜨지 않아(미리보기가 messages.applicant_id
+      // 기준) 초안만 만들고 매니저가 못 찾는 무응답 방치가 된다. 실패 시 Claude 과금 전에 끊는다.
+      const { error: markErr } = await supabase
         .from("messages")
         .update({ classification: "matched", applicant_id: appId, job_id: jobId })
         .eq("applicant_phone", phone).eq("direction", "inbound").eq("classification", "pending");
+      if (markErr) {
+        console.error("[inbox/classify job] message link failed", markErr);
+        return NextResponse.json(
+          { error: `인입 문자를 지원자와 연결하지 못했어요: ${markErr.message}` },
+          { status: 500 }
+        );
+      }
 
+      // AI 호출 '전에' 찍는다 — 타임아웃·예외로 요청이 죽어도 cron이 auto로 대신 답하지 못하게.
+      await stampAgentRun(supabase, appId);
       let agent = null;
       if (jc?.id) {
         agent = await runAgentForCandidate({
           supabase, candidate_id: jc.id as number,
           inbound_message_id: msg.id as string, inbound_text: body,
           received_at: msg.created_at as string,
+          // 등록 순간 시니어에게 문자가 자동으로 나가지 않게 초안까지만 — 매니저가 대화에서 검수 후 발송.
+          forceDraft: true,
         });
       }
-      return NextResponse.json({ ok: true, action: "job", applicant_id: appId, job_id: jobId, agent_invoked: !!jc?.id, agent });
+      return NextResponse.json({ ok: true, action: "job", applicant_id: appId, job_id: jobId, agent_invoked: !!jc?.id, agent, draft_created: !!agent?.draft_created, handed_off: !!agent?.handed_off });
     }
 
     // action === 'baemin'
@@ -242,6 +323,8 @@ export async function POST(
       .limit(1)
       .maybeSingle();
 
+    // AI 호출 '전에' 찍는다(라우터를 안 태우는 경로도 함께 커버) — 요청이 죽어도 cron 재실행 차단.
+    await stampAgentRun(supabase, applicantId);
     if (jc?.id && jc.agent_stage !== "paused") {
       const agentResult = await runAgentForCandidate({
         supabase,
@@ -249,6 +332,8 @@ export async function POST(
         inbound_message_id: msg.id as string,
         inbound_text: body,
         received_at: msg.created_at as string,
+        // 등록 순간 시니어에게 문자가 자동으로 나가지 않게 초안까지만 — 매니저가 대화에서 검수 후 발송.
+        forceDraft: true,
       });
       return NextResponse.json({
         ok: true,
@@ -256,6 +341,8 @@ export async function POST(
         applicant_id: applicantId,
         agent_invoked: true,
         agent: agentResult,
+        draft_created: !!agentResult?.draft_created,
+        handed_off: !!agentResult?.handed_off,
       });
     }
 

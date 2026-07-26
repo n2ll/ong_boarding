@@ -53,10 +53,20 @@ export async function POST(req: NextRequest) {
 
     const { data: applicant } = await supabase
       .from("applicants")
-      .select("id, name, phone")
+      .select("id, name, phone, status")
       .eq("id", applicant_id)
       .maybeSingle();
     if (!applicant) return NextResponse.json({ error: "지원자를 찾을 수 없습니다." }, { status: 404 });
+    // 확정 게이트 — 만남장소·첫날규칙·앱안내는 본질적으로 '확정 후' 콘텐츠라, 미확정자에게 나가면
+    // 그 자체가 근무 확정 신호가 된다(확정은 매니저가 한다는 절대규칙 위반). 클라 게이트만으로는
+    // 부족해 발송의 단일 소스인 여기서 강제한다. current_job_id는 요구하지 않는다 —
+    // 슬롯 단위 라인(비마트 등)은 확정인력이어도 공고 결속이 없는 게 정상이라 막으면 오차단.
+    if (applicant.status !== "확정인력") {
+      return NextResponse.json(
+        { error: "확정인력으로 확정한 뒤에 보낼 수 있어요. (지원자 상세에서 확정 → 후속 안내 발송)" },
+        { status: 400 }
+      );
+    }
     const name = (applicant.name as string) ?? null;
     const phone = (applicant.phone as string) ?? "";
     if (!phone) return NextResponse.json({ error: "지원자 전화번호가 없습니다." }, { status: 400 });

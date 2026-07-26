@@ -19,6 +19,7 @@ import { isJobEffectivelyClosed } from "../jobs";
 import { isGeneralLineJob } from "./general-line";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { getSystemMessage } from "./system-messages";
+import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
@@ -55,6 +56,10 @@ export interface RunAgentInput {
   /** 인입 SMS 수신 시각(ISO). 제공되면 received_at + REPLY_DELAY까지 대기 후 응답한다.
    *  '바로 답장' 느낌을 줄이기 위한 인위적 텀. simulate=true나 값 없으면 즉시 응답. */
   received_at?: string;
+  /** true면 전역 모드가 auto여도 이 호출만 초안(message_drafts)까지만 만들고 실발송을 건너뛴다.
+   *  분류 문자함에서 매니저가 '지원자로 등록'하는 순간 시니어에게 문자가 자동으로 나가지 않게 하는 용도 —
+   *  등록은 즉시, 첫 응답은 매니저가 초안을 검수하고 직접 보낸다. simulate(빙의 연습)와는 별개. */
+  forceDraft?: boolean;
 }
 
 const REPLY_DELAY_MS = 60_000;       // 인입 시각 기준 답장 목표 지연 (1분)
@@ -66,6 +71,9 @@ export interface RunAgentResult {
   reply_sent?: boolean;
   /** 코파일럿(draft) 모드에서 message_drafts에 초안을 만들었는지 */
   draft_created?: boolean;
+  /** forceDraft 호출에서 AI가 '매니저 인계'(pause/abort)로 판단해 실제 전이가 적용됐는지.
+   *  초안이 없어도 매니저가 인계 대기 큐에서 이 건을 보게 되므로, 호출자가 안내 문구를 갈라 쓴다. */
+  handed_off?: boolean;
   next_stage?: StageName | null;
   auto_sent_messages?: number;
   reasoning?: string;
@@ -103,7 +111,7 @@ function transitionLabelOf(transition: StageTransition): string {
 }
 
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
-  const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at } = input;
+  const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at, forceDraft = false } = input;
 
   // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
   // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
@@ -111,7 +119,12 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   if (mode === "off") {
     return { ok: true, skipped: "agent kill-switch ON — global pause" };
   }
-  const draftMode = mode === "draft";
+  // 전역 draft 모드이거나, 이 호출만 초안화(forceDraft — 문자함 등록 시 자동발송 차단)면 초안 경로.
+  // simulate(빙의 연습)는 발송 자체가 가짜라 forceDraft를 무시한다.
+  const draftMode = mode === "draft" || (!simulate && forceDraft);
+  // 이번 호출만 초안화된 경우(전역 코파일럿이 아님). 전역 코파일럿은 '부수효과 0' 계약이라 그대로 두고,
+  // forceDraft는 '지원자에게 문자만 안 보낸다'는 뜻이므로 아래에서 전이·state를 정상 저장한다.
+  const perCallDraft = draftMode && mode !== "draft";
 
   // 답장 텀 — 인입 시각으로부터 REPLY_DELAY_MS 후를 목표로 대기.
   // 이미 지났으면 즉시 진행. simulate(연습 빙의)는 매니저 테스트라 텀 없이 즉시.
@@ -183,7 +196,11 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // 답장 텀(sleep) 동안 같은 후보가 추가 메시지를 보냈으면, 더 늦은 핸들러가
   // 모든 메시지를 한꺼번에 history로 보고 한 번에 답한다. 내(현재) 핸들러는 양보하고 종료.
   // (사용자 메시지가 무시되지 않으면서도 답장이 중복 발송되는 것을 막는다)
-  if (!simulate && received_at) {
+  // forceDraft(문자함 등록)는 매니저가 1회 누른 호출이라 '더 늦은 핸들러'가 존재하지 않는다 —
+  // 등록 직전 같은 번호의 형제 문자들도 이미 처리 대상이 아니라 그냥 대기 중이었을 뿐이다.
+  // 여기서 양보하면 초안·state가 하나도 안 남아 cron이 auto로 대신 답해버리므로(게이트 우회) 건너뛴다.
+  // 형제 문자는 history 쿼리에 이미 포함돼 초안 품질 손실도 없다.
+  if (!simulate && !forceDraft && received_at) {
     const { data: newer } = await supabase
       .from("messages")
       .select("id")
@@ -366,10 +383,66 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     } catch (e) {
       console.error("[router] copilot draft skipped (fail-safe)", e);
     }
+    // forceDraft(등록 순간 1회 억제)는 '지원자 발송만' 막는 것 — 전이·state는 정상 적용한다.
+    //  · state 미저장 시 meta.last_run_at이 안 남아 inbound-sweeper(10분 cron)가 같은 인바운드를
+    //    auto 모드로 재실행해 결국 문자를 보내버린다(= 게이트 무력화). 체크리스트 진전도 유실된다.
+    //  · pause/abort를 버리면 AI의 '매니저 인계' 판단이 사라져 인계 대기 큐·Slack 알림이 안 뜨고,
+    //    pause 턴은 reply_text가 비어 초안조차 없어 지원자가 조용히 방치된다.
+    //  · advance만은 transitions가 안내 묶음(SCREENING_ANNOUNCE/GUIDE)을 자동 발송하므로 stay로
+    //    낮춰 지원자 발송 0을 보장한다(단계는 유지 — 다음 인입에서 다시 판단된다).
+    // 전역 코파일럿(mode==='draft')은 기존 '부수효과 0' 계약을 유지해 건드리지 않는다.
+    let handedOff = false;
+    if (perCallDraft) {
+      // advance는 transitions가 안내 묶음(SCREENING_ANNOUNCE/GUIDE)을 자동 발송하므로 그대로 적용하면 안 된다.
+      // 그렇다고 stay로 낮추면: advance 턴은 stage가 reply_text를 null로 만들어 초안도 없고, 단계도 그대로여서
+      // 지원자는 아무것도 못 받고 어떤 큐에도 안 뜨는 '영구 침묵'이 된다(정체 백스톱도 체크리스트 완료면 스킵).
+      // → pause로 낮춰 인계 대기 큐 + Slack에 남긴다. 지원자 발송은 여전히 0(pause 분기는 SMS를 보내지 않음).
+      let safeTransition: StageTransition = result.transition;
+      if (result.transition.kind === "advance") {
+        safeTransition = {
+          kind: "pause",
+          reason: `AI가 다음 단계 진행을 제안(→${result.transition.to}) — 안내 발송은 매니저 검수 후`,
+          suggestedAction: "대화를 확인하고 안내를 직접 발송한 뒤 AI를 재개하세요.",
+        };
+      } else if (result.transition.kind === "pause" && result.transition.reason.startsWith("에이전트 호출 실패")) {
+        // 이 문구는 agent-recovery cron(*/30)의 자동 복구 대상 마커다 — 그대로 두면 cron이 stage를 되살려
+        // forceDraft 없이 재처리해 검수 없는 문자를 보낸다. 등록 건은 매니저가 직접 처리해야 하므로 마커를 뗀다.
+        safeTransition = {
+          ...result.transition,
+          reason: `등록 첫 응답 초안 생성 실패 — 매니저가 직접 응대 필요 (원인: ${result.transition.reason})`,
+        };
+      }
+      // abort는 후보가 닫혀 인계 대기 큐에 안 잡히므로 '인계됨'으로 보고하지 않는다(토스트가 없는 큐를 가리키지 않게).
+      handedOff = safeTransition.kind === "pause";
+      try {
+        await applyTransition({
+          supabase,
+          candidate_id: jc.id,
+          applicant_id: applicant.id,
+          applicant_name: applicant.name,
+          applicant_phone: applicant.phone,
+          applicant_branch: applicant.branch1 ?? null,
+          applicant_work_hours: applicant.work_hours ?? null,
+          job_id: jc.job_id,
+          job,
+          current_stage: stageName,
+          // applyTransition은 넘긴 state_update를 그대로 저장한다(DB 기존 state와 병합하지 않음).
+          // 정상 턴의 state_update는 stage가 ctx.state를 포함해 보내므로 무해하지만, 호출 실패(failResult)
+          // 경로는 { meta: { last_reasoning } }만 담겨 있어 그대로 저장하면 등록 시 심어둔 체크리스트
+          // auto-true와 meta.last_run_at(cron 재실행 차단 스탬프)까지 날아간다. 여기서 병합해 막는다.
+          state_update: mergeAgentState(state, result.state_update),
+          transition: safeTransition,
+          simulate,
+        });
+      } catch (e) {
+        console.error("[router] forceDraft transition/state save failed", e);
+      }
+    }
     return {
       ok: true,
       reply_sent: false,
       draft_created: draftCreated,
+      handed_off: handedOff,
       next_stage: null,
       auto_sent_messages: 0,
       reasoning: result.reasoning,
