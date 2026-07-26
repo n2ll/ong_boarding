@@ -1158,7 +1158,7 @@ export function Pipeline() {
               <MapIcon size={16} /> 지도 분포
             </button>
             <button onClick={() => setView("funnel")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "funnel" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
-              <Funnel size={16} /> 단계별 현황
+              <Funnel size={16} /> 캠페인 단계별 현황
             </button>
           </div>
 
@@ -1319,9 +1319,9 @@ export function Pipeline() {
                     </button>
                   </div>
 
-                  {/* 발송 묶음 — 다시 연락할 대상 정밀화(원지원 시기/주소 확정/활동중 제외) */}
+                  {/* 발송 대상 좁히기 — 다시 연락할 대상 정밀화(원지원 시기/주소 확정/활동중 제외) */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="발송 묶음 — 같은 기간·조건으로 묶은 인원 그룹. 다시 연락할 대상을 좁히는 필터예요">발송 묶음</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="발송 대상 좁히기 — 다시 연락할 사람을 조건으로 걸러내는 필터예요">발송 대상 좁히기</label>
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         onClick={() => setRecentAppliedOnly((v) => !v)}
@@ -2062,7 +2062,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
         </select>
         <button
           onClick={onRefresh}
-          title="단계별 현황 새로고침"
+          title="캠페인 단계별 현황 새로고침"
           className="flex items-center gap-1 text-[12.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
         >
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
@@ -2070,7 +2070,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       </div>
 
       {error ? (
-        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">단계별 현황을 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
+        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">캠페인 단계별 현황을 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
       ) : !data ? (
         <div className="flex-1 flex items-center justify-center text-[13px] text-[#A0AEC0]">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
@@ -2078,7 +2078,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       ) : members.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
           <div className="text-[14px] font-bold text-[#4A5568]">최근 {data.window_days}일 캠페인 발송이 없어요</div>
-          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 단계별 현황이 쌓여요.</div>
+          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 캠페인 단계별 현황이 쌓여요.</div>
         </div>
       ) : (
         <div className="flex gap-6 flex-1 overflow-x-auto px-8 pb-8">

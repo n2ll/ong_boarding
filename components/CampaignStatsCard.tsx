@@ -118,7 +118,7 @@ export function CampaignStatsCard() {
               {i > 0 && <ChevronRight size={14} className="text-[#CBD5E0] shrink-0 self-center" />}
               <button
                 onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
-                title={s.anchor ? `${s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
+                title={s.anchor ? `${s.label === "답장" ? "내가 답할 차례" : s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
                 className="flex-1 text-left rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3 hover:border-[#90CDF4] hover:bg-[#EBF8FF] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
               >
                 {inner}

@@ -149,7 +149,7 @@ export function Reengagement() {
               <div className="text-[10.5px] text-[#68A17F]">이름+전화 반입</div>
             </div>
             <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-3">
-              <div className="text-[11px] font-bold text-[#718096]">비활동 사전 동의 후보</div>
+              <div className="text-[11px] font-bold text-[#718096]">비활동 · 사전 동의 필요</div>
               <div className="text-[20px] font-extrabold text-[#4A5568]">{data.inactiveCount}</div>
               <div className="text-[10.5px] text-[#A0AEC0]">집계만 (동의 후 반입)</div>
             </div>

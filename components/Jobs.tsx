@@ -239,9 +239,9 @@ function closedKind(closedReason: string | null | undefined): ClosedKind {
 
 type RecruitMode = "external" | "internal" | "both";
 const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
-  external: { label: "공개 모집", desc: "지원 폼·광고로 새 지원자 모집 — 맞춤링크(pull)에는 안 보여요", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
-  internal: { label: "인재풀 진행", desc: "보유 인재풀 대상 — 지원자 맞춤링크에 표시", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
-  both: { label: "병행", desc: "공개 모집 + 맞춤링크 표시 동시", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
+  external: { label: "공개 모집", desc: "지원 폼·광고로 새 지원자 모집 — 맞춤 공고 링크에는 안 보여요", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
+  internal: { label: "인재풀 진행", desc: "보유 인재풀 대상 — 지원자 맞춤 공고 링크에 표시", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
+  both: { label: "병행", desc: "공개 모집 + 맞춤 공고 링크 표시 동시", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
 };
 function asRecruitMode(v: unknown): RecruitMode {
   return v === "internal" || v === "both" ? v : "external";

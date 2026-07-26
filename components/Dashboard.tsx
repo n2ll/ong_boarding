@@ -244,7 +244,7 @@ export function Dashboard() {
       u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
-      u.push({ id: "pool-reply", tone: "amber", title: `내가 답할 차례 ${poolReplies}건`, desc: "다시 연락 문자에 답장이 왔는데 아직 아무도 답하지 않았어요. '사람 확인 필요' 건과는 별개로 응대가 필요합니다.", cta: "내가 답할 차례 보기", path: "#reply-queue" });
+      u.push({ id: "pool-reply", tone: "amber", title: `새 답장 ${poolReplies}건 — 내가 답할 차례`, desc: "다시 연락 문자에 답장이 왔는데 아직 아무도 답하지 않았어요. '사람 확인 필요' 건과는 별개로 응대가 필요합니다.", cta: "새 답장 처리로", path: "#reply-queue" });
     }
     return u;
   }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, confirmPendingCount, nowTick]);

@@ -203,7 +203,7 @@ export function ExposureEditor({
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">노출 대상</label>
+        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">노출 방식</label>
         <div className="grid grid-cols-2 gap-2">
           {(
             [

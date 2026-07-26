@@ -820,7 +820,7 @@ export function ApplicantDetailContent({
           {a.tms_active_signal === true && (
             <span
               className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]"
-              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 재컨택 발송 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
+              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 상태로 다시 연락하기 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
             >
               활동 중(옹고잉)
             </span>
@@ -1392,7 +1392,7 @@ export function ApplicantDetailPanel({
   applicantId: number | null;
   jobId?: number | null;
   onChanged?: () => void;
-  /** 열 때 처음 보여줄 탭 — 답장 대기 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
+  /** 열 때 처음 보여줄 탭 — ‘내가 답할 차례’ 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
   initialTab?: "detail" | "chat";
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);

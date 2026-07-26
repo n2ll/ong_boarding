@@ -604,7 +604,7 @@ export function AgentBrain() {
                   <div className="flex items-center gap-2 text-[#1A202C] text-[14px] font-bold"><TrendingUp size={16} className="text-[#805AD5]" /> 사람 확인 필요 사유 분포 (현재 {ovHandoffTotal}건 대기)</div>
                   <button onClick={() => router.push("/live")} className="text-[12px] font-bold text-[#805AD5] hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
                 </div>
-                <p className="text-[12px] text-[#718096] mb-4">자주 사람 확인이 필요한 분류는 위 ①②③ 사실을 채우면 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
+                <p className="text-[12px] text-[#718096] mb-4">사람 확인이 자주 필요한 분류는 위 ①②③ 사실을 채우면 건수가 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
                 {ovLoading ? (
                   <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
                 ) : Object.keys(ovByCategory).length === 0 ? (
@@ -633,7 +633,7 @@ export function AgentBrain() {
           {activeTab === 'persona' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-[#1A202C] mb-6 flex items-center gap-2">
-                <Sparkles size={20} className="text-[#FFCB3C]" /> AI 에이전트 성격 · 말투 정의
+                <Sparkles size={20} className="text-[#FFCB3C]" /> AI 말투·성격 정의
               </h2>
 
               <div className="space-y-6">
@@ -877,7 +877,7 @@ export function AgentBrain() {
               </div>
 
               <div className="mt-5 p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">항상 적용되는 안전 규칙:</b> 항의·법적 표현(취소/불법/신고 등), 반복 재촉·감정 격화, 계약·세금·보험 질문은 분류와 무관하게 즉시 매니저에게 넘깁니다. 이 안전 규칙은 끌 수 없습니다.
+                <b className="text-[#4A5568]">항상 적용되는 안전 규칙:</b> 항의·법적 표현(취소/불법/신고 등), 반복 재촉·감정 격화, 계약·세금·보험 질문은 분류와 무관하게 즉시 매니저에게 넘어갑니다. 이 안전 규칙은 끌 수 없습니다.
               </div>
             </div>
           )}
