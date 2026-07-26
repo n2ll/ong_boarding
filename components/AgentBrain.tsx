@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import useSWR from "swr";
 import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap, Lightbulb, Coins } from "lucide-react";
 import { toast } from "sonner";
@@ -709,7 +709,7 @@ export function AgentBrain() {
                 </h2>
                 <span className="text-[12px] font-bold bg-[#F0FFF4] text-[#38A169] px-3 py-1 rounded-full">prompt_examples 연동됨</span>
               </div>
-              <p className="text-sm text-[#718096] mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다. 파일 업로드(RAG)는 데모입니다.</p>
+              <p className="text-sm text-[#718096] mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다.</p>
 
               {/* 파일 업로드(RAG)는 백엔드가 없어 가짜 진행바·"벡터 인덱싱 중"까지 보여준 뒤 마지막에야
                   데모임을 알리는 화면이었다 — 매니저의 시간을 쓰게 하고 그 사이 학습된다고 믿게 만든다.
@@ -718,7 +718,7 @@ export function AgentBrain() {
                 <UploadCloud size={20} className="text-[#A0AEC0] shrink-0 mt-0.5" />
                 <div>
                   <div className="text-[13.5px] font-bold text-[#4A5568]">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-[#A0AEC0] bg-[#EDF2F7] px-1.5 py-0.5 rounded align-middle">준비중</span></div>
-                  <div className="text-[12.5px] text-[#718096] mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 바로 응대에 반영돼요.</div>
+                  <div className="text-[12.5px] text-[#718096] mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 1분 안에 응대에 반영돼요.</div>
                 </div>
               </div>
 
@@ -967,7 +967,7 @@ export function AgentBrain() {
                       고급 설정
                       <span className="text-[10px] font-bold text-[#975A16] bg-[#FEFCBF] px-1.5 py-0.5 rounded">준비중</span>
                     </h2>
-                    <p className="text-[13px] text-[#718096]">LLM 모델 교체 및 데이터 보존 정책을 관리합니다.</p>
+                    <p className="text-[13px] text-[#718096]">지금 쓰는 AI 모델과 개인정보 처리 상태를 확인합니다.</p>
                   </div>
                 </div>
 

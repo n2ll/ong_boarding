@@ -42,7 +42,7 @@ export function Settings() {
           준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">설정</h1>
-        <p className="text-[14px] text-[#718096]">화주사·지점·팀과 외부 연동을 관리합니다.</p>
+        <p className="text-[14px] text-[#718096]">화주사·지점·팀과 외부 연동을 관리합니다. (프로필·알림·보안은 준비 중)</p>
       </div>
 
       <div className="flex gap-8">
@@ -211,7 +211,11 @@ export function Settings() {
                               </div>
                             )}
                             {!it.configured && (
-                              <div className="text-[11px] text-[#A0AEC0] mt-1">필요: {it.required.join(", ")}</div>
+                              // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
+                              // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
+                              <div className="text-[11px] text-[#A0AEC0] mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
+                                아직 연결 정보가 없어요 — 개발팀에 연결 요청이 필요해요
+                              </div>
                             )}
                           </div>
                         </div>
