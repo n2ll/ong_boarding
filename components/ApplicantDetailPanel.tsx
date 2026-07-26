@@ -324,7 +324,7 @@ export function ApplicantDetailContent({
    *  쓰게 해서 지점·슬롯·시작일 없이 확정되던 '빠른 확정' 경로를 없앤다. 상세 로드 후에 1회만 열고,
    *  열면 onAutoOpenConfirmConsumed로 신호를 소비해 이후 리마운트에서 다시 열리지 않게 한다.
    *  (패널은 applicantId가 key라 지원자 전환 시 리마운트되므로 단순 카운터로는 신호가 유실된다.) */
-  autoOpenConfirm?: { id: number; n: number } | null;
+  autoOpenConfirm?: { id: number; n: number; jobId?: number | null } | null;
   onAutoOpenConfirmConsumed?: () => void;
 }) {
   const local = useApplicantDetail(externalDetail !== undefined ? null : applicantId);
@@ -333,14 +333,15 @@ export function ApplicantDetailContent({
   const loading = externalDetail !== undefined ? false : local.loading;
   // 확정 모달 외부 오픈 — openConfirm은 아래(상세 로드 이후 구간)에서 정의되므로 최신 함수를 ref로 받는다.
   // 상세가 로드되기 전에는 확정 대상 후보를 알 수 없어 열지 않고, 로드되면 그때 연다.
-  const openConfirmRef = useRef<() => void>(() => {});
+  const openConfirmRef = useRef<(seedJobId?: number | null) => void>(() => {});
   const consumedAutoOpen = useRef<number | null>(null);
   useEffect(() => {
     if (!autoOpenConfirm || autoOpenConfirm.id !== applicantId) return;
     if (consumedAutoOpen.current === autoOpenConfirm.n) return;
     if (!detail) return; // 후보·지점을 알아야 대상 공고를 시드할 수 있다
     consumedAutoOpen.current = autoOpenConfirm.n;
-    openConfirmRef.current();
+    // 큐 카드가 보여준 공고를 그대로 시드 — 열린 링크가 여러 개일 때 다른 공고로 확정되는 오귀속 방지.
+    openConfirmRef.current(autoOpenConfirm.jobId ?? null);
     onAutoOpenConfirmConsumed?.();
   }, [autoOpenConfirm, applicantId, detail, onAutoOpenConfirmConsumed]);
 
@@ -538,15 +539,18 @@ export function ApplicantDetailContent({
   // confirmed_at은 에이전트 스크리닝→온보딩 마커라 병행 후보에선 확정 공고와 다를 수 있어 폴백으로만.
   const confirmedJobId = a.current_job_id ?? (cands.find((c) => c.confirmed_at != null) ?? focusCand)?.job_id ?? null;
 
-  const openConfirm = () => {
+  // seedJobId: 외부(확정 대기 큐)에서 '그 카드가 보여준 공고'를 지정해 열 때 사용 — 열린 링크가 여러 개면
+  // 큐(진행단계 우선)와 이 모달(최신 링크)의 기본 선택이 달라 다른 공고로 확정되는 오귀속이 생긴다.
+  const openConfirm = (seedJobId?: number | null) => {
     setConfirmSlots(
       String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
     );
-    // 대상 공고 기본값: 현재 포커스 후보가 진행 중이면 그것, 아니면 진행 중 후보 첫 번째.
+    // 대상 공고 기본값: 외부 시드 → 현재 포커스 후보 → 확정 가능 후보 첫 번째.
     // 대상 시드도 confirmableCands와 같은 기준(비마감·비시스템) — abort를 빼면 시드가 비어 확정이 막힌다.
+    const seeded = seedJobId != null ? confirmableCands.find((c) => c.job_id === seedJobId) ?? null : null;
     const focusOpen =
       focusCand && !focusCand.job_effectively_closed && !isSystemJobTitle(focusCand.job_title ?? "") ? focusCand : null;
-    const target = focusOpen ?? confirmableCands[0] ?? null;
+    const target = seeded ?? focusOpen ?? confirmableCands[0] ?? null;
     setConfirmJobId(target?.job_id ?? null);
     setConfirmStartDate(String(a.start_date ?? target?.job_start_date ?? "").slice(0, 10));
     // 지점 기본값 — '미지정'(지점 미보유 라인 자리값)은 채우지 않는다.
@@ -945,7 +949,7 @@ export function ApplicantDetailContent({
           {a.status === "확정인력" ? (
             <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="flex-1 bg-white border border-[#DD6B20] text-[#DD6B20] hover:bg-[#FFFAF0] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
           ) : (
-            <button onClick={openConfirm} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+            <button onClick={() => openConfirm()} disabled={busy} className="flex-1 bg-[#1A202C] hover:bg-[#2D3748] text-white py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
           )}
           <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="px-3 bg-white border border-[#E53E3E] text-[#E53E3E] py-2 rounded-xl text-[12.5px] font-bold hover:bg-[#FFF5F5] disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
         </div>

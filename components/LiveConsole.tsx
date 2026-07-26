@@ -188,7 +188,7 @@ export function LiveConsole() {
   }, [urlTab]);
   // 상태 → URL: router.replace는 RSC 왕복을 유발해 (a) 응답까지 탭이 안 바뀌고 (b) 그 요청이 실패하면
   // 전체 페이지 리로드로 폴백해 작성 중인 문자 초안·편집이 날아간다. 탭은 즉시 바꾸고 URL만 얕게 맞춘다
-  // (Next 14는 history.replaceState를 패치해 useSearchParams도 함께 갱신한다). 선례: Pipeline·Jobs 탭.
+  // (Next 14는 history.replaceState를 패치해 useSearchParams도 함께 갱신한다.)
   const setActiveTab = useCallback((t: "all" | "intervention" | "confirm") => {
     setActiveTabState(t);
     if (typeof window !== "undefined") {
@@ -298,7 +298,7 @@ export function LiveConsole() {
   // 확정 모달 오픈 신호 — 큐의 '확정' 버튼이 상세 패널의 확정 모달(지점·슬롯·시작일 수집)을 열게 한다.
   // 대상 지원자 id를 함께 실어야 한다: 패널은 applicantId가 key라 지원자를 바꾸면 리마운트되므로
   // 단순 카운터는 신호가 유실된다. 열리면 패널이 소비 콜백으로 알려 신호를 비운다.
-  const [confirmSignal, setConfirmSignal] = useState<{ id: number; n: number } | null>(null);
+  const [confirmSignal, setConfirmSignal] = useState<{ id: number; n: number; jobId: number | null } | null>(null);
   const confirmSignalSeq = useRef(0);
 
   // 대화 상태가 바뀌면(재개/보류/발송/브로드캐스트) 목록·인계·확정 큐를 함께 새로고침.
@@ -529,7 +529,10 @@ export function LiveConsole() {
   const openConfirmFor = (p: ConfirmPending) => {
     setSelectedChatId(p.applicant_id);
     confirmSignalSeq.current += 1;
-    setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current });
+    // 큐 카드가 고른 대상 공고(jobId)를 함께 넘긴다 — 큐는 '진행단계 우선', 모달 기본 시드는 '최신 링크'라
+    // 열린 링크가 2개 이상이면 카드에 보인 공고와 모달 선택이 어긋나 다른 공고로 확정될 수 있다
+    // (충원율·라인 경험·집결지 오귀속). 매니저가 카드에서 본 그 공고가 시드가 되게 한다.
+    setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current, jobId: p.job_id ?? null });
     // 확정 모달은 우측 상세 패널 안에 있어, 목록·상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다
     // (예전 빠른 확정은 직접 PATCH라 실패 토스트가 떴다). 잠시 뒤에도 안 열렸으면 원인을 알려준다.
     window.setTimeout(() => {

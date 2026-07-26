@@ -70,10 +70,10 @@ export async function GET() {
   for (const c of (cands ?? []) as unknown as Cand[]) {
     const job = c.jobs ?? null;
     if (!job || isSystemJobTitle(job.title) || isJobEffectivelyClosed(job.status, job.closes_at)) continue;
-    // abort(공고 단위 종료) 후보도 폴백으로는 남긴다 — 확정 모달은 abort를 확정 대상에서 빼므로
-    // '큐엔 뜨는데 그 공고로는 확정 못 하는' 상태가 되지만, 여기서 제외하면 스크리닝을 끝낸 사람이
-    // 큐에서 사라져 아예 잊혀진다(더 나쁨). 모달이 "인재풀에서 공고 후보로 추가한 뒤 확정하세요"로
-    // 다음 행동을 안내하므로 보이게 두는 편이 낫다.
+    // abort(공고 단위 종료) 후보도 폴백으로 남긴다 — 대화가 중단됐어도 그 공고로 확정하는 것은
+    // 서버 검증(링크 존재·비시스템·비마감)이 허용하는 정상 동작이고, 확정 모달도 같은 기준을 쓴다
+    // (ApplicantDetailPanel.confirmableCands). ⚠️ 여기서 abort를 제외하지 말 것 —
+    // 스크리닝을 끝낸 사람이 큐에서 사라져 잊혀지고, 모달 기준과도 어긋나 확정 경로가 막힌다.
     const slot = byApplicant.get(c.applicant_id) ?? { primary: null, fallback: null };
     if (IN_PROGRESS_STAGES.has(c.agent_stage ?? "")) {
       if (!slot.primary) slot.primary = c;
