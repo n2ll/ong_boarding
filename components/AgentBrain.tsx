@@ -516,7 +516,17 @@ export function AgentBrain() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => { setPersona(DEFAULT_PERSONA); toast.info("기본 페르소나로 되돌렸어요. 저장해야 반영됩니다."); }}
+            onClick={async () => {
+              // 편집 중인 페르소나를 한 번에 날리므로 확인을 받는다(저장 전이라 서버 반영은 아직 없음).
+              if (!(await confirm({
+                title: "기본 페르소나로 되돌릴까요?",
+                description: "편집 중인 역할·지시·어조·이모지 설정이 기본값으로 초기화됩니다. (저장하기 전이라 서버에는 아직 반영되지 않아요)",
+                confirmText: "초기화",
+                destructive: true,
+              }))) return;
+              setPersona(DEFAULT_PERSONA);
+              toast.info("기본 페르소나로 되돌렸어요. 저장해야 반영됩니다.");
+            }}
             className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
           >
             <RefreshCw size={16} /> 기본값으로 초기화

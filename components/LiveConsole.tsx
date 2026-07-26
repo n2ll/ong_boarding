@@ -275,15 +275,9 @@ export function LiveConsole() {
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
   const copilotMode = !globalKill && killData?.mode === "draft";
 
-  // 발송 미리보기 모달(내용·비용 확인·수정 후 발송) — 만남장소/첫날규칙/옹고잉 앱 안내 공용
-  type SendKind = "venue" | "first_day" | "app_guide";
-  const [sendModal, setSendModal] = useState<{ p: ConfirmPending; kind: SendKind } | null>(null);
-  const [venueDate, setVenueDate] = useState("");
-  const [venueTime, setVenueTime] = useState(""); // 집합 시각 (예: 09:40) — 하드코딩 대신 매니저 입력
-  const [editText, setEditText] = useState(""); // 발송 직전 수정 가능한 본문(편집 가능 템플릿)
-  const [preview, setPreview] = useState<{ text: string; sms_type: string; cost_krw: number } | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [sendSaving, setSendSaving] = useState(false);
+  // 우측 상세 재조회 신호 — 확정 대기 큐에서 확정했을 때 상세의 낡은 status를 갱신해
+  // '확정 후속 안내'(확정 후에만 가능) 섹션이 즉시 나타나게 한다.
+  const [detailRefreshKey, setDetailRefreshKey] = useState(0);
 
   // 대화 상태가 바뀌면(재개/보류/발송/브로드캐스트) 목록·인계·확정 큐를 함께 새로고침.
   // 발송 후 onChanged와 DB 브로드캐스트가 거의 동시에 도착하므로 800ms 디바운스로 1회만 조회한다.
@@ -370,7 +364,12 @@ export function LiveConsole() {
     };
   }, [selectedChatId]);
 
-  const activeChat = chats.find((c) => c.id === selectedChatId) ?? null;
+  // 선택한 사람이 목록 필터에서 빠져도(확정 직후 상태 변화·14일 넘은 대화 등) 열어둔 상세는 유지한다 —
+  // 확정 후 "오른쪽 상세에서 만남장소를 보내세요"라고 안내했는데 패널이 사라지던 문제 방어.
+  const activeChat =
+    chats.find((c) => c.id === selectedChatId) ??
+    (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
+    null;
 
   // 인계 큐: 카테고리 필터 적용(이미 오래된 순으로 서버 정렬됨)
   const visibleHandoffs = handoffCat === "all" ? handoffs : handoffs.filter((h) => h.category === handoffCat);
@@ -500,64 +499,9 @@ export function LiveConsole() {
     }
   };
 
-  // ── 확정 대기 액션 (내용·비용 미리보기 → 수정 → 발송) ──
-  // 미리보기 본문을 editText에 채워 발송 직전 수정 가능하게 한다(편집 가능 템플릿).
-  const fetchPreview = useCallback(async (p: ConfirmPending, kind: SendKind, opts?: { startDate?: string; meetingTime?: string }) => {
-    setPreviewLoading(true);
-    setPreview(null);
-    try {
-      const res = await fetch("/api/admin/confirm/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, start_date: opts?.startDate, meeting_time: opts?.meetingTime, preview: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(json.error || "미리보기 실패"); return; }
-      setPreview({ text: json.text, sms_type: json.sms_type, cost_krw: json.cost_krw });
-      setEditText(json.text ?? "");
-    } finally {
-      setPreviewLoading(false);
-    }
-  }, []);
-
-  const openSend = (p: ConfirmPending, kind: SendKind) => {
-    setSendModal({ p, kind });
-    setPreview(null);
-    setEditText("");
-    setVenueTime("");
-    const d = p.start_date ?? "";
-    setVenueDate(d);
-    // 첫날규칙·앱안내는 시작일 불필요 → 즉시 미리보기. 만남장소는 시작일 있어야 미리보기.
-    if (kind === "first_day" || kind === "app_guide") void fetchPreview(p, kind);
-    else if (d) void fetchPreview(p, "venue", { startDate: d });
-  };
-
-  const KIND_LABEL: Record<SendKind, string> = { venue: "만남장소 안내", first_day: "첫날 규칙 안내", app_guide: "옹고잉 앱 안내" };
-  const doSend = async () => {
-    if (!sendModal) return;
-    const { p, kind } = sendModal;
-    if (kind === "venue" && !venueDate) return toast.error("시작일을 선택해주세요.");
-    if (!editText.trim()) return toast.error("발송할 내용이 비어 있어요.");
-    setSendSaving(true);
-    try {
-      const res = await fetch("/api/admin/confirm/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // 수정된 본문(editText)을 그대로 발송. venue는 시작일·집합시각도 함께(기록·재빌드 대비).
-        body: JSON.stringify({ applicant_id: p.applicant_id, kind, job_id: p.job_id, text: editText.trim(), start_date: kind === "venue" ? venueDate : undefined, meeting_time: kind === "venue" ? venueTime : undefined }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || "발송 실패");
-      toast.success(`${p.name}님 — ${KIND_LABEL[kind]}를 발송했어요.`);
-      setSendModal(null);
-      handleChanged();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "발송 실패");
-    } finally {
-      setSendSaving(false);
-    }
-  };
-
+  // ── 확정 대기 액션 ──
+  // 후속 안내(만남장소·첫날규칙·앱안내) 발송은 이 큐에 없다 — 확정 전이라 확정 통보로 읽히기 때문.
+  // 발송은 확정 후 지원자 상세의 FollowupSendModal(공용 /api/admin/confirm/send)이 담당한다.
   const confirmHire = async (p: ConfirmPending) => {
     if (!(await confirm({
       title: `${p.name}님을 '확정인력'으로 전환할까요?`,
@@ -572,7 +516,11 @@ export function LiveConsole() {
         body: JSON.stringify(p.job_id != null ? { status: "확정인력", current_job_id: p.job_id } : { status: "확정인력" }),
       });
       if (!res.ok) throw new Error();
-      toast.success(`${p.name}님을 확정인력으로 전환했어요.`);
+      toast.success(`${p.name}님을 확정인력으로 전환했어요. 이제 오른쪽 상세에서 만남장소·첫날 안내를 보낼 수 있어요.`, { duration: 8000 });
+      // 확정한 사람을 우측 상세로 띄우고 재조회 — 큐에서 빠지기만 하고 낡은 status가 남아
+      // '확정 후속 안내' 섹션이 안 나타나던 흐름 단절 방지(후속 안내는 확정 후에만 가능하므로 더 중요).
+      setSelectedChatId(p.applicant_id);
+      setDetailRefreshKey((n) => n + 1);
       handleChanged();
     } catch {
       toast.error("확정 처리에 실패했어요.");
@@ -757,10 +705,11 @@ export function LiveConsole() {
                       {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
                     </div>
                   </button>
+                  {/* 이 큐는 '아직 확정 안 된' 지원자(스크리닝 완료)만 담긴다 — 만남장소·첫날규칙·앱안내는
+                      확정 후 콘텐츠라 여기서 보내면 지원자에게 확정 통보로 읽힌다. 그래서 발송 버튼을 두지 않고
+                      '확정'만 남긴다. 확정하면 이 큐에서 빠지고, 후속 안내는 지원자 상세의 '확정 후속 안내'에서 보낸다. */}
                   <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
-                    <button onClick={() => openSend(p, "app_guide")} title="옹고잉 앱 설치·가이드 안내 발송 (내용 확인·수정)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95">앱 안내</button>
-                    <button onClick={() => openSend(p, "venue")} disabled={!p.can_send_venue} title={p.can_send_venue ? "만남장소 안내 발송 (내용 확인·수정)" : "공고에 픽업주소·현장매니저가 있어야 발송 가능"} className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">만남장소 발송</button>
-                    <button onClick={() => openSend(p, "first_day")} title="첫날 규칙 안내 발송 (내용 확인·수정)" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95">첫날규칙</button>
+                    <span className="mr-auto text-[11px] text-[#A0AEC0]">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
                     <button onClick={() => confirmHire(p)} title="확정인력으로 전환" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
                   </div>
                 </div>
@@ -917,6 +866,7 @@ export function LiveConsole() {
             jobId={selectedJobId}
             variant="panel"
             onChanged={handleChanged}
+            refreshKey={detailRefreshKey}
           />
         </div>
       )}
@@ -1001,56 +951,6 @@ export function LiveConsole() {
         </div>
       )}
 
-      {/* 확정 대기 → 발송 미리보기 (내용·비용 확인 후 발송) */}
-      {sendModal && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !sendSaving && setSendModal(null)}>
-          <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
-              <h2 className="text-[16px] font-extrabold text-[#1A202C]">{KIND_LABEL[sendModal.kind]} 발송</h2>
-              <button onClick={() => setSendModal(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
-            </div>
-            <div className="p-6 flex flex-col gap-4">
-              <div className="text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">{sendModal.p.name}</b>님({sendModal.p.phone})에게 <b className="text-[#E53E3E]">실제 문자</b>가 발송됩니다. 아래 내용을 확인·수정 후 발송하세요.
-              </div>
-              {sendModal.kind === "venue" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">근무 시작일</label>
-                    <input type="date" value={venueDate} onChange={(e) => { const v = e.target.value; setVenueDate(v); if (v) void fetchPreview(sendModal.p, "venue", { startDate: v, meetingTime: venueTime }); else setPreview(null); }} className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">집합 시각</label>
-                    <input type="time" value={venueTime} onChange={(e) => { const v = e.target.value; setVenueTime(v); if (venueDate) void fetchPreview(sendModal.p, "venue", { startDate: venueDate, meetingTime: v }); }} className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                  </div>
-                </div>
-              )}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[12px] font-bold text-[#4A5568]">발송 내용 (수정 가능)</label>
-                  {preview && <span className="text-[11px] font-bold text-[#B7791F] bg-[#FFFBEB] border border-[#FAF089] rounded-md px-2 py-0.5">{preview.sms_type} · 약 {preview.cost_krw}원</span>}
-                </div>
-                {previewLoading ? (
-                  <div className="w-full min-h-[140px] px-4 py-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl text-[13px] text-[#A0AEC0]">불러오는 중…</div>
-                ) : (
-                  <textarea
-                    value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    rows={7}
-                    placeholder={sendModal.kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
-                    className="w-full px-4 py-3 bg-white border border-[#E2E8F0] rounded-xl text-[13px] leading-relaxed text-[#2D3748] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none"
-                  />
-                )}
-                <div className="text-[11px] text-[#A0AEC0] mt-1.5">* 기본 문안은 라인 형태에 맞춰 채워지며, 그대로 두거나 수정해 발송할 수 있어요. 비용은 SOLAPI 대략치(SMS 20원 / LMS 33원).</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
-              <button onClick={() => setSendModal(null)} disabled={sendSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
-              <button onClick={doSend} disabled={sendSaving || previewLoading || !editText.trim()} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2B6CB0] hover:bg-[#2C5282] disabled:opacity-50">{sendSaving ? "발송 중…" : "발송"}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

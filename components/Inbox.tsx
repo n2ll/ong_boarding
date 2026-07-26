@@ -39,24 +39,46 @@ export function Inbox() {
       !(j.closes_at && new Date(j.closes_at).getTime() <= Date.now())
   );
 
+  // 분류 되돌리기 — 기타·옹매니징(단순 마킹)만. 목록에 다시 띄워 재분류할 수 있게 한다.
+  // 지원자 등록(배민·공고)은 지원자·후보·초안이 생겨 마킹 해제로 원복되지 않으므로 서버가 거부한다.
+  const undoClassify = async (msg: PendingMessage) => {
+    try {
+      const res = await fetch(`/api/admin/inbox/${msg.id}/classify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json.error || "되돌리기에 실패했어요");
+        return;
+      }
+      toast.success("분류를 되돌렸어요.");
+      // 서버가 pending으로 복구했으니 목록을 재검증해 카드를 되살린다.
+      void mutate();
+    } catch {
+      toast.error("되돌리기에 실패했어요");
+    }
+  };
+
   const classify = async (
     msg: PendingMessage,
     action: "baemin" | "job" | "other" | "ongmanaging",
     opts?: { jobId?: number; jobLabel?: string }
   ) => {
     if (busyId) return;
-    // 지원자 등록(배민·공고)은 등록 즉시 AI 스크리닝 문자가 나가므로 발송 사실을 확인받는다.
+    // 등록은 즉시, 첫 문자는 초안까지만 — 매니저가 대화에서 검수하고 직접 보낸다(자동 실발송 없음).
     if (action === "baemin") {
       if (!(await confirm({
         title: `${msg.applicant_phone} — 배민 커넥트로 등록할까요?`,
-        description: "지원자로 등록되고 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
-        confirmText: "등록하고 발송",
+        description: "지원자로 등록하고 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 실시간 응대에서 내용을 확인한 뒤 직접 보내요.",
+        confirmText: "등록",
       }))) return;
     } else if (action === "job") {
       if (!(await confirm({
         title: `${msg.applicant_phone} — '${opts?.jobLabel ?? "선택 공고"}'로 등록할까요?`,
-        description: "이 공고 지원자로 등록되고 라인에 맞는 AI 스크리닝 문자가 즉시 발송됩니다. 계속할까요?",
-        confirmText: "등록하고 발송",
+        description: "이 공고 지원자로 등록하고 라인에 맞는 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 실시간 응대에서 내용을 확인한 뒤 직접 보내요.",
+        confirmText: "등록",
       }))) return;
     } else if (action === "ongmanaging") {
       if (!(await confirm({
@@ -82,21 +104,39 @@ export function Inbox() {
         toast.error(json.error || "분류에 실패했어요");
         return;
       }
+      // 이미 분류된 문자(같은 번호의 형제 카드 등)는 서버가 아무 일도 하지 않는다 — 성공처럼 보이면
+      // '방금 이 공고로 등록했다'는 오보가 되므로 구분해 알리고 목록을 재검증한다.
+      if (json.noop) {
+        toast.info("이 문자는 이미 처리된 건이에요. 목록을 새로 불러왔어요.");
+        void mutate();
+        return;
+      }
       if (action === "baemin" || action === "job") {
         const where = action === "job" ? (opts?.jobLabel ?? "선택 공고") : "배민 커넥트";
-        toast.success(
-          json.agent_invoked
-            ? `${where}로 등록하고 AI 응대를 시작했어요.`
-            : `${where}로 등록했어요.`
-        );
+        // 다음 행동을 반드시 지정한다(무응답 방치 방지). 초안과 인계는 함께 발생할 수 있으므로
+        // 둘 다 알린다 — 초안만 알리면 'AI가 멈춰서 재개가 필요하다'는 사실이 묻힌다.
+        const next = json.draft_created
+          ? "AI 첫 응답 초안을 실시간 응대에서 확인하고 보내세요."
+          : "AI 초안이 만들어지지 않았어요 — 실시간 응대에서 직접 답해주세요.";
+        const handoff = json.handed_off
+          ? " AI 자동 응대는 멈춤 상태예요(실시간 응대 › 인계 대기) — 보낸 뒤 필요하면 AI를 재개하세요."
+          : "";
+        toast.success(`${where}로 등록했어요. ${next}${handoff}`, { duration: 10000 });
       } else if (action === "ongmanaging") {
-        toast.success("기존 계약자 문의로 분류했어요.");
+        // 단순 마킹이라 되돌리기 가능(지원자 등록과 달리 생성물이 없다).
+        toast.success("기존 계약자 문의로 분류했어요.", { action: { label: "실행취소", onClick: () => void undoClassify(msg) } });
       } else {
-        toast.success("기타로 분류해 종결했어요.");
+        toast.success("기타로 분류해 종결했어요.", { action: { label: "실행취소", onClick: () => void undoClassify(msg) } });
       }
       // 처리 완료 항목을 캐시에서 즉시 제거(낙관적). 재검증은 다음 진입/새로고침에서.
+      // 지원자 등록(배민·공고)은 서버가 같은 번호의 대기 문자를 한꺼번에 처리하므로 번호 기준으로 제거한다
+      // — id만 지우면 형제 문자가 '유령 카드'로 남아 재클릭 시 중복 등록·발송으로 이어졌다.
+      // 기타·옹매니징은 서버가 대상 문자 1건만 마킹하므로 id 기준 유지(번호로 지우면 되살아나 불일치).
+      const perPhone = action === "baemin" || action === "job";
       void mutate(
-        (cur) => ({ data: (cur?.data ?? []).filter((m) => m.id !== msg.id) }),
+        (cur) => ({
+          data: (cur?.data ?? []).filter((m) => (perPhone ? m.applicant_phone !== msg.applicant_phone : m.id !== msg.id)),
+        }),
         { revalidate: false }
       );
     } catch {

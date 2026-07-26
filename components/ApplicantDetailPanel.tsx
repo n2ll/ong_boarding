@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import {
   X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle, ChevronDown,
   Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap, RotateCcw,
@@ -307,6 +307,7 @@ export function ApplicantDetailContent({
   onChanged,
   detail: externalDetail,
   reload: externalReload,
+  refreshKey,
 }: {
   applicantId: number;
   jobId?: number | null;
@@ -314,11 +315,22 @@ export function ApplicantDetailContent({
   onChanged?: () => void;
   detail?: Detail | null;
   reload?: () => void;
+  /** 값이 바뀌면 상세를 다시 불러온다 — 이 패널 밖에서 상태가 바뀐 경우(예: 확정 대기 큐에서 확정)
+   *  낡은 status를 들고 있어 '확정 후속 안내' 섹션이 나타나지 않던 문제 방어. */
+  refreshKey?: number;
 }) {
   const local = useApplicantDetail(externalDetail !== undefined ? null : applicantId);
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
   const reload = externalReload ?? local.reload;
   const loading = externalDetail !== undefined ? false : local.loading;
+  // 외부 변경 신호로 재조회 (첫 마운트는 useApplicantDetail이 이미 로드하므로 값 변화에만 반응)
+  const lastRefreshKey = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey !== lastRefreshKey.current) {
+      lastRefreshKey.current = refreshKey;
+      reload();
+    }
+  }, [refreshKey, reload]);
 
   const confirm = useConfirm();
   // '확정 지점' 드롭다운 소스 — 활성 지점(화주사 결속). 자유텍스트 오타로 충원율 집계가 누락되던 문제(A5) 방지.
