@@ -39,7 +39,7 @@ export function Reengagement() {
     if (importing) return;
     if (
       !window.confirm(
-        `활동 편입후보 ${data?.activeCount ?? 0}명을 인력풀에 편입할까요?\n(스위치 OFF면 잠겨서 아무 것도 반입되지 않아요.)`
+        `활동 중인 후보 ${data?.activeCount ?? 0}명을 인력풀에 편입할까요?\n(‘다시 부르기’가 꺼져 있으면 잠겨서 아무 것도 반입되지 않아요.)`
       )
     )
       return;
@@ -52,7 +52,7 @@ export function Reengagement() {
         return;
       }
       if (json.enabled === false) {
-        toast.info(json.note || "재활용 스위치 OFF — 편입 잠금(미리보기만)");
+        toast.info(json.note || "‘다시 부르기’가 꺼져 있어요 — 편입 잠금(미리보기만)");
       } else {
         toast.success(json.note || `${json.imported}명 편입 완료`);
         await mutate();
@@ -69,7 +69,7 @@ export function Reengagement() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold text-[#1A202C] flex items-center gap-2">
-            <RefreshCw size={20} /> 재활용 · 배송원 재편입
+            <RefreshCw size={20} /> 다시 부르기 (배송원 재편입)
           </h1>
           <p className="text-[13px] text-[#718096] mt-1">
             옹고잉·옹매니징 배송원 중 옹보딩 미지원자를 인력풀 후보로 (블랙리스트 제외)
@@ -88,13 +88,13 @@ export function Reengagement() {
       {!triggered && (
         <div className="rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] p-5 text-center space-y-3">
           <p className="text-[13px] text-[#4A5568] leading-relaxed">
-            옹고잉·옹매니징 DB를 조회해 재활용 후보를 발굴합니다. 외부 DB 접속이라 자동 실행하지 않아요.
+            옹고잉·옹매니징 DB를 조회해 다시 부를 만한 분을 찾습니다. 외부 DB 접속이라 자동 실행하지 않아요.
           </p>
           <button
             onClick={() => setTriggered(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
           >
-            <RefreshCw size={15} /> 재활용 후보 발굴하기
+            <RefreshCw size={15} /> 다시 부를 분 찾기
           </button>
         </div>
       )}
@@ -106,7 +106,7 @@ export function Reengagement() {
       )}
       {!error && data && !data.configured && (
         <div className="px-4 py-3 rounded-xl bg-[#EDF2F7] border border-[#E2E8F0] text-[13px] font-semibold text-[#718096]">
-          옹고잉·옹매니징 미연동 — 재활용 후보를 발굴할 수 없어요.
+          옹고잉·옹매니징 미연동 — 다시 부를 분을 찾을 수 없어요.
         </div>
       )}
       {isLoading && (

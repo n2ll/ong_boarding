@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase";
 import {
   normalizePhone,
@@ -28,15 +29,29 @@ import { fetchBlacklistedPhones } from "@/lib/blacklist";
 const SWITCH_CATEGORY = "system_message";
 const SWITCH_TITLE = "__reengagement_switch__";
 
-export async function isReengagementEnabled(): Promise<boolean> {
-  const supabase = createServiceClient();
-  const { data } = await supabase
+// prompt_examples에는 (category,title) 유니크 제약이 없다 — 같은 title 행이 2개 이상이면
+// 조건 없는 maybeSingle()은 PGRST116 에러를 내고 data=null이 되어 스위치가 영구 'off'로 읽힌다.
+// 그래서 읽기·쓰기 모두 최신 1건으로 좁힌다(레포 선례: lib/automation.saveAutomationConfig).
+async function findSwitchRow(supabase: SupabaseClient): Promise<{ id: number; body: string } | null> {
+  const { data, error } = await supabase
     .from("prompt_examples")
-    .select("body")
+    .select("id, body")
     .eq("category", SWITCH_CATEGORY)
     .eq("title", SWITCH_TITLE)
+    .order("id", { ascending: false })
+    .limit(1)
     .maybeSingle();
-  return (data?.body ?? "off").trim().toLowerCase() === "on";
+  if (error) {
+    console.error("[reengagement] switch row lookup failed", error);
+    return null;
+  }
+  return (data as { id: number; body: string } | null) ?? null;
+}
+
+export async function isReengagementEnabled(): Promise<boolean> {
+  const supabase = createServiceClient();
+  const row = await findSwitchRow(supabase);
+  return (row?.body ?? "off").trim().toLowerCase() === "on";
 }
 
 /** 스위치 켜기/끄기 — 매니저가 설정 화면에서 직접 조작한다(예전엔 DB를 직접 고쳐야 했다).
@@ -44,20 +59,19 @@ export async function isReengagementEnabled(): Promise<boolean> {
 export async function setReengagementEnabled(on: boolean): Promise<void> {
   const supabase = createServiceClient();
   const body = on ? "on" : "off";
-  const { data: existing } = await supabase
-    .from("prompt_examples")
-    .select("id")
-    .eq("category", SWITCH_CATEGORY)
-    .eq("title", SWITCH_TITLE)
-    .maybeSingle();
+  const existing = await findSwitchRow(supabase);
   if (existing?.id) {
-    const { error } = await supabase.from("prompt_examples").update({ body }).eq("id", existing.id);
+    // updated_at을 명시 갱신 — '법적 검토 후 언제 켰는지'가 유일한 감사 흔적이다(테이블에 트리거 없음).
+    const { error } = await supabase
+      .from("prompt_examples")
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
     if (error) throw new Error(error.message);
     return;
   }
   const { error } = await supabase
     .from("prompt_examples")
-    .insert({ category: SWITCH_CATEGORY, title: SWITCH_TITLE, body });
+    .insert({ category: SWITCH_CATEGORY, title: SWITCH_TITLE, body, sort_order: 0 });
   if (error) throw new Error(error.message);
 }
 

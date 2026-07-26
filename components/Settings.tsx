@@ -43,7 +43,7 @@ export function Settings() {
   // '다시 부르기' 기능 스위치 — 화면은 "스위치를 켜세요"라고 안내하는데 콘솔에 스위치가 없어
   // DB를 직접 고쳐야 했다. 매니저가 여기서 켜고 끈다.
   const confirm = useConfirm();
-  const { data: reSwitch, mutate: mutateSwitch, isLoading: switchLoading } = useSWR<{ enabled?: boolean }>(
+  const { data: reSwitch, error: switchError, mutate: mutateSwitch, isLoading: switchLoading } = useSWR<{ enabled?: boolean }>(
     activeTab === "switches" ? "/api/admin/reengagement/switch" : null
   );
   const [switchSaving, setSwitchSaving] = useState(false);
@@ -53,7 +53,7 @@ export function Settings() {
     // 켜는 쪽만 확인 — 과거 인력에게 문자가 나갈 수 있게 되는 결정이다(끄는 건 안전 방향).
     if (next && !(await confirm({
       title: "‘다시 부르기’를 켤까요?",
-      description: "과거에 함께 일한 분들을 인력풀로 불러올 수 있게 됩니다. 실제 문자는 인재풀에서 매니저가 보낼 때만 나가요. 법적 검토·승인이 끝났는지 확인해 주세요.",
+      description: "옹고잉·옹매니징 배송원 중 옹보딩에 지원하지 않은 분들을 인력풀로 불러올 수 있게 됩니다. 지금 다른 라인에서 일하고 있는 분도 포함되고, 이름·전화번호가 인력풀에 저장돼요. 실제 문자는 인재풀에서 매니저가 보낼 때만 나갑니다. 법적 검토·승인이 끝났는지 확인해 주세요.",
       confirmText: "켜기",
     }))) return;
     setSwitchSaving(true);
@@ -233,19 +233,22 @@ export function Settings() {
               <div className="rounded-xl border border-[#E2E8F0] bg-white p-5 max-w-2xl">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <div className="text-[14px] font-bold text-[#1A202C] mb-1">다시 부르기 (과거 인력 재편입)</div>
+                    <div className="text-[14px] font-bold text-[#1A202C] mb-1">다시 부르기 (배송원 재편입)</div>
                     <p className="text-[13px] text-[#718096] leading-relaxed">
-                      과거에 함께 일한 분들을 인력풀로 불러오는 기능이에요. 꺼져 있으면 <b>미리보기만</b> 되고 아무 것도 편입되지 않아요.
+                      옹고잉·옹매니징 배송원 중 옹보딩 미지원자(지금 일하고 있는 분 포함)를 인력풀로 불러오는 기능이에요. 꺼져 있으면 <b>미리보기만</b> 되고 아무 것도 편입되지 않아요.
                       켜도 문자가 저절로 나가지는 않아요 — 실제 발송은 인재풀에서 매니저가 보낼 때만 됩니다.
                     </p>
                     <p className="text-[12px] text-[#A0AEC0] mt-2">법적 검토·승인이 끝난 뒤에 켜 주세요.</p>
                   </div>
                   {switchLoading ? (
                     <Loader2 size={18} className="animate-spin text-[#A0AEC0] shrink-0 mt-1" />
+                  ) : switchError ? (
+                    // 상태를 모르는데 OFF로 렌더하면 실제 ON인 기능을 꺼진 줄 알고, 토글은 '켜기'만 시도해 끌 수도 없다.
+                    <AlertCircle size={18} className="text-[#E53E3E] shrink-0 mt-1" />
                   ) : (
                     <button
                       onClick={toggleReengagement}
-                      disabled={switchSaving}
+                      disabled={switchSaving || !!switchError}
                       title={reEnabled ? "끄면 편입이 잠기고 미리보기만 됩니다" : "켜면 과거 인력을 인력풀로 편입할 수 있어요"}
                       className={`w-12 h-7 rounded-full relative transition-colors shrink-0 mt-1 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${reEnabled ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
                     >
@@ -254,7 +257,9 @@ export function Settings() {
                   )}
                 </div>
                 <div className="mt-4 pt-4 border-t border-[#F1F4F8] flex items-center gap-2 text-[12.5px] font-bold">
-                  {switchSaving ? (
+                  {switchError ? (
+                    <span className="text-[#E53E3E]">상태를 불러오지 못했어요 — 새로고침 후 다시 확인해 주세요(켜짐/꺼짐을 알 수 없어 조작을 막았어요).</span>
+                  ) : switchSaving ? (
                     <span className="flex items-center gap-1.5 text-[#718096]"><RefreshCw size={13} className="animate-spin" /> 저장 중…</span>
                   ) : reEnabled ? (
                     <span className="text-[#2F855A]">지금 켜져 있어요 — 인력풀에서 편입할 수 있어요</span>
