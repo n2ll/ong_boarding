@@ -43,9 +43,9 @@ function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): strin
   const meta = (ev.meta ?? {}) as { immediate?: unknown; to?: unknown };
   switch (ev.event_type) {
     case "ping_sent":
-      return "⚡ 재컨택 문자 발송";
+      return "⚡ 다시 연락 문자 발송";
     case "link_view":
-      return "👀 맞춤 공고 열람";
+      return "👀 맞춤 공고 링크 열람";
     case "interest_click": {
       const title = ev.job_id != null ? jobsMap[ev.job_id]?.title?.trim() : undefined;
       const name = title || (ev.job_id != null ? `공고 #${ev.job_id}` : "공고");
@@ -145,7 +145,7 @@ const QUICK_TEMPLATES: { label: string; text: string }[] = [
   { label: "순차 연락", text: `#{이름}님, 확인 감사합니다! 담당 매니저가 순차적으로 연락드릴 예정이에요. 조금만 기다려 주세요.` },
   { label: "대기 안내", text: `#{이름}님, 현재 지원이 많아 즉시 배정이 어려운 상황이에요. 자리가 생기면 가장 먼저 연락드리겠습니다!` },
   { label: "관심 대기 안내", text: `[옹고잉] #{이름}님, '#{공고명}' 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요!` },
-  { label: "맞춤링크 안내", text: `#{이름}님, 지금 모집 중인 공고를 본인 전용 페이지에서 모아 보실 수 있어요. 편하실 때 확인해보세요!\n#{맞춤링크}` },
+  { label: "맞춤 공고 링크 안내", text: `#{이름}님, 지금 모집 중인 공고를 본인 전용 페이지에서 모아 보실 수 있어요. 편하실 때 확인해보세요!\n#{맞춤링크}` },
   { label: "스크리닝 확인", text: `#{이름}님, 몇 가지만 확인 부탁드릴게요!\n- 배송에 쓰실 자차를 보유하고 계신가요?\n- 본인 명의로 정산 받으시는 데 문제 없으실까요?\n- 공휴일에도 업무 가능하실까요?` },
   { label: "온보딩 절차", text: `#{이름}님, 업무 진행을 위한 안내드릴게요. 영상 교육 수료 후 회신 부탁드립니다.\n1. 배민 커넥트 앱 설치 후 가입\n2. 가입 시 안전보건교육 영상(2시간) 시청\n3. 교육 수료 후 앱 아이디 회신` },
   { label: "서류 요청", text: `#{이름}님, 지원 감사합니다. 진행을 위해 신분증 사진 1장 회신 부탁드립니다.` },

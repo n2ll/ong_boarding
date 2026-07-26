@@ -789,7 +789,7 @@ export function ApplicantDetailContent({
         </div>
       )}
 
-      {/* 상단 고정 — 스크롤 없이 항상 보이는 '훑고 행동' 블록 (①신원 ②재컨택 ③핵심 판단 ④액션) */}
+      {/* 상단 고정 — 스크롤 없이 항상 보이는 '훑고 행동' 블록 (①신원 ②다시 연락 ③핵심 판단 ④액션) */}
       <div className="shrink-0 px-5 pt-4 pb-4 space-y-3 border-b border-[#E2E8F0]">
         {/* ① 이름·나이·전화·지역 — 드로어는 자체 헤더가 같은 정보를 담당 */}
         {variant === "panel" && (
@@ -820,7 +820,7 @@ export function ApplicantDetailContent({
           {a.tms_active_signal === true && (
             <span
               className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#F6E05E]"
-              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 재컨택 발송 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
+              title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 상태로 다시 연락하기 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
             >
               활동 중(옹고잉)
             </span>
@@ -862,11 +862,11 @@ export function ApplicantDetailContent({
           </div>
         )}
 
-        {/* ② 재컨택 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
+        {/* ② 다시 연락 반응 요약 — "이 답장이 무엇에 대한 것인지"를 스레드 옆에서 바로 대조 */}
         {hasRecontact && recontact && (
           <div className="rounded-xl border border-[#BEE3F8] bg-[#EBF8FF] p-3.5 space-y-2.5">
             <h3 className="text-[12.5px] font-extrabold text-[#2B6CB0] flex items-center gap-1.5">
-              <Zap size={14} /> 재컨택 반응
+              <Zap size={14} /> 다시 연락 반응
             </h3>
             <div className="grid grid-cols-3 gap-x-3 gap-y-2">
               <div className="flex flex-col gap-0.5">
@@ -933,7 +933,7 @@ export function ApplicantDetailContent({
           <a href={telHref} onClick={(e) => { if (!telHref) { e.preventDefault(); toast.error("연락처가 없어요."); } }} className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"><Phone size={14} /> 전화</a>
           <button
             onClick={async () => {
-              if (!a.access_token) return toast.error("이 지원자 전용 맞춤 링크가 아직 없어요. 재컨택 문자를 보내면 자동으로 만들어져요.");
+              if (!a.access_token) return toast.error("이 지원자 전용 맞춤 공고 링크가 아직 없어요. 다시 연락 문자를 보내면 자동으로 만들어져요.");
               try {
                 await navigator.clipboard.writeText(`${window.location.origin}/p/${a.access_token}`);
                 toast.success("맞춤 공고 링크를 복사했어요. 문자로 보내주세요.");
@@ -944,7 +944,7 @@ export function ApplicantDetailContent({
             className="flex-1 bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] text-[#1A202C] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 transition-colors"
             title="이 지원자 전용 맞춤 공고 페이지 링크 복사 — 문자에 붙여 보낼 수 있어요"
           >
-            <MessageSquare size={14} /> 맞춤링크
+            <MessageSquare size={14} /> 맞춤 공고 링크
           </button>
           {a.status === "확정인력" ? (
             <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="flex-1 bg-white border border-[#DD6B20] text-[#DD6B20] hover:bg-[#FFFAF0] py-2 rounded-xl text-[12.5px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
@@ -1392,7 +1392,7 @@ export function ApplicantDetailPanel({
   applicantId: number | null;
   jobId?: number | null;
   onChanged?: () => void;
-  /** 열 때 처음 보여줄 탭 — 답장 대기 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
+  /** 열 때 처음 보여줄 탭 — ‘내가 답할 차례’ 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
   initialTab?: "detail" | "chat";
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);

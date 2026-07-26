@@ -5,12 +5,12 @@ import { motion } from "motion/react";
 import { ChevronRight, Megaphone, RefreshCw, Zap } from "lucide-react";
 
 /**
- * 재컨택 캠페인 현황 카드 (내부 매니저용).
- * 벌크 ping 발송 코호트(최근 N일 ping_sent)의 반응을 퍼널 한 줄로 보여준다:
+ * 다시 연락 캠페인 현황 카드 (내부 매니저용).
+ * 벌크 ping 발송 묶음(최근 N일 ping_sent)의 반응을 단계별 현황 한 줄로 보여준다:
  * 발송 → 열람 → 관심 → 답장 (각 카운트 + 발송 대비 비율).
  * '관심'·'답장'은 아래 처리 큐 카드(#interest-queue/#reply-queue)로 앵커 스크롤해 바로 동선을 잇고,
- * '발송'·'열람'은 사람 명단이 있는 파이프라인 캠페인 퍼널 보드(/pipeline?view=funnel)로 이동한다.
- * 발송 이력이 없으면(코호트 0) 카드 자체를 숨긴다. 카드 톤은 InterestQueueCard와 일관.
+ * '발송'·'열람'은 사람 명단이 있는 파이프라인 캠페인 단계별 현황 보드(/pipeline?view=funnel)로 이동한다.
+ * 발송 이력이 없으면(발송 묶음 0) 카드 자체를 숨긴다. 카드 톤은 InterestQueueCard와 일관.
  */
 
 interface ByJob {
@@ -79,10 +79,10 @@ export function CampaignStatsCard() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
-            <Megaphone size={15} className="text-[#3182CE]" /> 재컨택 캠페인 (최근 {data.window_days}일)
+            <Megaphone size={15} className="text-[#3182CE]" /> 다시 연락 캠페인 (최근 {data.window_days}일)
           </h2>
-          <div className="text-[12px] text-[#718096] mt-0.5" title={`코호트 — 최근 ${data.window_days}일 안에 재컨택 문자를 받은 인원 묶음`}>
-            발송 코호트 {data.sent}명의 반응 현황
+          <div className="text-[12px] text-[#718096] mt-0.5" title={`발송 묶음 — 최근 ${data.window_days}일 안에 다시 연락 문자를 받은 인원 묶음`}>
+            발송 묶음 {data.sent}명의 반응 현황
             <span className="text-[#CBD5E0]"> · </span>
             마지막 발송 {agoLabel(data.last_sent_at, nowTick)}
             <span className="text-[#CBD5E0]"> · </span>
@@ -98,7 +98,7 @@ export function CampaignStatsCard() {
         </button>
       </div>
 
-      {/* 퍼널 한 줄 — 각 단계 카운트 + 발송 대비 비율. 관심/답장은 처리 큐 카드로 앵커 이동. */}
+      {/* 단계별 현황 한 줄 — 각 단계 카운트 + 발송 대비 비율. 관심/답장은 처리 큐 카드로 앵커 이동. */}
       <div className="flex items-stretch gap-2">
         {steps.map((s, i) => {
           const inner = (
@@ -118,7 +118,7 @@ export function CampaignStatsCard() {
               {i > 0 && <ChevronRight size={14} className="text-[#CBD5E0] shrink-0 self-center" />}
               <button
                 onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
-                title={s.anchor ? `${s.label} 처리 큐로 이동` : "캠페인 퍼널 보드(사람 명단)로 이동"}
+                title={s.anchor ? `${s.label === "답장" ? "내가 답할 차례" : s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
                 className="flex-1 text-left rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3 hover:border-[#90CDF4] hover:bg-[#EBF8FF] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
               >
                 {inner}

@@ -233,7 +233,7 @@ export function Settings() {
               <div className="rounded-xl border border-[#E2E8F0] bg-white p-5 max-w-2xl">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <div className="text-[14px] font-bold text-[#1A202C] mb-1">다시 부르기 (배송원 재편입)</div>
+                    <div className="text-[14px] font-bold text-[#1A202C] mb-1">다시 부르기 (외부 인력)</div>
                     <p className="text-[13px] text-[#718096] leading-relaxed">
                       옹고잉·옹매니징 배송원 중 옹보딩 미지원자(지금 일하고 있는 분 포함)를 인력풀로 불러오는 기능이에요. 꺼져 있으면 <b>미리보기만</b> 되고 아무 것도 편입되지 않아요.
                       켜도 문자가 저절로 나가지는 않아요 — 실제 발송은 인재풀에서 매니저가 보낼 때만 됩니다.

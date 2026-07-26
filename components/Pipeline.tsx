@@ -47,7 +47,7 @@ interface SavedSegment {
 type VehicleClass = "확정" | "도보" | "미확인";
 
 // pool_events 반응 요약 — /api/admin/pool-events/summary 응답의 지원자별 항목.
-// 반응 배지(열람/관심/답장)·'재컨택 N일 전' 배지·'반응 있음' 필터·'반응 최신순' 정렬의 근거.
+// 반응 배지(열람/관심/답장)·'마지막 연락 N일 전' 배지·'반응 있음' 필터·'반응 최신순' 정렬의 근거.
 interface PoolEventSummary {
   last_ping_at: string | null;
   last_link_view_at: string | null;
@@ -134,7 +134,7 @@ function channelLabel(source: string | null | undefined): string {
   return CHANNEL_LABEL[source] ?? source;
 }
 
-// 재컨택 A안 (2026-07-10 다이어트, 전체 기본) — 지원 시점 뭉갬(오래된 코호트 안전), 문의 답장 유도, 짧게.
+// 다시 연락 A안 (2026-07-10 다이어트, 전체 기본) — 지원 시점 뭉갬(오래된 지원자 안전), 문의 답장 유도, 짧게.
 // 치환: #{이름}, #{맞춤링크}. 제목은 bulk-send subject로 분리(인사말 중복 방지). 확정 뉘앙스 금지·정보성.
 const DEFAULT_BULK_BODY = `[옹고잉] #{이름}님, 안녕하세요. 예전에 배송 지원 설문을 남겨주셔서 연락드려요.
 
@@ -144,7 +144,7 @@ const DEFAULT_BULK_BODY = `[옹고잉] #{이름}님, 안녕하세요. 예전에 
 
 궁금하시면 이 문자로 편하게 답장 주세요. (안내 중단: '그만' 회신)`;
 
-// 재컨택 B안 (최근 6개월 이내 지원 코호트용 — 더 짧게)
+// 다시 연락 B안 (최근 6개월 이내 지원자용 — 더 짧게)
 const RECONTACT_B_BODY = `[옹고잉] #{이름}님, 안녕하세요. 얼마 전 남겨주신 배송 지원 설문 보고 연락드려요. 지금 맞는 배송 건이 있어요 — 아래에서 조건 확인 후 '관심 있음'만 눌러주세요. 매니저가 연락드립니다.
 
 #{맞춤링크}
@@ -247,25 +247,25 @@ function distKm(lat1: number, lng1: number, lat2: number, lng2: number): number 
 
 // 6개월 경계 — 원지원 코호트 필터/템플릿 판단용
 const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
-// 14일 경계 — '최근 재컨택 제외' 필터 기준
+// 14일 경계 — '최근 14일 다시 연락 제외' 필터 기준
 const FOURTEEN_DAYS_MS = 1000 * 60 * 60 * 24 * 14;
 
-// 발송 가능 여부 판정 — 연락처·맞춤링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
+// 발송 가능 여부 판정 — 연락처·맞춤 공고 링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   if (!c.phone) return { sendable: false, reason: "연락처 없음" };
-  if (!c.accessToken) return { sendable: false, reason: "맞춤 링크 없음" };
+  if (!c.accessToken) return { sendable: false, reason: "맞춤 공고 링크 없음" };
   if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
   return { sendable: true, reason: null };
 }
 
-// 마지막 재컨택 경과 표기 — '재컨택 오늘/N일 전' (일 단위, 배지용). ping_sent 이력 없으면 null.
+// 마지막으로 다시 연락한 시점 표기 — '마지막 연락 오늘/N일 전' (일 단위, 배지용). ping_sent 이력 없으면 null.
 function recontactLabel(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return null;
   const days = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
-  if (days <= 0) return "재컨택 오늘";
-  return `재컨택 ${days}일 전`;
+  if (days <= 0) return "마지막 연락 오늘";
+  return `마지막 연락 ${days}일 전`;
 }
 
 // 원지원일 표기 — 'YYYY-MM' (연락 이력 relTime과 구분)
@@ -394,13 +394,13 @@ export function Pipeline() {
   const [regionFilter, setRegionFilter] = useState<"all" | "capital" | "seoul">("all");
   // 부적합/이탈/기타는 칸반 보드에서 제외되지만, 리스트에서는 토글로 복구·재검토 가능해야 한다.
   const [showExcluded, setShowExcluded] = useState(false);
-  // 원지원 6개월 이내 코호트 필터 — 재컨택 B안(짧은 템플릿) 대상 격리용
+  // 원지원 6개월 이내 필터 — 다시 연락 B안(짧은 템플릿) 대상 격리용
   const [recentAppliedOnly, setRecentAppliedOnly] = useState(false);
   // 주소 확정(지오코딩) 필터 — geo_precision in exact/approx (지도·경로 매칭 신뢰 인원)
   const [geoConfirmedOnly, setGeoConfirmedOnly] = useState(false);
   // 옹매니징 활동 중 제외 필터 — 켜면 현재 활동 중(activeSet) 인원을 리스트에서 제외
   const [excludeActive, setExcludeActive] = useState(false);
-  // 최근 14일 재컨택 제외 필터 — 켜면 해당 기간 내 ping_sent 이력이 있는 인원을 리스트에서 제외(중복 재컨택 방지)
+  // '최근 14일 다시 연락 제외' 필터 — 켜면 해당 기간 내 ping_sent 이력이 있는 인원을 리스트에서 제외(중복 연락 방지)
   const [excludeRecentPing, setExcludeRecentPing] = useState(false);
   // 반응 있음 필터 — 열람/관심/답장 중 1건이라도 있는 인원만 (summaryById 의존 → base 이후 단계 적용, 순환 방지)
   const [reactionOnly, setReactionOnly] = useState(false);
@@ -414,7 +414,7 @@ export function Pipeline() {
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
   const [activeSet, setActiveSet] = useState<Set<number>>(new Set());
-  // 지원자별 pool_events 반응 요약 — 반응 배지·'재컨택 N일 전' 배지·반응 필터/정렬의 근거 (디바운스 배치 조회)
+  // 지원자별 pool_events 반응 요약 — 반응 배지·'마지막 연락 N일 전' 배지·반응 필터/정렬의 근거 (디바운스 배치 조회)
   const [summaryById, setSummaryById] = useState<Record<number, PoolEventSummary>>({});
   // 벌크 발송 성공 후 요약 재조회 트리거 — 방금 나간 ping_sent가 '14일 제외' 필터에 바로 반영되게.
   const [summaryVersion, setSummaryVersion] = useState(0);
@@ -456,7 +456,7 @@ export function Pipeline() {
     setWaitlistJobId(null);
   }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, optOutOnly, sortMode, distanceJobId, query]);
 
-  // 저장된 세그먼트(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
+  // 저장된 대상 묶음(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
   const [segNameDraft, setSegNameDraft] = useState("");
   useEffect(() => {
@@ -487,7 +487,7 @@ export function Pipeline() {
     };
     persistSegments([seg, ...segments.filter((s) => s.name !== name)]);
     setSegNameDraft("");
-    toast.success(`세그먼트 '${name}'을 저장했어요`);
+    toast.success(`대상 묶음 '${name}'을 저장했어요`);
   };
   const applySegment = (seg: SavedSegment) => {
     setChannelFilter(new Set(seg.channels));
@@ -497,7 +497,7 @@ export function Pipeline() {
     setStatusFilter(new Set(seg.statuses ?? []));
     setAvailabilityFilter(new Set(seg.availability ?? []));
     setRegionFilter(seg.region ?? "all");
-    toast.info(`'${seg.name}' 세그먼트를 적용했어요`);
+    toast.info(`'${seg.name}' 대상 묶음을 적용했어요`);
   };
   const deleteSegment = (id: string) => persistSegments(segments.filter((s) => s.id !== id));
 
@@ -543,7 +543,7 @@ export function Pipeline() {
     toast.success(`활동 중 ${removeIds.size}명을 발송 대상에서 제외했어요`);
   };
 
-  // 세그먼트 → 공고 타겟 전환: 선택된 지원자를 공고 후보로 일괄 추가
+  // 대상 묶음 → 공고 후보 전환: 선택된 지원자를 공고 후보로 일괄 추가
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
   const [addingJobId, setAddingJobId] = useState<number | null>(null);
 
@@ -621,7 +621,7 @@ export function Pipeline() {
   // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용(서버가 발송 시 자동 제외)
   const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
 
-  // 템플릿↔코호트 정합성 — B안(최근 6개월용)을 골랐는데 선택 대상에 원지원 6개월 초과자가 섞였으면 경고(발송은 막지 않음).
+  // 템플릿↔대상 정합성 — B안(최근 6개월용)을 골랐는데 선택 대상에 원지원 6개월 초과자가 섞였으면 경고(발송은 막지 않음).
   const bBodySelected = bulkMsgBody.trim() === RECONTACT_B_BODY.trim();
   const bCohortMismatchCount = bBodySelected
     ? listCards.filter((c) => {
@@ -800,7 +800,7 @@ export function Pipeline() {
   }, [visibleIdsKey, view]);
 
   // 리스트 레벨 pool_events 반응 요약 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
-  // '재컨택 N일 전'·반응 배지와 '최근 14일 재컨택 제외'·'반응 있음' 필터, '반응 최신순' 정렬의 근거.
+  // '마지막 연락 N일 전'·반응 배지와 '최근 14일 다시 연락 제외'·'반응 있음' 필터, '반응 최신순' 정렬의 근거.
   // 실패는 조용히 무시(배지/필터는 부가정보). summaryVersion은 벌크 발송 직후 재조회 트리거.
   useEffect(() => {
     if (view !== "list") return;
@@ -1096,7 +1096,7 @@ export function Pipeline() {
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
       if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
       if (recentDup) parts.push(`중복 방지 ${recentDup}명`);
-      if (noToken) parts.push(`맞춤 링크 없음 ${noToken}명 제외`);
+      if (noToken) parts.push(`맞춤 공고 링크 없음 ${noToken}명 제외`);
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
       // 청크 단위 실패는 개별 결과가 없어 대상 인원 수를 '미시도'로 별도 표기(부분 발송 가시화).
@@ -1108,7 +1108,7 @@ export function Pipeline() {
         setSummaryVersion((v) => v + 1);
         // '14일 제외'가 꺼져 있으면 켜기를 제안 — 자동으로 켜지 않고 매니저가 결정(액션 버튼).
         if (!excludeRecentPing) {
-          toast.info("방금 발송한 인원이 리스트에 그대로 남아 있어요. 중복 재컨택을 막으려면 '최근 14일 재컨택 제외'를 켜세요.", {
+          toast.info("방금 발송한 인원이 리스트에 그대로 남아 있어요. 같은 사람에게 또 보내지 않으려면 '최근 14일 다시 연락 제외'를 켜세요.", {
             action: { label: "14일 제외 켜기", onClick: () => setExcludeRecentPing(true) },
           });
         }
@@ -1135,7 +1135,7 @@ export function Pipeline() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">인재풀 및 파이프라인 관리</h1>
-              <p className="text-[14px] text-[#718096]">조건(지역·차종·가용성)으로 대상을 골라 재컨택 문자를 보내고, 후보의 진행 단계를 관리하는 화면입니다.</p>
+              <p className="text-[14px] text-[#718096]">조건(지역·차종·가용성)으로 대상을 골라 다시 연락하는 문자를 보내고, 후보의 진행 단계를 관리하는 화면입니다.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={exportCsv} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] rounded-lg text-[13px] font-bold text-[#4A5568] transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
@@ -1158,7 +1158,7 @@ export function Pipeline() {
               <MapIcon size={16} /> 지도 분포
             </button>
             <button onClick={() => setView("funnel")} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[13px] font-bold transition-all ${view === "funnel" ? "bg-white text-[#1A202C] shadow-sm" : "text-[#718096] hover:text-[#4A5568]"}`}>
-              <Funnel size={16} /> 퍼널
+              <Funnel size={16} /> 캠페인 단계별 현황
             </button>
           </div>
 
@@ -1319,9 +1319,9 @@ export function Pipeline() {
                     </button>
                   </div>
 
-                  {/* 발송·코호트 — 재컨택 대상 정밀화(원지원 코호트/주소 확정/활동중 제외) */}
+                  {/* 발송 대상 좁히기 — 다시 연락할 대상 정밀화(원지원 시기/주소 확정/활동중 제외) */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="코호트 — 같은 기간·조건으로 묶은 인원 그룹. 재컨택 문자를 보낼 대상을 좁히는 필터예요">발송·코호트</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2" title="발송 대상 좁히기 — 다시 연락할 사람을 조건으로 걸러냅니다(‘수신거부만’은 반대로 발송 불가자만 봅니다)">발송 대상 좁히기</label>
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         onClick={() => setRecentAppliedOnly((v) => !v)}
@@ -1347,14 +1347,14 @@ export function Pipeline() {
                       <button
                         onClick={() => setExcludeRecentPing((v) => !v)}
                         className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${excludeRecentPing ? 'bg-[#DD6B20] border-[#DD6B20] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
-                        title="최근 14일 내 재컨택(문자) 발송 이력이 있는 인원을 리스트에서 제외합니다"
+                        title="최근 14일 안에 다시 연락(문자)한 이력이 있는 인원을 리스트에서 제외합니다"
                       >
-                        최근 14일 재컨택 제외
+                        최근 14일 다시 연락 제외
                       </button>
                       <button
                         onClick={() => setReactionOnly((v) => !v)}
                         className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${reactionOnly ? 'bg-[#38A169] border-[#38A169] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
-                        title="맞춤링크 열람·관심 클릭·답장 중 1건이라도 있는 인원만 표시합니다"
+                        title="맞춤 공고 링크 열람·관심 클릭·답장 중 1건이라도 있는 인원만 표시합니다"
                       >
                         반응 있음(열람/관심/답장)
                       </button>
@@ -1369,10 +1369,10 @@ export function Pipeline() {
                   </div>
                 </div>
 
-                {/* 저장된 세그먼트 (필터 프리셋) */}
+                {/* 저장된 대상 묶음 (필터 프리셋) */}
                 <div className="border-t border-[#E2E8F0] pt-3 flex flex-col gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[12px] font-bold text-[#4A5568]">저장된 세그먼트</span>
+                    <span className="text-[12px] font-bold text-[#4A5568]">저장된 대상 묶음</span>
                     {segments.length === 0 && <span className="text-[11.5px] text-[#A0AEC0]">자주 쓰는 필터 조합을 저장해 1클릭으로 재적용하세요.</span>}
                     {segments.map((seg) => (
                       <span key={seg.id} className="group inline-flex items-center gap-1 bg-white border border-[#E2E8F0] rounded-lg pl-2.5 pr-1 py-1 text-[12px] font-bold text-[#4A5568] hover:border-[#FFCB3C]">
@@ -1451,7 +1451,7 @@ export function Pipeline() {
                     <button onClick={() => setJobPickerOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Briefcase size={16} /> 공고 후보로 추가
                     </button>
-                    <button onClick={() => setExposurePickerOpen(true)} title="지정 노출 공고의 노출 대상(맞춤링크에 공고를 보여줄 사람)으로 추가/제외 — 후보 등록과 별개" className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
+                    <button onClick={() => setExposurePickerOpen(true)} title="지정 노출 공고의 노출 대상(맞춤 공고 링크에 공고를 보여줄 사람)으로 추가/제외 — 후보 등록과 별개" className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Eye size={16} /> 노출 대상 지정
                     </button>
                     <button onClick={() => setBulkMsgModalOpen(true)} className="bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all shadow-md">
@@ -1563,7 +1563,7 @@ export function Pipeline() {
                         reactionBadge = {
                           label: `열람 ${relTime(summary.last_link_view_at)}`,
                           cls: "bg-[#EDF2F7] text-[#718096]",
-                          title: "맞춤링크(맞춤 공고 페이지) 열람",
+                          title: "맞춤 공고 링크 열람",
                         };
                       }
                       // 거리 정렬 활성 시에만 거리 표기. 상차지·마지막경유지 둘 다 있으면 '상차 12/종료 4km', 하나면 그 값만. 좌표 없으면 생략.
@@ -1624,7 +1624,7 @@ export function Pipeline() {
                                     </span>
                                   )}
                                   {recontactLbl && (
-                                    <span title={`마지막 재컨택 ${relTime(summary?.last_ping_at ?? null)}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
+                                    <span title={`마지막으로 연락한 시점 ${relTime(summary?.last_ping_at ?? null)}`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">
                                       {recontactLbl}
                                     </span>
                                   )}
@@ -1797,7 +1797,7 @@ export function Pipeline() {
               })}
             </div>
             <div className="px-5 py-3.5 border-t border-[#E2E8F0] flex items-center justify-between gap-3">
-              <span className="text-[11.5px] text-[#A0AEC0]">노출 대상은 후보 등록이 아니에요 — 맞춤링크에 공고가 보일 뿐, 배정·확정이 아닙니다.</span>
+              <span className="text-[11.5px] text-[#A0AEC0]">노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.</span>
               <button
                 onClick={assignExposure}
                 disabled={exposureSaving || exposureJobIds.size === 0}
@@ -1868,10 +1868,10 @@ export function Pipeline() {
                 </div>
               )}
 
-              {/* 템플릿↔코호트 경고 — B안(최근 6개월용)에 원지원 6개월 초과자가 섞임(발송은 막지 않음, 인지용) */}
+              {/* 템플릿↔대상 경고 — B안(최근 6개월용)에 원지원 6개월 초과자가 섞임(발송은 막지 않음, 인지용) */}
               {bCohortMismatchCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFFBEB] border border-[#F6E05E] text-[12.5px] font-bold text-[#B7791F]">
-                  ⚠️ B안은 최근 6개월 코호트용 — 현재 대상 중 {bCohortMismatchCount}명이 6개월 초과(원지원일 미상 포함)예요. A안 사용을 검토하세요.
+                  ⚠️ B안은 최근 6개월 안에 지원한 분들에게 맞는 문구예요 — 현재 대상 중 {bCohortMismatchCount}명이 6개월 초과(원지원일 미상 포함)예요. A안 사용을 검토하세요.
                 </div>
               )}
 
@@ -1923,7 +1923,7 @@ export function Pipeline() {
                     })}
                   </div>
                   <p className="text-[11.5px] leading-relaxed text-[#B7791F]">
-                    재컨택(구직 안내)이라면 제외하세요. 현재 라인과 시간대가 겹치지 않는 병행 가능 건이라면 유지해도 됩니다 — 발송 목적에 따라 판단하세요.
+                    다시 연락(구직 안내) 목적이라면 제외하세요. 현재 라인과 시간대가 겹치지 않는 병행 가능 건이라면 유지해도 됩니다 — 발송 목적에 따라 판단하세요.
                   </p>
                 </div>
               )}
@@ -1950,8 +1950,8 @@ export function Pipeline() {
                   className="w-full border border-[#E2E8F0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#FFCB3C] bg-white"
                 >
                   <option value="">직접 입력하기</option>
-                  <option value={DEFAULT_BULK_BODY}>재컨택 A안 (전체 기본)</option>
-                  <option value={RECONTACT_B_BODY}>재컨택 B안 (최근 6개월·짧게)</option>
+                  <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
+                  <option value={RECONTACT_B_BODY}>다시 연락 B안 (최근 6개월·짧게)</option>
                   <option value={WAITLIST_BODY}>관심 대기 안내 (사후관리)</option>
                   <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
                   <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
@@ -1964,7 +1964,7 @@ export function Pipeline() {
                   onChange={(e) => setBulkMsgBody(e.target.value)}
                   className="w-full h-[150px] border border-[#E2E8F0] rounded-xl p-4 text-[14px] outline-none focus:border-[#FFCB3C] resize-none leading-relaxed text-[#2D3748] bg-[#F7FAFC]"
                 />
-                <p className="mt-1.5 text-[11.5px] text-[#A0AEC0]">치환자: <b className="text-[#718096]">#{"{이름}"}</b> 수신자 이름 · <b className="text-[#718096]">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 페이지 주소</p>
+                <p className="mt-1.5 text-[11.5px] text-[#A0AEC0]">치환자: <b className="text-[#718096]">#{"{이름}"}</b> 수신자 이름 · <b className="text-[#718096]">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
             </div>
             <div className="p-5 border-t border-[#E2E8F0] bg-white flex justify-between items-center">
@@ -2043,10 +2043,10 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* 상단 컨트롤 — 코호트 요약 + 기간 셀렉트 + 새로고침 */}
+      {/* 상단 컨트롤 — 발송 묶음 요약 + 기간 셀렉트 + 새로고침 */}
       <div className="px-8 pt-6 pb-3 flex items-center gap-3 shrink-0 flex-wrap">
-        <span className="text-[13px] font-bold text-[#4A5568]" title="코호트 — 이 기간 안에 재컨택 문자를 받은 인원 묶음">
-          최근 {data?.window_days ?? days}일 발송 코호트 <span className="text-[#3182CE]">{members.length}명</span>
+        <span className="text-[13px] font-bold text-[#4A5568]" title="발송 묶음 — 이 기간 안에 다시 연락 문자를 받은 인원">
+          최근 {data?.window_days ?? days}일 발송 묶음 <span className="text-[#3182CE]">{members.length}명</span>
           {query && <span className="text-[#A0AEC0] font-semibold"> · 검색 일치 {visible.length}명</span>}
         </span>
         <div className="flex-1" />
@@ -2054,7 +2054,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
           value={String(days)}
           onChange={(e) => onDaysChange(Number(e.target.value))}
           className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-[13px] font-semibold text-[#4A5568] outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40 shadow-sm cursor-pointer"
-          title="캠페인 코호트 기간 — 이 기간 안에 재컨택 문자를 받은 인원 묶음"
+          title="발송 묶음 기간 — 이 기간 안에 다시 연락 문자를 받은 인원"
         >
           <option value="7">최근 7일</option>
           <option value="14">최근 14일</option>
@@ -2062,7 +2062,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
         </select>
         <button
           onClick={onRefresh}
-          title="퍼널 새로고침"
+          title="캠페인 단계별 현황 새로고침"
           className="flex items-center gap-1 text-[12.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
         >
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
@@ -2070,7 +2070,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       </div>
 
       {error ? (
-        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">퍼널 데이터를 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
+        <div className="flex-1 flex items-center justify-center text-[13px] text-[#E53E3E]">캠페인 단계별 현황을 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
       ) : !data ? (
         <div className="flex-1 flex items-center justify-center text-[13px] text-[#A0AEC0]">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
@@ -2078,7 +2078,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       ) : members.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
           <div className="text-[14px] font-bold text-[#4A5568]">최근 {data.window_days}일 캠페인 발송이 없어요</div>
-          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 선별해 재컨택 문자를 발송하면 여기에 반응 퍼널이 쌓여요.</div>
+          <div className="text-[12.5px] text-[#A0AEC0]">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 단계별로 반응이 쌓여요.</div>
         </div>
       ) : (
         <div className="flex gap-6 flex-1 overflow-x-auto px-8 pb-8">

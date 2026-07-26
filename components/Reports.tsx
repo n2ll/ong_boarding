@@ -95,7 +95,7 @@ export function Reports() {
       ["스크리닝 진행 중(명)", stats.screening],
       ["최근 30일 누적 비용(원)", Math.round(stats.cost)],
       [],
-      ["퍼널 단계", "인원"],
+      ["채용 단계", "인원"],
       ...funnel.map((f) => [f.step, f.count] as (string | number)[]),
     ];
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
@@ -218,7 +218,7 @@ export function Reports() {
 
         {/* Funnel Chart */}
         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-[#1A202C] mb-6">채용 퍼널 전환율 (Funnel)</h3>
+          <h3 className="text-[16px] font-bold text-[#1A202C] mb-6">채용 단계별 전환율</h3>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
               <BarChart data={funnel} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>

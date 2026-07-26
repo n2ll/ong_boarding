@@ -9,7 +9,7 @@ import { jsonFetcher } from "@/lib/swr";
 /**
  * J · 타겟 공고 노출 편집기 — 공고 생성 폼·수정 모달 공용.
  *
- * - 노출 범위 토글(전체/지정) + 규칙 빌더(지역·가용성·선탑완료·코호트) + "해당 N명" 실시간 미리보기.
+ * - 노출 방식 토글(전체/지정) + 규칙 빌더(지역·가용성·선탑완료·등록 시점) + "해당 N명" 실시간 미리보기.
  * - jobId가 있으면(수정 모달) 서버에 '저장된' 기준의 유효 노출 명단 + 개별 제외/복원까지 제공.
  * - 값 저장은 부모가 한다(jobs POST/PATCH의 exposure·exposure_rule) — 이 컴포넌트는 편집·미리보기 담당.
  * - 확정 뉘앙스 금지: '노출 대상'은 공고를 보여줄 사람일 뿐, 배정·확정이 아니다.
@@ -203,11 +203,11 @@ export function ExposureEditor({
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">노출 범위</label>
+        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">노출 방식</label>
         <div className="grid grid-cols-2 gap-2">
           {(
             [
-              ["all", "전체 노출", "인재풀 전원의 맞춤링크에 노출(기본)"],
+              ["all", "전체 노출", "인재풀 전원의 맞춤 공고 링크에 노출(기본)"],
               ["targeted", "지정 노출", "아래 규칙·수동 지정 대상에게만 노출"],
             ] as ["all" | "targeted", string, string][]
           ).map(([k, label, desc]) => {

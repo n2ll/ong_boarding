@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
           .from("job_candidates")
           .update({
             agent_stage: "paused",
-            paused_reason: "매니저 직접 응답 — 자동 인계",
+            paused_reason: "매니저 직접 응답 — 자동 전환",
             agent_state: {
               ...prevState,
               meta: {

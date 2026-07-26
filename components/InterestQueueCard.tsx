@@ -8,7 +8,7 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 /**
  * 관심 표시 처리 대기 카드 (내부 매니저용).
- * pull 채널에서 '관심 있어요'를 누른 후보(agent_stage IS NULL, 미컨택)를 큐로 보여준다.
+ * 맞춤 공고 링크에서 '관심 있어요'를 누른 후보(agent_stage IS NULL, 미컨택)를 큐로 보여준다.
  * 매니저가 상세 확인 → 빠른 컨택(문자 발송+처리) / 컨택 완료(발송 없이 처리) / 보류로 처리하며,
  * 상세에서 확정·부적합 처리하면 자동으로 큐에서 빠진다.
  * 카드 톤·마크업은 SosLedgerCard와 일관되게 맞춘다.
@@ -207,7 +207,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
           <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
             <Heart size={15} className="text-[#E53E3E]" /> 관심 표시 처리 대기
           </h2>
-          <div className="text-[12px] text-[#718096] mt-0.5">맞춤 공고에 관심을 누른 후보 · 상세 확인 후 컨택/보류로 처리</div>
+          <div className="text-[12px] text-[#718096] mt-0.5">맞춤 공고 링크에서 관심을 누른 후보 · 상세 확인 후 컨택/보류로 처리</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
@@ -242,7 +242,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">처리 대기 중인 관심 표시가 없어요. 재컨택 문자를 받은 후보가 공고에 관심을 누르면 여기에 표시됩니다.</div>
+        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">처리 대기 중인 관심 표시가 없어요. 다시 연락 문자를 받은 후보가 맞춤 공고 링크에서 관심을 누르면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {

@@ -34,7 +34,7 @@ const CATEGORY_META: Record<string, { label: string; tone: HandoffTone; action: 
   policy: { label: "기타·정책", tone: "human", action: "공고 미명시 정책 → 확인 후 안내" },
   // 아래 3개는 에이전트가 고르지 않고, 매니저/시스템 pause·분류 폴백에서만 쓰인다.
   manual: { label: "수동(매니저)", tone: "neutral", action: "확인 후 AI 재개" },
-  auto: { label: "자동인계", tone: "neutral", action: "확인 후 AI 재개" },
+  auto: { label: "자동 전환", tone: "neutral", action: "확인 후 AI 재개" },
   unknown: { label: "사유 미상", tone: "neutral", action: "내용 확인 필요" },
 };
 
