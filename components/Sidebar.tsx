@@ -13,6 +13,7 @@ import {
   Inbox,
   Brain,
   Users,
+  UserCheck,
   // CheckCircle,
   Briefcase,
   Building2,
@@ -67,7 +68,12 @@ export function Sidebar() {
     // { label: "리포트 · 분석", icon: BarChart2, path: "/reports" }, // 파일럿 기간 숨김
 
     { label: "AI 에이전트", type: "header" },
-    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions, confirmCount: confirmPending },
+    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
+    // 확정은 매니저만 하는 핵심 업무인데 '실시간 응대' 안 탭에 숨어 가장 먼 액션이었다 → 전용 진입점으로 승격.
+    // 확정 대기 배지는 이 행에만 둔다(예전엔 '실시간 응대' 행에 초록 배지로 붙어, 전용 행을 만들면 같은 숫자가
+    // 두 번 보였다). 색은 확정 계열 초록(confirmCount 경로) — 빨강은 이 레포에서 '미처리 경고' 색이다.
+    // path에 쿼리가 있어 isActive(pathname 정확일치)에는 걸리지 않는다 — /live에선 위 '실시간 응대'가 활성 표시된다.
+    { label: "확정할 지원자", icon: UserCheck, path: "/live?tab=confirm", confirmCount: confirmPending },
     { label: "분류 대기 문자함", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
     // 자동 응대(auto) 가동으로 재노출 (2026-07-12) — AI 모드 전환·일반 라인 FAQ 편집 진입점
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },

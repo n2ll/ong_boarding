@@ -70,6 +70,10 @@ export async function GET() {
   for (const c of (cands ?? []) as unknown as Cand[]) {
     const job = c.jobs ?? null;
     if (!job || isSystemJobTitle(job.title) || isJobEffectivelyClosed(job.status, job.closes_at)) continue;
+    // abort(공고 단위 종료) 후보도 폴백으로 남긴다 — 대화가 중단됐어도 그 공고로 확정하는 것은
+    // 서버 검증(링크 존재·비시스템·비마감)이 허용하는 정상 동작이고, 확정 모달도 같은 기준을 쓴다
+    // (ApplicantDetailPanel.confirmableCands). ⚠️ 여기서 abort를 제외하지 말 것 —
+    // 스크리닝을 끝낸 사람이 큐에서 사라져 잊혀지고, 모달 기준과도 어긋나 확정 경로가 막힌다.
     const slot = byApplicant.get(c.applicant_id) ?? { primary: null, fallback: null };
     if (IN_PROGRESS_STAGES.has(c.agent_stage ?? "")) {
       if (!slot.primary) slot.primary = c;
