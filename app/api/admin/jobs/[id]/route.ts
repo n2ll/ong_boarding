@@ -13,6 +13,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "body",
   "branch",
   "branch_id",
+  // 화주사 — 잘못 귀속된 공고를 수정 모달에서 바로잡을 수 있게(예전엔 허용 목록에 없어 조용히 무시됐다).
+  "client_id",
   "slot",
   "start_date",
   "vehicle_required",
@@ -153,21 +155,35 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const supabase = createServiceClient();
 
-  // 지점(branch_id) 변경 시 지점 이름·소속 화주사를 함께 맞춰 계층 정합성 유지
+  // 지점(branch_id) 변경 시 지점 이름·소속 화주사를 함께 맞춰 계층 정합성 유지.
+  // 수정 모달에 화주사 셀렉트가 생겼으므로(잘못 귀속 바로잡기) 화주사↔지점 불일치는 400으로 막는다 —
+  // 조용히 다른 화주사 지점이 붙으면 충원율·필터·현장 안내가 전부 어긋난다.
   if (typeof update.branch_id === "number") {
-    const { data: b } = await supabase
+    const { data: b, error: bErr } = await supabase
       .from("branches")
       .select("name, client_id")
       .eq("id", update.branch_id)
       .maybeSingle();
-    if (b) {
-      update.branch = (b.name as string) ?? update.branch ?? null;
-      update.client_id = (b.client_id as number | null) ?? null;
+    if (bErr) {
+      return NextResponse.json({ error: "지점 조회에 실패했습니다." }, { status: 500 });
     }
+    if (!b) {
+      return NextResponse.json({ error: "지점을 찾을 수 없습니다." }, { status: 400 });
+    }
+    if (typeof update.client_id === "number" && (b.client_id as number | null) !== update.client_id) {
+      return NextResponse.json({ error: "선택한 화주사에 속한 지점이 아닙니다." }, { status: 400 });
+    }
+    update.branch = (b.name as string) ?? update.branch ?? null;
+    update.client_id = (b.client_id as number | null) ?? null;
+  } else if (update.branch_id === null) {
+    // 지점 연결을 끊으면 지점에서 파생된 이름(branch)만 지운다.
+    // 지점 없이 자유 텍스트로 들어온 legacy branch는 보존한다(제목만 고쳐도 지점명이 사라지던 사고 방지).
+    const { data: cur } = await supabase.from("jobs").select("branch_id").eq("id", id).maybeSingle();
+    if (typeof cur?.branch_id === "number") update.branch = null;
   }
   // ⚠️ branch_id === null(지점 미지정)일 때 client_id를 자동으로 null 하지 않는다.
-  // 수정 모달엔 화주사 셀렉트가 없어 branch_id=null이 항상 전송되는데, 예전엔 이때 client_id까지
-  // 지워 '화주사만 귀속' 공고가 제목만 고쳐도 화주사 필터에서 증발했다. 지점을 비워도 화주사는 보존.
+  // 지점을 비워도 화주사 귀속은 보존한다('화주사만 귀속' 공고가 화주사 필터에서 증발하던 문제).
+  // 화주사를 바꾸는 건 셀렉트로 명시 전송한 client_id만으로 한다.
 
   // 상차지 주소가 바뀌었고 좌표를 함께 안 넘겼으면 지오코딩 (거리 정렬 근거). 주소를 비우면 좌표도 클리어.
   if (typeof update.pickup_address === "string" && update.pickup_address.trim() && update.pickup_lat === undefined) {

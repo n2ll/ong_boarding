@@ -384,6 +384,32 @@ export function ApplicantDetailContent({
     setSuntopLine("");
   }, [applicantId]);
 
+  // '다른 라인 활동' — 옹매니징 활성계약·지난달정산 또는 옹고잉 실배차 신호.
+  // 인재풀 목록에서 '활동중' 배지를 뺀 뒤(B5) 이 값을 볼 곳이 없어져서, 한 사람 기준으로 여기서 확인한다.
+  // 미연동(configured=false)과 '대조했고 활동 없음'을 구분해 표시한다 — NULL을 '비활동'으로 오해하면 이미 일하는 분에게 연락한다.
+  const [activeWork, setActiveWork] = useState<{ state: "loading" | "off" | "none" | "active"; reasons: string[] }>({ state: "loading", reasons: [] });
+  useEffect(() => {
+    let cancelled = false;
+    setActiveWork({ state: "loading", reasons: [] });
+    fetch("/api/admin/ongmanaging/active-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ applicantIds: [applicantId] }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((j: { configured?: boolean; active?: { id: number; reasons?: string[] }[] }) => {
+        if (cancelled) return;
+        if (!j.configured) return setActiveWork({ state: "off", reasons: [] });
+        const hit = (j.active ?? []).find((x) => x.id === applicantId);
+        setActiveWork(hit ? { state: "active", reasons: hit.reasons ?? [] } : { state: "none", reasons: [] });
+      })
+      .catch(() => {
+        // 대조 실패를 '활동 없음'으로 보여주면 안 된다 — 미확인으로 남긴다.
+        if (!cancelled) setActiveWork({ state: "off", reasons: [] });
+      });
+    return () => { cancelled = true; };
+  }, [applicantId]);
+
   if (loading && !detail) {
     return <div className="p-6 text-[13px] text-[#A0AEC0] text-center">불러오는 중…</div>;
   }
@@ -926,6 +952,24 @@ export function ApplicantDetailContent({
             title={a.applied_at ? `처음 지원한 날: ${new Date(a.applied_at).toLocaleDateString("ko-KR")}` : "처음 지원한 시점 기록이 없어요"}
           />
           <KeyCell label="희망 시간" value={a.work_hours} />
+          {/* 다른 라인 활동 — 인재풀 목록에서 뺀 '활동중' 신호를 사람 단위로 여기서 확인한다.
+              '확인 안 됨'(미연동·조회 실패)과 '활동 없음'을 구분해 적는다 — 둘을 같게 보여주면 이미 일하는 분에게 연락하게 된다. */}
+          <KeyCell
+            label="다른 라인 활동"
+            value={
+              activeWork.state === "active"
+                ? [
+                    activeWork.reasons.includes("active_contract") ? "계약 진행" : null,
+                    activeWork.reasons.includes("recent_settlement") ? "지난달 정산" : null,
+                    activeWork.reasons.includes("tms_active") ? "배차 있음" : null,
+                  ].filter(Boolean).join(" · ") || "활동 중"
+                : activeWork.state === "none"
+                  ? "활동 없음"
+                  : null
+            }
+            empty={activeWork.state === "loading" ? "확인 중…" : "확인 안 됨"}
+            title="옹매니징 계약·정산 또는 옹고잉 배차 기준. '확인 안 됨'은 연동이 없거나 조회에 실패한 상태로, 활동 없음을 뜻하지 않아요."
+          />
         </div>
 
         {/* ④ 핵심 액션 */}

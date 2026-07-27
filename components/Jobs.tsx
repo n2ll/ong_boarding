@@ -502,6 +502,8 @@ export function Jobs() {
   const [newJobSiteManagerId, setNewJobSiteManagerId] = useState<number | "">("");
   // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, external 기본이면 등록해도 지원자에게 안 보이는 함정이 된다.
   const [newJobMode, setNewJobMode] = useState<RecruitMode>(DEFAULT_RECRUIT_MODE);
+  // 복제로 채워진 채널 초안 여부 — 당근·문자 탭이 '원본에 저장돼 있던 내용'임을 안내하는 데만 쓴다.
+  const [channelDraftsFromCopy, setChannelDraftsFromCopy] = useState(false);
   const [newJobCapacity, setNewJobCapacity] = useState(1);
   const [newJobPayType, setNewJobPayType] = useState("");
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
@@ -925,6 +927,7 @@ export function Jobs() {
     setNewJobBranchId("");
     setNewJobSiteManagerId("");
     setNewJobMode(DEFAULT_RECRUIT_MODE);
+    setChannelDraftsFromCopy(false);
     setNewJobCapacity(1);
     setNewJobPayType("");
     setNewJobPayAmount("");
@@ -978,6 +981,8 @@ export function Jobs() {
       const body = (j.body ?? "").trim();
       // 채널별 본문이 저장돼 있으면 채널 특화를 보존해 복제(D1). 없으면(레거시) 캐논 본문으로 3채널 채움.
       const cb = (j.channel_bodies ?? null) as { danggeun?: string; albamon?: string; sms?: string } | null;
+      // 당근·문자 탭에 저장본을 쓰면 그 뒤 수정 모달로 고친 본문이 반영되지 않는다 → 그 사실을 화면에 밝힌다.
+      setChannelDraftsFromCopy(Boolean(cb?.danggeun || cb?.sms));
       setChannelDrafts({
         danggeun: cb?.danggeun || body,
         // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
@@ -1211,6 +1216,8 @@ export function Jobs() {
           title,
           body: editForm.body,
           branch_id: editForm.branchId === "" ? null : editForm.branchId,
+          // 화주사 — 지점이 있으면 서버가 지점 소속으로 역채움하고, 불일치면 400으로 막는다.
+          client_id: editForm.clientId === "" ? null : editForm.clientId,
           site_manager_id: editForm.siteManagerId === "" ? null : editForm.siteManagerId,
           capacity: editForm.capacity,
           vehicle_required: editForm.vehicleRequired,
@@ -2086,6 +2093,11 @@ export function Jobs() {
                     </label>
                     <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
                   </div>
+                  {channelDraftsFromCopy && (
+                    <div className="mb-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-semibold text-[#B7791F] leading-relaxed">
+                      당근·문자 탭은 <b>원본 공고에 저장돼 있던 초안</b>이에요. 원본을 등록한 뒤 수정 모달에서 본문을 고쳤다면 그 내용은 알바몬 탭에만 반영돼 있어요 — 필요하면 여기서 직접 손봐 주세요.
+                    </div>
+                  )}
 
                   {channelDrafts && (
                     <>
@@ -2289,6 +2301,26 @@ export function Jobs() {
                         value={editForm.recruitMode}
                         onChange={(m) => setEditForm({ ...editForm, recruitMode: m, ...(m === "external" ? { exposureDraft: EMPTY_EXPOSURE } : {}) })}
                       />
+                      {/* 화주사 — 등록 모달과 같은 위치·같은 컨트롤. 예전엔 수정 모달에 없어서
+                          잘못 귀속된 공고(화주사 오선택)를 화면에서 바로잡을 수 없었다. 서버가 화주사↔지점 정합을 검증한다. */}
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">화주사</label>
+                        <select
+                          value={editForm.clientId}
+                          onChange={(e) => {
+                            const v = e.target.value === "" ? "" : Number(e.target.value);
+                            // 새 화주사에 속하지 않는 지점 선택은 해제 — 다른 화주사 지점이 붙은 채 저장되지 않게(서버도 400으로 막는다).
+                            const keepBranch =
+                              editForm.branchId !== "" &&
+                              branches.find((b) => b.id === editForm.branchId)?.client_id === (v === "" ? undefined : v);
+                            setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
+                          }}
+                          className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                        >
+                          <option value="">미지정</option>
+                          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </div>
                       <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
                         {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
                         {editShowBranch && (

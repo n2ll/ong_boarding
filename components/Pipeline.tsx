@@ -267,10 +267,15 @@ const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
 const FOURTEEN_DAYS_MS = 1000 * 60 * 60 * 24 * 14;
 
 // 발송 가능 여부 판정 — 연락처·맞춤 공고 링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
+// 캠페인 발송이 서버에서 차단되는 상태 — app/api/admin/messages/bulk-send(EXCLUDED_POOL_STATUS)와 **같은 집합**이어야 한다.
+// '기타'는 서버가 막지 않으므로 여기서도 막지 않는다(막으면 화면에만 안 보이는 조용한 제외가 된다).
+const POOL_EXCLUDED_STATUS = new Set(["부적합", "이탈"]);
+
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   if (!c.phone) return { sendable: false, reason: "연락처 없음" };
   if (!c.accessToken) return { sendable: false, reason: "맞춤 공고 링크 없음" };
   if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
+  if (POOL_EXCLUDED_STATUS.has(c.status)) return { sendable: false, reason: `인력풀 제외(${c.status})` };
   return { sendable: true, reason: null };
 }
 
@@ -1444,15 +1449,16 @@ export function Pipeline() {
                     </div>
                   </div>
 
-                  {/* 제외 인원 — 부적합/이탈/기타. 실수 복구·재검토용. 칸반에는 이 단계 컬럼이 없어 리스트·지도에만 반영된다. */}
+                  {/* 부적합·이탈(=서버가 캠페인 발송을 막는 상태) + 기타(그 외·발송 가능). 실수 복구·재검토용.
+                      칸반에는 이 단계 컬럼이 없어 리스트·지도에만 반영된다. */}
                   <div>
-                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">제외된 분</label>
+                    <label className="block text-[12px] font-bold text-[#4A5568] mb-2">단계 밖에 있는 분</label>
                     <button
                       onClick={() => setShowExcluded((v) => !v)}
                       className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${showExcluded ? 'bg-[#E53E3E] border-[#E53E3E] text-white' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}
-                      title="부적합·이탈·기타 상태인 분도 함께 표시합니다 (리스트·지도에만 반영 — 칸반에는 이 단계 컬럼이 없어요)"
+                      title="부적합·이탈·기타 상태인 분도 함께 표시합니다. 부적합·이탈은 캠페인 문자가 서버에서 차단되고(목록에 '인력풀 제외' 표시), '기타'는 발송됩니다. 리스트·지도에만 반영 — 칸반에는 이 단계 컬럼이 없어요."
                     >
-                      부적합·이탈도 표시 {showExcluded ? "ON" : "OFF"} <span className="font-semibold text-[11px] opacity-70">(리스트·지도)</span>
+                      부적합·이탈·기타도 표시 {showExcluded ? "ON" : "OFF"} <span className="font-semibold text-[11px] opacity-70">(리스트·지도)</span>
                     </button>
                   </div>
 
