@@ -79,7 +79,6 @@ interface FunnelMember {
   interest_job_id: number | null;
   interest_job_title: string | null;
   immediate: boolean;
-  unread_count: number;
 }
 
 interface CampaignFunnelRes {
@@ -2121,14 +2120,6 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-[13.5px] font-bold text-[#1A202C] truncate">{m.name || "이름 미상"}</span>
-                            {m.stage === "replied" && m.unread_count > 0 && (
-                              <span
-                                title={`미읽음 답장 ${m.unread_count}건`}
-                                className="min-w-4 h-4 px-1 rounded-full bg-[#E53E3E] text-white text-[10px] font-bold flex items-center justify-center shrink-0"
-                              >
-                                {m.unread_count}
-                              </span>
-                            )}
                           </div>
                           <span className="text-[11px] text-[#A0AEC0] shrink-0" title="이 단계 마지막 이벤트 시각">{relTime(m.last_event_at)}</span>
                         </div>

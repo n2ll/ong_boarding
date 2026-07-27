@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { motion } from "motion/react";
 import { MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
@@ -6,8 +6,13 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 /**
  * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
- * 미답 지원자('마지막 메시지가 inbound' 또는 unread_count>0)를 카드로 나열해,
+ * 미답 지원자('마지막 메시지가 inbound')를 카드로 나열해,
  * 가장 hot한 신호가 흩어지지 않게 모은다. (열람만으로는 큐에서 빠지지 않는다)
+ *
+ * 판정에 applicants.unread_count는 쓰지 않는다. 그 값은 '답장이 왔는데 스레드를 아직 한 번도 열지 않았다'는
+ * 신호다(messages BEFORE INSERT 트리거 trg_match_applicant가 inbound마다 +1, 스레드를 열면 서버가 0으로 리셋)
+ * — 열람만으로 지워지므로 '답했는가'를 뜻하지 않는다(실데이터도 전원 0 = 이미 다 열어봤다).
+ * 대시보드 '지금 할 일'도 자체 계산을 버리고 이 카드가 올려주는 수(onCountsChange)를 쓴다 — 두 곳이 어긋나지 않게.
  * 카드에서 대화 스레드를 바로 열어(상세 드로어의 대화 탭) 매니저가 즉시 수동 응대할 수 있다.
  *
  * 데이터는 새 엔드포인트 없이 /api/admin/applicants(파이프라인·대시보드와 동일 SWR 키라 dedup)를
@@ -23,7 +28,6 @@ interface AppRow {
   name: string;
   phone: string | null;
   status: string;
-  unread_count?: number | null;
   agent_stage?: string | null;
   last_message_at?: string | null;
   created_at?: string | null;
@@ -43,7 +47,7 @@ interface Preview {
   last_inbound_at?: string | null;
 }
 
-// 열람(unread 리셋) 후에도 미답 건을 잃지 않도록 미리보기 조회 대상을 잡는 기간
+// 미답 건을 잃지 않도록 미리보기 조회 대상을 넓게 잡는 기간(최근 답장 기준)
 const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
 function agoLabel(iso: string | null | undefined, now: number): string {
@@ -57,7 +61,14 @@ function agoLabel(iso: string | null | undefined, now: number): string {
 }
 
 // initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
-export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null } = {}) {
+// onCountsChange — 계산된 건수를 부모(대시보드 '지금 할 일')에 올린다. 판정 공식을 한 곳에만 두기 위한 것.
+export function ReplyQueueCard({
+  initialJobId,
+  onCountsChange,
+}: {
+  initialJobId?: number | null;
+  onCountsChange?: (counts: { total: number; untouched: number }) => void;
+} = {}) {
   const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
   // 공고 제목 매핑용 — Jobs 탭과 동일 SWR 키라 중복 호출을 dedup. 실패해도 필터만 미노출.
   const { data: jobsRes } = useSWR<{ jobs?: JobLite[] }>("/api/admin/jobs?status=all");
@@ -67,18 +78,19 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
     return m;
   }, [jobsRes]);
 
-  // 미리보기 조회 대상: unread>0 또는 최근 14일 내 inbound(last_message_at은 inbound 수신 시각).
-  // 대화 열람 시 서버가 unread를 리셋하므로, 열람만 하고 답장하지 않은 건을 놓치지 않게 넓게 잡는다.
+  // 미리보기 조회 대상: 최근 14일 내 inbound가 있는 지원자(last_message_at은 inbound 수신 시각).
+  // 열람 여부는 보지 않는다 — 열람만 하고 답장하지 않은 건을 놓치지 않기 위해.
   const previewTargets = useMemo(() => {
     const rows = data?.data ?? [];
-    return rows.filter(
-      (a) => (a.unread_count ?? 0) > 0 || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
-    );
+    return rows.filter((a) => a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS);
   }, [data]);
 
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
   const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
   const idsKey = previewTargets.map((a) => a.id).join(",");
+  // 매니저가 답장해도 last_message_at(=inbound 시각)은 그대로여서 조회 대상 집합이 바뀌지 않는다 →
+  // idsKey만 보면 미리보기가 영원히 stale이고 처리한 건이 큐·대시보드에 계속 남는다. 명시적 재조회 신호를 둔다.
+  const [previewNonce, setPreviewNonce] = useState(0);
   useEffect(() => {
     if (!idsKey) {
       setPreviewById({});
@@ -99,12 +111,12 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
     return () => {
       cancelled = true;
     };
-  }, [idsKey]);
+  }, [idsKey, previewNonce]);
 
-  // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound' — unread_count는 보조 신호.
+  // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound'.
   const allItems = useMemo(() => {
     return previewTargets
-      .filter((a) => previewById[a.id]?.direction === "inbound" || (a.unread_count ?? 0) > 0)
+      .filter((a) => previewById[a.id]?.direction === "inbound")
       .sort((a, b) => {
         const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
         const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
@@ -133,8 +145,17 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
   const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.current_job_id === jobFilter);
 
   const count = items.length;
-  // 미착수 = 매니저가 아직 개입 안 함(paused 아님). '오늘의 할 일'의 poolReplies와 동일 관점.
+  // 미착수 = 매니저가 아직 개입 안 함(paused 아님). paused 건은 '사람 확인 필요'로 따로 집계된다.
   const untouchedCount = useMemo(() => items.filter((a) => a.agent_stage !== "paused").length, [items]);
+
+  // 계산된 건수를 부모에 올린다 — 대시보드 '지금 할 일'이 같은 수를 쓰게(공식 중복 금지).
+  // 공고 필터가 걸린 상태의 수를 올리면 대시보드가 축소된 수를 보여주므로 전체(allItems) 기준으로 올린다.
+  const onCountsRef = useRef(onCountsChange);
+  onCountsRef.current = onCountsChange;
+  const allUntouched = useMemo(() => allItems.filter((a) => a.agent_stage !== "paused").length, [allItems]);
+  useEffect(() => {
+    onCountsRef.current?.({ total: allItems.length, untouched: allUntouched });
+  }, [allItems.length, allUntouched]);
 
   // 상대시각을 화면에 머무는 동안 갱신 (InterestQueueCard와 동일 1분 틱)
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -208,9 +229,6 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-[#1A202C]">{it.name || "이름 미상"}</span>
-                    {(it.unread_count ?? 0) > 0 && (
-                      <span className="min-w-4 h-4 px-1 rounded-full bg-[#E53E3E] text-white text-[10px] font-bold flex items-center justify-center">{it.unread_count}</span>
-                    )}
                     <span
                       className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${untouched ? "bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]" : "bg-[#FEFCBF] text-[#B7791F] border-[#F6E05E]"}`}
                     >
@@ -261,16 +279,20 @@ export function ReplyQueueCard({ initialJobId }: { initialJobId?: number | null 
       )}
 
       {/* 상세 드로어를 대화 탭으로 바로 열어 매니저가 즉시 응대.
-          대화 열람 시 서버가 unread_count=0으로 리셋하므로, 닫힐 때/변경 시 목록을 재검증해 큐에서 빠지게 한다. */}
+          매니저가 답장하면 '마지막 메시지'가 발신으로 바뀌므로, 닫힐 때/변경 시 목록을 재검증해 큐에서 빠지게 한다. */}
       <ApplicantDetailPanel
         isOpen={detailId != null}
         onClose={() => {
           setDetailId(null);
           void mutate();
+          setPreviewNonce((n) => n + 1);
         }}
         applicantId={detailId}
         initialTab="chat"
-        onChanged={() => void mutate()}
+        onChanged={() => {
+          void mutate();
+          setPreviewNonce((n) => n + 1);
+        }}
       />
     </motion.div>
   );

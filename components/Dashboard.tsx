@@ -1,6 +1,6 @@
 import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, ChevronDown, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { motion } from "motion/react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
@@ -23,7 +23,6 @@ interface UrgentItem {
 interface AppRow {
   status: string;
   created_at: string;
-  unread_count?: number | null;
   branch?: string | null;
   branch1?: string | null;
   confirmed_branch?: string | null;
@@ -200,15 +199,18 @@ export function Dashboard() {
     return { top, unknownCount: unknown, max: top[0]?.count ?? 1 };
   }, [apps]);
 
-  // 죽은 unread_count 대신 /notifications counts(사람 확인 필요·AI 중단)와 /sos open(진행 중 긴급 건) 기반
+  // /notifications counts(사람 확인 필요·AI 중단)와 /sos open(진행 중 긴급 건) 기반
   const notiCounts = notiRes?.counts;
   const sosOpen = sosRes?.open ?? [];
-  // 풀 응답 = 답장(unread>0)이 왔지만 사람 확인 필요(paused)로는 집계되지 않는 건.
-  // 활성 대화 없이 다시 연락 문자에 답장한 사람이 여기 잡힌다. interventions(paused)와 중복되지 않게 paused 제외.
-  const poolReplies = useMemo(
-    () => apps.filter((a) => (a.unread_count ?? 0) > 0 && a.agent_stage !== "paused").length,
-    [apps]
-  );
+  // '내가 답할 차례' 건수는 아래 ReplyQueueCard가 계산해 올려준다.
+  // (예전엔 여기서 unread_count>0으로 셌다. 그 값은 '스레드를 아직 열지 않았다'는 뜻이라 열람만으로 0이 되고,
+  //  실데이터에서도 전원 0이어서 이 항목이 뜬 적이 없다. 판정은 '마지막 메시지가 inbound' 한 가지로 통일하고,
+  //  공식을 두 곳에 두면 어긋나므로 큐 카드 한 곳에서만 계산한다.)
+  const [replyCounts, setReplyCounts] = useState({ total: 0, untouched: 0 });
+  const handleReplyCounts = useCallback((c: { total: number; untouched: number }) => {
+    setReplyCounts((prev) => (prev.total === c.total && prev.untouched === c.untouched ? prev : c));
+  }, []);
+  const poolReplies = replyCounts.untouched;
   const interestCount = interestRes?.count ?? 0;
   const interestImmediate = interestRes?.immediate_count ?? 0;
   const confirmPendingCount = confirmRes?.total ?? confirmRes?.pending?.length ?? 0;
@@ -244,7 +246,7 @@ export function Dashboard() {
       u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
-      u.push({ id: "pool-reply", tone: "amber", title: `새 답장 ${poolReplies}건 — 내가 답할 차례`, desc: "다시 연락 문자에 답장이 왔는데 아직 아무도 답하지 않았어요. '사람 확인 필요' 건과는 별개로 응대가 필요합니다.", cta: "새 답장 처리로", path: "#reply-queue" });
+      u.push({ id: "pool-reply", tone: "amber", title: `내가 답할 차례 ${poolReplies}건`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
     }
     return u;
   }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, confirmPendingCount, nowTick]);
@@ -390,7 +392,7 @@ export function Dashboard() {
           '오늘의 할 일' 바로 아래, 긴급 건 기록 위. */}
       <div className="grid grid-cols-2 gap-6 items-start">
         <InterestQueueCard />
-        <ReplyQueueCard />
+        <ReplyQueueCard onCountsChange={handleReplyCounts} />
       </div>
 
       {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김.

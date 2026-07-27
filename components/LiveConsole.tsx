@@ -15,7 +15,6 @@ interface Applicant {
   name: string;
   phone: string | null;
   status: string;
-  unread_count?: number | null;
   agent_stage?: string | null;
   availability?: string | null;
   source?: string | null;
@@ -134,12 +133,15 @@ function relTime(iso: string | null | undefined): string {
 
 const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
-// 목록 기본 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status (3) 미열람 답장(unread>0)
+// 목록 기본 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status.
+// applicants.unread_count는 판정에서 뺐다 — 그 값은 '스레드를 아직 열지 않았다'는 신호라(트리거가 inbound마다 +1,
+// 열람 시 0으로 리셋) 열람만으로 목록에서 빠지는 부작용이 있었다. 답장 온 풀 응답자는 아래 최근 inbound
+// (last_message_at, RECENT_INBOUND_MS) 조건으로 들어오고, 미답 판정은 '마지막 메시지가 inbound'로 한다.
 function isBaseChat(a: Applicant): boolean {
-  return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status) || (a.unread_count ?? 0) > 0;
+  return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status);
 }
 
-// 풀 응답자(agent_stage 없음)가 스레드 열람(unread 리셋) 후에도 목록에 남는 기간.
+// 풀 응답자(agent_stage 없음)가 목록에 남는 기간(최근 답장 기준).
 // '답 대기'(매니저 발신 후 회신 대기) 대화가 목록에 남는 기간으로도 함께 쓴다.
 const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -158,7 +160,7 @@ function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
 // 우선순위: 수신거부 > 초안 검토 > 내가 답할 차례 > 수동 응대 > AI 응대 중 > 상대 답 기다림 > (그 외).
 interface TurnBadge { label: string; cls: string; sub?: string }
 function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBadge {
-  const unanswered = pv?.direction === "inbound" || (chat.unread_count ?? 0) > 0;
+  const unanswered = pv?.direction === "inbound";
   if (chat.sms_opt_out_at) return { label: "수신거부", cls: "bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" };
   if (pv?.pending_draft) return { label: "초안 검토", cls: "bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]" };
   if (unanswered) {
@@ -223,7 +225,7 @@ export function LiveConsole() {
   const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
   const appsLoaded = !!appsData;
   // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
-  // 풀 응답자가 열람으로 unread가 리셋돼도 '마지막 inbound' 판별이 가능하게 살짝 넓게 잡는다.
+  // 활성 대화가 없는 풀 응답자의 '마지막 inbound'도 판별할 수 있게 살짝 넓게 잡는다.
   // 최근 활동순 상위 PREVIEW_TARGET_CAP명으로 상한 — 넘치는 건 오래된 대화라 잘려도 실사용 영향이 없다.
   // ⚠️ 매니저 발신은 last_message_at을 갱신하지 않으므로 여기서 못 잡는다 —
   //    '발신만 있는 대화(답 대기)'는 preview API가 with_manual=1로 서버에서 찾아 합집합으로 내려준다.
@@ -256,13 +258,12 @@ export function LiveConsole() {
   );
   const loadingList = appsLoading && chats.length === 0;
 
-  // 미답 판정(A2): '마지막 메시지가 inbound(지원자 답장)' 기준 — 스레드 열람 시 서버가
-  // unread_count를 0으로 리셋하므로 unread는 보조 신호로만 쓴다(둘 중 하나면 미답).
+  // 미답 판정(A2): '마지막 메시지가 inbound(지원자 답장)' 기준. 대시보드 답장 큐와 같은 규칙.
   const isUnanswered = useCallback(
-    (c: Applicant) => previewById[c.id]?.direction === "inbound" || (c.unread_count ?? 0) > 0,
+    (c: Applicant) => previewById[c.id]?.direction === "inbound",
     [previewById]
   );
-  // 답 대기 판정 — 미답이 우선이므로 미답이 아닌 것 중에서만(unread>0인데 마지막이 발신인 경계 케이스 방지)
+  // 답 대기 판정 — 미답이 우선이므로 미답이 아닌 것 중에서만
   const isAwaiting = useCallback(
     (c: Applicant) => !isUnanswered(c) && isAwaitingPreview(previewById[c.id]),
     [isUnanswered, previewById]
@@ -315,8 +316,8 @@ export function LiveConsole() {
   }, [mutateApps, mutateHandoffs, mutateConfirm]);
   useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
 
-  // 첫 대화 자동 선택은 하지 않는다 — 선택(열람) 시 서버가 unread를 리셋해
-  // 탭 진입만으로 미답 신호가 지워지는 부작용이 있었다. 선택 전에는 빈 상태 안내를 보여준다.
+  // 첫 대화 자동 선택은 하지 않는다 — 탭 진입만으로 열람 처리되는 부작용을 피한다.
+  // 선택 전에는 빈 상태 안내를 보여준다.
 
   // 활성 대화 subset의 마지막 메시지 미리보기를 가볍게 조회(목록이 갱신될 때).
   // with_manual=1: '최근 14일 내 매니저 수동 발신' 지원자를 서버가 찾아 합집합으로 내려준다 —
@@ -762,7 +763,6 @@ export function LiveConsole() {
           )}
           {visibleChats.map((chat, idx) => {
             const pal = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
-            const unread = chat.unread_count ?? 0;
             const intervention = isUnanswered(chat);
             const pv = previewById[chat.id];
             const turn = whoseTurn(chat, pv);
@@ -781,7 +781,7 @@ export function LiveConsole() {
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm" style={{ backgroundColor: pal.bg, color: pal.fg }}>{chat.name.charAt(0)}</div>
                     <div>
-                      <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">{chat.name} {unread > 0 && <span className="w-4 h-4 rounded-full bg-[#E53E3E] text-white text-[10px] flex items-center justify-center">{unread}</span>}</div>
+                      <div className="text-[14px] font-bold text-[#1A202C]">{chat.name}</div>
                     </div>
                   </div>
                   <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>

@@ -27,7 +27,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         own_vehicle, license_type, vehicle_type, available_date, status,
         source, confirmed_slot, confirmed_branch, availability,
         lat, lng, applied_at,
-        last_message_at, unread_count
+        last_message_at
       )
     `)
     .eq("job_id", jobId)

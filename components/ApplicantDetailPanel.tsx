@@ -1386,6 +1386,8 @@ export function ApplicantDetailPanel({
   jobId = null,
   onChanged,
   initialTab = "detail",
+  autoOpenConfirm,
+  onAutoOpenConfirmConsumed,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -1394,6 +1396,9 @@ export function ApplicantDetailPanel({
   onChanged?: () => void;
   /** 열 때 처음 보여줄 탭 — ‘내가 답할 차례’ 큐처럼 바로 대화로 들어가고 싶을 때 "chat" */
   initialTab?: "detail" | "chat";
+  /** 열면서 확정 모달까지 바로 띄우는 신호 — 공고 탭 보드의 '확정' 버튼용(본문 컴포넌트로 그대로 전달). */
+  autoOpenConfirm?: { id: number; n: number; jobId?: number | null } | null;
+  onAutoOpenConfirmConsumed?: () => void;
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
@@ -1482,6 +1487,8 @@ export function ApplicantDetailPanel({
                 detail={detail}
                 reload={() => { reload(); onChanged?.(); }}
                 onChanged={onChanged}
+                autoOpenConfirm={autoOpenConfirm}
+                onAutoOpenConfirmConsumed={onAutoOpenConfirmConsumed}
               />
             ) : a ? (
               <ConversationThread
