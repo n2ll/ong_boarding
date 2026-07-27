@@ -91,6 +91,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "변경할 필드가 없습니다." }, { status: 400 });
   }
+  if ("client_id" in update && update.client_id !== null && typeof update.client_id !== "number") {
+    return NextResponse.json({ error: "client_id 값이 잘못되었습니다." }, { status: 400 });
+  }
   if (
     typeof update.status === "string" &&
     !["active", "closed", "paused"].includes(update.status)
@@ -172,7 +175,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       // 어긋남은 대개 '지점의 화주사를 나중에 바꾼' 데이터 상태다. 400으로 막으면 그 지점의 모든 공고가
       // 제목 한 글자도 못 고치는 상태가 된다(수정 모달이 client_id를 항상 전송하므로).
       update.branch = (b.name as string) ?? update.branch ?? null;
-      update.client_id = (b.client_id as number | null) ?? null;
+      // 지점에 소속 화주사가 있을 때만 역채움 — 소속이 비어 있는 지점(화주사 삭제 등)에 붙은 공고가
+      // 제목만 고쳐도 화주사 귀속을 잃는 것을 막는다.
+      if (typeof b.client_id === "number") update.client_id = b.client_id;
     }
   } else if (update.branch_id === null) {
     // 지점 연결을 끊으면 지점에서 파생된 이름(branch)만 지운다.

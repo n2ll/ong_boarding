@@ -1219,7 +1219,8 @@ export function Jobs() {
       return toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
     }
     // 화주사를 바꿔 지점이 떨어져 나간 상태 — 지점 연결과 지점명이 함께 지워지므로 확인을 받는다.
-    if (editDroppedBranch) {
+    // 대체 지점을 골랐으면 지워지는 게 없으므로 확인을 묻지 않는다(거짓 경고 방지).
+    if (editDroppedBranch && editForm.branchId === "") {
       const ok = await confirm({
         title: "지점 연결을 지우고 저장할까요?",
         description: `'${editDroppedBranch.name}' 지점 연결과 이 공고의 지점명이 지워져요.\n지원 폼 지점 프리필·현장 안내 문자·화주사 집계에 쓰이는 값이라, 새 화주사의 지점을 다시 고르는 편이 안전해요.`,
@@ -2308,6 +2309,13 @@ export function Jobs() {
                   </div>
                 </div>
 
+                {/* 지점 해제 경고 — 접이식 밖 상시 영역에 둔다(섹션을 접으면 경고가 사라지면 안 된다). */}
+                {editDroppedBranch && editForm.branchId === "" && (
+                  <div className="px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[12px] font-semibold text-[#B7791F] leading-relaxed">
+                    지점 <b>{editDroppedBranch.name}</b> 연결이 해제됐어요 — 이대로 저장하면 이 공고의 <b>지점명도 지워집니다</b>(지원 폼 지점 프리필·현장 안내 문자·화주사 집계에 쓰이는 값). 화주사를 원래대로 되돌리거나 새 화주사의 지점을 고르면 지워지지 않아요.
+                  </div>
+                )}
+
                 {/* 공고 설정 [접이식, 기본 열림] — 섹션명·필드 순서를 등록 모달의 '공고 설정'과 맞춘다(모집방식 → 지점·정원 → 현장매니저 → 차량 → 급여). */}
                 <EditSection
                   title="공고 설정"
@@ -2356,18 +2364,27 @@ export function Jobs() {
                           <option value="">미지정</option>
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
-                        {editDroppedBranch && (
-                          <div className="mt-2 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-semibold text-[#B7791F] leading-relaxed">
-                            지점 <b>{editDroppedBranch.name}</b> 연결이 해제됐어요 — 이대로 저장하면 이 공고의 <b>지점명도 지워집니다</b>(지원 폼 지점 프리필·현장 안내 문자·화주사 집계에 쓰이는 값). 화주사를 원래대로 되돌리면 지점도 돌아옵니다.
-                          </div>
-                        )}
                       </div>
                       <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
                         {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
                         {editShowBranch && (
                         <div className="col-span-2">
                           <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점 <span className="text-[#A0AEC0] font-semibold">(선택)</span></label>
-                          <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                          <select
+                            value={editForm.branchId}
+                            onChange={(e) => {
+                              const v = e.target.value === "" ? "" : Number(e.target.value);
+                              // 지점을 직접 비우는 것도 지점명이 지워지는 동작이라 같은 게이트(배너·저장 확인)를 태운다.
+                              if (v === "") {
+                                const cur = editForm.branchId === "" ? null : branches.find((b) => b.id === editForm.branchId);
+                                setEditDroppedBranch(cur ? { id: cur.id, name: cur.name } : null);
+                              } else {
+                                setEditDroppedBranch(null);
+                              }
+                              setEditForm({ ...editForm, branchId: v });
+                            }}
+                            className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                          >
                             <option value="">미지정</option>
                             {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                           </select>
