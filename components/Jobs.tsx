@@ -242,6 +242,10 @@ const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; aiNo
   internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", aiNote: "AI는 일반 배송 라인 흐름(선탑 일정은 매니저가 연락)으로 응대해요", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
   both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
 };
+// '둘 다'(both)는 선택지에서 감춘다 — 사용 공고 0건인데 노출만 internal과 같고 AI 응대·확정 후속·지표는
+// external(배민) 기준이라, 골랐을 때만 어긋나는 함정 값이다. DB 값·목록 배지는 그대로 두고(옛 데이터 표시),
+// 이미 'both'인 공고를 수정할 때는 그 값이 화면에서 사라지지 않게 선택지에 다시 넣는다.
+const HIDDEN_RECRUIT_MODE: RecruitMode = "both";
 // 기본값 — 파일럿 배포 채널이 맞춤 공고 링크뿐이라 '우리 인력에게'가 아니면 등록해도 지원자에게 안 보인다.
 // 이 상수를 프론트 기본값 3곳(등록 useState·resetNewJobForm·openEdit 플레이스홀더)이 공유한다.
 const DEFAULT_RECRUIT_MODE: RecruitMode = "internal";
@@ -282,8 +286,8 @@ function payLabel(f: EditJobForm): string | null {
   if (f.payType) return f.payAmount === "" ? `급여 ${f.payType}` : `급여 ${f.payType} ${Number(f.payAmount).toLocaleString()}원`;
   return f.payInfo.trim() ? "급여 정보 있음" : null;
 }
-function basicSummary(f: EditJobForm): string {
-  return [RECRUIT_MODE_META[f.recruitMode].label, `${f.capacity}명 모집`, f.vehicleRequired ? "차량 필요" : null, payLabel(f) ?? "급여 미입력"]
+function basicSummary(f: EditJobForm, clientLabel?: string | null, branchLabel?: string | null): string {
+  return [clientLabel ?? null, branchLabel ?? null, RECRUIT_MODE_META[f.recruitMode].label, `${f.capacity}명 모집`, f.vehicleRequired ? "차량 필요" : null, payLabel(f) ?? "급여 미입력"]
     .filter(Boolean)
     .join(" · ");
 }
@@ -355,6 +359,9 @@ function EditSection({
  */
 function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (m: RecruitMode) => void }) {
   const [open, setOpen] = useState(value !== DEFAULT_RECRUIT_MODE);
+  const modeOptions = (Object.keys(RECRUIT_MODE_META) as RecruitMode[]).filter(
+    (m) => m !== HIDDEN_RECRUIT_MODE || value === HIDDEN_RECRUIT_MODE
+  );
   // 수정 모달은 공고 값을 나중에(GET 응답) 받는다 — 기본값이 아닌 값이 들어오면 그때 펼친다.
   useEffect(() => {
     if (value !== DEFAULT_RECRUIT_MODE) setOpen(true);
@@ -370,15 +377,15 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
           <button
             type="button"
             onClick={() => setOpen(true)}
-            title="모집 방식 바꾸기 — '새로 모집'·'둘 다'도 고를 수 있어요"
+            title="모집 방식 바꾸기 — '새로 모집'(지원 폼·광고로 새 지원자)도 고를 수 있어요"
             className="ml-auto shrink-0 text-[12px] font-bold text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
           >
             바꾸기
           </button>
         </div>
       ) : (
-        <div role="radiogroup" aria-label="모집 방식" className="grid grid-cols-3 gap-2">
-          {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
+        <div role="radiogroup" aria-label="모집 방식" className={`grid gap-2 ${modeOptions.length > 2 ? "grid-cols-3" : "grid-cols-2"}`}>
+          {modeOptions.map((m) => {
             const sel = value === m;
             return (
               <button
@@ -502,6 +509,11 @@ export function Jobs() {
   const [newJobSiteManagerId, setNewJobSiteManagerId] = useState<number | "">("");
   // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, external 기본이면 등록해도 지원자에게 안 보이는 함정이 된다.
   const [newJobMode, setNewJobMode] = useState<RecruitMode>(DEFAULT_RECRUIT_MODE);
+  // 복제로 채워진 채널 초안 여부 — 당근·문자 탭이 '원본에 저장돼 있던 내용'임을 안내하는 데만 쓴다.
+  const [channelDraftsFromCopy, setChannelDraftsFromCopy] = useState(false);
+  // 수정 모달에서 화주사를 바꿔 '떨어져 나간' 지점 — 지점 셀렉트는 그 순간 화면에서 사라지므로(해당 화주사에 지점이 없으면)
+  // 무슨 일이 벌어졌는지 배너·확인 모달로 남긴다. 화주사를 원래대로 되돌리면 지점도 복원한다.
+  const [editDroppedBranch, setEditDroppedBranch] = useState<{ id: number; name: string } | null>(null);
   const [newJobCapacity, setNewJobCapacity] = useState(1);
   const [newJobPayType, setNewJobPayType] = useState("");
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
@@ -925,6 +937,7 @@ export function Jobs() {
     setNewJobBranchId("");
     setNewJobSiteManagerId("");
     setNewJobMode(DEFAULT_RECRUIT_MODE);
+    setChannelDraftsFromCopy(false);
     setNewJobCapacity(1);
     setNewJobPayType("");
     setNewJobPayAmount("");
@@ -978,6 +991,8 @@ export function Jobs() {
       const body = (j.body ?? "").trim();
       // 채널별 본문이 저장돼 있으면 채널 특화를 보존해 복제(D1). 없으면(레거시) 캐논 본문으로 3채널 채움.
       const cb = (j.channel_bodies ?? null) as { danggeun?: string; albamon?: string; sms?: string } | null;
+      // 당근·문자 탭에 저장본을 쓰면 그 뒤 수정 모달로 고친 본문이 반영되지 않는다 → 그 사실을 화면에 밝힌다.
+      setChannelDraftsFromCopy(Boolean(cb?.danggeun || cb?.sms));
       setChannelDrafts({
         danggeun: cb?.danggeun || body,
         // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
@@ -1139,6 +1154,7 @@ export function Jobs() {
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
   const openEdit = useCallback(async (id: string) => {
+    setEditDroppedBranch(null);
     setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
@@ -1202,6 +1218,16 @@ export function Jobs() {
     if (editForm.closesAt && new Date(editForm.closesAt).getTime() <= Date.now()) {
       return toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
     }
+    // 화주사를 바꿔 지점이 떨어져 나간 상태 — 지점 연결과 지점명이 함께 지워지므로 확인을 받는다.
+    // 대체 지점을 골랐으면 지워지는 게 없으므로 확인을 묻지 않는다(거짓 경고 방지).
+    if (editDroppedBranch && editForm.branchId === "") {
+      const ok = await confirm({
+        title: "지점 연결을 지우고 저장할까요?",
+        description: `'${editDroppedBranch.name}' 지점 연결과 이 공고의 지점명이 지워져요.\n지원 폼 지점 프리필·현장 안내 문자·화주사 집계에 쓰이는 값이라, 새 화주사의 지점을 다시 고르는 편이 안전해요.`,
+        confirmText: "지점 지우고 저장",
+      });
+      if (!ok) return;
+    }
     setEditSaving(true);
     try {
       const res = await fetch(`/api/admin/jobs/${editForm.id}`, {
@@ -1211,6 +1237,8 @@ export function Jobs() {
           title,
           body: editForm.body,
           branch_id: editForm.branchId === "" ? null : editForm.branchId,
+          // 화주사 — 지점이 있으면 서버가 지점 소속으로 역채움한다(지점이 기준).
+          client_id: editForm.clientId === "" ? null : editForm.clientId,
           site_manager_id: editForm.siteManagerId === "" ? null : editForm.siteManagerId,
           capacity: editForm.capacity,
           vehicle_required: editForm.vehicleRequired,
@@ -2086,6 +2114,11 @@ export function Jobs() {
                     </label>
                     <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
                   </div>
+                  {channelDraftsFromCopy && (
+                    <div className="mb-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-semibold text-[#B7791F] leading-relaxed">
+                      당근·문자 탭은 <b>원본 공고에 저장돼 있던 초안</b>이에요. 원본을 등록한 뒤 수정 모달에서 본문을 고쳤다면 그 내용은 알바몬 탭에만 반영돼 있어요 — 필요하면 여기서 직접 손봐 주세요.
+                    </div>
+                  )}
 
                   {channelDrafts && (
                     <>
@@ -2244,7 +2277,7 @@ export function Jobs() {
           <div className="bg-white w-full max-w-[640px] rounded-[20px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-7 py-5 border-b border-[#E2E8F0]">
               <h2 className="text-[18px] font-extrabold text-[#1A202C]">공고 수정</h2>
-              <button onClick={() => setEditForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={22} /></button>
+              <button onClick={() => { setEditForm(null); setEditDroppedBranch(null); }} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={22} /></button>
             </div>
             {editLoading ? (
               <div className="flex items-center justify-center py-16 text-[#A0AEC0]"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
@@ -2276,10 +2309,21 @@ export function Jobs() {
                   </div>
                 </div>
 
+                {/* 지점 해제 경고 — 접이식 밖 상시 영역에 둔다(섹션을 접으면 경고가 사라지면 안 된다). */}
+                {editDroppedBranch && editForm.branchId === "" && (
+                  <div className="px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[12px] font-semibold text-[#B7791F] leading-relaxed">
+                    지점 <b>{editDroppedBranch.name}</b> 연결이 해제됐어요 — 이대로 저장하면 이 공고의 <b>지점명도 지워집니다</b>(지원 폼 지점 프리필·현장 안내 문자·화주사 집계에 쓰이는 값). 화주사를 원래대로 되돌리거나 새 화주사의 지점을 고르면 지워지지 않아요.
+                  </div>
+                )}
+
                 {/* 공고 설정 [접이식, 기본 열림] — 섹션명·필드 순서를 등록 모달의 '공고 설정'과 맞춘다(모집방식 → 지점·정원 → 현장매니저 → 차량 → 급여). */}
                 <EditSection
                   title="공고 설정"
-                  summary={basicSummary(editForm)}
+                  summary={basicSummary(
+                    editForm,
+                    editForm.clientId === "" ? "화주사 미지정" : clients.find((c) => c.id === editForm.clientId)?.name ?? null,
+                    editForm.branchId === "" ? null : branches.find((b) => b.id === editForm.branchId)?.name ?? null
+                  )}
                   open={editOpenSections.basic}
                   onToggle={() => setEditOpenSections((s) => ({ ...s, basic: !s.basic }))}
                 >
@@ -2289,12 +2333,58 @@ export function Jobs() {
                         value={editForm.recruitMode}
                         onChange={(m) => setEditForm({ ...editForm, recruitMode: m, ...(m === "external" ? { exposureDraft: EMPTY_EXPOSURE } : {}) })}
                       />
+                      {/* 화주사 — 등록 모달과 같은 위치·같은 컨트롤. 예전엔 수정 모달에 없어서
+                          잘못 귀속된 공고(화주사 오선택)를 화면에서 바로잡을 수 없었다. 서버가 화주사↔지점 정합을 검증한다. */}
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">화주사</label>
+                        <select
+                          value={editForm.clientId}
+                          onChange={(e) => {
+                            const v = e.target.value === "" ? "" : Number(e.target.value);
+                            const target = v === "" ? null : v;
+                            // 되돌리기 — 방금 떨어져 나간 지점의 화주사로 다시 바꾸면 지점도 복원한다.
+                            if (editDroppedBranch && branches.find((b) => b.id === editDroppedBranch.id)?.client_id === target) {
+                              setEditForm({ ...editForm, clientId: v, branchId: editDroppedBranch.id });
+                              setEditDroppedBranch(null);
+                              return;
+                            }
+                            const cur = editForm.branchId === "" ? null : branches.find((b) => b.id === editForm.branchId);
+                            // 지점 목록이 아직 안 왔으면 소속을 판단할 수 없다 — 조용히 지점을 떼지 않고 잠시 뒤 다시 고르게 한다.
+                            if (editForm.branchId !== "" && !cur) {
+                              toast.info("지점 목록을 불러오는 중이에요. 잠시 뒤 다시 선택해 주세요.");
+                              return;
+                            }
+                            // 새 화주사에 속하지 않는 지점 선택은 해제한다(다른 화주사 지점이 붙은 채 저장되지 않게).
+                            const keepBranch = !!cur && cur.client_id === target;
+                            if (cur && !keepBranch) setEditDroppedBranch({ id: cur.id, name: cur.name });
+                            setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
+                          }}
+                          className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                        >
+                          <option value="">미지정</option>
+                          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </div>
                       <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
                         {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
                         {editShowBranch && (
                         <div className="col-span-2">
                           <label className="block text-[13px] font-bold text-[#4A5568] mb-2">지점 <span className="text-[#A0AEC0] font-semibold">(선택)</span></label>
-                          <select value={editForm.branchId} onChange={(e) => setEditForm({ ...editForm, branchId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                          <select
+                            value={editForm.branchId}
+                            onChange={(e) => {
+                              const v = e.target.value === "" ? "" : Number(e.target.value);
+                              // 지점을 직접 비우는 것도 지점명이 지워지는 동작이라 같은 게이트(배너·저장 확인)를 태운다.
+                              if (v === "") {
+                                const cur = editForm.branchId === "" ? null : branches.find((b) => b.id === editForm.branchId);
+                                setEditDroppedBranch(cur ? { id: cur.id, name: cur.name } : null);
+                              } else {
+                                setEditDroppedBranch(null);
+                              }
+                              setEditForm({ ...editForm, branchId: v });
+                            }}
+                            className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                          >
                             <option value="">미지정</option>
                             {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                           </select>
@@ -2432,7 +2522,7 @@ export function Jobs() {
               </div>
             )}
             <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-[#E2E8F0] bg-white">
-              <button onClick={() => setEditForm(null)} disabled={editSaving} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
+              <button onClick={() => { setEditForm(null); setEditDroppedBranch(null); }} disabled={editSaving} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
               <button onClick={handleEditSave} disabled={editSaving || editLoading} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 flex items-center gap-2">
                 {editSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} 저장
               </button>
