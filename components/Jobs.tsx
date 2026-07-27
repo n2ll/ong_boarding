@@ -235,10 +235,12 @@ function closedKind(closedReason: string | null | undefined): ClosedKind {
 
 type RecruitMode = "external" | "internal" | "both";
 // 표시 라벨은 확정 용어집(docs/실무자-UX개편-계획-2026-07-25.md)대로 — DB 값(external/internal/both)은 그대로.
-const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
-  external: { label: "새로 모집", desc: "지원 폼·광고로 새 지원자를 받아요 (우리 인력의 맞춤 공고 링크에는 안 보여요)", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
-  internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
-  both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
+// aiNote — 이 값은 '누구에게 보여줄까'만이 아니라 AI 응대 흐름(lib/agent/general-line.isGeneralLineJob)까지 바꾼다.
+// 예전엔 화면 어디에도 그 사실이 없어 고르는 사람이 알 수 없었다 → 선택 카드에 한 줄로 적는다.
+const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; aiNote: string; badge: string }> = {
+  external: { label: "새로 모집", desc: "지원 폼·광고로 새 지원자를 받아요 (우리 인력의 맞춤 공고 링크에는 안 보여요)", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]" },
+  internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", aiNote: "AI는 일반 배송 라인 흐름(선탑 일정은 매니저가 연락)으로 응대해요", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
+  both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
 };
 // 기본값 — 파일럿 배포 채널이 맞춤 공고 링크뿐이라 '우리 인력에게'가 아니면 등록해도 지원자에게 안 보인다.
 // 이 상수를 프론트 기본값 3곳(등록 useState·resetNewJobForm·openEdit 플레이스홀더)이 공유한다.
@@ -364,7 +366,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
       {!open ? (
         <div className="flex items-center gap-2 px-4 py-3 border border-[#E2E8F0] rounded-xl bg-[#F7FAFC]">
           <span className="text-[13px] font-bold text-[#1A202C] shrink-0">{RECRUIT_MODE_META[value].label}</span>
-          <span className="text-[11.5px] text-[#718096] truncate">{RECRUIT_MODE_META[value].desc}</span>
+          <span className="text-[11.5px] text-[#718096] truncate" title={`${RECRUIT_MODE_META[value].desc} · ${RECRUIT_MODE_META[value].aiNote}`}>{RECRUIT_MODE_META[value].desc}</span>
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -389,6 +391,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
               >
                 <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>{RECRUIT_MODE_META[m].label}</div>
                 <div className="text-[11px] text-[#A0AEC0] mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
+                <div className="text-[11px] text-[#B7791F] mt-1 leading-snug">{RECRUIT_MODE_META[m].aiNote}</div>
               </button>
             );
           })}
