@@ -454,12 +454,13 @@ export function Pipeline() {
     return pickup || dropoff ? { pickup, dropoff } : null;
   }, [distanceJobId, distanceJobs]);
 
-  // 필터·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
+  // 조건·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
   // 거리 기준 공고 변경도 정렬 순서를 바꿔 '상위 N'의 대상이 달라지므로 함께 초기화한다.
+  // 지점 스코프(헤더)도 포함 — 스코프를 좁히면 표시 집합이 줄어드는데 선택만 남아 '80명 선택됨'이 거짓이 됐다.
   useEffect(() => {
     setSelectedRows(new Set());
     setWaitlistJobId(null);
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, optOutOnly, sortMode, distanceJobId, query]);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, optOutOnly, sortMode, distanceJobId, query, scopeBranch]);
 
   // 저장된 대상 묶음(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -697,7 +698,10 @@ export function Pipeline() {
 
   // 활동중·최근연락·반응 조회가 필요한 때 — 리스트는 배지에 쓰고, 다른 뷰에서도 그 조건을 켰으면 실제로 걸리게 조회한다.
   // (옹매니징 외부 DB 호출이라 필요 없을 때는 돌리지 않는다. 단계별 현황 뷰는 별도 API라 제외.)
-  const needsLookups = view === "list" || ((view === "kanban" || view === "map") && (excludeActive || excludeRecentPing || reactionOnly));
+  // 활동중 조회(옹매니징 외부 DB)는 '이미 일하는 분 제외'를 켠 때만 — 행 배지가 없어져 다른 소비처가 없다.
+  const needsActiveCheck = view !== "funnel" && excludeActive;
+  // 반응 요약은 리스트 배지(반응 신호)에 상시 쓰고, 다른 뷰에서는 관련 조건을 켰을 때만.
+  const needsSummary = view === "list" || (view !== "funnel" && (excludeRecentPing || reactionOnly));
 
   const q = query.trim().toLowerCase();
   const sixMonthsAgo = Date.now() - SIX_MONTHS_MS;
@@ -807,6 +811,9 @@ export function Pipeline() {
     return { ...col, cards, count: cards.length };
   });
 
+  // 조건 바 '표시 N명' — 뷰에 실제로 보이는 수. 칸반은 부적합·이탈 컬럼이 없어 컬럼 합계로 센다.
+  const shownCount = view === "kanban" ? kanbanColumns.reduce((n, c) => n + c.count, 0) : filteredCards.length;
+
   // 발송 가능 인원 수 — 조건 바 카운트("발송가능 N / 표시 M")
   const sendableCount = filteredCards.filter((c) => sendableOf(c).sendable).length;
 
@@ -818,7 +825,7 @@ export function Pipeline() {
   // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
   // 발송 모달 로직과 별개(중복 조회 허용). 실패는 조용히 무시(서버가 최종 가드).
   useEffect(() => {
-    if (!needsLookups) return;
+    if (!needsActiveCheck) { setActiveSet(new Set()); return; }
     const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
     if (ids.length === 0) { setActiveSet(new Set()); return; }
     let cancelled = false;
@@ -838,13 +845,13 @@ export function Pipeline() {
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, needsLookups]);
+  }, [visibleIdsKey, needsActiveCheck]);
 
   // 리스트 레벨 pool_events 반응 요약 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
   // '마지막 연락 N일 전'·반응 배지와 '최근 14일 다시 연락 제외'·'반응 있음' 필터, '반응 최신순' 정렬의 근거.
   // 실패는 조용히 무시(배지/필터는 부가정보). summaryVersion은 벌크 발송 직후 재조회 트리거.
   useEffect(() => {
-    if (!needsLookups) return;
+    if (!needsSummary) return;
     const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
     if (ids.length === 0) { setSummaryById({}); return; }
     let cancelled = false;
@@ -862,7 +869,7 @@ export function Pipeline() {
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, needsLookups, summaryVersion]);
+  }, [visibleIdsKey, needsSummary, summaryVersion]);
 
   // 지도 뷰용 — 리스트와 **같은 조건 결과**를 쓴다(예전엔 지점 스코프·검색만 걸려, 조건을 걸어도 지도는 그대로였다).
   const mapApplicants: MapApplicant[] = rawApplicants
@@ -950,7 +957,14 @@ export function Pipeline() {
           if (!r.ok) {
             toast.error("상태 변경 저장에 실패했어요");
             loadApplicants();
+            return;
           }
+          // 진행 단계 조건이 걸려 있으면 옮긴 카드가 조건에서 빠진다 — 60초 뒤 조용히 사라지지 않게
+          // 곧바로 재동기화하고 왜 사라지는지 알려준다.
+          if (statusFilter.size > 0 && !statusFilter.has(newStatus)) {
+            toast.info("지금 걸린 '진행 단계' 조건에서 빠져 보드에서 사라져요 — 조건을 풀면 다시 보여요.");
+          }
+          loadApplicants();
         })
         .catch(() => {
           toast.error("상태 변경 저장에 실패했어요");
@@ -1000,7 +1014,7 @@ export function Pipeline() {
       // 확정인력은 이미 배정 판단이 끝난 인원 — 대기 안내 대상에서 제외.
       const eligible = filteredCards.filter((c) => interestedSet.has(c.id) && c.status !== "확정인력");
       if (eligible.length === 0) {
-        return toast.info(`관심자 ${interestedIds.length}명이 모두 확정인력이거나 현재 필터 밖이에요.`);
+        return toast.info(`관심자 ${interestedIds.length}명이 모두 확정인력이거나 지금 조건 밖이에요.`);
       }
       setSelectedRows(new Set(eligible.map((c) => c.id)));
       setWaitlistJobId(jobId);
@@ -1321,23 +1335,29 @@ export function Pipeline() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-[290px] rounded-xl border-[#E2E8F0]">
-                <DropdownMenuLabel className="text-[11px] font-bold text-[#A0AEC0]">문자 보내기 전에 빼야 할 분을 걸러요</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px] font-bold text-[#A0AEC0]">문자 보내기 전에 대상을 좁혀요</DropdownMenuLabel>
                 <DropdownMenuCheckboxItem checked={excludeActive} onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => setExcludeActive((v) => !v)} className="text-[12.5px] font-semibold text-[#4A5568]">
+                    onCheckedChange={() => setExcludeActive((v) => !v)} title="옹매니징 계약·정산 또는 옹고잉 실배차가 있는 분을 뺍니다. 연동이 안 되어 있으면 아무 것도 빼지 않아요." className="text-[12.5px] font-semibold text-[#4A5568]">
                   이미 일하는 분 제외
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={excludeRecentPing} onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => setExcludeRecentPing((v) => !v)} className="text-[12.5px] font-semibold text-[#4A5568]">
-                  최근 14일 안에 연락한 분 제외
+                    onCheckedChange={() => setExcludeRecentPing((v) => !v)} title="이 화면에서 보낸 일괄 문자(캠페인) 이력 기준이에요 — 개별 문자·확정 안내는 집계되지 않습니다." className="text-[12.5px] font-semibold text-[#4A5568]">
+                  최근 14일 안에 캠페인 문자 보낸 분 제외
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={geoConfirmedOnly} onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => setGeoConfirmedOnly((v) => !v)} className="text-[12.5px] font-semibold text-[#4A5568]">
+                    onCheckedChange={() => setGeoConfirmedOnly((v) => !v)} title="주소를 지도 좌표로 확인한 분만 봅니다(지오코딩 확정·근사)." className="text-[12.5px] font-semibold text-[#4A5568]">
                   주소가 확인된 분만
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem checked={recentAppliedOnly} onSelect={(e) => e.preventDefault()}
-                    onCheckedChange={() => setRecentAppliedOnly((v) => !v)} className="text-[12.5px] font-semibold text-[#4A5568]">
+                    onCheckedChange={() => setRecentAppliedOnly((v) => !v)} title="원지원일이 6개월 이내인 분만 봅니다 — 지원일을 모르는 분은 함께 빠집니다." className="text-[12.5px] font-semibold text-[#4A5568]">
                   6개월 안에 지원한 분만
                 </DropdownMenuCheckboxItem>
+                {/* 앞 500명만 조회하는 상한 — '이미 일하는 분'·'캠페인 문자' 판정이 그 뒤 인원에는 걸리지 않는다는 사실을 밝힌다. */}
+                {baseFilteredCards.length > 500 && (
+                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[#B7791F] bg-[#FFFBEB]">
+                    지금 조건에 {baseFilteredCards.length}명이라 <b>앞 500명만 확인</b>해요. 뒤쪽 인원에는 위 두 조건이 걸리지 않으니, 진행 단계·지역으로 먼저 좁혀 주세요.
+                  </div>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -1363,12 +1383,12 @@ export function Pipeline() {
             {/* 지금 보이는 인원 — 한 곳에만 둔다(예전엔 필터 패널·리스트 머리에 같은 숫자가 두 번 있었다) */}
             <span className="text-[13px] font-bold text-[#4A5568]">
               {view === "list" && <>발송가능 <span className="text-[#38A169]">{sendableCount}</span> / </>}
-              표시 {filteredCards.length}명
+              표시 {shownCount}명
             </span>
           </div>
         ) : (
           <div className="px-8 py-2.5 border-b border-[#E2E8F0] bg-white shrink-0 text-[12px] text-[#718096]">
-            이 화면은 최근 <b className="text-[#4A5568]">발송 묶음</b> 기준이라 위 조건·검색이 적용되지 않아요. 아래 기간만 바꿔 보세요.
+            이 화면은 최근 <b className="text-[#4A5568]">발송 묶음</b> 기준이라 위 조건은 적용되지 않아요(검색은 이름으로만 적용됩니다). 아래 기간을 바꿔 보세요.
           </div>
         )}
 
@@ -1465,7 +1485,7 @@ export function Pipeline() {
                 <div className="border-t border-[#E2E8F0] pt-3 flex flex-col gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[12px] font-bold text-[#4A5568]">저장된 대상 묶음</span>
-                    {segments.length === 0 && <span className="text-[11.5px] text-[#A0AEC0]">자주 쓰는 필터 조합을 저장해 1클릭으로 재적용하세요.</span>}
+                    {segments.length === 0 && <span className="text-[11.5px] text-[#A0AEC0]">자주 쓰는 조건 조합을 저장해 1클릭으로 재적용하세요.</span>}
                     {segments.map((seg) => (
                       <span key={seg.id} className="group inline-flex items-center gap-1 bg-white border border-[#E2E8F0] rounded-lg pl-2.5 pr-1 py-1 text-[12px] font-bold text-[#4A5568] hover:border-[#FFCB3C]">
                         <button onClick={() => applySegment(seg)} className="hover:text-[#1A202C]">{seg.name}</button>
@@ -1478,10 +1498,10 @@ export function Pipeline() {
                       value={segNameDraft}
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
-                      placeholder="현재 필터를 이름 붙여 저장 (예: 강남·자차·즉시가능)"
+                      placeholder="지금 조건을 이름 붙여 저장 (예: 강남·자차·즉시가능)"
                       className="flex-1 max-w-[340px] px-3 py-1.5 border border-[#E2E8F0] rounded-lg text-[12.5px] focus:outline-none focus:border-[#FFCB3C] bg-white"
                     />
-                    <button onClick={saveCurrentSegment} disabled={!segNameDraft.trim()} className="text-[12.5px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg">현재 필터 저장</button>
+                    <button onClick={saveCurrentSegment} disabled={!segNameDraft.trim()} className="text-[12.5px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg">지금 조건 저장</button>
                   </div>
                 </div>
 
@@ -1933,7 +1953,7 @@ export function Pipeline() {
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
               {modalExcludedCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFFAF0] border border-[#FBD38D] text-[12.5px] font-bold text-[#C05621]">
-                  선택 {selectedRows.size}명 중 {modalExcludedCount}명은 현재 필터에서 벗어났거나 연락처가 없어 제외됩니다.
+                  선택 {selectedRows.size}명 중 {modalExcludedCount}명은 지금 조건에서 벗어났거나 연락처가 없어 제외됩니다.
                 </div>
               )}
               {selectedOptOutCount > 0 && (
@@ -2347,7 +2367,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
   }));
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: cardIndex * 0.05 + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white border border-[#E2E8F0] rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-[#FFCB3C] hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-[#FFCB3C]' : 'shadow-sm'}`}>
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white border border-[#E2E8F0] rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-[#FFCB3C] hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-[#FFCB3C]' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-[#1A202C]">{card.name} <span className="text-[12px] text-[#718096] font-medium ml-1">{card.age}세</span></div>
         <div className="text-[11px] font-bold px-2 py-0.5 rounded bg-[#EDF2F7] text-[#4A5568]">{card.channel}</div>
