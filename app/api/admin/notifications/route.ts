@@ -29,7 +29,8 @@ export async function GET() {
       .select("id", { count: "exact", head: true })
       .eq("classification", "pending")
       .eq("direction", "inbound"),
-    // 사람 확인 필요 = 매니저 인계(paused) 후보 수. (applicants.unread_count는 실인입 경로가 올리지 않아 사문화 — 쓰지 않는다)
+    // 사람 확인 필요 = 매니저 인계(paused) 후보 수.
+    // (applicants.unread_count는 '스레드 미열람' 신호라 열람만으로 0이 된다 — 답장 여부 지표로 쓰지 않는다)
     supabase
       .from("job_candidates")
       .select("id", { count: "exact", head: true })

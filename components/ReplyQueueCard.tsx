@@ -9,9 +9,10 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
  * 미답 지원자('마지막 메시지가 inbound')를 카드로 나열해,
  * 가장 hot한 신호가 흩어지지 않게 모은다. (열람만으로는 큐에서 빠지지 않는다)
  *
- * 판정에 applicants.unread_count는 쓰지 않는다 — 실인입 경로(app/api/messages/inbound)가
- * 이 값을 올리지 않아 전 지원자가 0이다(사문화). 대시보드 '지금 할 일'도 같은 이유로
- * 자체 계산을 버리고 이 카드가 올려주는 수(onCountsChange)를 쓴다 — 두 곳이 어긋나지 않게.
+ * 판정에 applicants.unread_count는 쓰지 않는다. 그 값은 '답장이 왔는데 스레드를 아직 한 번도 열지 않았다'는
+ * 신호다(messages BEFORE INSERT 트리거 trg_match_applicant가 inbound마다 +1, 스레드를 열면 서버가 0으로 리셋)
+ * — 열람만으로 지워지므로 '답했는가'를 뜻하지 않는다(실데이터도 전원 0 = 이미 다 열어봤다).
+ * 대시보드 '지금 할 일'도 자체 계산을 버리고 이 카드가 올려주는 수(onCountsChange)를 쓴다 — 두 곳이 어긋나지 않게.
  * 카드에서 대화 스레드를 바로 열어(상세 드로어의 대화 탭) 매니저가 즉시 수동 응대할 수 있다.
  *
  * 데이터는 새 엔드포인트 없이 /api/admin/applicants(파이프라인·대시보드와 동일 SWR 키라 dedup)를
@@ -87,6 +88,9 @@ export function ReplyQueueCard({
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
   const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
   const idsKey = previewTargets.map((a) => a.id).join(",");
+  // 매니저가 답장해도 last_message_at(=inbound 시각)은 그대로여서 조회 대상 집합이 바뀌지 않는다 →
+  // idsKey만 보면 미리보기가 영원히 stale이고 처리한 건이 큐·대시보드에 계속 남는다. 명시적 재조회 신호를 둔다.
+  const [previewNonce, setPreviewNonce] = useState(0);
   useEffect(() => {
     if (!idsKey) {
       setPreviewById({});
@@ -107,7 +111,7 @@ export function ReplyQueueCard({
     return () => {
       cancelled = true;
     };
-  }, [idsKey]);
+  }, [idsKey, previewNonce]);
 
   // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound'.
   const allItems = useMemo(() => {
@@ -281,10 +285,14 @@ export function ReplyQueueCard({
         onClose={() => {
           setDetailId(null);
           void mutate();
+          setPreviewNonce((n) => n + 1);
         }}
         applicantId={detailId}
         initialTab="chat"
-        onChanged={() => void mutate()}
+        onChanged={() => {
+          void mutate();
+          setPreviewNonce((n) => n + 1);
+        }}
       />
     </motion.div>
   );

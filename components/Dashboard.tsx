@@ -203,8 +203,9 @@ export function Dashboard() {
   const notiCounts = notiRes?.counts;
   const sosOpen = sosRes?.open ?? [];
   // '내가 답할 차례' 건수는 아래 ReplyQueueCard가 계산해 올려준다.
-  // (예전엔 여기서 unread_count>0으로 셌지만 실인입 경로가 그 값을 올리지 않아 항상 0 → 이 항목이 뜬 적이 없다.
-  //  판정 공식을 카드와 이 목록 두 곳에 두면 어긋나므로, 큐 카드 한 곳에서만 계산한다.)
+  // (예전엔 여기서 unread_count>0으로 셌다. 그 값은 '스레드를 아직 열지 않았다'는 뜻이라 열람만으로 0이 되고,
+  //  실데이터에서도 전원 0이어서 이 항목이 뜬 적이 없다. 판정은 '마지막 메시지가 inbound' 한 가지로 통일하고,
+  //  공식을 두 곳에 두면 어긋나므로 큐 카드 한 곳에서만 계산한다.)
   const [replyCounts, setReplyCounts] = useState({ total: 0, untouched: 0 });
   const handleReplyCounts = useCallback((c: { total: number; untouched: number }) => {
     setReplyCounts((prev) => (prev.total === c.total && prev.untouched === c.untouched ? prev : c));

@@ -134,8 +134,9 @@ function relTime(iso: string | null | undefined): string {
 const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
 // 목록 기본 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status.
-// applicants.unread_count는 판정에서 뺐다 — 실인입 경로(app/api/messages/inbound)가 그 값을 올리지 않아
-// 전 지원자가 0이다(사문화). 답장 온 풀 응답자는 아래 최근 inbound(last_message_at) 조건으로 들어온다.
+// applicants.unread_count는 판정에서 뺐다 — 그 값은 '스레드를 아직 열지 않았다'는 신호라(트리거가 inbound마다 +1,
+// 열람 시 0으로 리셋) 열람만으로 목록에서 빠지는 부작용이 있었다. 답장 온 풀 응답자는 아래 최근 inbound
+// (last_message_at, RECENT_INBOUND_MS) 조건으로 들어오고, 미답 판정은 '마지막 메시지가 inbound'로 한다.
 function isBaseChat(a: Applicant): boolean {
   return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status);
 }

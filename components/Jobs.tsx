@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw } from "lucide-react";
+import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, MoreHorizontal, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -37,7 +37,6 @@ interface JobRow {
   effectivelyClosed: boolean;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
   interestCount: number;
-  // 후보 미읽음 답장 합계 — 행 '답장 N' 칩(수동 응대 필요 신호).
 }
 
 interface ApiJob {
@@ -59,7 +58,7 @@ interface ApiJob {
   counts: Record<string, number>;
   // 매니저 명시 확정(applicants.status='확정인력') 수 — 충원율 게이지의 분자.
   confirmed_count?: number;
-  // pull '관심 있음' 클릭 인원(distinct)과 후보 미읽음 답장 합계 — 행 반응 현황 칩.
+  // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
   interest_count?: number;
 }
 
@@ -297,10 +296,17 @@ function workSummary(f: EditJobForm): string {
     f.slot.trim() ? `근무시간 ${f.slot.trim()}` : null,
     f.startDate ? `시작 ${f.startDate}` : null,
     f.pickupAddress.trim() ? "집결지 있음" : null,
+    f.dropoffAddress.trim() ? "경유지 있음" : null,
     f.policyNotes.trim() || f.aiFacts.trim() ? "AI 응대 근거 있음" : null,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : "미입력";
 }
+/** '더보기' 메뉴 라벨 — 실제로 들어가는 항목에서 파생한다(없는 항목을 툴팁이 약속하면 그 기능을 찾아 헤맨다). */
+function moreActionsLabel(job: { effectivelyClosed: boolean; recruitMode: RecruitMode }): string {
+  const canAnnounce = !job.effectivelyClosed && job.recruitMode !== "external";
+  return [...(canAnnounce ? ["대기자에게 안내"] : []), "복제", job.effectivelyClosed ? "다시 열기" : "마감"].join(" · ");
+}
+
 function bodySummary(f: EditJobForm): string {
   const n = f.body.trim().length;
   return n > 0 ? `${n}자` : "본문 없음";
@@ -369,14 +375,15 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div role="radiogroup" aria-label="모집 방식" className="grid grid-cols-3 gap-2">
           {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
             const sel = value === m;
             return (
               <button
                 key={m}
                 type="button"
-                aria-pressed={sel}
+                role="radio"
+                aria-checked={sel}
                 onClick={() => onChange(m)}
                 className={`text-left p-3 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
               >
@@ -542,11 +549,23 @@ export function Jobs() {
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
   // 확정 모달 자동 오픈 신호 — 보드 카드의 '확정' 버튼이 지원자 상세를 열면서 확정 모달까지 바로 띄운다.
   // (예전엔 보드 → 카드 → 상세 → 핵심 액션 '확정' 3홉이라 공고 화면에서 확정이 보이지 않았다.)
-  // n은 같은 사람을 연달아 확정 시도할 때도 신호가 새 값이 되게 하는 카운터, jobId는 오귀속 방지용 시드.
+  // 확정 대기 큐(LiveConsole)와 같은 규약: n은 단조 증가 시퀀스(신호가 소비되어 null이 돼도 되돌아가지 않게
+  // ref로 센다 — prev 기반이면 항상 1이 되어 두 번째 확정이 '이미 소비한 n'으로 무시된다), jobId는 오귀속 방지 시드.
+  const confirmSignalSeq = useRef(0);
   const [confirmSignal, setConfirmSignal] = useState<{ id: number; n: number; jobId?: number | null } | null>(null);
   const openConfirmFor = (applicantId: number, jobId: number | null) => {
     setSelectedApplicantId(applicantId);
-    setConfirmSignal((prev) => ({ id: applicantId, n: (prev?.n ?? 0) + 1, jobId }));
+    confirmSignalSeq.current += 1;
+    setConfirmSignal({ id: applicantId, n: confirmSignalSeq.current, jobId });
+    // 확정 모달은 상세 드로어 안에 있어, 상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다.
+    // 잠시 뒤에도 안 열렸으면 원인을 알려주고 신호를 버린다(잔존 신호가 나중에 저절로 모달을 여는 것도 막는다).
+    window.setTimeout(() => {
+      setConfirmSignal((cur) => {
+        if (!cur || cur.n !== confirmSignalSeq.current) return cur; // 이미 소비됐거나 더 최신 신호가 있음
+        toast.error("상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.");
+        return null;
+      });
+    }, 6000);
   };
   const [candBusyId, setCandBusyId] = useState<number | null>(null);
   const [dispatching, setDispatching] = useState(false);
@@ -660,7 +679,10 @@ export function Jobs() {
   const openCandidates = (job: JobRow) => {
     setCandPanel({ jobId: Number(job.id), title: job.title, recruitMode: job.recruitMode });
     setCandidates([]);
+    setConfirmSignal(null); // 이전 보드에서 남은 확정 신호가 이 보드의 카드에 붙지 않게
     loadCandidates(Number(job.id));
+    // 마감시각이 지난 공고를 '진행 중' 스냅샷으로 들고 있으면 보드의 '확정' 버튼이 남는다 → 열 때 목록도 갱신.
+    loadJobs();
   };
 
   // 인재풀에서 후보 추가 — 피커 열기(전체 인재풀 로드)
@@ -1247,12 +1269,13 @@ export function Jobs() {
     // 이 경우 마감시각을 함께 해제(closes_at=null)해 정말로 다시 진행되게 한다(수정 모달로 가서
     // 마감시각을 지워야 하던 숨은 단계 제거).
     const closesPast = !!job.closesAt && new Date(job.closesAt).getTime() <= Date.now();
+    // 메뉴 항목('공고 다시 열기')과 같은 동사로 통일 — 방금 누른 말과 확인 화면의 말이 달라 헷갈렸다.
     const ok = await confirm({
-      title: "공고를 다시 진행할까요?",
+      title: "이 공고를 다시 열까요?",
       description: closesPast
-        ? `'${job.title}' 공고를 재개합니다. 마감시각이 이미 지나 있어 함께 해제돼요(상시 진행). 필요하면 수정에서 새 마감시각을 정하세요.`
-        : `'${job.title}' 공고를 재개합니다.`,
-      confirmText: "재개하기",
+        ? `'${job.title}' 공고를 다시 엽니다. 마감시각이 이미 지나 있어 함께 해제돼요(상시 진행). 필요하면 수정에서 새 마감시각을 정하세요.`
+        : `'${job.title}' 공고를 다시 엽니다.`,
+      confirmText: "다시 열기",
     });
     if (!ok) return;
     setStatusBusyId(job.id);
@@ -1586,7 +1609,7 @@ export function Jobs() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_1fr] items-center px-6 py-3.5 border-b border-[#E2E8F0] bg-[#F7FAFC] text-[13px] font-bold text-[#718096]">
+        <div className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-3.5 border-b border-[#E2E8F0] bg-[#F7FAFC] text-[13px] font-bold text-[#718096]">
           <div>공고 정보</div>
           <div>지점 / 직무</div>
           <div>모집 기간</div>
@@ -1618,7 +1641,7 @@ export function Jobs() {
             </div>
           ) : filteredJobs.length > 0 ? (
             filteredJobs.map(job => (
-              <div key={job.id} className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_1fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
+              <div key={job.id} className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {/* 제목 클릭 = 지원자 보드 열기. 예전엔 div+onClick이라 키보드로는 들어갈 수 없었다. */}
@@ -1746,7 +1769,7 @@ export function Jobs() {
                     // shadcn(Radix) DropdownMenu — 바깥 클릭·ESC 닫기·충돌 회피 포지셔닝·포털 렌더(행 잘림 방지)를 위임.
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
+                        <button className="flex items-center gap-1 px-2 py-2 whitespace-nowrap shrink-0 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]" title="채널별 게시 링크 복사 — 유입이 해당 채널로 집계됩니다">
                           <Copy size={14} /> 게시 링크
                         </button>
                       </DropdownMenuTrigger>
@@ -1765,7 +1788,7 @@ export function Jobs() {
                       아이콘만 바뀌는 같은 자리 토글이라 무엇을 누르는지 알 수 없었다. */}
                   <button
                     onClick={() => openEdit(job.id)}
-                    className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    className="flex items-center gap-1 px-2 py-2 whitespace-nowrap shrink-0 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
                     title="공고 수정 — 제목·정원·마감시각·급여 등"
                   >
                     <Edit2 size={14} /> 수정
@@ -1773,11 +1796,11 @@ export function Jobs() {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
-                        aria-label={`${job.title} 더보기 — 복제·마감·대기자 안내`}
-                        className="flex items-center gap-1 px-2 py-2 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-                        title="더보기 — 대기자에게 안내 · 복제 · 마감/재개"
+                        aria-label={`${job.title} 더보기 — ${moreActionsLabel(job)}`}
+                        className="flex items-center gap-1 px-2 py-2 shrink-0 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                        title={`더보기 — ${moreActionsLabel(job)}`}
                       >
-                        {announceBusyId === job.id || duplicatingId === job.id || statusBusyId === job.id ? <Loader2 size={14} className="animate-spin" /> : <span className="leading-none tracking-widest">···</span>}
+                        {announceBusyId === job.id || duplicatingId === job.id || statusBusyId === job.id ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
                       </button>
                     </DropdownMenuTrigger>
                     {/* 항목 실행을 다음 틱으로 미룬다 — 메뉴가 닫히며 트리거로 포커스를 되돌리는 사이에
@@ -2357,6 +2380,8 @@ export function Jobs() {
                           ) : (
                             <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
                               <option value="">미지정</option>
+                              {/* 모집 방식을 바꾸면 컨트롤이 4-슬롯 select로 변한다 — 저장돼 있던 자유텍스트가 빈 칸으로 보이지 않게 그 값도 옵션으로 남긴다(저장값은 그대로 유지). */}
+                              {editForm.slot && !SLOT_KEYS.some((s) => s.key === editForm.slot) && <option value={editForm.slot}>{editForm.slot} (직접 입력한 값)</option>}
                               {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                             </select>
                           )}
@@ -2529,7 +2554,7 @@ export function Jobs() {
       <AnimatePresence>
         {candPanel && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setCandPanel(null)} className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[2px]" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setCandPanel(null); setConfirmSignal(null); }} className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[2px]" />
             <motion.div
               initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 26, stiffness: 220 }}
@@ -2542,7 +2567,7 @@ export function Jobs() {
                     <h2 className="text-[17px] font-extrabold text-[#1A202C] truncate">{candPanel.title}</h2>
                     <div className="text-[12px] text-[#A0AEC0] mt-0.5">{candidates.length}명 지원 · 미발송 {unsentCount}명</div>
                   </div>
-                  <button onClick={() => setCandPanel(null)} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
+                  <button onClick={() => { setCandPanel(null); setConfirmSignal(null); }} className="p-2 hover:bg-[#E2E8F0] rounded-lg text-[#A0AEC0] hover:text-[#1A202C]"><X size={20} /></button>
                 </div>
                 <button
                   onClick={openPicker}
@@ -2662,7 +2687,14 @@ export function Jobs() {
                                 <div className="min-w-0">
                                   <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5">
                                     {a?.name ?? `#${c.applicant_id}`}
-                                    {alreadyConfirmed && <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">확정</span>}
+                                    {alreadyConfirmed && (
+                                      <span
+                                        className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]"
+                                        title="인력풀 상태가 '확정인력'이에요(다른 라인 확정도 포함). 이 공고 확정 여부는 카드를 눌러 상세에서 확인하세요."
+                                      >
+                                        확정인력
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[11.5px] text-[#718096] truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-[#D69E2E] font-bold">· 미발송</span>}</div>
                                   {metaLine && <div className="text-[11px] text-[#A0AEC0] truncate">{metaLine}</div>}
@@ -2702,12 +2734,15 @@ export function Jobs() {
                             <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[#F1F4F8] flex-wrap">
                               {/* 확정 — 이 화면의 핵심 결과 액션. 지원자 상세를 열면서 확정 모달까지 바로 띄운다(공고를 시드해 오귀속 방지).
                                   확정 자체는 상세의 확정 모달에서 지점·시간대·시작일을 받아 처리된다(단일 경로 유지). */}
+                              {alreadyConfirmed && (
+                                <span className="text-[11px] text-[#A0AEC0]">이미 확정된 분 — 이 공고로 바꾸려면 상세에서 확정을 취소하고 다시 확정하세요</span>
+                              )}
                               {!alreadyConfirmed && !boardJobClosed && (
                                 <button
                                   onClick={() => openConfirmFor(c.applicant_id, candPanel?.jobId ?? null)}
                                   disabled={busy}
-                                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] px-2.5 py-1 rounded-md disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2F855A]/40"
-                                  title="이 공고에 확정 — 지점·시간대·시작일을 확인하고 확정합니다"
+                                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] px-2.5 py-1 rounded-md disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2F855A]"
+                                  title="이 공고에 확정 — 확정 정보를 확인한 뒤 확정합니다"
                                 >
                                   <CheckCircle2 size={12} /> 확정
                                 </button>
@@ -2806,7 +2841,7 @@ export function Jobs() {
 
       <ApplicantDetailPanel
         isOpen={selectedApplicantId != null}
-        onClose={() => setSelectedApplicantId(null)}
+        onClose={() => { setSelectedApplicantId(null); setConfirmSignal(null); }}
         applicantId={selectedApplicantId}
         jobId={candPanel?.jobId ?? null}
         autoOpenConfirm={confirmSignal}
