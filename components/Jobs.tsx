@@ -242,6 +242,10 @@ const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; aiNo
   internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", aiNote: "AI는 일반 배송 라인 흐름(선탑 일정은 매니저가 연락)으로 응대해요", badge: "bg-[#FAF5FF] text-[#805AD5] border-[#E9D8FD]" },
   both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]" },
 };
+// '둘 다'(both)는 선택지에서 감춘다 — 사용 공고 0건인데 노출만 internal과 같고 AI 응대·확정 후속·지표는
+// external(배민) 기준이라, 골랐을 때만 어긋나는 함정 값이다. DB 값·목록 배지는 그대로 두고(옛 데이터 표시),
+// 이미 'both'인 공고를 수정할 때는 그 값이 화면에서 사라지지 않게 선택지에 다시 넣는다.
+const HIDDEN_RECRUIT_MODE: RecruitMode = "both";
 // 기본값 — 파일럿 배포 채널이 맞춤 공고 링크뿐이라 '우리 인력에게'가 아니면 등록해도 지원자에게 안 보인다.
 // 이 상수를 프론트 기본값 3곳(등록 useState·resetNewJobForm·openEdit 플레이스홀더)이 공유한다.
 const DEFAULT_RECRUIT_MODE: RecruitMode = "internal";
@@ -355,6 +359,9 @@ function EditSection({
  */
 function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (m: RecruitMode) => void }) {
   const [open, setOpen] = useState(value !== DEFAULT_RECRUIT_MODE);
+  const modeOptions = (Object.keys(RECRUIT_MODE_META) as RecruitMode[]).filter(
+    (m) => m !== HIDDEN_RECRUIT_MODE || value === HIDDEN_RECRUIT_MODE
+  );
   // 수정 모달은 공고 값을 나중에(GET 응답) 받는다 — 기본값이 아닌 값이 들어오면 그때 펼친다.
   useEffect(() => {
     if (value !== DEFAULT_RECRUIT_MODE) setOpen(true);
@@ -370,15 +377,15 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
           <button
             type="button"
             onClick={() => setOpen(true)}
-            title="모집 방식 바꾸기 — '새로 모집'·'둘 다'도 고를 수 있어요"
+            title="모집 방식 바꾸기 — '새로 모집'(지원 폼·광고로 새 지원자)도 고를 수 있어요"
             className="ml-auto shrink-0 text-[12px] font-bold text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
           >
             바꾸기
           </button>
         </div>
       ) : (
-        <div role="radiogroup" aria-label="모집 방식" className="grid grid-cols-3 gap-2">
-          {(Object.keys(RECRUIT_MODE_META) as RecruitMode[]).map((m) => {
+        <div role="radiogroup" aria-label="모집 방식" className={`grid gap-2 ${modeOptions.length > 2 ? "grid-cols-3" : "grid-cols-2"}`}>
+          {modeOptions.map((m) => {
             const sel = value === m;
             return (
               <button
