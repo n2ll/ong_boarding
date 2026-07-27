@@ -56,11 +56,10 @@ export async function GET(req: NextRequest) {
   );
   const stageCounts: Record<number, Record<string, number>> = {};
   const confirmedCounts: Record<number, number> = {};
-  const unreadTotals: Record<number, number> = {};
   if (jobIds.length > 0) {
     const { data: cands } = await supabase
       .from("job_candidates")
-      .select("job_id, agent_stage, applicants:applicant_id ( status, unread_count )")
+      .select("job_id, agent_stage, applicants:applicant_id ( status )")
       .in("job_id", jobIds);
     for (const c of cands ?? []) {
       const jid = c.job_id as number;
@@ -68,15 +67,11 @@ export async function GET(req: NextRequest) {
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
-      const rel = (c as { applicants?: { status?: string | null; unread_count?: number | null } | { status?: string | null; unread_count?: number | null }[] | null }).applicants;
+      const rel = (c as { applicants?: { status?: string | null } | { status?: string | null }[] | null }).applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
       // 확정 계상 가드: 마감 공고 링크·이탈(abort) 링크는 제외 → 실제 진행 공고에만 충원 1 반영.
       if (a?.status === "확정인력" && stage !== "abort" && !closedJobIds.has(jid)) {
         confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
-      }
-      // 후보 미읽음 답장 합산 — 목록 행 '답장 N' 칩(수동 응대 필요 신호)의 근거.
-      if (typeof a?.unread_count === "number" && a.unread_count > 0) {
-        unreadTotals[jid] = (unreadTotals[jid] ?? 0) + a.unread_count;
       }
     }
   }
@@ -108,7 +103,6 @@ export async function GET(req: NextRequest) {
     counts: stageCounts[j.id] ?? {},
     confirmed_count: confirmedCounts[j.id] ?? 0,
     interest_count: interestCounts[j.id] ?? 0,
-    unread_total: unreadTotals[j.id] ?? 0,
   }));
 
   return NextResponse.json({ jobs: enriched });

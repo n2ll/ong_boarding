@@ -36,7 +36,7 @@ const LIST_COLUMNS = [
   "own_vehicle", "license_type", "vehicle_type",
   "branch1", "branch2", "work_hours", "experience", "available_date", "self_ownership",
   "status", "branch", "source", "filter_pass", "sort_order",
-  "last_message_at", "unread_count", "start_date",
+  "last_message_at", "start_date",
   "confirmed_slot", "confirmed_branch", "current_branch", "churned_at",
   "baemin_id", "guide_sent", "onboarding_call_status", "kakao_channel_friend",
   "bname", "sigungu", "sido", "lat", "lng", "geo_precision",

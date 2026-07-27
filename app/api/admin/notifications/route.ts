@@ -3,7 +3,7 @@
  *
  * 헤더 알림 벨용 실시간 알림 집계. 저장형이 아니라 현재 상태에서 파생되는 라이브 알림이다.
  *  - 미분류 인박스 누적
- *  - 수동 개입 필요(미답장 unread)
+ *  - 사람 확인 필요(AI가 매니저에게 넘긴 대화)
  *  - AI 전역 응답 중단(kill switch) 상태
  */
 import { NextResponse } from "next/server";
@@ -29,7 +29,7 @@ export async function GET() {
       .select("id", { count: "exact", head: true })
       .eq("classification", "pending")
       .eq("direction", "inbound"),
-    // 수동 개입 = 매니저 인계(paused) 후보 수. (기존 unread_count 기준은 현재 0으로 사실상 사문화)
+    // 사람 확인 필요 = 매니저 인계(paused) 후보 수. (applicants.unread_count는 실인입 경로가 올리지 않아 사문화 — 쓰지 않는다)
     supabase
       .from("job_candidates")
       .select("id", { count: "exact", head: true })

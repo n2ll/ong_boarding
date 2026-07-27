@@ -15,7 +15,7 @@
  *
  * 반환: { window_days, members: [{ applicant_id, name, sigungu, availability,
  *        stage, opted_out, last_event_at, interest_job_id, interest_job_title,
- *        immediate, unread_count }] } — last_event_at 최신순.
+ *        immediate }] } — last_event_at 최신순.
  *
  * 쿼리: pool_events 기간 스캔 1회 + messages(코호트 inbound) 1회
  *      + applicants 1회 + jobs 제목 1회 (campaign-stats 패턴, N+1 없음).
@@ -44,7 +44,6 @@ interface FunnelMember {
   interest_job_id: number | null;
   interest_job_title: string | null;
   immediate: boolean;
-  unread_count: number;
 }
 
 export async function GET(req: NextRequest) {
@@ -116,7 +115,7 @@ export async function GET(req: NextRequest) {
       .limit(SCAN_LIMIT),
     supabase
       .from("applicants")
-      .select("id, name, sigungu, availability, sms_opt_out_at, unread_count")
+      .select("id, name, sigungu, availability, sms_opt_out_at")
       .in("id", cohortIds),
     interestJobIds.length > 0
       ? supabase.from("jobs").select("id, title").in("id", interestJobIds)
@@ -147,7 +146,6 @@ export async function GET(req: NextRequest) {
     sigungu: string | null;
     availability: string | null;
     sms_opt_out_at: string | null;
-    unread_count: number | null;
   }[];
   const applicantById = new Map(applicantRows.map((a) => [a.id, a]));
 
@@ -183,7 +181,6 @@ export async function GET(req: NextRequest) {
         interestJobId !== null ? titleByJobId.get(interestJobId) || `공고 #${interestJobId}` : null,
       // immediate 기준은 campaign-stats by_job과 동일 — 관심 클릭 meta 또는 가용성 '즉시가능'
       immediate: interest !== null && (interest.immediate || a?.availability === "즉시가능"),
-      unread_count: a?.unread_count ?? 0,
     };
   });
 
