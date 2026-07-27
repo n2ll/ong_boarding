@@ -156,25 +156,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const supabase = createServiceClient();
 
   // 지점(branch_id) 변경 시 지점 이름·소속 화주사를 함께 맞춰 계층 정합성 유지.
-  // 수정 모달에 화주사 셀렉트가 생겼으므로(잘못 귀속 바로잡기) 화주사↔지점 불일치는 400으로 막는다 —
-  // 조용히 다른 화주사 지점이 붙으면 충원율·필터·현장 안내가 전부 어긋난다.
+  // 수정 모달에 화주사 셀렉트가 생겼고(잘못 귀속 바로잡기) 클라이언트가 화주사에 안 맞는 지점 선택을 미리 해제하므로,
+  // 서버까지 온 불일치는 데이터 상태로 보고 '지점 기준'으로 정합화한다(저장을 막지 않는다).
   if (typeof update.branch_id === "number") {
     const { data: b, error: bErr } = await supabase
       .from("branches")
       .select("name, client_id")
       .eq("id", update.branch_id)
       .maybeSingle();
-    if (bErr) {
-      return NextResponse.json({ error: "지점 조회에 실패했습니다." }, { status: 500 });
+    // 조회 실패·없는 지점이면 계층 채움만 건너뛴다 — 저장 자체를 막지 않는다.
+    // (지점이 지워진 옛 공고의 제목 수정까지 막히면 손댈 방법이 없어진다.)
+    if (!bErr && b) {
+      // 지점이 정해지면 이름·소속 화주사는 **지점 기준**으로 맞춘다.
+      // 전송된 client_id와 어긋나면 지점을 신뢰한다 — 한 지점은 한 화주사 소속이고,
+      // 어긋남은 대개 '지점의 화주사를 나중에 바꾼' 데이터 상태다. 400으로 막으면 그 지점의 모든 공고가
+      // 제목 한 글자도 못 고치는 상태가 된다(수정 모달이 client_id를 항상 전송하므로).
+      update.branch = (b.name as string) ?? update.branch ?? null;
+      update.client_id = (b.client_id as number | null) ?? null;
     }
-    if (!b) {
-      return NextResponse.json({ error: "지점을 찾을 수 없습니다." }, { status: 400 });
-    }
-    if (typeof update.client_id === "number" && (b.client_id as number | null) !== update.client_id) {
-      return NextResponse.json({ error: "선택한 화주사에 속한 지점이 아닙니다." }, { status: 400 });
-    }
-    update.branch = (b.name as string) ?? update.branch ?? null;
-    update.client_id = (b.client_id as number | null) ?? null;
   } else if (update.branch_id === null) {
     // 지점 연결을 끊으면 지점에서 파생된 이름(branch)만 지운다.
     // 지점 없이 자유 텍스트로 들어온 legacy branch는 보존한다(제목만 고쳐도 지점명이 사라지던 사고 방지).
