@@ -397,7 +397,8 @@ export default function PoolPage() {
                       7장이 한꺼번에 보이는 상황에서 '나와 맞는 자리'를 스스로 가리게 돕는 최소 장치. */}
                   {job.vehicle_required && ownVehicle === "없음" && (
                     <div className="mt-1 rounded-lg bg-[#FFFBEC] border border-[#F6E4B0] px-3 py-2 text-[14px] font-bold text-[#B7791F] leading-snug">
-                      이 일자리는 <b>본인 차량이 필요</b>해요. 저희가 받은 정보에는 차량이 없다고 되어 있어요 — 차량이 준비되셨다면 관심을 눌러 주세요.
+                      이 일자리는 <b>본인 차량이 필요</b>해요. 저희가 받은 정보에는 차량이 없다고 되어 있어요
+                      {done ? " — 차량 여부는 매니저가 연락드릴 때 확인할게요." : " — 차량이 준비되셨다면 관심을 눌러 주세요."}
                     </div>
                   )}
                 </dl>
