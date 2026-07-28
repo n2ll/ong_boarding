@@ -85,6 +85,8 @@ export default function PoolPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
+  // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
@@ -139,7 +141,20 @@ export default function PoolPage() {
           if (cancelled) return;
           setName(json.name ?? null);
           setAvailability(json.availability ?? null);
-          setJobs(json.jobs ?? []);
+          // 백그라운드 갱신에서는 카드 목록·순서를 갈아엎지 않는다 —
+          // 읽는 중에 순서가 바뀌면 손가락이 내려오는 순간 다른 공고에 관심이 등록된다(시니어 대상 오클릭).
+          // 새 공고·마감 반영은 다음 방문(또는 새로고침) 때 이루어진다. 접수 상태는 아래에서 계속 합쳐진다.
+          if (background) {
+            setJobs((prev) => {
+              const incoming: PoolJob[] = json.jobs ?? [];
+              if (prev.length === 0) return incoming;
+              const byId = new Map(incoming.map((j) => [j.id, j]));
+              // 순서는 그대로 두고 각 카드 내용만 최신으로. 사라진 공고도 화면에서 빼지 않는다(접수 흔적 보존).
+              return prev.map((j) => byId.get(j.id) ?? j);
+            });
+          } else {
+            setJobs(json.jobs ?? []);
+          }
           const serverDone = (json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id);
           const serverNotify = (json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id);
           setDoneIds((prev) => new Set([...(background ? prev : []), ...serverDone]));
@@ -176,6 +191,7 @@ export default function PoolPage() {
       });
       if (res.ok) {
         setDoneIds((prev) => new Set(prev).add(job.id));
+        setConfirmingId(null);
       } else {
         const json = await res.json().catch(() => null);
         alert(json?.error ?? "잠시 후 다시 시도해주세요.");
@@ -321,10 +337,16 @@ export default function PoolPage() {
                       <dd className="font-bold text-[#1A202C]">{pay} <span className="font-medium text-[13px] text-[#A0AEC0]">(변동될 수 있어요)</span></dd>
                     </div>
                   )}
-                  {job.branch && (
+                  {(job.branch || job.pickup_address) && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">지점</dt>
-                      <dd>{job.branch}{job.distance_km !== null && <span className="text-[#38A169] font-bold"> · 약 {job.distance_km}km</span>}</dd>
+                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">{job.branch ? "지점" : "출발지"}</dt>
+                      <dd>{job.branch || job.pickup_address}</dd>
+                    </div>
+                  )}
+                  {job.distance_km !== null && (
+                    <div className="flex gap-2">
+                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">거리</dt>
+                      <dd className="font-bold text-[#38A169]">집에서 약 {job.distance_km}km</dd>
                     </div>
                   )}
                   {job.slot && (
@@ -364,24 +386,61 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="py-1.5 text-[15px] font-bold text-[#B7791F]"
+                      className="py-2.5 mb-2 text-[15px] font-bold text-[#B7791F]"
                     >
                       {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
                     </button>
                   </div>
                 )}
 
-                <button
-                  onClick={() => expressInterest(job)}
-                  disabled={done || sendingId === job.id}
-                  className={`mt-4 w-full py-4 rounded-xl text-[17px] font-extrabold transition-colors ${
-                    done
-                      ? "bg-[#F0FFF4] text-[#38A169] border border-[#9AE6B4]"
-                      : "bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] active:bg-[#E0B500]"
-                  } disabled:cursor-default`}
-                >
-                  {done ? "✓ 접수됐어요 — 매니저가 연락드릴게요" : sendingId === job.id ? "접수 중…" : "관심 있어요"}
-                </button>
+                {done || confirmingId !== job.id ? (
+                  <button
+                    onClick={() => {
+                      if (done) return;
+                      // 전송 중에는 다른 카드 버튼도 눌리지 않는다(예전엔 눌러도 아무 반응이 없어 고장으로 보였다).
+                      if (sendingId !== null) return;
+                      setConfirmingId(job.id);
+                    }}
+                    disabled={done || sendingId !== null}
+                    className={`mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
+                      done
+                        ? "bg-[#F0FFF4] text-[#38A169] border border-[#9AE6B4]"
+                        : sendingId !== null
+                          ? "bg-[#EDF2F7] text-[#A0AEC0]"
+                          : "bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] active:bg-[#E0B500]"
+                    } disabled:cursor-default`}
+                  >
+                    {done
+                      ? "✓ 접수됐어요 — 매니저가 연락드릴게요"
+                      : sendingId !== null
+                        ? "잠시만요…"
+                        : "관심 있어요"}
+                  </button>
+                ) : (
+                  // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
+                  <div className="mt-5 rounded-xl border-2 border-[#FFCB3C] bg-[#FFFBEC] p-3">
+                    <p className="text-[16px] font-bold text-[#1A202C] text-center leading-snug">
+                      <span className="text-[#B7791F]">{job.title}</span>
+                      <br />이 일자리에 관심 있다고 보낼까요?
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => setConfirmingId(null)}
+                        disabled={sendingId === job.id}
+                        className="flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-[#4A5568] border border-[#CBD5E0]"
+                      >
+                        아니요
+                      </button>
+                      <button
+                        onClick={() => expressInterest(job)}
+                        disabled={sendingId === job.id}
+                        className="flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-[#FFCB3C] text-[#1A202C] active:bg-[#E0B500] disabled:opacity-70"
+                      >
+                        {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {done && (
                   <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">

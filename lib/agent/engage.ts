@@ -116,7 +116,7 @@ async function isJobFullyStaffed(
 ): Promise<boolean> {
   const { data: cands, error } = await supabase
     .from("job_candidates")
-    .select("applicant_id, applicants:applicant_id ( status )")
+    .select("applicant_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
     .eq("job_id", jobId)
     .limit(1000);
   if (error) {
@@ -126,10 +126,25 @@ async function isJobFullyStaffed(
   let confirmed = 0;
   for (const c of cands ?? []) {
     // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어 (jobs GET과 동일).
-    const rel = (c as { applicants?: { status?: string | null } | { status?: string | null }[] | null })
-      .applicants;
+    const rel = (
+      c as {
+        applicants?:
+          | { status?: string | null; current_job_id?: number | null }
+          | { status?: string | null; current_job_id?: number | null }[]
+          | null;
+      }
+    ).applicants;
     const a = Array.isArray(rel) ? rel[0] : rel;
-    if (a?.status === "확정인력") confirmed++;
+    // 공고탭 충원율(app/api/admin/jobs GET)과 **같은 규칙**: 확정이 이 공고에 결속(current_job_id)됐고
+    // 이탈 링크가 아닐 때만 센다. 공고가 여럿일 때 다른 라인 확정자가 이 공고에 링크만 있어도
+    // 충원 완료로 오판해, 신규 관심자에게 '자리가 모두 차 있어요' 한 통만 보내고 스크리닝을 영구 미시작하던 문제.
+    if (
+      a?.status === "확정인력" &&
+      a?.current_job_id === jobId &&
+      (c as { agent_stage?: string | null }).agent_stage !== "abort"
+    ) {
+      confirmed++;
+    }
   }
   return confirmed >= capacity;
 }
@@ -427,7 +442,14 @@ export async function pickJobForCampaignReply(
     if (best) return { jobId: best.job.id, jobTitle: best.job.title, pickedBy: "nearest_anchor" };
   }
 
-  // ③ 최신 활성 공고
+  // ③ 최신 활성 공고 — **활성 실공고가 1개일 때만** 쓴다.
+  // 여러 개가 동시에 열려 있으면 이건 추측 편입이고, 편입 즉시 current_job_id가 그 공고로 박혀
+  // 지원자가 진짜 원하는 공고를 눌러도 이후 아무 문자도 안 가게 된다(한 사람=진행 중 1공고 정책).
+  // 그래서 여러 개면 자동 편입을 포기하고 null을 돌려준다 → 호출부가 매니저 확인으로 넘긴다.
+  if (jobs.length > 1) {
+    console.log("[engage] campaign-reply 자동 편입 보류 — 활성 공고 다수", { applicantId: applicant.id, activeJobs: jobs.length });
+    return null;
+  }
   return { jobId: jobs[0].id, jobTitle: jobs[0].title, pickedBy: "latest_active" };
 }
 

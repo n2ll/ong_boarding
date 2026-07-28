@@ -364,6 +364,13 @@ async function processInbound(
             // 정책: 한 사람 = 하나의 '진행 중' 공고 (engage·dispatch와 동일)
             const jobConflict =
               pick != null && a.current_job_id != null && a.current_job_id !== pick.jobId;
+            if (!pick) {
+              // 활성 공고가 여러 개면 자동 편입을 하지 않는다(추측 편입 금지, lib/agent/engage.pickJobForCampaignReply ③).
+              // 문자는 이미 이 지원자 스레드에 붙어 '내가 답할 차례' 큐에 뜨지만, 자동 응대가 없다는 사실을 알린다.
+              await sendSlackText(
+                `💬 캠페인 답장 — 어느 공고인지 확정할 수 없어 자동 편입을 건너뜀: ${applicant.name?.trim() || phone} · 실시간 응대의 '내가 답할 차례'에서 직접 확인해 주세요`
+              );
+            }
             if (pick && !jobConflict) {
               const { data: upserted, error: upErr } = await supabase
                 .from("job_candidates")
