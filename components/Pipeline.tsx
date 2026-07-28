@@ -359,7 +359,7 @@ export function Pipeline() {
   const loadApplicants = () => { void mutateApplicants(); };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
-  const { data: jobsData } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
+  const { data: jobsData, mutate: mutateJobs } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
   const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null, exposure: j.exposure ?? "all" })), [visibleJobs]);
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
@@ -578,30 +578,171 @@ export function Pipeline() {
   const [exposureJobIds, setExposureJobIds] = useState<Set<number>>(new Set());
   const [exposureMode, setExposureMode] = useState<"include" | "exclude">("include");
   const [exposureSaving, setExposureSaving] = useState(false);
+  // 전체 노출 공고를 '지정 노출'로 함께 전환할지 — 없으면 명단만 저장되고 아무 효력이 없다.
+  // (예전엔 저장 뒤 토스트로만 알려주고, 매니저가 공고 수정 모달로 다시 들어가 노출 방식을 바꿔야 했다.)
+  const [exposureMakeTargeted, setExposureMakeTargeted] = useState(true);
+  // 저장된 자동 노출 규칙 처리 — **기본값 없음**(반드시 고르게 한다). 규칙 소거를 조용히 하지 않는다.
+  const [exposureRuleAction, setExposureRuleAction] = useState<"keep" | "clear" | null>(null);
+
+  // 공고별 노출 현황(현재 노출 방식·저장된 규칙·규칙 해당 인원·이미 연결된 인원) — 모달을 열 때 한 번 조회.
+  // 특히 전체 노출 공고에 남아 있는 예전 규칙을 보여줘야 한다(전환만 하면 고르지 않은 인원에게도 보인다).
+  const { data: exposureImpact, error: exposureImpactError, mutate: mutateExposureImpact } = useSWR<{
+    total_pool: number;
+    jobs: {
+      id: number;
+      title: string;
+      exposure: "all" | "targeted";
+      rule_conditions: number;
+      rule_labels: string[];
+      rule_matched: number;
+      include_count: number;
+      exclude_count: number;
+      linked: number;
+    }[];
+  }>(
+    exposurePickerOpen && activeJobs.length > 0
+      ? `/api/admin/exposure/impact?job_ids=${activeJobs.map((j) => j.id).join(",")}`
+      : null,
+    { revalidateOnFocus: false }
+  );
+  const impactById = useMemo(
+    () => new Map((exposureImpact?.jobs ?? []).map((j) => [j.id, j])),
+    [exposureImpact]
+  );
+
+  // 모달을 열 때마다 공고 선택·선택지를 초기화 — 직전에 고른 공고가 남아 있으면 엉뚱한 공고에 적용된다.
+  useEffect(() => {
+    if (!exposurePickerOpen) return;
+    setExposureJobIds(new Set());
+    setExposureMakeTargeted(true);
+    setExposureRuleAction(null);
+  }, [exposurePickerOpen]);
+
+  const exposureSelectedJobs = activeJobs.filter((j) => exposureJobIds.has(j.id));
+  // 전체 노출 → 지정 노출 전환 대상. 전환하면 '인재풀 전원'에게 보이던 공고가 명단에게만 보인다.
+  const exposureFlipJobs = exposureSelectedJobs.filter(
+    (j) => (impactById.get(j.id)?.exposure ?? j.exposure) !== "targeted"
+  );
+  // 저장된 규칙이 있는 공고 — 규칙을 두면 '규칙 해당 인원 + 이 명단', 지우면 '이 명단만'.
+  const exposureRuleJobs = exposureSelectedJobs.filter((j) => (impactById.get(j.id)?.rule_conditions ?? 0) > 0);
+  const exposureWillFlip = exposureMode === "include" && exposureMakeTargeted && exposureFlipJobs.length > 0;
+  const exposureWillClear = exposureMode === "include" && exposureRuleAction === "clear" && exposureRuleJobs.length > 0;
+  // 노출이 좁아지는 공고에서 이미 연결된(관심·후보) 인원 — 이분들은 명단에 자동으로 남는다.
+  const exposureLinkedProtected = [
+    ...new Set([
+      ...(exposureWillFlip ? exposureFlipJobs.map((j) => j.id) : []),
+      ...(exposureWillClear ? exposureRuleJobs.map((j) => j.id) : []),
+    ]),
+  ].reduce((n, id) => n + (impactById.get(id)?.linked ?? 0), 0);
+
+  // 지금 걸린 조건을 조건 바의 라벨 그대로 — 노출을 지정할 때 '어떤 조건으로 고른 명단인지'가
+  // 명단 자체보다 중요하다(나중에 왜 이 사람들인지 되짚을 수 있어야 한다).
+  const conditionLabels: string[] = [];
+  if (scopeBranch) conditionLabels.push(`지점 ${scopeBranch}`);
+  if (statusFilter.size > 0) conditionLabels.push(`진행 단계 ${[...statusFilter].join("·")}`);
+  if (regionFilter !== "all") conditionLabels.push(regionFilter === "capital" ? "수도권(서울·경기·인천)" : "서울");
+  if (vehicleFilter !== "all")
+    conditionLabels.push(
+      vehicleFilter === "vehicle" ? "차량 보유" : vehicleFilter === "walk" ? "도보" : "차량 미확인"
+    );
+  if (channelFilter.size > 0) conditionLabels.push(`지원 채널 ${[...channelFilter].join("·")}`);
+  if (slotFilter.size > 0) conditionLabels.push(`희망 근무 ${[...slotFilter].join("·")}`);
+  if (availabilityFilter.size > 0) conditionLabels.push(`가용성 ${[...availabilityFilter].join("·")}`);
+  if (excludeActive) conditionLabels.push("이미 일하는 분 제외");
+  if (excludeRecentPing) conditionLabels.push("최근 14일 캠페인 문자 보낸 분 제외");
+  if (geoConfirmedOnly) conditionLabels.push("주소가 확인된 분만");
+  if (recentAppliedOnly) conditionLabels.push("6개월 안에 지원한 분만");
+  if (reactionOnly) conditionLabels.push("반응 있음(열람/관심/답장)");
+  if (optOutOnly) conditionLabels.push("수신거부한 분만");
+  if (showExcluded) conditionLabels.push("부적합·이탈·기타도 표시");
+  if (query.trim()) conditionLabels.push(`검색 "${query.trim()}"`);
 
   const assignExposure = async () => {
     const applicantIds = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     const jobIds = Array.from(exposureJobIds);
     if (applicantIds.length === 0 || jobIds.length === 0 || exposureSaving) return;
+    // 규칙이 있는 공고엔 2택을 반드시 고르게 한다(서버도 같은 가드 — code:'rule_action_required').
+    if (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) {
+      toast.error("자동 노출 규칙이 있는 공고예요 — 규칙을 둘지 지울지 먼저 골라 주세요.");
+      return;
+    }
+    if (exposureWillFlip || exposureWillClear) {
+      const lines: string[] = [];
+      if (exposureWillFlip) {
+        lines.push(
+          `'지정 노출'로 전환: ${exposureFlipJobs.map((j) => j.title).join(" / ")}`,
+          `→ 지금은 인재풀 전원(${exposureImpact?.total_pool ?? "?"}명)의 맞춤 공고 링크에 보여요. 전환하면 노출 명단에게만 보입니다.`
+        );
+      }
+      if (exposureWillClear) {
+        lines.push(
+          `자동 노출 규칙을 지웁니다(되돌릴 수 없어요):`,
+          ...exposureRuleJobs.map(
+            (j) =>
+              `· ${j.title} — ${(impactById.get(j.id)?.rule_labels ?? []).join(" / ")} (해당 ${impactById.get(j.id)?.rule_matched ?? 0}명)`
+          )
+        );
+      }
+      if (exposureLinkedProtected > 0) {
+        lines.push(
+          `이미 이 공고로 연결된 ${exposureLinkedProtected}명은 명단에 자동으로 남겨요 — 이야기 중인 공고가 본인 화면에서 사라지지 않게요(직접 제외해둔 분은 그대로 제외).`
+        );
+      }
+      lines.push(`노출 명단에 넣을 인원: 지금 고른 ${applicantIds.length}명`);
+      if (
+        !(await confirm({
+          title: "이 명단에게만 보이도록 바꿀까요?",
+          description: lines.join("\n"),
+          confirmText: "적용",
+          destructive: true,
+        }))
+      )
+        return;
+    }
     setExposureSaving(true);
     try {
       const res = await fetch("/api/admin/exposure/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_ids: jobIds, applicant_ids: applicantIds, mode: exposureMode }),
+        body: JSON.stringify({
+          job_ids: jobIds,
+          applicant_ids: applicantIds,
+          mode: exposureMode,
+          ...(exposureMode === "include"
+            ? {
+                make_targeted: exposureMakeTargeted,
+                ...(exposureRuleJobs.length > 0 ? { rule_action: exposureRuleAction ?? "keep" } : {}),
+              }
+            : {}),
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(json.error || "노출 배정에 실패했어요");
+        // 부분 적용(명단은 저장, 전환·규칙 삭제 실패)이면 화면을 실제 상태로 되돌린다.
+        if (json.partial) {
+          void mutateJobs();
+          void mutateExposureImpact();
+        }
         return;
       }
       const nonTargeted: number[] = json.non_targeted ?? [];
+      const flipped: number[] = json.flipped ?? [];
+      const cleared: number[] = json.rule_cleared ?? [];
       toast.success(
         `${applicantIds.length}명을 공고 ${jobIds.length}개에 ${exposureMode === "include" ? "노출 대상으로 추가" : "노출 제외로 지정"}했어요` +
-          (nonTargeted.length > 0 ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)` : "")
+          (flipped.length > 0 ? ` · 공고 ${flipped.length}개를 '지정 노출'로 전환` : "") +
+          (cleared.length > 0 ? ` · 규칙 ${cleared.length}개 삭제` : "") +
+          (json.auto_included > 0 ? ` · 이미 연결된 ${json.auto_included}명 자동 포함` : "") +
+          (nonTargeted.length > 0
+            ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
+            : "")
       );
       setExposurePickerOpen(false);
       setExposureJobIds(new Set());
+      // 전환·규칙 삭제로 공고 상태가 바뀌었으니 목록·현황을 다시 읽는다(다음에 열 때 옛 배지가 보이지 않게).
+      void mutateJobs();
+      void mutateExposureImpact();
     } finally {
       setExposureSaving(false);
     }
@@ -824,6 +965,10 @@ export function Pipeline() {
 
   // 발송 가능 인원 수 — 조건 바 카운트("발송가능 N / 표시 M")
   const sendableCount = filteredCards.filter((c) => sendableOf(c).sendable).length;
+
+  // 선택 인원 중 지금 조건 밖에 있는 수 — 노출 지정 모달이 '조건으로 고른 명단'이라고 말할 때
+  // 실제로는 직접 고른 사람이 섞였을 수 있다는 사실을 숨기지 않기 위해.
+  const selectedOutsideCondition = [...selectedRows].filter((id) => !filteredIdSet.has(id)).length;
 
   // 발송 모달 실제 수신 대상 — 화면 표시(filteredCards) ∩ 선택 ∩ 연락처 보유. handleBulkSend의 발송 대상과 동일 기준.
   // selectedRows.size 그대로 쓰면 필터로 화면에서 빠진 인원까지 세어 인원·비용이 부풀려진다.
@@ -1574,8 +1719,8 @@ export function Pipeline() {
                     <button onClick={() => setJobPickerOpen(true)} title="이 분들을 공고의 지원자(후보)로 등록해 AI 스크리닝 대상에 넣습니다 — 문자는 나가지 않아요" className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
                       <Briefcase size={16} /> 공고 후보로 추가
                     </button>
-                    <button onClick={() => setExposurePickerOpen(true)} title="지정 노출 공고의 노출 대상(맞춤 공고 링크에 공고를 보여줄 사람)으로 추가/제외 — 후보 등록과 별개" className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
-                      <Eye size={16} /> 노출 대상 지정
+                    <button onClick={() => setExposurePickerOpen(true)} title="이 분들에게만 공고가 보이도록 지정합니다(맞춤 공고 링크 노출 명단). 전체 노출 공고는 '지정 노출'로 전환까지 한 번에 — 후보 등록·문자 발송과 별개예요." className="bg-white/10 hover:bg-white/20 text-white border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all backdrop-blur-sm">
+                      <Eye size={16} /> 이 명단에게만 노출
                     </button>
                     <button onClick={() => setBulkMsgModalOpen(true)} className="bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] border-0 rounded-xl px-4 py-2.5 text-[13px] font-bold flex items-center gap-2 transition-all shadow-md">
                       <MessageCircle size={16} /> 문자 보내기
@@ -1849,13 +1994,20 @@ export function Pipeline() {
       {exposurePickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setExposurePickerOpen(false)}>
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
-          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[460px] max-h-[80vh] flex flex-col border border-[#E2E8F0]">
-            <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-start justify-between">
-              <div>
+          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[520px] max-h-[85vh] flex flex-col border border-[#E2E8F0]">
+            <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <h2 className="text-[16px] font-bold text-[#1A202C]">노출 대상 지정</h2>
                 <div className="text-[12.5px] text-[#718096] mt-0.5">선택된 {selectedRows.size}명을 어느 공고의 노출 대상으로 할까요? (여러 공고 선택 가능)</div>
+                {/* 조건 요약 — '어떤 조건으로 고른 명단인지'를 남긴다. 명단만 보면 나중에 근거를 되짚을 수 없다. */}
+                <div className="mt-2 text-[11.5px] leading-snug text-[#4A5568] bg-[#F7FAFC] border border-[#E2E8F0] rounded-lg px-2.5 py-1.5">
+                  <b className="text-[#718096]">지금 조건</b> {conditionLabels.length > 0 ? conditionLabels.join(" · ") : "조건 없음(인재풀 전체에서 고름)"}
+                  {selectedOutsideCondition > 0 && (
+                    <div className="text-[#B7791F] mt-0.5">선택한 {selectedRows.size}명 중 {selectedOutsideCondition}명은 지금 조건 밖이에요(직접 고르신 분도 그대로 적용됩니다).</div>
+                  )}
+                </div>
               </div>
-              <button onClick={() => setExposurePickerOpen(false)} className="p-1.5 hover:bg-[#EDF2F7] rounded-lg text-[#A0AEC0]"><X size={18} /></button>
+              <button onClick={() => setExposurePickerOpen(false)} className="p-1.5 hover:bg-[#EDF2F7] rounded-lg text-[#A0AEC0] shrink-0"><X size={18} /></button>
             </div>
             <div className="px-6 py-3 border-b border-[#F1F4F8] flex items-center gap-2">
               {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
@@ -1874,40 +2026,132 @@ export function Pipeline() {
               <span className="text-[11.5px] text-[#A0AEC0]">제외는 규칙보다 우선해요</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {/* 현황 조회 실패를 '규칙 없음'으로 위장하지 않는다 — 규칙이 있는데 못 읽으면 서버가 400으로 막고,
+                  화면엔 2택이 안 떠서 매니저는 막힌 이유를 알 수 없게 된다. */}
+              {exposureImpactError && (
+                <div className="text-[12px] leading-snug text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] rounded-lg px-3 py-2">
+                  공고 노출 현황을 불러오지 못했어요 — 저장된 규칙·연결 인원을 확인할 수 없어 적용이 막힐 수 있어요.
+                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">다시 시도</button>
+                </div>
+              )}
               {activeJobs.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">진행 중인 공고가 없어요</div>}
               {activeJobs.map((j) => {
                 const on = exposureJobIds.has(j.id);
+                const im = impactById.get(j.id);
+                // 노출 방식은 조회한 현황을 우선 — 공고 목록 캐시는 전환 직후 옛 값을 들고 있을 수 있다.
+                const ex = im?.exposure ?? j.exposure;
                 return (
                   <button
                     key={j.id}
                     onClick={() => setExposureJobIds((prev) => { const next = new Set(prev); if (next.has(j.id)) next.delete(j.id); else next.add(j.id); return next; })}
-                    className={`w-full text-left flex items-center gap-3 p-3.5 rounded-xl border transition-all ${on ? "border-[#1A202C] ring-1 ring-[#1A202C] bg-[#F7FAFC]" : "border-[#E2E8F0] hover:border-[#CBD5E0]"}`}
+                    className={`w-full text-left flex items-start gap-3 p-3.5 rounded-xl border transition-all ${on ? "border-[#1A202C] ring-1 ring-[#1A202C] bg-[#F7FAFC]" : "border-[#E2E8F0] hover:border-[#CBD5E0]"}`}
                   >
-                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#1A202C] border-[#1A202C]" : "border-[#CBD5E0]"}`}>
+                    <span className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#1A202C] border-[#1A202C]" : "border-[#CBD5E0]"}`}>
                       {on && <Check size={12} className="text-white" />}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="text-[14px] font-bold text-[#1A202C] truncate">{j.title}</div>
                       {j.branch && <div className="text-[12px] text-[#718096]">{j.branch}</div>}
+                      {/* 현황 한 줄 — 규칙이 남아 있는지가 핵심(전환만 하면 고르지 않은 인원에게도 보인다) */}
+                      <div className="text-[11.5px] text-[#718096] mt-0.5 leading-snug">
+                        {im ? (
+                          <>
+                            {im.rule_conditions > 0 ? (
+                              <span className="font-bold text-[#B7791F]">자동 규칙 {im.rule_conditions}개 · 해당 {im.rule_matched}명</span>
+                            ) : (
+                              <span>자동 규칙 없음</span>
+                            )}
+                            {im.include_count > 0 && <> · 명단 {im.include_count}명</>}
+                            {im.exclude_count > 0 && <> · 제외 {im.exclude_count}명</>}
+                            {im.linked > 0 && <> · 이 공고로 연결됨 {im.linked}명</>}
+                          </>
+                        ) : (
+                          <span className="text-[#CBD5E0]">현황 불러오는 중…</span>
+                        )}
+                      </div>
                     </div>
-                    {j.exposure === "targeted" ? (
+                    {ex === "targeted" ? (
                       <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] shrink-0">지정 노출</span>
                     ) : (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#A0AEC0] shrink-0" title="현재 전체 노출 — 배정은 저장되지만, 공고를 '지정 노출'로 바꿔야 배정이 효력을 가져요">전체 노출</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#A0AEC0] shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
                     )}
                   </button>
                 );
               })}
             </div>
+
+            {/* 원클릭 전환 + 규칙 2택 — 노출을 좁히는 결정은 여기서 명시적으로 고른다(조용한 소거 금지) */}
+            {exposureMode === "include" && exposureJobIds.size > 0 && (
+              <div className="px-5 py-3 border-t border-[#F1F4F8] bg-[#FAFCFF] space-y-3">
+                {exposureFlipJobs.length > 0 && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exposureMakeTargeted}
+                      onChange={(e) => setExposureMakeTargeted(e.target.checked)}
+                      className="mt-0.5 accent-[#1A202C]"
+                    />
+                    <span className="text-[12.5px] font-bold text-[#1A202C] leading-snug">
+                      전체 노출 공고 {exposureFlipJobs.length}개를 &lsquo;지정 노출&rsquo;로 함께 전환
+                      <span className="block text-[11.5px] font-semibold text-[#718096] mt-0.5">
+                        끄면 명단만 저장돼요 — 공고는 계속 인재풀 전원에게 보입니다(명단이 효력을 갖지 않아요).
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {exposureRuleJobs.length > 0 && (
+                  <div role="radiogroup" aria-label="저장된 자동 노출 규칙 처리">
+                    <div className="text-[12px] font-bold text-[#B7791F] mb-1.5">
+                      {exposureRuleJobs.length === 1 ? "이 공고엔" : `고른 공고 ${exposureRuleJobs.length}개엔`} 자동 노출 규칙이 저장돼 있어요 — 어떻게 할까요?
+                    </div>
+                    {([
+                      ["keep", `규칙을 두고 이 ${selectedRows.size}명을 추가`, "규칙 해당 인원 + 이 명단 모두에게 보여요"],
+                      ["clear", `규칙을 지우고 이 ${selectedRows.size}명만`, "규칙으로만 들어온 인원은 빠져요. 지운 규칙은 되돌릴 수 없어요."],
+                    ] as ["keep" | "clear", string, string][]).map(([k, label, desc]) => (
+                      <label key={k} className="flex items-start gap-2 cursor-pointer py-1">
+                        <input
+                          type="radio"
+                          name="exposure-rule-action"
+                          checked={exposureRuleAction === k}
+                          onChange={() => setExposureRuleAction(k)}
+                          className="mt-0.5 accent-[#1A202C]"
+                        />
+                        <span className="text-[12.5px] font-bold text-[#1A202C] leading-snug">
+                          {label}
+                          <span className="block text-[11.5px] font-semibold text-[#718096] mt-0.5">{desc}</span>
+                        </span>
+                      </label>
+                    ))}
+                    <div className="text-[11px] text-[#718096] mt-1 leading-snug">
+                      {exposureRuleJobs.map((j) => `${j.title} — ${(impactById.get(j.id)?.rule_labels ?? []).join(" / ")}`).join(" | ")}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="px-5 py-3.5 border-t border-[#E2E8F0] flex items-center justify-between gap-3">
-              <span className="text-[11.5px] text-[#A0AEC0]">노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.</span>
+              <span className="text-[11.5px] text-[#A0AEC0] leading-snug">
+                노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.
+                <br />명단 확인·개별 제외는 공고 수정 → &lsquo;노출 대상 명단&rsquo;에서 할 수 있어요.
+              </span>
               <button
                 onClick={assignExposure}
-                disabled={exposureSaving || exposureJobIds.size === 0}
+                disabled={
+                  exposureSaving ||
+                  exposureJobIds.size === 0 ||
+                  // 규칙 2택을 고르지 않으면 진행 불가 — 기본값으로 조용히 정하지 않는다.
+                  (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null)
+                }
                 className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 transition-colors"
               >
                 {exposureSaving ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
-                {exposureMode === "include" ? "노출 추가" : "노출 제외"} ({exposureJobIds.size})
+                {exposureMode === "exclude"
+                  ? "노출 제외"
+                  : exposureWillFlip
+                    ? "이 명단에게만 노출"
+                    : "노출 추가"}{" "}
+                ({exposureJobIds.size})
               </button>
             </div>
           </div>

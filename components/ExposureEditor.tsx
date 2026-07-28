@@ -248,6 +248,20 @@ export function ExposureEditor({
       {targeted && (
         <div className="rounded-xl border border-[#E2E8F0] bg-[#FAFCFF] p-3.5 space-y-3">
           <div className="text-[12.5px] font-bold text-[#4A5568]">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
+          {/* 역방향 동선 — 여기 있는 축(지역·가용성·차량…)으로 안 잡히는 대상은 인재풀에서 직접 골라야 한다.
+              축을 늘리는 대신 '사람을 골라 명단으로' 경로를 안내한다. 새 탭 — 수정 중 내용이 날아가지 않게. */}
+          <p className="text-[11px] text-[#718096] leading-snug">
+            여기 조건으로 못 가르는 대상이면{" "}
+            <a
+              href="/pipeline"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-[#2B6CB0] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
+            >
+              인재풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
+            </a>
+            을 쓰세요(새 탭에서 열려요 — 수정 중 내용은 유지됩니다).
+          </p>
 
           <div>
             <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">지역(시도)</div>
@@ -397,7 +411,8 @@ export function ExposureEditor({
               <RefreshCw size={12} /> 새로고침
             </button>
           </div>
-          <p className="text-[11px] text-[#A0AEC0] leading-snug">이 명단은 <b className="text-[#718096]">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-[#718096]">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는 파이프라인에서 인원 선택 → &lsquo;노출 대상으로 추가&rsquo;.</p>
+          <p className="text-[11px] text-[#A0AEC0] leading-snug">이 명단은 <b className="text-[#718096]">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-[#718096]">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는{" "}
+            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-[#2B6CB0] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">인재풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
           {rosterLoading ? (
             <div className="flex items-center gap-2 text-[12px] text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</div>
           ) : roster ? (

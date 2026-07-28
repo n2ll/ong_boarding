@@ -111,6 +111,26 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * 규칙을 사람이 읽는 조건 목록으로 풀어 쓴다.
+ *
+ * 왜 필요한가: '규칙을 지우고 이 명단만 노출'을 누르면 저장된 규칙은 **되돌릴 수 없이** 사라진다.
+ * 무엇을 지우는지 확인 화면에 그대로 보여줘야 조용한 소거가 아니게 된다.
+ * 서버 응답(impact)과 클라이언트 표시가 같은 문구를 쓰도록 여기에 둔다.
+ */
+export function describeRule(rule: ExposureRule | null): string[] {
+  if (!rule) return [];
+  const out: string[] = [];
+  if (rule.sido?.length) out.push(`지역 ${rule.sido.join("·")}`);
+  // 복합키(시도>시군구)는 '>'만 공백으로 — 구 이름만 남기면 어느 시도의 중구인지 알 수 없다.
+  if (rule.sigungu?.length) out.push(`시군구 ${rule.sigungu.map((k) => k.replace(">", " ")).join("·")}`);
+  if (rule.availability?.length) out.push(`가용성 ${rule.availability.join("·")}`);
+  if (rule.vehicle?.length) out.push(`차량 ${rule.vehicle.join("·")}`);
+  if (rule.suntopDone) out.push("선탑(동승) 완료자만");
+  if (rule.cohortMonths) out.push(`최근 ${rule.cohortMonths}개월 안에 지원`);
+  return out;
+}
+
 /** applicant가 규칙에 매칭되나. 규칙 없으면 false(자동 노출 없음). nowMs 주입 가능(테스트/일관성). */
 export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, nowMs: number = Date.now()): boolean {
   if (!rule) return false;
