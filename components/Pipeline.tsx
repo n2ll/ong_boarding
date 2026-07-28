@@ -598,6 +598,8 @@ export function Pipeline() {
       include_count: number;
       exclude_count: number;
       linked: number;
+      /** false면 맞춤 공고 링크에 애초에 안 뜨는 공고(external) — 노출 명단이 효력을 갖지 않는다. */
+      pull_exposed: boolean;
     }[];
   }>(
     exposurePickerOpen && activeJobs.length > 0
@@ -614,15 +616,22 @@ export function Pipeline() {
   useEffect(() => {
     if (!exposurePickerOpen) return;
     setExposureJobIds(new Set());
+    // 진입 버튼이 '이 명단에게만 노출'(추가)을 약속한다 — 직전에 쓴 '노출 제외'가 남아 있으면
+    // 고른 명단이 그대로 제외되어 의도의 정반대가 된다(제외는 규칙·명단보다 우선).
+    setExposureMode("include");
     setExposureMakeTargeted(true);
     setExposureRuleAction(null);
   }, [exposurePickerOpen]);
 
   const exposureSelectedJobs = activeJobs.filter((j) => exposureJobIds.has(j.id));
+  // 현황을 아직 못 읽은 공고 — 규칙이 있는지 알 수 없으므로 적용을 막는다(서버도 400으로 막는다).
+  const exposureUnknownJobs = exposureSelectedJobs.filter((j) => !impactById.has(j.id));
   // 전체 노출 → 지정 노출 전환 대상. 전환하면 '인재풀 전원'에게 보이던 공고가 명단에게만 보인다.
-  const exposureFlipJobs = exposureSelectedJobs.filter(
-    (j) => (impactById.get(j.id)?.exposure ?? j.exposure) !== "targeted"
-  );
+  // external(새로 모집)은 맞춤 공고 링크에 애초에 안 뜨므로 전환 대상이 아니다(명단도 효력 없음).
+  const exposureFlipJobs = exposureSelectedJobs.filter((j) => {
+    const im = impactById.get(j.id);
+    return (im?.exposure ?? j.exposure) !== "targeted" && (im?.pull_exposed ?? true);
+  });
   // 저장된 규칙이 있는 공고 — 규칙을 두면 '규칙 해당 인원 + 이 명단', 지우면 '이 명단만'.
   const exposureRuleJobs = exposureSelectedJobs.filter((j) => (impactById.get(j.id)?.rule_conditions ?? 0) > 0);
   const exposureWillFlip = exposureMode === "include" && exposureMakeTargeted && exposureFlipJobs.length > 0;
@@ -643,7 +652,9 @@ export function Pipeline() {
   // 지금 걸린 조건을 조건 바의 라벨 그대로 — 노출을 지정할 때 '어떤 조건으로 고른 명단인지'가
   // 명단 자체보다 중요하다(나중에 왜 이 사람들인지 되짚을 수 있어야 한다).
   const conditionLabels: string[] = [];
-  if (scopeBranch) conditionLabels.push(`지점 ${scopeBranch}`);
+  // 지점 스코프는 '지점 없는 라인'(도시락 등)을 항상 함께 포함한다(matchesBranchScope) —
+  // '지점 X'만 적으면 명단 절반 이상이 왜 들어왔는지 설명되지 않는다.
+  if (scopeBranch) conditionLabels.push(`지점 ${scopeBranch}(지점 없는 분 포함)`);
   if (statusFilter.size > 0) conditionLabels.push(`진행 단계 ${[...statusFilter].join("·")}`);
   if (regionFilter !== "all") conditionLabels.push(regionFilter === "capital" ? "수도권(서울·경기·인천)" : "서울");
   if (vehicleFilter !== "all")
@@ -666,6 +677,12 @@ export function Pipeline() {
     const applicantIds = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     const jobIds = Array.from(exposureJobIds);
     if (applicantIds.length === 0 || jobIds.length === 0 || exposureSaving) return;
+    // 현황을 못 읽은 공고가 섞여 있으면 규칙 유무를 알 수 없다 — 서버가 400으로 막기 전에 여기서 멈춘다.
+    if (exposureMode === "include" && exposureUnknownJobs.length > 0) {
+      toast.error("공고 노출 현황을 아직 못 읽었어요 — 잠시 뒤 다시 시도해 주세요.");
+      void mutateExposureImpact();
+      return;
+    }
     // 규칙이 있는 공고엔 2택을 반드시 고르게 한다(서버도 같은 가드 — code:'rule_action_required').
     if (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) {
       toast.error("자동 노출 규칙이 있는 공고예요 — 규칙을 둘지 지울지 먼저 골라 주세요.");
@@ -677,6 +694,14 @@ export function Pipeline() {
         lines.push(
           `'지정 노출'로 전환: ${exposureFlipJobs.map((j) => j.title).join(" / ")}`,
           `→ 지금은 인재풀 전원(${exposureImpact?.total_pool ?? "?"}명)의 맞춤 공고 링크에 보여요. 전환하면 노출 명단에게만 보입니다.`
+        );
+      }
+      // 규칙을 두는 선택이면 '명단에게만'이 아니다 — 규칙 해당 인원도 그대로 본다는 사실을 명시한다.
+      if (exposureMode === "include" && exposureRuleAction === "keep" && exposureRuleJobs.length > 0) {
+        lines.push(
+          `자동 노출 규칙은 그대로 둡니다 — ${exposureRuleJobs
+            .map((j) => `${j.title}(규칙 해당 ${impactById.get(j.id)?.rule_matched ?? 0}명)`)
+            .join(" / ")}도 함께 보게 됩니다.`
         );
       }
       if (exposureWillClear) {
@@ -698,7 +723,11 @@ export function Pipeline() {
       lines.push(`노출 명단에 넣을 인원: 지금 고른 ${applicantIds.length}명`);
       if (
         !(await confirm({
-          title: "이 명단에게만 보이도록 바꿀까요?",
+          // 규칙을 두면 '명단에게만'이 아니다 — 제목이 거짓이 되지 않게 분기한다.
+          title:
+            exposureRuleAction === "keep" && exposureRuleJobs.length > 0
+              ? "규칙 해당 인원 + 이 명단에게 보이도록 바꿀까요?"
+              : "이 명단에게만 보이도록 바꿀까요?",
           description: lines.join("\n"),
           confirmText: "적용",
           destructive: true,
@@ -718,7 +747,15 @@ export function Pipeline() {
           ...(exposureMode === "include"
             ? {
                 make_targeted: exposureMakeTargeted,
-                ...(exposureRuleJobs.length > 0 ? { rule_action: exposureRuleAction ?? "keep" } : {}),
+                // 화면이 '전체 노출'로 보여주고 확인까지 받은 공고만 전환 — 낡은 화면이 몰래 다른 공고를 좁히지 않게.
+                flip_job_ids: exposureMakeTargeted ? exposureFlipJobs.map((j) => j.id) : [],
+                ...(exposureRuleJobs.length > 0
+                  ? {
+                      rule_action: exposureRuleAction ?? "keep",
+                      // 규칙 삭제는 되돌릴 수 없다 — 확인 창에 나열한 공고 스냅샷을 서버가 대조한다.
+                      rule_jobs: exposureRuleJobs.map((j) => j.id),
+                    }
+                  : {}),
               }
             : {}),
         }),
@@ -726,8 +763,9 @@ export function Pipeline() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(json.error || "노출 배정에 실패했어요");
-        // 부분 적용(명단은 저장, 전환·규칙 삭제 실패)이면 화면을 실제 상태로 되돌린다.
-        if (json.partial) {
+        // 부분 적용(명단은 저장, 전환·규칙 삭제 실패) · 스냅샷 불일치 · 규칙 선택 필요 —
+        // 모두 화면이 실제 상태를 다시 읽어야 매니저가 무엇을 고를지 볼 수 있다.
+        if (json.partial || json.code === "rule_snapshot_stale" || json.code === "rule_action_required") {
           void mutateJobs();
           void mutateExposureImpact();
         }
@@ -736,11 +774,15 @@ export function Pipeline() {
       const nonTargeted: number[] = json.non_targeted ?? [];
       const flipped: number[] = json.flipped ?? [];
       const cleared: number[] = json.rule_cleared ?? [];
+      const skippedExternal: number[] = json.skipped_flip_external ?? [];
       toast.success(
         `${applicantIds.length}명을 공고 ${jobIds.length}개에 ${exposureMode === "include" ? "노출 대상으로 추가" : "노출 제외로 지정"}했어요` +
           (flipped.length > 0 ? ` · 공고 ${flipped.length}개를 '지정 노출'로 전환` : "") +
           (cleared.length > 0 ? ` · 규칙 ${cleared.length}개 삭제` : "") +
           (json.auto_included > 0 ? ` · 이미 연결된 ${json.auto_included}건 자동 포함` : "") +
+          (skippedExternal.length > 0
+            ? ` — ${skippedExternal.length}개 공고는 '새로 모집'이라 전환하지 않았어요(맞춤 공고 링크에 뜨지 않는 공고예요)`
+            : "") +
           (nonTargeted.length > 0
             ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
             : "")
@@ -2077,7 +2119,11 @@ export function Pipeline() {
                         )}
                       </div>
                     </div>
-                    {ex === "targeted" ? (
+                    {im && !im.pull_exposed ? (
+                      // external(새로 모집) — 맞춤 공고 링크에 애초에 안 뜬다. '전체 노출 = 전원에게 보임'은 거짓이고
+                      // 노출 명단도 효력이 없다(전환도 서버가 막는다).
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096] shrink-0" title="이 공고는 공개 게시 링크로만 유통돼요. 맞춤 공고 링크에는 뜨지 않아 노출 명단이 효력을 갖지 않습니다.">새로 모집 — 링크 미노출</span>
+                    ) : ex === "targeted" ? (
                       <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] shrink-0">지정 노출</span>
                     ) : (
                       <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#A0AEC0] shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
@@ -2148,14 +2194,17 @@ export function Pipeline() {
                   exposureSaving ||
                   exposureJobIds.size === 0 ||
                   // 규칙 2택을 고르지 않으면 진행 불가 — 기본값으로 조용히 정하지 않는다.
-                  (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null)
+                  (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) ||
+                  // 현황을 못 읽은 공고가 있으면 규칙 유무를 알 수 없다(서버 400으로 막히는데 화면엔 2택이 없다).
+                  (exposureMode === "include" && exposureUnknownJobs.length > 0)
                 }
                 className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 transition-colors"
               >
                 {exposureSaving ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
                 {exposureMode === "exclude"
                   ? "노출 제외"
-                  : exposureWillFlip
+                  : /* 규칙을 두면 '명단에게만'이 아니다(규칙 해당 인원도 함께 본다) — 버튼이 거짓말하지 않게. */
+                    exposureWillFlip && !(exposureRuleAction === "keep" && exposureRuleJobs.length > 0)
                     ? "이 명단에게만 노출"
                     : "노출 추가"}{" "}
                 ({exposureJobIds.size})

@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
-import { normalizeRule } from "@/lib/exposure";
+import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -213,6 +213,41 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     update.dropoff_lng = null;
   }
 
+  // 노출을 좁히는 저장이면, 파이프라인의 '이 명단에게만 노출'과 **같은 공식**으로 먼저 보호한다.
+  // 좁히는 경로가 둘(파이프라인 일괄 배정 · 이 수정 모달)인데 여기에만 보호가 없으면
+  // 이야기 중인 공고가 지원자 화면에서 사라진다(AI만 그 공고를 말하는 상태). 같은 개념 두 공식 금지.
+  let autoIncluded = 0;
+  if ("exposure" in update || "exposure_rule" in update) {
+    const { data: cur, error: curErr } = await supabase
+      .from("jobs")
+      .select("exposure, exposure_rule")
+      .eq("id", id)
+      .maybeSingle();
+    if (curErr) {
+      console.error("[jobs PATCH] exposure 현재값 조회 실패", curErr);
+      return NextResponse.json({ error: "공고 조회 실패 — 아무것도 바꾸지 않았습니다." }, { status: 500 });
+    }
+    const curRow = cur as { exposure?: string | null; exposure_rule?: unknown } | null;
+    const nextExposure = ("exposure" in update ? (update.exposure as string | null) : curRow?.exposure) ?? "all";
+    const nextRule = "exposure_rule" in update ? normalizeRule(update.exposure_rule) : normalizeRule(curRow?.exposure_rule);
+    // 좁아짐 = 결과가 지정 노출이고, (전체→지정 전환이거나 규칙이 바뀜). 규칙이 그대로면 추가 쓰기 없음.
+    const narrowing =
+      nextExposure === "targeted" &&
+      (curRow?.exposure !== "targeted" ||
+        JSON.stringify(nextRule) !== JSON.stringify(normalizeRule(curRow?.exposure_rule)));
+    if (narrowing) {
+      const { inserted, error: protectErr } = await writeExposureProtectRows(supabase, [id]);
+      if (protectErr) {
+        console.error("[jobs PATCH] exposure protect failed", protectErr);
+        return NextResponse.json(
+          { error: "이미 연결된 인원을 노출 명단에 남기지 못했어요 — 아무것도 바꾸지 않았습니다." },
+          { status: 500 }
+        );
+      }
+      autoIncluded = inserted;
+    }
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .update(update)
@@ -225,5 +260,5 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
   }
 
-  return NextResponse.json({ job: data });
+  return NextResponse.json({ job: data, auto_included: autoIncluded });
 }

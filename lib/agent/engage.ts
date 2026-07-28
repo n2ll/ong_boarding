@@ -340,6 +340,12 @@ export interface CampaignReplyJobPick {
 export interface CampaignReplyAmbiguous {
   jobId: null;
   ambiguousCount: number;
+  /**
+   * 열린 공고는 있는데 **전부 이 지원자의 노출 대상이 아니라** 보류(게이트 실패 fail-closed 포함).
+   * 공고를 명단으로 좁히면 생기는 새 상태다 — 답장한 사람이 자동 응대도 알림도 못 받는 침묵이 되므로
+   * 호출부가 반드시 사람에게 알려야 한다.
+   */
+  exposureBlockedCount?: number;
 }
 
 /**
@@ -382,6 +388,9 @@ export async function pickJobForCampaignReply(
     (j) => !isSystemJobTitle(j.title) && !isJobEffectivelyClosed(j.status, j.closes_at)
   );
 
+  // 게이트 전 열린 공고 수 — 게이트로 0개가 된 것과 '열린 공고 자체가 없다'를 구분해야 한다.
+  const openBeforeGate = jobs.length;
+
   // 지정 노출(targeted) 게이트 — 노출 대상이 아닌 공고로 자동 편입하면 AI 문자로 공고 상세가
   // 미대상에게 새는 우회 경로가 된다(pull 게이팅과 동일 판정). 판정 실패 시 targeted 전부 제외(fail-closed).
   if (jobs.some((j) => j.exposure === "targeted")) {
@@ -414,7 +423,13 @@ export async function pickJobForCampaignReply(
       jobs = jobs.filter((j) => j.exposure !== "targeted");
     }
   }
-  if (jobs.length === 0) return null; // 보낼 공고 자체가 없음 — 알릴 것도 없다
+  if (jobs.length === 0) {
+    // 열린 공고가 있는데 게이트에서 전부 빠졌다 = '이 사람이 모든 명단 밖'(또는 판정 실패 fail-closed).
+    // 자동 편입은 여전히 금지지만(미대상 공고 유출), 일할 수 있다고 답장한 사람이 무응답으로 남는
+    // 상태이므로 매니저에게 알려야 한다. 열린 공고가 0개일 때만 조용히 끝낸다.
+    if (openBeforeGate > 0) return { jobId: null, ambiguousCount: 0, exposureBlockedCount: openBeforeGate };
+    return null; // 보낼 공고 자체가 없음 — 알릴 것도 없다
+  }
 
   // ① 관심 클릭 이력(stage NULL 후보) — 지원자가 직접 고른 공고가 최우선(최신순)
   const { data: nullCands, error: candsErr } = await supabase

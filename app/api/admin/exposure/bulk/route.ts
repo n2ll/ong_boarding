@@ -2,7 +2,9 @@
  * J · 타겟 공고 노출 — 수동 오버라이드 일괄 배정.
  *
  * POST   : { job_ids: number[], applicant_ids: number[], mode: 'include'|'exclude',
- *            make_targeted?: boolean, rule_action?: 'keep'|'clear' }
+ *            make_targeted?: boolean, flip_job_ids?: number[], rule_action?: 'keep'|'clear', rule_jobs?: number[] }
+ *          flip_job_ids·rule_jobs는 **호출부가 확인 화면에서 실제로 보여준 공고 스냅샷**이다.
+ *          낡은 화면이 확인 없이 다른 공고를 좁히거나 규칙을 지우는 것을 막는다(전환은 교집합만, clear는 409).
  *          선택 인원 × 선택 공고 조합을 job_exposure_targets에 upsert(같은 조합은 mode 갱신).
  *          파이프라인에서 필터·세그먼트로 고른 인원을 여러 공고에 한 번에 배정하는 핵심 동선.
  *          make_targeted=true면 전체 노출 공고를 '지정 노출'로 전환까지 한 번에(원클릭).
@@ -17,7 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { isSystemJobTitle } from "@/lib/jobs";
-import { normalizeRule } from "@/lib/exposure";
+import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
 
 export const dynamic = "force-dynamic";
 
@@ -32,75 +34,17 @@ function parseIds(v: unknown): number[] {
 async function loadValidJobs(supabase: ReturnType<typeof createServiceClient>, jobIds: number[]) {
   const { data, error } = await supabase
     .from("jobs")
-    .select("id, title, exposure, exposure_rule")
+    .select("id, title, exposure, exposure_rule, recruit_mode")
     .in("id", jobIds);
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as { id: number; title: string; exposure: string | null; exposure_rule: unknown }[];
+  const rows = (data ?? []) as {
+    id: number;
+    title: string;
+    exposure: string | null;
+    exposure_rule: unknown;
+    recruit_mode: string | null;
+  }[];
   return rows.filter((j) => !isSystemJobTitle(j.title));
-}
-
-/**
- * 노출이 좁아지는 공고에서 **이미 이 공고로 연결된 분**(관심 클릭·후보)을 명단에 남긴다.
- *
- * 왜: 노출 게이팅은 후보 여부를 보지 않는다(pool GET·interest·notify 모두 isExposed만 본다).
- * 그래서 전체→지정 전환이나 규칙 삭제로 이분들이 규칙에서 빠지면, 이야기 중인 공고가 본인 화면에서
- * 그냥 사라진다 — AI는 그 공고를 응대하는데 지원자는 볼 수 없는 상태가 된다.
- * 이탈(abort)만 제외하고, stage가 NULL인 '관심만 누른 분'은 반드시 포함한다(가장 보호가 필요한 집단).
- * 이미 오버라이드 행이 있는 사람은 건드리지 않는다 — 매니저가 명시적으로 제외한 사람을 되살리면 안 된다.
- */
-async function protectLinkedApplicants(
-  supabase: ReturnType<typeof createServiceClient>,
-  jobIds: number[]
-): Promise<{ rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[]; error?: string }> {
-  if (jobIds.length === 0) return { rows: [] };
-
-  const linked = new Map<number, Set<number>>();
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from("job_candidates")
-      .select("job_id, applicant_id")
-      .in("job_id", jobIds)
-      .or("agent_stage.is.null,agent_stage.neq.abort")
-      .order("id", { ascending: true })
-      .range(from, from + 999);
-    if (error) return { rows: [], error: error.message };
-    const batch = data ?? [];
-    for (const r of batch) {
-      const row = r as { job_id: number; applicant_id: number | null };
-      if (typeof row.applicant_id !== "number") continue;
-      const s = linked.get(row.job_id) ?? new Set<number>();
-      s.add(row.applicant_id);
-      linked.set(row.job_id, s);
-    }
-    if (batch.length < 1000) break;
-  }
-  if (linked.size === 0) return { rows: [] };
-
-  const existing = new Set<string>();
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from("job_exposure_targets")
-      .select("job_id, applicant_id")
-      .in("job_id", jobIds)
-      .order("id", { ascending: true })
-      .range(from, from + 999);
-    if (error) return { rows: [], error: error.message };
-    const batch = data ?? [];
-    for (const r of batch) {
-      const row = r as { job_id: number; applicant_id: number };
-      existing.add(`${row.job_id}:${row.applicant_id}`);
-    }
-    if (batch.length < 1000) break;
-  }
-
-  const rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[] = [];
-  for (const [jobId, set] of linked) {
-    for (const applicantId of set) {
-      if (existing.has(`${jobId}:${applicantId}`)) continue;
-      rows.push({ job_id: jobId, applicant_id: applicantId, mode: "include", added_by: "auto_linked" });
-    }
-  }
-  return { rows };
 }
 
 export async function POST(req: NextRequest) {
@@ -172,38 +116,58 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "대상 지원자가 없습니다." }, { status: 400 });
   }
 
+  // 전환 대상 — 호출부가 확인 화면에서 **실제로 보여준 공고만**(flip_job_ids) 전환한다.
+  // 화면 캐시가 낡아 '이미 지정 노출'로 알고 있던 공고를 확인 없이 좁히면 안 된다
+  // (전환되지 않은 공고는 아래 non_targeted로 알려 재시도할 수 있다).
+  const flipAllowed = Array.isArray(body?.flip_job_ids) ? new Set(parseIds(body.flip_job_ids)) : null;
+  const flipJobs = makeTargeted
+    ? jobs.filter(
+        (j) =>
+          j.exposure !== "targeted" &&
+          (flipAllowed === null || flipAllowed.has(j.id)) &&
+          // external(새로 모집)은 맞춤 공고 링크에 애초에 뜨지 않는다(pool GET이 internal·both만 노출).
+          // targeted로 바꾸면 명단은 효력이 없고, 공개 지원 링크의 후보 연결만 끊긴다.
+          j.recruit_mode !== "external"
+      )
+    : [];
+  const skippedFlipExternal = makeTargeted
+    ? jobs.filter((j) => j.exposure !== "targeted" && j.recruit_mode === "external").map((j) => j.id)
+    : [];
+
+  // 'clear'는 되돌릴 수 없다. 화면이 본 스냅샷(rule_jobs)에 없는 공고의 규칙까지 지우면
+  // 확인 창에 한 줄도 안 뜬 규칙이 사라진다 — 아무것도 바꾸지 않고 막고 현황을 다시 읽게 한다.
+  if (ruleAction === "clear") {
+    const seen = new Set(parseIds(body?.rule_jobs));
+    const unseen = withRule.filter((j) => !seen.has(j.id));
+    if (unseen.length > 0) {
+      return NextResponse.json(
+        {
+          error: "화면을 연 뒤 규칙이 바뀐 공고가 있어요 — 현황을 다시 읽고 확인해 주세요.",
+          code: "rule_snapshot_stale",
+          jobs_with_rule: unseen.map((j) => ({ id: j.id, title: j.title })),
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // 노출이 좁아지는 공고 = 전체→지정 전환 대상 ∪ 규칙 삭제 대상.
-  const flipJobs = makeTargeted ? jobs.filter((j) => j.exposure !== "targeted") : [];
   const clearJobs = ruleAction === "clear" ? withRule : [];
   const narrowingIds = [...new Set([...flipJobs, ...clearJobs].map((j) => j.id))];
 
-  // 1) 이미 이 공고로 연결된 분을 먼저 명단에 남긴다 — 전환보다 **먼저** 써야 노출이 끊기는 순간이 없다.
+  // 1) 이미 이 공고로 연결된 분·안내 문자를 받은 분을 먼저 명단에 남긴다 —
+  //    전환보다 **먼저** 써야 노출이 끊기는 순간이 없다. 판정은 lib/exposure의 단일 공식.
   let autoIncluded = 0;
   if (narrowingIds.length > 0) {
-    const { rows: protectRows, error: protectErr } = await protectLinkedApplicants(supabase, narrowingIds);
+    const { inserted, error: protectErr } = await writeExposureProtectRows(supabase, narrowingIds);
     if (protectErr) {
       console.error("[exposure bulk] linked protect failed", protectErr);
       return NextResponse.json(
-        { error: "이미 연결된 인원 확인에 실패했어요 — 아무것도 바꾸지 않았습니다." },
+        { error: "이미 연결된 인원을 명단에 남기지 못했어요 — 아무것도 바꾸지 않았습니다." },
         { status: 500 }
       );
     }
-    if (protectRows.length > 0) {
-      // ignoreDuplicates — 기존 행은 그대로 둔다(매니저가 제외해둔 사람을 되살리지 않는다).
-      // 대상 계산과 insert 사이에 관심 클릭·다른 매니저 조작으로 행이 생기면 plain insert는 유니크 제약
-      // 위반으로 배치 전체가 죽는다. 그 경합에서 매니저를 막지 않도록 충돌은 무시한다.
-      const { error: protectInsErr } = await supabase
-        .from("job_exposure_targets")
-        .upsert(protectRows, { onConflict: "job_id,applicant_id", ignoreDuplicates: true });
-      if (protectInsErr) {
-        console.error("[exposure bulk] linked protect insert failed", protectInsErr);
-        return NextResponse.json(
-          { error: "이미 연결된 인원을 명단에 남기지 못했어요 — 아무것도 바꾸지 않았습니다." },
-          { status: 500 }
-        );
-      }
-      autoIncluded = protectRows.length;
-    }
+    autoIncluded = inserted;
   }
 
   const rows = jobs.flatMap((j) =>
@@ -250,6 +214,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 5) 전환·규칙 삭제 뒤 한 번 더 — 1)의 읽기와 전환 사이엔 아직 '전체 노출'이라 관심 클릭이
+  //    게이트를 통과해 후보 행 + AI 첫 문자가 생긴다. 전환 후에는 interest가 fail-closed라
+  //    새 행이 생기지 않으므로 이 2차 패스가 창을 닫는다. 실패해도 이미 적용된 변경은 유지(non-fatal).
+  if (narrowingIds.length > 0) {
+    const { inserted: late, error: lateErr } = await writeExposureProtectRows(supabase, narrowingIds);
+    if (lateErr) console.error("[exposure bulk] late protect failed", lateErr);
+    else autoIncluded += late;
+  }
+
   return NextResponse.json({
     success: true,
     mode,
@@ -260,6 +233,8 @@ export async function POST(req: NextRequest) {
       .filter((j) => j.exposure !== "targeted" && !flippedIds.includes(j.id))
       .map((j) => j.id),
     flipped: flippedIds,
+    // 전환하지 않은 external 공고 — 조용한 부분 성공으로 보이지 않게 호출부가 알린다.
+    skipped_flip_external: skippedFlipExternal,
     rule_cleared: clearedIds,
     auto_included: autoIncluded,
     // 걸러진 것들 — 조용한 부분 성공으로 보이지 않게 명시(호출부가 안내 표시).

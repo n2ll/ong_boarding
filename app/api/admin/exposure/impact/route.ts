@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   const { data: jobRows, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, exposure, exposure_rule")
+    .select("id, title, exposure, exposure_rule, recruit_mode")
     .in("id", ids);
   if (jobErr) {
     console.error("[exposure impact] jobs load failed", jobErr);
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
   }
   const jobs = (jobRows ?? []).filter(
     (j) => !isSystemJobTitle((j as { title: string }).title)
-  ) as { id: number; title: string; exposure: string | null; exposure_rule: unknown }[];
+  ) as { id: number; title: string; exposure: string | null; exposure_rule: unknown; recruit_mode: string | null }[];
   if (jobs.length === 0) {
     return NextResponse.json({ error: "대상 실공고가 없습니다." }, { status: 400 });
   }
@@ -122,6 +122,9 @@ export async function GET(req: NextRequest) {
         id: j.id,
         title: j.title,
         exposure: j.exposure === "targeted" ? "targeted" : "all",
+        // 맞춤 공고 링크에 실제로 뜨는 공고인가 — pool GET은 recruit_mode in ('internal','both')만 노출한다.
+        // false면 '전체 노출 = 인재풀 전원에게 보임'이 거짓이고, 노출 명단도 효력이 없다.
+        pull_exposed: j.recruit_mode === "internal" || j.recruit_mode === "both",
         rule_conditions: labels.length,
         rule_labels: labels,
         // 지금 규칙에 해당하는 인원 — '규칙 두고 추가'와 '규칙 지우고 명단만'의 차이를 숫자로 보여준다.

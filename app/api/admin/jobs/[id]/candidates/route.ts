@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { haversineKm } from "@/lib/kakao-geocode";
+import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const jobId = Number(params.id);
@@ -103,5 +104,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "후보 추가 실패" }, { status: 500 });
   }
 
-  return NextResponse.json({ added: data?.length ?? 0, candidates: data ?? [] });
+  // 지정 노출 공고면 방금 붙인 후보를 노출 명단에 남긴다 — 좁히는 시점의 보호는 그 순간의 명단만
+  // 지키므로, 전환 뒤 추가한 후보는 '지원자는 못 보는데 AI는 말하는' 상태가 된다.
+  let exposureIncluded = 0;
+  try {
+    exposureIncluded = await ensureExposureIncludeForLinked(supabase, jobId, ids);
+  } catch (e) {
+    console.error("[candidates POST] exposure include failed", e);
+    return NextResponse.json(
+      {
+        error:
+          "후보는 추가했지만 노출 명단에 남기지 못했어요 — 파이프라인 '이 명단에게만 노출'로 이분들을 추가해 주세요.",
+        added: data?.length ?? 0,
+        partial: true,
+      },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ added: data?.length ?? 0, candidates: data ?? [], exposure_included: exposureIncluded });
 }

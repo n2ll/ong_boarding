@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
+import { useConfirm } from "./ConfirmDialog";
 import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/exposure";
 
 /**
@@ -68,6 +69,10 @@ interface RosterPerson {
   id: number;
   name: string | null;
   via: "rule" | "include" | "both";
+  /** 이 공고로 이야기 중(관심·후보, 이탈 제외) — 명단에서 빼면 본인 화면에서 공고가 사라진다. */
+  linked?: boolean;
+  /** 노출을 좁힐 때 시스템이 자동으로 남긴 행(added_by='auto_linked') — 매니저가 고른 인원과 구분. */
+  auto?: boolean;
 }
 interface RosterResp {
   exposure: string;
@@ -107,6 +112,7 @@ export function ExposureEditor({
   onChange: (next: ExposureDraft) => void;
   jobId?: number;
 }) {
+  const confirm = useConfirm();
   const targeted = value.exposure === "targeted";
 
   // 규칙 빌더 옵션 — 실데이터 distinct 값(지정 노출을 켰을 때만 로드)
@@ -182,8 +188,25 @@ export function ExposureEditor({
 
   // 제외의 두 갈래: 순수 수동 include(via='include')는 행 삭제(DELETE)로 되돌린다 — exclude로
   // 덮어쓰면 include 이력이 소실돼 복원이 불가능해진다. 규칙 매칭(rule/both)은 exclude 오버라이드.
-  const overrideCall = async (applicantId: number, action: "exclude" | "remove-include" | "restore") => {
+  const overrideCall = async (
+    applicantId: number,
+    action: "exclude" | "remove-include" | "restore",
+    linked = false
+  ) => {
     if (!jobId || rosterBusy) return;
+    // 이야기 중인 분을 빼는 건 되돌리기 어려운 결과(본인 화면에서 공고가 사라지는데 AI 응대는 계속된다)
+    // → 한 단계 확인. 확정 뉘앙스 없이 사실만 말한다.
+    if (linked && action !== "restore") {
+      const ok = await confirm({
+        title: "이 분은 지금 이 공고로 이야기 중이에요",
+        description:
+          "명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라져요. AI 응대는 계속되기 때문에, 지원자는 볼 수 없는 공고를 이야기하는 상태가 됩니다." +
+          (action === "remove-include" ? "\n이 화면에서는 되돌릴 수 없어요(인재풀에서 다시 추가해야 합니다)." : ""),
+        confirmText: "그래도 빼기",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     setRosterBusy(true);
     try {
       const isDelete = action !== "exclude";
@@ -260,7 +283,7 @@ export function ExposureEditor({
             >
               인재풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
             </a>
-            을 쓰세요(새 탭에서 열려요 — 수정 중 내용은 유지됩니다).
+            을 쓰세요. 새 탭에서 열려요 — <b className="text-[#B7791F]">거기서 노출을 바꾸면 이 창의 노출 값은 옛 값이 됩니다.</b> 돌아와서는 이 창을 닫고 다시 열어 주세요.
           </p>
 
           <div>
@@ -424,12 +447,18 @@ export function ExposureEditor({
                   {roster.effective.map((p) => (
                     <div key={p.id} className="flex items-center gap-2 py-1.5 text-[12.5px]">
                       <span className="font-bold text-[#1A202C]">{p.name ?? `#${p.id}`}</span>
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{VIA_LABEL[p.via]}</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
+                      {/* 이야기 중인 분을 '수동 추가'와 같게 보여주면, 클릭 한 번에 보호가 사라진다 */}
+                      {p.linked && (
+                        <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFAF0] text-[#C05621] border border-[#FBD38D]" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
+                          이 공고로 이야기 중
+                        </span>
+                      )}
                       <button
                         type="button"
-                        onClick={() => overrideCall(p.id, p.via === "include" ? "remove-include" : "exclude")}
+                        onClick={() => overrideCall(p.id, p.via === "include" ? "remove-include" : "exclude", p.linked === true)}
                         disabled={rosterBusy}
-                        title={p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
+                        title={p.linked ? "이 분은 이 공고로 이야기 중이에요 — 빼면 본인 화면에서 공고가 사라지고 AI 응대는 계속됩니다(확인 후 적용)" : p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
                         className="ml-auto flex items-center gap-1 text-[11px] font-bold text-[#C53030] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
                       >
                         <UserX size={11} /> 제외

@@ -280,6 +280,13 @@ interface EditJobForm {
   pickupAddress: string;
   dropoffAddress: string;
   exposureDraft: ExposureDraft;
+  /**
+   * 모달을 열던 시점의 노출 값 — 저장 시 '내가 노출을 건드렸는지' 판정용.
+   * 파이프라인 '이 명단에게만 노출'이 같은 두 컬럼(exposure·exposure_rule)을 쓰기 때문에,
+   * 노출을 만지지도 않은 저장이 그 결과를 통째로 되돌리는 lost update가 생긴다
+   * (전환이 취소되고, 되돌릴 수 없다며 지운 규칙이 부활한다). 안 만졌으면 아예 전송하지 않는다.
+   */
+  exposureBaseline: ExposureDraft;
 }
 
 // ── 수정 모달 접이식 섹션 요약 ──
@@ -1173,7 +1180,7 @@ export function Jobs() {
 
   const openEdit = useCallback(async (id: string) => {
     setEditDroppedBranch(null);
-    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
@@ -1207,6 +1214,11 @@ export function Jobs() {
         pickupAddress: j.pickup_address ?? "",
         dropoffAddress: j.dropoff_address ?? "",
         exposureDraft: {
+          exposure: j.exposure === "targeted" ? "targeted" : "all",
+          rule: ruleToDraft(j.exposure_rule),
+        },
+        // 같은 값을 기준선으로 보관 — 저장 시 이 값과 같으면 노출 필드를 전송하지 않는다.
+        exposureBaseline: {
           exposure: j.exposure === "targeted" ? "targeted" : "all",
           rule: ruleToDraft(j.exposure_rule),
         },
@@ -1246,6 +1258,38 @@ export function Jobs() {
       });
       if (!ok) return;
     }
+    // 노출을 이 창에서 실제로 바꿨는지 — 안 바꿨으면 노출 필드를 아예 보내지 않는다.
+    // 파이프라인 '이 명단에게만 노출'이 같은 컬럼을 쓰기 때문에, 급여만 고친 저장이 방금 좁힌 노출을
+    // 되돌리거나(전환 취소) 되돌릴 수 없다며 지운 규칙을 부활시키는 사고가 난다.
+    const exposureChanged =
+      editForm.exposureDraft.exposure !== editForm.exposureBaseline.exposure ||
+      JSON.stringify(draftToRule(editForm.exposureDraft.rule)) !==
+        JSON.stringify(draftToRule(editForm.exposureBaseline.rule));
+    // 바꿨다면, 그 사이 다른 화면(파이프라인)에서 노출이 바뀌었는지 확인하고 덮어쓸지 묻는다.
+    if (exposureChanged) {
+      try {
+        const cur = await fetch(`/api/admin/jobs/${editForm.id}`).then((r) => (r.ok ? r.json() : null));
+        const j = cur?.job as { exposure?: string | null; exposure_rule?: unknown } | undefined;
+        if (j) {
+          const serverExposure = j.exposure === "targeted" ? "targeted" : "all";
+          const serverRule = JSON.stringify(draftToRule(ruleToDraft(j.exposure_rule)));
+          const baseRule = JSON.stringify(draftToRule(editForm.exposureBaseline.rule));
+          if (serverExposure !== editForm.exposureBaseline.exposure || serverRule !== baseRule) {
+            const ok = await confirm({
+              title: "이 공고의 노출 설정이 방금 다른 화면에서 바뀌었어요",
+              description: `지금 서버: ${serverExposure === "targeted" ? "지정 노출" : "전체 노출"}${
+                serverRule === "null" ? " · 자동 규칙 없음" : " · 자동 규칙 있음"
+              }\n이 창의 값으로 덮어쓰면 그 변경(노출 명단 전환·규칙)이 사라질 수 있어요.`,
+              confirmText: "이 창 값으로 덮어쓰기",
+              destructive: true,
+            });
+            if (!ok) return;
+          }
+        }
+      } catch {
+        /* 확인 조회 실패는 저장을 막지 않는다 — 아래 저장이 실패하면 그때 알린다 */
+      }
+    }
     setEditSaving(true);
     try {
       const res = await fetch(`/api/admin/jobs/${editForm.id}`, {
@@ -1268,8 +1312,13 @@ export function Jobs() {
           pay_amount: editForm.payType && editForm.payType !== "협의" && editForm.payAmount !== "" ? Number(editForm.payAmount) : null,
           ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
-          exposure: editForm.exposureDraft.exposure,
-          exposure_rule: draftToRule(editForm.exposureDraft.rule),
+          // 노출은 이 창에서 바꿨을 때만 전송 — 서버는 본문에 없는 필드를 건드리지 않는다.
+          ...(exposureChanged
+            ? {
+                exposure: editForm.exposureDraft.exposure,
+                exposure_rule: draftToRule(editForm.exposureDraft.rule),
+              }
+            : {}),
           work_period: editForm.workPeriod || null,
           closes_at: editForm.closesAt ? new Date(editForm.closesAt).toISOString() : null,
           slot: editForm.slot || null,
@@ -1285,7 +1334,13 @@ export function Jobs() {
       }
       // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
       const geoNote = geocodeResultNote(json.job, editForm.pickupAddress, editForm.dropoffAddress);
-      toast.success("공고를 수정했어요.", geoNote ? { description: geoNote } : undefined);
+      // 노출을 좁혔다면 서버가 이미 연결된 인원을 명단에 남긴다 — 그 사실을 알려준다(확정·배정이 아니다).
+      const autoNote =
+        typeof json.auto_included === "number" && json.auto_included > 0
+          ? `이미 이 공고로 연결된 ${json.auto_included}명은 노출 명단에 남겼어요(직접 제외한 분은 그대로 제외).`
+          : "";
+      const desc = [geoNote, autoNote].filter(Boolean).join(" ");
+      toast.success("공고를 수정했어요.", desc ? { description: desc } : undefined);
       setEditForm(null);
       await loadJobs();
     } catch {

@@ -234,6 +234,151 @@ export async function fetchSuntopDoneSet(supabase: SupabaseClient): Promise<Set<
 }
 
 /**
+ * **노출이 좁아질 때 명단에 남겨야 하는 사람**을 계산한다 — 노출 축소의 단일 공식.
+ *
+ * 왜: 노출 판정(isExposed)은 후보 여부도, 그 공고 문자를 받았는지도 보지 않는다.
+ * 그래서 전체→지정 전환이나 규칙 축소로 이분들이 규칙에서 빠지면
+ *  - 이야기 중인 공고가 본인 화면에서 사라지고(AI만 그 공고를 말하는 상태),
+ *  - '새 배송 건이 올라왔어요! {공고명}' 문자를 받은 분이 링크를 열면 그 공고가 없다.
+ * 좁히는 경로가 둘(파이프라인 일괄 배정 · 공고 수정 모달 저장)이라 여기 한 곳에 둔다.
+ *
+ * 두 소스:
+ *  1) job_candidates — 이탈(abort)만 제외. stage가 NULL인 '관심만 누른 분'을 반드시 포함한다.
+ *  2) pool_events ping_sent(purpose='new_job', meta.job_id=이 공고) — 그 공고 이름이 적힌 안내 문자 수신자.
+ *     공고 무관 캠페인(purpose='campaign')은 job_id가 없어 걸리지 않는다(명단이 부풀지 않는다).
+ *
+ * 이미 오버라이드 행이 있는 사람은 건너뛴다 — 매니저가 명시적으로 제외한 사람을 되살리면 안 된다.
+ */
+export async function collectExposureProtectRows(
+  supabase: SupabaseClient,
+  jobIds: number[]
+): Promise<{ rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[]; error?: string }> {
+  if (jobIds.length === 0) return { rows: [] };
+
+  const linked = new Map<number, Set<number>>();
+  const add = (jobId: number, applicantId: number) => {
+    const s = linked.get(jobId) ?? new Set<number>();
+    s.add(applicantId);
+    linked.set(jobId, s);
+  };
+
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("job_candidates")
+      .select("job_id, applicant_id")
+      .in("job_id", jobIds)
+      .or("agent_stage.is.null,agent_stage.neq.abort")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) return { rows: [], error: error.message };
+    const batch = data ?? [];
+    for (const r of batch) {
+      const row = r as { job_id: number; applicant_id: number | null };
+      if (typeof row.applicant_id === "number") add(row.job_id, row.applicant_id);
+    }
+    if (batch.length < 1000) break;
+  }
+
+  // 안내 문자 수신자. 공고 필터는 **JS에서** 한다 — meta의 job_id가 숫자/문자열 어느 쪽으로도
+  // 들어올 수 있고, jsonb 경로를 in-필터로 쓰면 문법이 조용히 어긋나 0건이 될 위험이 있다.
+  // 보호가 조용히 사라지는 것이 최악이라, 대상은 넓게 읽고 판정은 코드로 확실히 한다(건수는 안내 상한 200/공고로 작다).
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("pool_events")
+      .select("applicant_id, meta")
+      .eq("event_type", "ping_sent")
+      .eq("meta->>purpose", "new_job")
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) return { rows: [], error: error.message };
+    const batch = data ?? [];
+    for (const r of batch) {
+      const row = r as { applicant_id: number | null; meta: { job_id?: number | string } | null };
+      const jid = Number(row.meta?.job_id);
+      if (typeof row.applicant_id === "number" && jobIds.includes(jid)) add(jid, row.applicant_id);
+    }
+    if (batch.length < 1000) break;
+  }
+
+  if (linked.size === 0) return { rows: [] };
+
+  const existing = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("job_exposure_targets")
+      .select("job_id, applicant_id")
+      .in("job_id", jobIds)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) return { rows: [], error: error.message };
+    const batch = data ?? [];
+    for (const r of batch) {
+      const row = r as { job_id: number; applicant_id: number };
+      existing.add(`${row.job_id}:${row.applicant_id}`);
+    }
+    if (batch.length < 1000) break;
+  }
+
+  const rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[] = [];
+  for (const [jobId, set] of linked) {
+    for (const applicantId of set) {
+      if (existing.has(`${jobId}:${applicantId}`)) continue;
+      rows.push({ job_id: jobId, applicant_id: applicantId, mode: "include", added_by: "auto_linked" });
+    }
+  }
+  return { rows };
+}
+
+/** 위 계산 + 쓰기까지. 기존 행은 보존(ignoreDuplicates) — 대상 계산과 쓰기 사이의 경합에서도 죽지 않는다. */
+export async function writeExposureProtectRows(
+  supabase: SupabaseClient,
+  jobIds: number[]
+): Promise<{ inserted: number; error?: string }> {
+  const { rows, error } = await collectExposureProtectRows(supabase, jobIds);
+  if (error) return { inserted: 0, error };
+  if (rows.length === 0) return { inserted: 0 };
+  const { error: insErr } = await supabase
+    .from("job_exposure_targets")
+    .upsert(rows, { onConflict: "job_id,applicant_id", ignoreDuplicates: true });
+  if (insErr) return { inserted: 0, error: insErr.message };
+  return { inserted: rows.length };
+}
+
+/**
+ * 지정 노출 공고에 후보를 새로 붙일 때 그 인원을 노출 명단에 남긴다.
+ *
+ * 좁히는 시점의 보호(위)는 그 순간의 명단만 지킨다 — **전환 뒤에** 매니저가 후보를 추가하면
+ * 다시 '지원자는 못 보는데 AI는 말하는' 상태가 된다. 그래서 후보를 만드는 쓰기 지점에서도 보장한다.
+ * 전체 노출 공고는 그대로 전원에게 보이므로 아무것도 하지 않는다.
+ */
+export async function ensureExposureIncludeForLinked(
+  supabase: SupabaseClient,
+  jobId: number,
+  applicantIds: number[]
+): Promise<number> {
+  if (applicantIds.length === 0) return 0;
+  const { data: job, error } = await supabase
+    .from("jobs")
+    .select("exposure")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw new Error(`[exposure] linked include job load failed: ${error.message}`);
+  if ((job as { exposure?: string } | null)?.exposure !== "targeted") return 0;
+  const rows = applicantIds.map((aid) => ({
+    job_id: jobId,
+    applicant_id: aid,
+    mode: "include",
+    added_by: "auto_linked",
+  }));
+  // 기존 행 보존 — 매니저가 제외해둔 사람을 후보 추가로 되살리지 않는다.
+  const { error: insErr } = await supabase
+    .from("job_exposure_targets")
+    .upsert(rows, { onConflict: "job_id,applicant_id", ignoreDuplicates: true });
+  if (insErr) throw new Error(`[exposure] linked include failed: ${insErr.message}`);
+  return rows.length;
+}
+
+/**
  * 규칙 평가용 지원자 전량 로드(id·name·sido·availability·applied_at·created_at + suntopDone 주입).
  * 페이지네이션·정렬 필수(PostgREST 행 상한/무정렬 누락 방지 — tms-sync 패턴).
  */
