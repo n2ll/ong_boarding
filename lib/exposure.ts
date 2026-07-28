@@ -8,10 +8,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * 전체 노출(all) 공고는 이 판정을 거치지 않고 항상 노출(호출부에서 분기).
  */
 
-// 자동 노출 규칙 — 파이프라인 필터 스키마 재사용(지역·가용성·선탑완료·코호트).
+// 자동 노출 규칙 — 파이프라인 필터 스키마 재사용(지역·가용성·선탑완료·코호트) + 차량.
 export interface ExposureRule {
   sido?: string[]; // 시도(지역) 화이트리스트
   availability?: string[]; // 가용성 값 화이트리스트
+  /**
+   * 차량 보유 화이트리스트 — 정규화 값('있음' | '없음' | '미확인').
+   * 공고 요건과 직결되는 축인데 규칙에 없어서, 차량이 필요한 라인이 도보만 가능한 분에게도 그대로 노출됐다.
+   * (실데이터 645명 전원 own_vehicle 값 보유: 있음 389 · 없음 165 · 미확인 91 — 가장 잘 채워진 축이다.)
+   */
+  vehicle?: string[];
   suntopDone?: boolean; // 선탑 완료자만
   cohortMonths?: number; // 원지원(없으면 등록)일이 최근 N개월 이내
 }
@@ -21,10 +27,28 @@ export interface ExposureApplicant {
   id: number;
   sido: string | null;
   availability: string | null;
+  /** 자유 입력 값이라 정규화해서 비교한다(있음/없음/미확인). 호출부가 반드시 함께 넘길 것 — 없으면 차량 규칙이 fail-closed. */
+  own_vehicle?: string | null;
   applied_at: string | null;
   created_at: string | null;
   suntopDone?: boolean; // pool_events(suntop_done)에서 계산해 주입
 }
+
+/**
+ * 차량 보유 3값 정규화 — **파이프라인 목록의 차량 판정(vehicleClassOf)과 같은 규칙**이어야 한다.
+ * 매니저가 파이프라인에서 '차량 보유'로 고른 집합과 노출 규칙 '있음'이 다른 사람을 가리키면 안 된다.
+ * 그래서 느슨한 패턴 매칭을 쓰지 않는다 — 자유 입력('업무용 차량 있음' 같은 값)은 '미확인'으로 남기고
+ * 사람이 값을 정리하게 한다(잘못 '없음'으로 분류해 조용히 노출을 끊는 것보다 안전).
+ */
+export function normalizeVehicleOwned(raw: string | null | undefined): "있음" | "없음" | "미확인" {
+  const v = (raw ?? "").trim();
+  if (v === "있음" || v === "네" || v === "예") return "있음";
+  if (v === "없음" || v === "아니오") return "없음";
+  return "미확인";
+}
+
+/** 노출 규칙에서 고를 수 있는 차량 값 — UI 칩과 서버 정규화가 같은 집합을 쓴다. */
+export const VEHICLE_RULE_VALUES = ["있음", "없음", "미확인"] as const;
 
 export type ExposureMode = "include" | "exclude";
 
@@ -42,6 +66,9 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
   const availability = strArr(r.availability);
   if (sido && sido.length) out.sido = sido;
   if (availability && availability.length) out.availability = availability;
+  // 차량 — 허용 3값만 남긴다(자유 문자열이 규칙에 들어와 아무도 매칭되지 않는 상태 방지).
+  const vehicle = strArr(r.vehicle)?.filter((v) => (VEHICLE_RULE_VALUES as readonly string[]).includes(v));
+  if (vehicle && vehicle.length) out.vehicle = vehicle;
   if (r.suntopDone === true) out.suntopDone = true;
   if (typeof r.cohortMonths === "number" && r.cohortMonths > 0 && r.cohortMonths <= 120) {
     out.cohortMonths = Math.floor(r.cohortMonths);
@@ -57,6 +84,10 @@ export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, now
   }
   if (rule.availability && rule.availability.length) {
     if (!a.availability || !rule.availability.includes(a.availability)) return false;
+  }
+  if (rule.vehicle && rule.vehicle.length) {
+    // own_vehicle을 안 넘긴 호출부에서는 '미확인'으로 본다 — 조용히 전원 통과시키지 않는다(fail-closed 방향).
+    if (!rule.vehicle.includes(normalizeVehicleOwned(a.own_vehicle))) return false;
   }
   if (rule.suntopDone && !a.suntopDone) return false;
   if (typeof rule.cohortMonths === "number" && rule.cohortMonths > 0) {
@@ -154,7 +185,7 @@ export async function fetchApplicantsForExposure(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("id, name, sido, availability, applied_at, created_at")
+      .select("id, name, sido, availability, own_vehicle, applied_at, created_at")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
@@ -165,6 +196,7 @@ export async function fetchApplicantsForExposure(
         name: string | null;
         sido: string | null;
         availability: string | null;
+        own_vehicle: string | null;
         applied_at: string | null;
         created_at: string | null;
       };

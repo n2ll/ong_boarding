@@ -5,11 +5,12 @@ import useSWR from "swr";
 import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
+import { VEHICLE_RULE_VALUES } from "@/lib/exposure";
 
 /**
  * J · 타겟 공고 노출 편집기 — 공고 생성 폼·수정 모달 공용.
  *
- * - 노출 방식 토글(전체/지정) + 규칙 빌더(지역·가용성·선탑완료·등록 시점) + "해당 N명" 실시간 미리보기.
+ * - 노출 방식 토글(전체/지정) + 규칙 빌더(지역·가용성·차량·선탑완료·등록 시점) + "해당 N명" 실시간 미리보기.
  * - jobId가 있으면(수정 모달) 서버에 '저장된' 기준의 유효 노출 명단 + 개별 제외/복원까지 제공.
  * - 값 저장은 부모가 한다(jobs POST/PATCH의 exposure·exposure_rule) — 이 컴포넌트는 편집·미리보기 담당.
  * - 확정 뉘앙스 금지: '노출 대상'은 공고를 보여줄 사람일 뿐, 배정·확정이 아니다.
@@ -18,6 +19,8 @@ import { jsonFetcher } from "@/lib/swr";
 export interface ExposureRuleDraft {
   sido: string[];
   availability: string[];
+  /** 차량 보유('있음'·'없음'·'미확인') — 공고 요건과 직결되는 축. 비우면 차량과 무관하게 노출. */
+  vehicle: string[];
   suntopDone: boolean;
   cohortMonths: number | "";
 }
@@ -29,7 +32,7 @@ export interface ExposureDraft {
 
 export const EMPTY_EXPOSURE: ExposureDraft = {
   exposure: "all",
-  rule: { sido: [], availability: [], suntopDone: false, cohortMonths: "" },
+  rule: { sido: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
 };
 
 /** 서버(jsonb)의 exposure_rule → 편집용 draft. */
@@ -40,6 +43,7 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
     availability: Array.isArray(r.availability)
       ? r.availability.filter((v): v is string => typeof v === "string")
       : [],
+    vehicle: Array.isArray(r.vehicle) ? r.vehicle.filter((v): v is string => typeof v === "string") : [],
     suntopDone: r.suntopDone === true,
     cohortMonths: typeof r.cohortMonths === "number" && r.cohortMonths > 0 ? r.cohortMonths : "",
   };
@@ -50,6 +54,7 @@ export function draftToRule(d: ExposureRuleDraft): Record<string, unknown> | nul
   const out: Record<string, unknown> = {};
   if (d.sido.length) out.sido = d.sido;
   if (d.availability.length) out.availability = d.availability;
+  if (d.vehicle.length) out.vehicle = d.vehicle;
   if (d.suntopDone) out.suntopDone = true;
   if (typeof d.cohortMonths === "number" && d.cohortMonths > 0) out.cohortMonths = d.cohortMonths;
   return Object.keys(out).length ? out : null;
@@ -252,6 +257,17 @@ export function ExposureEditor({
                 <Chip key={s} label={s} on={value.rule.availability.includes(s)} onClick={() => setRule({ availability: toggleIn(value.rule.availability, s) })} />
               ))}
               {options && options.availabilities.length === 0 && <span className="text-[12px] text-[#A0AEC0]">가용성 데이터 없음</span>}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">
+              차량 <span className="font-semibold text-[#CBD5E0]">— 차량이 필요한 라인이면 '있음'만 골라 주세요</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {VEHICLE_RULE_VALUES.map((s) => (
+                <Chip key={s} label={s} on={value.rule.vehicle.includes(s)} onClick={() => setRule({ vehicle: toggleIn(value.rule.vehicle, s) })} />
+              ))}
             </div>
           </div>
 

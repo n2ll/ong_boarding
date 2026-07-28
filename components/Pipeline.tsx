@@ -12,6 +12,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
+import { normalizeVehicleOwned } from "@/lib/exposure";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
@@ -232,12 +233,11 @@ function vehicleTag(a: Applicant): string {
   return "도보";
 }
 
-// 자차 3값 판정 — own_vehicle 원문 기준. 빈값/미지정/null은 '미확인'(발송 판단 시 누수 방지).
+// 자차 3값 판정 — 노출 규칙의 차량 축과 **같은 함수**를 쓴다(lib/exposure.normalizeVehicleOwned).
+// 파이프라인에서 '차량 보유'로 고른 집합과 공고 노출 규칙 '있음'이 다른 사람을 가리키면 안 된다.
 function vehicleClassOf(a: Applicant): VehicleClass {
-  const v = a.own_vehicle?.trim();
-  if (v === "있음" || v === "네" || v === "예") return "확정";
-  if (v === "없음" || v === "아니오") return "도보";
-  return "미확인";
+  const n = normalizeVehicleOwned(a.own_vehicle);
+  return n === "있음" ? "확정" : n === "없음" ? "도보" : "미확인";
 }
 
 // 수도권 판별 — sido 원문("서울특별시"/"경기도"/"인천광역시" 등) 접두 매칭

@@ -294,7 +294,8 @@ function basicSummary(f: EditJobForm, clientLabel?: string | null, branchLabel?:
 function exposureSummary(f: EditJobForm): string {
   if (f.exposureDraft.exposure !== "targeted") return "전체 인재풀에 보여줘요";
   const r = f.exposureDraft.rule;
-  const conds = [r.sido.length > 0, r.availability.length > 0, r.suntopDone, r.cohortMonths !== ""].filter(Boolean).length;
+  const rule = draftToRule(r);
+  const conds = rule ? Object.keys(rule).length : 0;
   return conds > 0 ? `지정 대상에게만 · 조건 ${conds}개` : "지정 대상에게만";
 }
 function workSummary(f: EditJobForm): string {
