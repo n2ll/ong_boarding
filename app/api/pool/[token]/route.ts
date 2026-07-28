@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import {
   isExposed,
+  normalizeVehicleOwned,
   normalizeRule,
   fetchOverridesForApplicant,
   fetchSuntopDone,
@@ -42,7 +43,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   const supabase = createServiceClient();
   const { data: applicant, error } = await supabase
     .from("applicants")
-    .select("id, name, lat, lng, availability, sido, applied_at, created_at")
+    .select("id, name, lat, lng, availability, sido, own_vehicle, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
 
@@ -108,6 +109,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     id: applicant.id as number,
     sido: (applicant as { sido?: string | null }).sido ?? null,
     availability: (applicant as { availability?: string | null }).availability ?? null,
+    own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
     applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
     created_at: (applicant as { created_at?: string | null }).created_at ?? null,
     suntopDone: exSuntopDone,
@@ -196,6 +198,9 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   return NextResponse.json({
     name: applicant.name,
     availability: applicant.availability,
+    // 차량 보유(정규화) — 카드가 '이 일자리는 차량이 필요해요'를 지원자 본인 정보와 대조해 알려주는 데 쓴다.
+    // 노출을 끊지는 않는다(차량이 새로 생겼을 수도 있다) — 판단은 지원자가 한다.
+    own_vehicle: normalizeVehicleOwned((applicant as { own_vehicle?: string | null }).own_vehicle),
     jobs: list,
   });
 }

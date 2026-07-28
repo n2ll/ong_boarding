@@ -198,6 +198,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         id: a.id,
         sido: a.sido,
         availability: a.availability,
+        own_vehicle: a.own_vehicle,
         applied_at: a.applied_at,
         created_at: a.created_at,
         suntopDone: suntopDoneSet.has(a.id),

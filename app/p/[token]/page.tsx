@@ -94,6 +94,8 @@ export default function PoolPage() {
   const [sendingId, setSendingId] = useState<number | null>(null);
   // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  // 본인 차량 보유(정규화 '있음'|'없음'|'미확인') — 차량이 필요한 공고에 그 사실을 알려주는 데만 쓴다(노출은 그대로).
+  const [ownVehicle, setOwnVehicle] = useState<string | null>(null);
   // 갱신 타이머(=[token] 의존 effect)에서 최신 값을 읽기 위한 ref — 확인 중·전송 중 갱신을 건너뛴다.
   const confirmingRef = useRef<number | null>(null);
   const sendingRef = useRef<number | null>(null);
@@ -153,6 +155,7 @@ export default function PoolPage() {
           if (cancelled) return;
           setName(json.name ?? null);
           setAvailability(json.availability ?? null);
+          setOwnVehicle(json.own_vehicle ?? null);
           // 백그라운드 갱신에서는 카드 목록·순서를 갈아엎지 않는다 —
           // 읽는 중에 순서가 바뀌면 손가락이 내려오는 순간 다른 공고에 관심이 등록된다(시니어 대상 오클릭).
           // 새 공고·마감 반영은 다음 방문(또는 새로고침) 때 이루어진다. 접수 상태는 아래에서 계속 합쳐진다.
@@ -390,6 +393,13 @@ export default function PoolPage() {
                     <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">차량</dt>
                     <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
                   </div>
+                  {/* 공고 요건과 등록된 본인 정보가 어긋나면 알려준다 — 카드를 감추지는 않는다(차량이 새로 생겼을 수도 있다).
+                      7장이 한꺼번에 보이는 상황에서 '나와 맞는 자리'를 스스로 가리게 돕는 최소 장치. */}
+                  {job.vehicle_required && ownVehicle === "없음" && (
+                    <div className="mt-1 rounded-lg bg-[#FFFBEC] border border-[#F6E4B0] px-3 py-2 text-[14px] font-bold text-[#B7791F] leading-snug">
+                      이 일자리는 <b>본인 차량이 필요</b>해요. 저희가 받은 정보에는 차량이 없다고 되어 있어요 — 차량이 준비되셨다면 관심을 눌러 주세요.
+                    </div>
+                  )}
                 </dl>
 
                 {job.body && (
@@ -448,6 +458,11 @@ export default function PoolPage() {
                       <span className="text-[#B7791F]">{job.title}</span>
                       <br />이 일자리에 관심 있다고 보낼까요?
                     </p>
+                    {job.vehicle_required && ownVehicle === "없음" && (
+                      <p className="mt-2 text-[14px] font-bold text-[#C05621] text-center leading-snug">
+                        본인 차량이 필요한 자리예요 — 괜찮으신가요?
+                      </p>
+                    )}
                     <div className="mt-3 flex gap-2">
                       <button
                         onClick={() => setConfirmingId(null)}
