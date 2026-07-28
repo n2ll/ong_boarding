@@ -449,7 +449,9 @@ export async function PATCH(
       .update({ agent_stage: "paused", paused_reason: "투입 확정 — 매니저 인계" })
       .eq("applicant_id", id)
       .eq("job_id", confirmTargetJobId)
-      .in("agent_stage", ["exploration", "screening", "onboarding", "active"]);
+      // abort 포함 — 중단된 대화에서 확정하는 경로가 허용돼 있어(확정 모달의 대상 목록에 abort 후보가 있다),
+      // 확정 후에도 abort로 남으면 충원 집계(공고탭 충원율·AI 충원 판정)에서 그 사람이 빠진다.
+      .in("agent_stage", ["exploration", "screening", "onboarding", "active", "abort"]);
     if (pauseErr) console.error("[applicant PATCH] confirm target pause failed", pauseErr);
   }
 

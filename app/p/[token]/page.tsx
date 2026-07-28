@@ -9,7 +9,7 @@
  * 시니어 친화: 큰 글씨·큰 터치 영역·단순 구조.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 interface PoolJob {
@@ -69,6 +69,13 @@ function payLabel(j: PoolJob): string | null {
 }
 
 /** 시작일 → 'YYYY-MM-DD'면 'M월 D일'로, 자유 텍스트면 원문 그대로 */
+/** 주소 권역 표기 — '서울 성동구 성수동1가 12-3' → '서울 성동구'. 상세주소는 확정 후 안내에서만 노출. */
+function shortArea(addr: string | null): string {
+  const t = (addr ?? "").trim().split(/\s+/).filter(Boolean);
+  if (t.length === 0) return "";
+  return t.slice(0, 2).join(" ");
+}
+
 function startDateLabel(raw: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!m) return raw;
@@ -85,6 +92,13 @@ export default function PoolPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
+  // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  // 갱신 타이머(=[token] 의존 effect)에서 최신 값을 읽기 위한 ref — 확인 중·전송 중 갱신을 건너뛴다.
+  const confirmingRef = useRef<number | null>(null);
+  const sendingRef = useRef<number | null>(null);
+  confirmingRef.current = confirmingId;
+  sendingRef.current = sendingId;
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
@@ -139,7 +153,27 @@ export default function PoolPage() {
           if (cancelled) return;
           setName(json.name ?? null);
           setAvailability(json.availability ?? null);
-          setJobs(json.jobs ?? []);
+          // 백그라운드 갱신에서는 카드 목록·순서를 갈아엎지 않는다 —
+          // 읽는 중에 순서가 바뀌면 손가락이 내려오는 순간 다른 공고에 관심이 등록된다(시니어 대상 오클릭).
+          // 새 공고·마감 반영은 다음 방문(또는 새로고침) 때 이루어진다. 접수 상태는 아래에서 계속 합쳐진다.
+          if (background) {
+            setJobs((prev) => {
+              const incoming: PoolJob[] = json.jobs ?? [];
+              if (prev.length === 0) return incoming;
+              const byId = new Map(incoming.map((j) => [j.id, j]));
+              // 이미 보고 있던 카드는 **위치를 유지**하고 내용만 최신으로(정렬이 바뀌면 오클릭이 난다).
+              // 서버에서 사라진 공고는 화면에서도 뺀다 — 남기면 마감된 자리가 계속 '모집 중'으로 보인다.
+              const kept = prev.filter((j) => byId.has(j.id)).map((j) => byId.get(j.id) as PoolJob);
+              // 새로 올라온 공고는 맨 뒤에 붙인다(기존 카드 위치를 밀지 않는다).
+              const prevIds = new Set(prev.map((j) => j.id));
+              const added = incoming.filter((j) => !prevIds.has(j.id));
+              // 확인 패널을 띄운 공고가 사라졌으면 확인 상태도 해제한다.
+              if (confirmingRef.current !== null && !byId.has(confirmingRef.current)) setConfirmingId(null);
+              return [...kept, ...added];
+            });
+          } else {
+            setJobs(json.jobs ?? []);
+          }
           const serverDone = (json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id);
           const serverNotify = (json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id);
           setDoneIds((prev) => new Set([...(background ? prev : []), ...serverDone]));
@@ -153,7 +187,11 @@ export default function PoolPage() {
         });
     };
     load(false);
-    const interval = setInterval(() => load(true), 60_000);
+    const interval = setInterval(() => {
+      // 확인 중·전송 중에는 갱신을 건너뛴다(카드가 움직이면 손가락이 다른 버튼에 떨어진다).
+      if (confirmingRef.current !== null || sendingRef.current !== null) return;
+      load(true);
+    }, 60_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") load(true);
     };
@@ -176,6 +214,7 @@ export default function PoolPage() {
       });
       if (res.ok) {
         setDoneIds((prev) => new Set(prev).add(job.id));
+        setConfirmingId(null);
       } else {
         const json = await res.json().catch(() => null);
         alert(json?.error ?? "잠시 후 다시 시도해주세요.");
@@ -277,7 +316,7 @@ export default function PoolPage() {
                   ) : (
                     <button
                       onClick={() => expressNotify(job)}
-                      disabled={sendingId === job.id}
+                      disabled={sendingId !== null}
                       className="mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#CBD5E0] text-[#4A5568] hover:bg-[#EDF2F7] active:bg-[#EDF2F7]"
                     >
                       {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
@@ -321,10 +360,18 @@ export default function PoolPage() {
                       <dd className="font-bold text-[#1A202C]">{pay} <span className="font-medium text-[13px] text-[#A0AEC0]">(변동될 수 있어요)</span></dd>
                     </div>
                   )}
-                  {job.branch && (
+                  {(job.branch || job.pickup_address) && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">지점</dt>
-                      <dd>{job.branch}{job.distance_km !== null && <span className="text-[#38A169] font-bold"> · 약 {job.distance_km}km</span>}</dd>
+                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">{job.branch ? "지점" : "출발지"}</dt>
+                      {/* 지점명이 없으면 집결지 주소로 대신 보여주되 **권역까지만** — 상세주소(동/번지 뒤)는
+                          확정 후 만남장소 안내에서 알려준다. 링크만 있으면 누구나 보는 화면이다. */}
+                      <dd className="break-words">{job.branch || shortArea(job.pickup_address)}</dd>
+                    </div>
+                  )}
+                  {job.distance_km !== null && (
+                    <div className="flex gap-2">
+                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">거리</dt>
+                      <dd className="font-bold text-[#38A169]">집에서 약 {job.distance_km}km</dd>
                     </div>
                   )}
                   {job.slot && (
@@ -364,24 +411,61 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="py-1.5 text-[15px] font-bold text-[#B7791F]"
+                      className="py-2.5 mb-2 text-[15px] font-bold text-[#B7791F]"
                     >
                       {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
                     </button>
                   </div>
                 )}
 
-                <button
-                  onClick={() => expressInterest(job)}
-                  disabled={done || sendingId === job.id}
-                  className={`mt-4 w-full py-4 rounded-xl text-[17px] font-extrabold transition-colors ${
-                    done
-                      ? "bg-[#F0FFF4] text-[#38A169] border border-[#9AE6B4]"
-                      : "bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] active:bg-[#E0B500]"
-                  } disabled:cursor-default`}
-                >
-                  {done ? "✓ 접수됐어요 — 매니저가 연락드릴게요" : sendingId === job.id ? "접수 중…" : "관심 있어요"}
-                </button>
+                {done || confirmingId !== job.id ? (
+                  <button
+                    onClick={() => {
+                      if (done) return;
+                      // 전송 중에는 다른 카드 버튼도 눌리지 않는다(예전엔 눌러도 아무 반응이 없어 고장으로 보였다).
+                      if (sendingId !== null) return;
+                      setConfirmingId(job.id);
+                    }}
+                    disabled={done || sendingId !== null}
+                    className={`mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
+                      done
+                        ? "bg-[#F0FFF4] text-[#38A169] border border-[#9AE6B4]"
+                        : sendingId !== null
+                          ? "bg-[#EDF2F7] text-[#A0AEC0]"
+                          : "bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] active:bg-[#E0B500]"
+                    } disabled:cursor-default`}
+                  >
+                    {done
+                      ? "✓ 접수됐어요 — 매니저가 연락드릴게요"
+                      : sendingId !== null
+                        ? "잠시만요…"
+                        : "관심 있어요"}
+                  </button>
+                ) : (
+                  // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
+                  <div className="mt-5 rounded-xl border-2 border-[#FFCB3C] bg-[#FFFBEC] p-3">
+                    <p className="text-[16px] font-bold text-[#1A202C] text-center leading-snug">
+                      <span className="text-[#B7791F]">{job.title}</span>
+                      <br />이 일자리에 관심 있다고 보낼까요?
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => setConfirmingId(null)}
+                        disabled={sendingId !== null}
+                        className="flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-[#4A5568] border border-[#CBD5E0]"
+                      >
+                        아니요
+                      </button>
+                      <button
+                        onClick={() => expressInterest(job)}
+                        disabled={sendingId !== null}
+                        className="flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-[#FFCB3C] text-[#1A202C] active:bg-[#E0B500] disabled:opacity-70"
+                      >
+                        {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {done && (
                   <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
@@ -398,7 +482,7 @@ export default function PoolPage() {
                         </p>
                         <button
                           onClick={() => expressImmediate(job)}
-                          disabled={sendingId === job.id}
+                          disabled={sendingId !== null}
                           className="w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#FFCB3C] text-[#1A202C] hover:bg-[#FFF9E6] active:bg-[#FFF9E6]"
                         >
                           {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}

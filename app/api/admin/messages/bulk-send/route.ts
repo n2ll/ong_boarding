@@ -4,6 +4,9 @@ import { sendSms } from "@/lib/solapi";
 import { fetchBlacklistedPhones } from "@/lib/blacklist";
 
 export const dynamic = "force-dynamic";
+// 한 요청이 최대 50명에게 순차 발송한다 — 기본 제한(10s/60s)으로는 중간에 끊겨
+// '일부만 나갔는데 실패로 보이는' 상태가 된다. 발송 루프에 맞춰 넉넉히 잡는다.
+export const maxDuration = 300;
 
 interface Recipient {
   phone: string;
@@ -105,9 +108,18 @@ export async function POST(req: NextRequest) {
     // 두 안내 모두 맞춤링크(살아있는 페이지)를 담고 있어 한 통이면 최신 상태가 전부 전달된다.
     // (지원자 경험 원칙, 2026-07-14. 10분 가드는 동일 발송 재클릭용 — 이 가드는 목적 교차용.)
     const CROSS_NOTICE_WINDOW_MS = 24 * 60 * 60 * 1000;
-    const CROSS_NOTICE_PURPOSES = new Set(["job_closed", "new_job"]);
+    // 'campaign' = 목적 없이 나간 공고 안내 성격의 캠페인. 24시간 교차 가드에는 포함하되,
+    // 'new_job'과는 구분한다 — 공고탭 '대기자에게 안내'의 7일 피로도 필터가 new_job만 보기 때문에
+    // 재컨택 발송을 new_job으로 태깅하면 '새 공고 먼저 안내' 약속 대상이 안내 목록에서 사라진다.
+    const CROSS_NOTICE_PURPOSES = new Set(["job_closed", "new_job", "campaign"]);
+    // 목적을 안 실은 발송도 가드를 태운다 — 목적은 클라이언트가 '프리셋 본문과 글자까지 같을 때만' 싣기 때문에,
+    // 자유 본문으로 공고를 하나씩 알리면(다공고 동시 게시에서 실제 일어나는 동선) 가드가 조회조차 되지 않아
+    // 한 사람이 공고 수만큼 문자를 받는다. 단 **맞춤 공고 링크가 들어간 본문**(공고 안내 성격)만 태깅한다 —
+    // '근무 시작 안내'·'추가 정보 확인 요청'처럼 링크 없는 발송까지 24시간 묶으면 정당한 발송이 막힌다.
+    const looksLikeJobNotice = text.includes("#{맞춤링크}");
+    const effectivePurpose = purpose || (looksLikeJobNotice ? "campaign" : "");
     const recentNoticed = new Set<number>();
-    if (CROSS_NOTICE_PURPOSES.has(purpose)) {
+    if (CROSS_NOTICE_PURPOSES.has(effectivePurpose)) {
       const ids = recipients
         .map((r) => r.applicant_id)
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -137,10 +149,18 @@ export async function POST(req: NextRequest) {
       "https://ong-boarding-pi.vercel.app";
     const normalizedBase = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
 
+    // 같은 번호로 두 번 나가는 것을 막는다 — 위 중복 가드는 전부 applicant_id 키라
+    // 한 사람이 지원자 행 2개로 들어와 있으면(전화번호 중복 데이터) 각각 발송된다.
+    const sentPhones = new Set<string>();
+
     for (const r of recipients) {
       const phone = (r.phone || "").replace(/\D/g, "");
       if (!/^\d{10,11}$/.test(phone)) {
         results.push({ phone, success: false, error: "잘못된 번호" });
+        continue;
+      }
+      if (sentPhones.has(phone)) {
+        results.push({ phone, success: false, error: "같은 번호 중복 방지(1통만 발송)" });
         continue;
       }
       // 블랙리스트 하드 가드 — 절대 재채용 불가 명단(수신거부와 동일 계층, 서버 강제).
@@ -185,6 +205,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      sentPhones.add(phone);
       const sent = await sendSms(phone, personalText, subject);
       results.push({
         phone,
@@ -213,7 +234,8 @@ export async function POST(req: NextRequest) {
             meta: {
               source: "bulk",
               has_link: personalText.includes("/p/"),
-              ...(purpose ? { purpose } : {}),
+              // 가드가 다음 발송에서 이 이력을 알아보게 태그를 남긴다(공고 안내 성격만 'campaign').
+              ...(effectivePurpose ? { purpose: effectivePurpose } : {}),
               ...(purposeJobId !== null ? { job_id: purposeJobId } : {}),
             },
           });

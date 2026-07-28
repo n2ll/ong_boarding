@@ -41,6 +41,8 @@ export async function GET(req: NextRequest) {
     // 예약 시각이 도달한 건만 처리 — 미래 시각으로 세팅하면 '특정일 아침 시작' 예약이 된다
     // (예: 주말 유입을 월요일 09:00에). 야간 큐(당일 클릭)는 과거 시각이라 그대로 처리.
     .lte("engage_queued_at", new Date().toISOString())
+    // 먼저 누른 것부터 처리한다 — 정렬이 없으면 여러 개를 누른 사람의 '어느 공고'가 발송될지 DB 반환 순서에 달린다.
+    .order("engage_queued_at", { ascending: true })
     .limit(200);
   if (error) {
     console.error("[engage-queued cron] query error", error);
@@ -55,7 +57,20 @@ export async function GET(req: NextRequest) {
     error?: string;
   }> = [];
 
+  // 한 사람이 밤에 여러 공고를 누른 경우 — 이번 회차에는 가장 먼저 누른 1건만 처리하고 나머지는 큐에 남긴다.
+  // 이어서 처리하면 '한 사람 = 진행 중 1공고' 가드에 걸려 스킵되는데, 그 과정에서 예약 표시가 지워져
+  // 다시 시도할 방법이 없어졌다. 남겨두면 매니저가 관심 큐에서 수동 처리하거나 다음 회차에 다시 잡힌다.
+  const handledApplicants = new Set<number>();
+  let deferredSameApplicant = 0;
+
   for (const row of rows ?? []) {
+    const applicantId = row.applicant_id as number;
+    if (handledApplicants.has(applicantId)) {
+      deferredSameApplicant++;
+      results.push({ candidate_id: row.id as number, action: "deferred", reason: "same_applicant_this_run" });
+      continue;
+    }
+    handledApplicants.add(applicantId);
     const outcome = await runInterestEngage({
       supabase,
       jobId: row.job_id as number,
@@ -89,8 +104,9 @@ export async function GET(req: NextRequest) {
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  // Slack 요약 — 실제 발송·수동 유도·실패가 있었을 때만 (매일 0건 스팸 방지, non-fatal)
-  if (counts.engaged + counts.waitlist + counts.copilot + counts.failed > 0) {
+  // Slack 요약 — 처리할 게 있었으면 결과를 알린다. 스킵·보류만 있어도 보내야 한다:
+  // 전건 스킵이면 지원자는 관심을 눌렀는데 아무 문자도 못 받고 매니저는 그 사실조차 모르는 상태가 됐다.
+  if (counts.engaged + counts.waitlist + counts.copilot + counts.failed + counts.skipped + deferredSameApplicant > 0) {
     const lines = ["🌅 *아침 자동 응대(관심 클릭 야간 큐) 처리 결과*"];
     if (counts.engaged > 0) lines.push(`- ⚡ AI 스크리닝 시작: ${counts.engaged}명`);
     if (counts.waitlist > 0) lines.push(`- 충원 완료 대기 안내 발송: ${counts.waitlist}명`);
@@ -99,7 +115,11 @@ export async function GET(req: NextRequest) {
         `- 🤖 코파일럿: 초안 불가(인바운드 없음) ${counts.copilot}명 — 관심 큐에서 [빠른 컨택]으로 수동 진행해주세요.`
       );
     if (counts.failed > 0) lines.push(`- ⚠️ 발송 실패(내일 재시도): ${counts.failed}명`);
-    if (counts.skipped > 0) lines.push(`- 가드 스킵(진행 중/중복/수신거부 등): ${counts.skipped}명`);
+    if (counts.skipped > 0) lines.push(`- 가드로 건너뜀: ${counts.skipped}건 (진행 중·중복·수신거부 등 — 대개 정상이에요)`);
+    if (deferredSameApplicant > 0)
+      lines.push(
+        `- ⏭ 같은 분의 추가 관심 ${deferredSameApplicant}건은 큐에 남겨뒀어요(한 번에 1건만 자동 진행) — 관심 큐에서 직접 처리해 주세요.`
+      );
     await sendSlackText(lines.join("\n")).catch(() => false);
   }
 

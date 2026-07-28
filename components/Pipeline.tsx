@@ -646,6 +646,9 @@ export function Pipeline() {
 
   // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용(서버가 발송 시 자동 제외)
   const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
+  // 선택 인원 중 이미 확정된 사람 — 서버는 막지 않는다(운행이 중단됐다가 재확정되는 케이스가 실제로 있어
+  // '다른 라인 안내'가 정당한 발송일 수 있다). 다만 모르고 보내면 안 되므로 모달에서 수를 알려준다.
+  const selectedConfirmedCount = listCards.filter((c) => selectedRows.has(c.id) && c.status === "확정인력").length;
 
   // 템플릿↔대상 정합성 — B안(최근 6개월용)을 골랐는데 선택 대상에 원지원 6개월 초과자가 섞였으면 경고(발송은 막지 않음).
   const bBodySelected = bulkMsgBody.trim() === RECONTACT_B_BODY.trim();
@@ -1965,6 +1968,13 @@ export function Pipeline() {
               {selectedOptOutCount > 0 && (
                 <div className="px-4 py-2.5 rounded-xl bg-[#FFF5F5] border border-[#FEB2B2] text-[12.5px] font-bold text-[#C53030]">
                   수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
+                </div>
+              )}
+              {/* 확정인력 포함 — 막지 않는다. 운행이 멈춰 대기 중인 확정자에게 다른 라인을 안내하는 건 정당한 발송이다.
+                  다만 '지금 근무 중인 분에게 다른 일 권유'가 되는 경우도 있어 수를 밝혀 의식적으로 고르게 한다. */}
+              {selectedConfirmedCount > 0 && (
+                <div className="px-4 py-2.5 rounded-xl bg-[#FFFBEB] border border-[#F6E05E] text-[12.5px] font-bold text-[#B7791F]">
+                  이미 확정된 분 {selectedConfirmedCount}명이 포함돼 있어요 — 운행이 멈춰 대기 중인 분이라면 보내도 되고, 지금 근무 중인 분이면 진행 단계 조건에서 <b>확정인력</b>을 빼고 보내세요.
                 </div>
               )}
 

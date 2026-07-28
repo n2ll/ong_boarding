@@ -476,6 +476,12 @@ function nowLocalInput(): string {
   return isoToLocalInput(new Date().toISOString());
 }
 
+/** 오늘 날짜(YYYY-MM-DD, 로컬=KST) — date input의 min·과거 시작일 검증용. */
+function todayLocalDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // 긴급 건 권역/차종(자유 텍스트) → 파이프라인 필터 파라미터 매핑.
 //   region: 수도권 키워드(서울/경기/인천 + 주요 서울 구)가 있으면 capital, 아니면 미전달(파이프라인 지역 필터는 capital 1칩뿐).
 //   vehicle: 차종 값이 있으면 배송 라인 백업이므로 차량 보유(vehicle)로 좁힌다.
@@ -1021,7 +1027,9 @@ export function Jobs() {
       setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");
       setNewJobPeriod(j.work_period ?? "");
       setNewJobSlot(j.slot ?? "");
-      setNewJobStartDate(j.start_date ?? "");
+      // 시작일은 복제하지 않는다 — 원본의 지난 날짜가 그대로 실려 지원자 화면과 만남장소 문자('일시')에 나간다.
+      // 마감시각을 복제하지 않는 것과 같은 이유(라인별로 다시 정해야 하는 값).
+      setNewJobStartDate("");
       setNewJobPickupAddress(j.pickup_address ?? "");
       setNewJobDropoffAddress(j.dropoff_address ?? "");
       setNewJobVehicleRequired(j.vehicle_required !== false);
@@ -1048,6 +1056,11 @@ export function Jobs() {
     // 마감시각을 과거로 넣으면 등록 즉시 pull에서 '마감됨'으로 빠져 혼란 — 저장 전 경고.
     if (newJobClosesAt && new Date(newJobClosesAt).getTime() <= Date.now()) {
       toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
+      return;
+    }
+    // 시작일도 과거면 막는다 — 이 값은 지원자 화면 카드와 확정 후속 '만남장소' 문자의 일시로 그대로 나간다.
+    if (newJobStartDate && newJobStartDate < todayLocalDate()) {
+      toast.error("시작일이 지난 날짜입니다. 오늘 이후 날짜로 설정해주세요.");
       return;
     }
     // resetNewJobForm()이 SOS 상태를 지우기 전에, 등록 후 CTA용으로 스냅샷을 잡아둔다.
@@ -2199,6 +2212,7 @@ export function Jobs() {
                           <input
                             type="date"
                             value={newJobStartDate}
+                            min={todayLocalDate()}
                             onChange={(e) => setNewJobStartDate(e.target.value)}
                             className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
                           />

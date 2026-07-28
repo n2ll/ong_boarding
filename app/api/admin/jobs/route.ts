@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
   if (jobIds.length > 0) {
     const { data: cands } = await supabase
       .from("job_candidates")
-      .select("job_id, agent_stage, applicants:applicant_id ( status )")
+      .select("job_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
       .in("job_id", jobIds);
     for (const c of cands ?? []) {
       const jid = c.job_id as number;
@@ -67,10 +67,18 @@ export async function GET(req: NextRequest) {
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
-      const rel = (c as { applicants?: { status?: string | null } | { status?: string | null }[] | null }).applicants;
+      const rel = (c as { applicants?: { status?: string | null; current_job_id?: number | null } | { status?: string | null; current_job_id?: number | null }[] | null }).applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
-      // 확정 계상 가드: 마감 공고 링크·이탈(abort) 링크는 제외 → 실제 진행 공고에만 충원 1 반영.
-      if (a?.status === "확정인력" && stage !== "abort" && !closedJobIds.has(jid)) {
+      // 확정 계상 가드: 마감 공고 링크·이탈(abort) 링크는 제외 + **확정이 이 공고에 결속됐을 때만**.
+      // 확정은 사람 단위(applicants.status)라, 공고가 여럿이면 다른 라인 확정자가 이 공고에 링크만 있어도
+      // (예: 맞춤 공고 링크에서 관심 클릭) 충원율이 올라가 '충원 완료 — 마감하기'가 오탐된다.
+      // current_job_id는 확정 시 서버가 링크·비시스템·비마감 검증을 거쳐 박는 포인터다(applicants/[id] PATCH).
+      if (
+        a?.status === "확정인력" &&
+        a?.current_job_id === jid &&
+        stage !== "abort" &&
+        !closedJobIds.has(jid)
+      ) {
         confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
       }
     }
