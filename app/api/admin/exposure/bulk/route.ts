@@ -119,12 +119,14 @@ export async function POST(req: NextRequest) {
   // 전환 대상 — 호출부가 확인 화면에서 **실제로 보여준 공고만**(flip_job_ids) 전환한다.
   // 화면 캐시가 낡아 '이미 지정 노출'로 알고 있던 공고를 확인 없이 좁히면 안 된다
   // (전환되지 않은 공고는 아래 non_targeted로 알려 재시도할 수 있다).
-  const flipAllowed = Array.isArray(body?.flip_job_ids) ? new Set(parseIds(body.flip_job_ids)) : null;
+  // 스냅샷이 없으면 전환하지 않는다(fail-closed) — 배포 전 번들이나 다른 호출부가 make_targeted만 보내면
+  // 확인 화면을 거치지 않은 공고까지 좁아진다. 전환이 안 된 사실은 아래 non_targeted로 알려 재시도 가능하다.
+  const flipAllowed = new Set(parseIds(body?.flip_job_ids));
   const flipJobs = makeTargeted
     ? jobs.filter(
         (j) =>
           j.exposure !== "targeted" &&
-          (flipAllowed === null || flipAllowed.has(j.id)) &&
+          flipAllowed.has(j.id) &&
           // external(새로 모집)은 맞춤 공고 링크에 애초에 뜨지 않는다(pool GET이 internal·both만 노출).
           // targeted로 바꾸면 명단은 효력이 없고, 공개 지원 링크의 후보 연결만 끊긴다.
           j.recruit_mode !== "external"
@@ -134,9 +136,10 @@ export async function POST(req: NextRequest) {
     ? jobs.filter((j) => j.exposure !== "targeted" && j.recruit_mode === "external").map((j) => j.id)
     : [];
 
-  // 'clear'는 되돌릴 수 없다. 화면이 본 스냅샷(rule_jobs)에 없는 공고의 규칙까지 지우면
-  // 확인 창에 한 줄도 안 뜬 규칙이 사라진다 — 아무것도 바꾸지 않고 막고 현황을 다시 읽게 한다.
-  if (ruleAction === "clear") {
+  // 화면이 본 규칙 스냅샷(rule_jobs)과 DB가 어긋나면 막는다 — 'clear'는 확인 창에 한 줄도 안 뜬 규칙이
+  // 되돌릴 수 없이 사라지고, 'keep'은 매니저가 모르는 규칙이 그대로 남아 고르지 않은 사람이 함께 본다.
+  // 두 방향 모두 조용해서, 선택 종류와 무관하게 같은 기준으로 막고 현황을 다시 읽게 한다.
+  if (ruleAction !== undefined && withRule.length > 0) {
     const seen = new Set(parseIds(body?.rule_jobs));
     const unseen = withRule.filter((j) => !seen.has(j.id));
     if (unseen.length > 0) {

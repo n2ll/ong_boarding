@@ -23,7 +23,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
-import { haversineKm } from "../kakao-geocode";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 import {
@@ -328,7 +327,7 @@ export async function runInterestEngage(params: {
 }
 
 /** pickJobForCampaignReply 선택 근거 — pool_events meta·로그용. */
-export type CampaignReplyJobPickedBy = "interest_candidate" | "nearest_anchor" | "latest_active";
+export type CampaignReplyJobPickedBy = "interest_candidate" | "notified_job" | "latest_active";
 
 export interface CampaignReplyJobPick {
   jobId: number;
@@ -346,15 +345,18 @@ export interface CampaignReplyAmbiguous {
    * 호출부가 반드시 사람에게 알려야 한다.
    */
   exposureBlockedCount?: number;
+  /** true면 '명단 밖'이 아니라 **판정 재료 조회 실패**로 제외된 것(fail-closed) — 문구를 다르게 써야 한다. */
+  exposureGateFailed?: boolean;
 }
 
 /**
  * 캠페인 문자에 '답장으로만' 반응한 지원자(활성 후보 없음)를 편입할 공고 선택.
  *
- * 우선순위:
+ * 우선순위 — **증거만 쓴다**(추측 편입 금지):
  *  ① 이 지원자의 stage NULL 후보가 걸린 활성 공고 — 관심 클릭했던 곳(최신 우선)
- *  ② 지원자 좌표가 있으면 활성 공고 앵커(상차지·마지막 경유지) 최근접
- *  ③ 최신 활성 공고
+ *  ② 그 공고 이름으로 안내 문자를 보낸 공고(ping_sent purpose='new_job')가 **정확히 1개**일 때
+ *  ③ 활성 실공고가 **1개**일 때 그 공고
+ *  그 외(활성 공고 다수 · 안내가 여러 공고) → 자동 편입 포기(jobId null) → 호출부가 사람에게 넘긴다.
  *
  * 시스템 공고(`__` 프리픽스)·실질 마감(isJobEffectivelyClosed)은 제외. 후보 없으면 null.
  */
@@ -390,6 +392,8 @@ export async function pickJobForCampaignReply(
 
   // 게이트 전 열린 공고 수 — 게이트로 0개가 된 것과 '열린 공고 자체가 없다'를 구분해야 한다.
   const openBeforeGate = jobs.length;
+  // 판정 재료 조회가 실패해 제외한 경우 — '명단 밖'이라고 단정하면 안 된다(원인이 다르다).
+  let gateFailed = false;
 
   // 지정 노출(targeted) 게이트 — 노출 대상이 아닌 공고로 자동 편입하면 AI 문자로 공고 상세가
   // 미대상에게 새는 우회 경로가 된다(pull 게이팅과 동일 판정). 판정 실패 시 targeted 전부 제외(fail-closed).
@@ -421,13 +425,16 @@ export async function pickJobForCampaignReply(
     } catch (e) {
       console.error("[engage] campaign-reply exposure gate failed — targeted 공고 제외(fail-closed)", e);
       jobs = jobs.filter((j) => j.exposure !== "targeted");
+      gateFailed = true;
     }
   }
   if (jobs.length === 0) {
     // 열린 공고가 있는데 게이트에서 전부 빠졌다 = '이 사람이 모든 명단 밖'(또는 판정 실패 fail-closed).
     // 자동 편입은 여전히 금지지만(미대상 공고 유출), 일할 수 있다고 답장한 사람이 무응답으로 남는
     // 상태이므로 매니저에게 알려야 한다. 열린 공고가 0개일 때만 조용히 끝낸다.
-    if (openBeforeGate > 0) return { jobId: null, ambiguousCount: 0, exposureBlockedCount: openBeforeGate };
+    if (openBeforeGate > 0) {
+      return { jobId: null, ambiguousCount: 0, exposureBlockedCount: openBeforeGate, exposureGateFailed: gateFailed };
+    }
     return null; // 보낼 공고 자체가 없음 — 알릴 것도 없다
   }
 
@@ -445,27 +452,34 @@ export async function pickJobForCampaignReply(
     if (hit) return { jobId: hit.id, jobTitle: hit.title, pickedBy: "interest_candidate" };
   }
 
-  // ② 좌표 있으면 앵커(상차지·마지막 경유지 중 가까운 쪽) 최근접 — 파이프라인 거리 정렬과 동일 원칙
-  if (typeof applicant.lat === "number" && typeof applicant.lng === "number") {
-    const alat = applicant.lat;
-    const alng = applicant.lng;
-    let best: { job: JobRow; km: number } | null = null;
-    for (const j of jobs) {
-      const anchors: { lat: number; lng: number }[] = [];
-      if (typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number") {
-        anchors.push({ lat: j.pickup_lat, lng: j.pickup_lng });
-      }
-      if (typeof j.dropoff_lat === "number" && typeof j.dropoff_lng === "number") {
-        anchors.push({ lat: j.dropoff_lat, lng: j.dropoff_lng });
-      }
-      if (anchors.length === 0) continue;
-      const km = Math.min(...anchors.map((p) => haversineKm(alat, alng, p.lat, p.lng)));
-      if (!best || km < best.km) best = { job: j, km };
+  // ② 우리가 **그 공고 이름으로 안내 문자를 보낸** 공고 — 추측이 아니라 증거다.
+  //    '새 배송 건이 올라왔어요! {공고명}'을 받고 답장한 것이므로 그 공고가 맞다. 최신 안내 우선.
+  //    여러 공고를 안내했다면 어느 쪽인지 알 수 없으므로 아래 다수 판정으로 내려간다.
+  const { data: notices, error: noticeErr } = await supabase
+    .from("pool_events")
+    .select("meta, created_at")
+    .eq("applicant_id", applicant.id)
+    .eq("event_type", "ping_sent")
+    .eq("meta->>purpose", "new_job")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (noticeErr) console.error("[engage] campaign-reply notices load failed", noticeErr);
+  const noticedJobIds: number[] = [];
+  for (const r of (notices ?? []) as { meta: { job_id?: number | string } | null }[]) {
+    const jid = Number(r.meta?.job_id);
+    if (Number.isFinite(jid) && jobs.some((j) => j.id === jid) && !noticedJobIds.includes(jid)) {
+      noticedJobIds.push(jid);
     }
-    if (best) return { jobId: best.job.id, jobTitle: best.job.title, pickedBy: "nearest_anchor" };
+  }
+  if (noticedJobIds.length === 1) {
+    const hit = jobs.find((j) => j.id === noticedJobIds[0])!;
+    return { jobId: hit.id, jobTitle: hit.title, pickedBy: "notified_job" };
   }
 
   // ③ 최신 활성 공고 — **활성 실공고가 1개일 때만** 쓴다.
+  // (예전엔 여기 앞에 '좌표 최근접 공고' 자동 편입이 있었다. 공고가 6~7개 동시에 열리면 그건 추측이고,
+  //  지원자가 안내받은 공고가 아니라 집에서 가까운 다른 라인으로 편입돼 AI가 엉뚱한 공고를 응대했다.
+  //  거리 최근접은 매니저가 파이프라인에서 대상을 고를 때 쓰는 기준이고, 자동 편입 근거로는 쓰지 않는다.)
   // 여러 개가 동시에 열려 있으면 이건 추측 편입이고, 편입 즉시 current_job_id가 그 공고로 박혀
   // 지원자가 진짜 원하는 공고를 눌러도 이후 아무 문자도 안 가게 된다(한 사람=진행 중 1공고 정책).
   // 그래서 여러 개면 자동 편입을 포기하고 null을 돌려준다 → 호출부가 매니저 확인으로 넘긴다.

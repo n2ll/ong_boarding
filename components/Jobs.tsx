@@ -748,6 +748,12 @@ export function Jobs() {
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "후보 추가에 실패했어요");
+        // partial = 후보는 이미 추가됐고 뒤 단계만 실패 — 화면이 DB와 어긋나면 재시도가 '0명 추가'로 보인다.
+        if (json.partial) {
+          setPickerOpen(false);
+          loadCandidates(candPanel.jobId);
+          loadJobs();
+        }
         return;
       }
       toast.success(`${json.added ?? 0}명을 후보로 추가했어요`, {
@@ -1153,6 +1159,13 @@ export function Jobs() {
           const at = await fetchAnnounceTargets(newJobId);
           if (at.targets.length > 0) {
             setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
+          } else if ((at.dropped_by_exposure?.total ?? 0) > 0) {
+            // 대상 0명이 '이력이 없어서'가 아니라 '노출 명단이 좁아서'인 경우 — 등록 경로에서도 침묵하지 않는다.
+            toast.info("안내할 대기자가 없어요", {
+              description: `이 공고는 지정 노출이라 명단 밖 ${at.dropped_by_exposure?.total}명이 대상에서 빠졌어요${
+                (at.dropped_by_exposure?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_exposure?.promised}명은 '먼저 안내드릴게요' 약속)` : ""
+              }. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`,
+            });
           }
         } catch {
           /* noop */
@@ -1261,33 +1274,59 @@ export function Jobs() {
     // 노출을 이 창에서 실제로 바꿨는지 — 안 바꿨으면 노출 필드를 아예 보내지 않는다.
     // 파이프라인 '이 명단에게만 노출'이 같은 컬럼을 쓰기 때문에, 급여만 고친 저장이 방금 좁힌 노출을
     // 되돌리거나(전환 취소) 되돌릴 수 없다며 지운 규칙을 부활시키는 사고가 난다.
+    // 배열 원소 **순서**는 규칙의 의미가 아니다 — 칩을 껐다 켜서 순서만 달라진 걸 '바꿨다'로 보면
+    // 불필요한 노출 전송·보호 쓰기·낯선 안내가 뜬다. 비교 전에 배열을 정렬한다.
+    const ruleFingerprint = (d: ExposureDraft) => {
+      const r = draftToRule(d.rule);
+      if (!r) return "null";
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(r).sort()) {
+        const v = r[k];
+        sorted[k] = Array.isArray(v) ? [...v].map(String).sort() : v;
+      }
+      return JSON.stringify(sorted);
+    };
     const exposureChanged =
       editForm.exposureDraft.exposure !== editForm.exposureBaseline.exposure ||
-      JSON.stringify(draftToRule(editForm.exposureDraft.rule)) !==
-        JSON.stringify(draftToRule(editForm.exposureBaseline.rule));
+      ruleFingerprint(editForm.exposureDraft) !== ruleFingerprint(editForm.exposureBaseline);
     // 바꿨다면, 그 사이 다른 화면(파이프라인)에서 노출이 바뀌었는지 확인하고 덮어쓸지 묻는다.
     if (exposureChanged) {
+      let serverState: { exposure: "all" | "targeted"; rule: string } | null = null;
       try {
         const cur = await fetch(`/api/admin/jobs/${editForm.id}`).then((r) => (r.ok ? r.json() : null));
         const j = cur?.job as { exposure?: string | null; exposure_rule?: unknown } | undefined;
         if (j) {
-          const serverExposure = j.exposure === "targeted" ? "targeted" : "all";
-          const serverRule = JSON.stringify(draftToRule(ruleToDraft(j.exposure_rule)));
-          const baseRule = JSON.stringify(draftToRule(editForm.exposureBaseline.rule));
-          if (serverExposure !== editForm.exposureBaseline.exposure || serverRule !== baseRule) {
-            const ok = await confirm({
-              title: "이 공고의 노출 설정이 방금 다른 화면에서 바뀌었어요",
-              description: `지금 서버: ${serverExposure === "targeted" ? "지정 노출" : "전체 노출"}${
-                serverRule === "null" ? " · 자동 규칙 없음" : " · 자동 규칙 있음"
-              }\n이 창의 값으로 덮어쓰면 그 변경(노출 명단 전환·규칙)이 사라질 수 있어요.`,
-              confirmText: "이 창 값으로 덮어쓰기",
-              destructive: true,
-            });
-            if (!ok) return;
-          }
+          serverState = {
+            exposure: j.exposure === "targeted" ? "targeted" : "all",
+            rule: ruleFingerprint({ exposure: "all", rule: ruleToDraft(j.exposure_rule) }),
+          };
         }
       } catch {
-        /* 확인 조회 실패는 저장을 막지 않는다 — 아래 저장이 실패하면 그때 알린다 */
+        /* 아래에서 fail-closed로 처리 */
+      }
+      if (!serverState) {
+        // 확인할 수 없으면 조용히 덮어쓰지 않는다 — 이 확인이 '되돌릴 수 없이 지운 규칙 부활'의 유일한 방어선이다.
+        const ok = await confirm({
+          title: "지금 저장된 노출 설정을 확인할 수 없어요",
+          description:
+            "이 창의 노출 값으로 덮어쓰면, 그 사이 다른 화면(인재풀 '이 명단에게만 노출')에서 바꾼 전환·규칙이 사라질 수 있어요.\n확실하지 않으면 취소하고 창을 닫았다 다시 열어 주세요.",
+          confirmText: "그래도 덮어쓰기",
+          destructive: true,
+        });
+        if (!ok) return;
+      } else if (
+        serverState.exposure !== editForm.exposureBaseline.exposure ||
+        serverState.rule !== ruleFingerprint(editForm.exposureBaseline)
+      ) {
+        const ok = await confirm({
+          title: "이 공고의 노출 설정이 방금 다른 화면에서 바뀌었어요",
+          description: `지금 서버: ${serverState.exposure === "targeted" ? "지정 노출" : "전체 노출"}${
+            serverState.rule === "null" ? " · 자동 규칙 없음" : " · 자동 규칙 있음"
+          }\n이 창의 값으로 덮어쓰면 그 변경(노출 명단 전환·규칙)이 사라질 수 있어요.`,
+          confirmText: "이 창 값으로 덮어쓰기",
+          destructive: true,
+        });
+        if (!ok) return;
       }
     }
     setEditSaving(true);

@@ -249,13 +249,12 @@ export async function fetchSuntopDoneSet(supabase: SupabaseClient): Promise<Set<
  *
  * 이미 오버라이드 행이 있는 사람은 건너뛴다 — 매니저가 명시적으로 제외한 사람을 되살리면 안 된다.
  */
-export async function collectExposureProtectRows(
+export async function gatherExposureProtectTargets(
   supabase: SupabaseClient,
   jobIds: number[]
-): Promise<{ rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[]; error?: string }> {
-  if (jobIds.length === 0) return { rows: [] };
-
+): Promise<{ linked: Map<number, Set<number>>; error?: string }> {
   const linked = new Map<number, Set<number>>();
+  if (jobIds.length === 0) return { linked };
   const add = (jobId: number, applicantId: number) => {
     const s = linked.get(jobId) ?? new Set<number>();
     s.add(applicantId);
@@ -270,7 +269,7 @@ export async function collectExposureProtectRows(
       .or("agent_stage.is.null,agent_stage.neq.abort")
       .order("id", { ascending: true })
       .range(from, from + 999);
-    if (error) return { rows: [], error: error.message };
+    if (error) return { linked, error: error.message };
     const batch = data ?? [];
     for (const r of batch) {
       const row = r as { job_id: number; applicant_id: number | null };
@@ -290,7 +289,7 @@ export async function collectExposureProtectRows(
       .eq("meta->>purpose", "new_job")
       .order("id", { ascending: true })
       .range(from, from + 999);
-    if (error) return { rows: [], error: error.message };
+    if (error) return { linked, error: error.message };
     const batch = data ?? [];
     for (const r of batch) {
       const row = r as { applicant_id: number | null; meta: { job_id?: number | string } | null };
@@ -300,6 +299,19 @@ export async function collectExposureProtectRows(
     if (batch.length < 1000) break;
   }
 
+  return { linked };
+}
+
+/**
+ * gather 결과에서 **아직 오버라이드 행이 없는** 사람만 골라 insert할 행으로 만든다.
+ * 이미 행이 있는 사람은 건너뛴다 — 매니저가 명시적으로 제외한 사람을 되살리면 안 된다.
+ */
+export async function collectExposureProtectRows(
+  supabase: SupabaseClient,
+  jobIds: number[]
+): Promise<{ rows: { job_id: number; applicant_id: number; mode: string; added_by: string }[]; error?: string }> {
+  const { linked, error: gatherErr } = await gatherExposureProtectTargets(supabase, jobIds);
+  if (gatherErr) return { rows: [], error: gatherErr };
   if (linked.size === 0) return { rows: [] };
 
   const existing = new Set<string>();

@@ -15,7 +15,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { describeRule, fetchApplicantsForExposure, matchesRule, normalizeRule } from "@/lib/exposure";
+import {
+  describeRule,
+  fetchApplicantsForExposure,
+  gatherExposureProtectTargets,
+  matchesRule,
+  normalizeRule,
+} from "@/lib/exposure";
 import { isSystemJobTitle } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
@@ -78,30 +84,13 @@ export async function GET(req: NextRequest) {
     if (batch.length < 1000) break;
   }
 
-  // 연결 인원 = 이 공고의 후보 행(관심 클릭·수동 추가·스크리닝). 이탈(abort)만 제외한다 —
-  // stage가 NULL인 '관심만 누른 분'이 가장 보호가 필요한 집단이라 NULL을 함께 살린다.
-  const linked = new Map<number, Set<number>>();
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from("job_candidates")
-      .select("job_id, applicant_id, agent_stage")
-      .in("job_id", jobIds)
-      .or("agent_stage.is.null,agent_stage.neq.abort")
-      .order("id", { ascending: true })
-      .range(from, from + 999);
-    if (error) {
-      console.error("[exposure impact] candidates load failed", error);
-      return NextResponse.json({ error: "후보 조회 실패" }, { status: 500 });
-    }
-    const batch = data ?? [];
-    for (const r of batch) {
-      const row = r as { job_id: number; applicant_id: number | null };
-      if (typeof row.applicant_id !== "number") continue;
-      const s = linked.get(row.job_id) ?? new Set<number>();
-      s.add(row.applicant_id);
-      linked.set(row.job_id, s);
-    }
-    if (batch.length < 1000) break;
+  // 연결 인원 = **노출을 좁힐 때 서버가 실제로 명단에 남기는 집합**과 같은 공식으로 센다.
+  // 여기서 후보만 세면 확인 창의 '이미 연결된 N명'이 실제 pin 집합보다 작게 나온다
+  // (그 공고 안내 문자를 받은 분이 빠진다) — 같은 개념 두 공식 금지.
+  const { linked, error: linkedErr } = await gatherExposureProtectTargets(supabase, jobIds);
+  if (linkedErr) {
+    console.error("[exposure impact] linked load failed", linkedErr);
+    return NextResponse.json({ error: "연결 인원 조회 실패" }, { status: 500 });
   }
 
   let pool;

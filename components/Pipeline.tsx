@@ -688,6 +688,28 @@ export function Pipeline() {
       toast.error("자동 노출 규칙이 있는 공고예요 — 규칙을 둘지 지울지 먼저 골라 주세요.");
       return;
     }
+    // 대량 '노출 제외'도 노출을 끊는 조작이다 — 이야기 중인 분이 섞여 있으면 확인을 받는다
+    // (명단 화면의 1건 제외에는 확인이 있는데 여기엔 없어, 더 큰 조작이 더 조용했다).
+    if (exposureMode === "exclude") {
+      const linkedTotal = exposureSelectedJobs.reduce((n, j) => n + (impactById.get(j.id)?.linked ?? 0), 0);
+      const lines = [
+        `고른 ${applicantIds.length}명을 공고 ${jobIds.length}개의 노출에서 제외합니다(제외는 규칙·명단보다 우선).`,
+      ];
+      if (linkedTotal > 0) {
+        lines.push(
+          `이 공고들엔 이미 연결된 분이 ${linkedTotal}건 있어요 — 그중 제외되는 분은 본인 화면에서 이 공고를 볼 수 없게 되고 AI 응대는 계속됩니다.`
+        );
+      }
+      if (
+        !(await confirm({
+          title: "이 분들을 노출에서 제외할까요?",
+          description: lines.join("\n"),
+          confirmText: "제외",
+          destructive: true,
+        }))
+      )
+        return;
+    }
     if (exposureWillFlip || exposureWillClear) {
       const lines: string[] = [];
       if (exposureWillFlip) {
@@ -723,11 +745,15 @@ export function Pipeline() {
       lines.push(`노출 명단에 넣을 인원: 지금 고른 ${applicantIds.length}명`);
       if (
         !(await confirm({
-          // 규칙을 두면 '명단에게만'이 아니다 — 제목이 거짓이 되지 않게 분기한다.
+          // 제목이 실제로 일어나는 일과 어긋나지 않게 3갈래로 나눈다.
+          //  · 규칙을 두면 '명단에게만'이 아니다(규칙 해당 인원도 본다)
+          //  · 전환을 안 하면 노출 범위는 그대로고 규칙만 지워진다
           title:
             exposureRuleAction === "keep" && exposureRuleJobs.length > 0
               ? "규칙 해당 인원 + 이 명단에게 보이도록 바꿀까요?"
-              : "이 명단에게만 보이도록 바꿀까요?",
+              : exposureWillClear && !exposureWillFlip
+                ? "자동 노출 규칙을 지울까요? (노출 방식은 그대로)"
+                : "이 명단에게만 보이도록 바꿀까요?",
           description: lines.join("\n"),
           confirmText: "적용",
           destructive: true,
@@ -810,6 +836,11 @@ export function Pipeline() {
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "공고 후보 추가에 실패했어요");
+        // partial = 후보는 이미 추가됨(뒤 단계만 실패) — 모달을 닫고 목록을 맞춰 재시도 오해를 없앤다.
+        if (json.partial) {
+          setJobPickerOpen(false);
+          loadApplicants();
+        }
         return;
       }
       toast.success(`${json.added ?? ids.length}명을 공고 후보로 추가했어요. (이미 추가된 인원은 제외)`);
@@ -2081,6 +2112,15 @@ export function Pipeline() {
                 <div className="text-[12px] leading-snug text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] rounded-lg px-3 py-2">
                   공고 노출 현황을 불러오지 못했어요 — 저장된 규칙·연결 인원을 확인할 수 없어 적용이 막힐 수 있어요.
                   <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">다시 시도</button>
+                </div>
+              )}
+              {/* 응답은 왔지만 이 공고만 빠진 경우 — 버튼이 이유 없이 비활성으로 보이지 않게 그 공고를 이름으로 지목한다.
+                  (조회 상한을 넘겼거나 그새 삭제·시스템 공고로 걸러진 공고) */}
+              {!exposureImpactError && exposureImpact && exposureUnknownJobs.length > 0 && (
+                <div className="text-[12px] leading-snug text-[#B7791F] bg-[#FFFBEB] border border-[#FAF089] rounded-lg px-3 py-2">
+                  이 공고의 노출 현황을 못 읽었어요 — <b>{exposureUnknownJobs.map((j) => j.title).join(", ")}</b>. 규칙이 있는지 알 수 없어 적용할 수 없습니다.
+                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">다시 시도</button>
+                  {" "}또는 선택을 해제하고 진행하세요.
                 </div>
               )}
               {activeJobs.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">진행 중인 공고가 없어요</div>}

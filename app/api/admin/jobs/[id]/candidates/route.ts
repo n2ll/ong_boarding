@@ -113,8 +113,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error("[candidates POST] exposure include failed", e);
     return NextResponse.json(
       {
+        // 이 공고가 '지정 노출'일 때만 도달하는 경로다(전체 노출이면 훅이 0을 반환하고 끝).
         error:
-          "후보는 추가했지만 노출 명단에 남기지 못했어요 — 파이프라인 '이 명단에게만 노출'로 이분들을 추가해 주세요.",
+          "후보는 추가했지만 노출 명단에 남기지 못했어요 — 이 공고는 지정 노출이라, 인재풀에서 '이 명단에게만 노출'로 이분들을 명단에 추가해야 본인 링크에 공고가 보입니다.",
         added: data?.length ?? 0,
         partial: true,
       },

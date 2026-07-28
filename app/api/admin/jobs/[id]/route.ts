@@ -217,24 +217,36 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // 좁히는 경로가 둘(파이프라인 일괄 배정 · 이 수정 모달)인데 여기에만 보호가 없으면
   // 이야기 중인 공고가 지원자 화면에서 사라진다(AI만 그 공고를 말하는 상태). 같은 개념 두 공식 금지.
   let autoIncluded = 0;
+  let narrowingExposure = false;
   if ("exposure" in update || "exposure_rule" in update) {
     const { data: cur, error: curErr } = await supabase
       .from("jobs")
-      .select("exposure, exposure_rule")
+      .select("exposure, exposure_rule, recruit_mode")
       .eq("id", id)
       .maybeSingle();
     if (curErr) {
       console.error("[jobs PATCH] exposure 현재값 조회 실패", curErr);
       return NextResponse.json({ error: "공고 조회 실패 — 아무것도 바꾸지 않았습니다." }, { status: 500 });
     }
-    const curRow = cur as { exposure?: string | null; exposure_rule?: unknown } | null;
+    const curRow = cur as { exposure?: string | null; exposure_rule?: unknown; recruit_mode?: string | null } | null;
     const nextExposure = ("exposure" in update ? (update.exposure as string | null) : curRow?.exposure) ?? "all";
     const nextRule = "exposure_rule" in update ? normalizeRule(update.exposure_rule) : normalizeRule(curRow?.exposure_rule);
+    // external(새로 모집)은 맞춤 공고 링크에 애초에 안 뜬다 — 지정 노출로 만들면 명단은 효력이 없고
+    // 공개 지원 링크의 후보 연결만 끊긴다. 파이프라인 전환과 같은 규칙을 여기서도 막는다(경로 하나만 닫으면 뚫린다).
+    const nextRecruitMode =
+      ("recruit_mode" in update ? (update.recruit_mode as string | null) : curRow?.recruit_mode) ?? "external";
+    if (nextExposure === "targeted" && nextRecruitMode === "external") {
+      return NextResponse.json(
+        { error: "'새로 모집' 공고는 지정 노출로 둘 수 없어요 — 맞춤 공고 링크에 뜨지 않는 공고입니다." },
+        { status: 400 }
+      );
+    }
     // 좁아짐 = 결과가 지정 노출이고, (전체→지정 전환이거나 규칙이 바뀜). 규칙이 그대로면 추가 쓰기 없음.
     const narrowing =
       nextExposure === "targeted" &&
       (curRow?.exposure !== "targeted" ||
         JSON.stringify(nextRule) !== JSON.stringify(normalizeRule(curRow?.exposure_rule)));
+    narrowingExposure = narrowing;
     if (narrowing) {
       const { inserted, error: protectErr } = await writeExposureProtectRows(supabase, [id]);
       if (protectErr) {
@@ -258,6 +270,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (error || !data) {
     console.error("[jobs PATCH]", error);
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
+  }
+
+  // 보호를 읽은 시점과 저장 사이엔 아직 넓은 노출이라, 그 창에 들어온 관심 클릭은 후보 행만 생기고
+  // 명단에는 없다. 저장 뒤 한 번 더 돌려 그 창을 닫는다(저장 후에는 게이트가 fail-closed라 새 행이 안 생긴다).
+  // 실패해도 저장은 유지 — 여기서 500을 내면 이미 반영된 수정을 실패로 보고하게 된다(non-fatal).
+  if (narrowingExposure) {
+    const { inserted: late, error: lateErr } = await writeExposureProtectRows(supabase, [id]);
+    if (lateErr) console.error("[jobs PATCH] late exposure protect failed", lateErr);
+    else autoIncluded += late;
   }
 
   return NextResponse.json({ job: data, auto_included: autoIncluded });
