@@ -9,7 +9,7 @@
  * 시니어 친화: 큰 글씨·큰 터치 영역·단순 구조.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 interface PoolJob {
@@ -87,6 +87,11 @@ export default function PoolPage() {
   const [sendingId, setSendingId] = useState<number | null>(null);
   // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  // 갱신 타이머(=[token] 의존 effect)에서 최신 값을 읽기 위한 ref — 확인 중·전송 중 갱신을 건너뛴다.
+  const confirmingRef = useRef<number | null>(null);
+  const sendingRef = useRef<number | null>(null);
+  confirmingRef.current = confirmingId;
+  sendingRef.current = sendingId;
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
@@ -149,8 +154,15 @@ export default function PoolPage() {
               const incoming: PoolJob[] = json.jobs ?? [];
               if (prev.length === 0) return incoming;
               const byId = new Map(incoming.map((j) => [j.id, j]));
-              // 순서는 그대로 두고 각 카드 내용만 최신으로. 사라진 공고도 화면에서 빼지 않는다(접수 흔적 보존).
-              return prev.map((j) => byId.get(j.id) ?? j);
+              // 이미 보고 있던 카드는 **위치를 유지**하고 내용만 최신으로(정렬이 바뀌면 오클릭이 난다).
+              // 서버에서 사라진 공고는 화면에서도 뺀다 — 남기면 마감된 자리가 계속 '모집 중'으로 보인다.
+              const kept = prev.filter((j) => byId.has(j.id)).map((j) => byId.get(j.id) as PoolJob);
+              // 새로 올라온 공고는 맨 뒤에 붙인다(기존 카드 위치를 밀지 않는다).
+              const prevIds = new Set(prev.map((j) => j.id));
+              const added = incoming.filter((j) => !prevIds.has(j.id));
+              // 확인 패널을 띄운 공고가 사라졌으면 확인 상태도 해제한다.
+              if (confirmingRef.current !== null && !byId.has(confirmingRef.current)) setConfirmingId(null);
+              return [...kept, ...added];
             });
           } else {
             setJobs(json.jobs ?? []);
@@ -168,7 +180,11 @@ export default function PoolPage() {
         });
     };
     load(false);
-    const interval = setInterval(() => load(true), 60_000);
+    const interval = setInterval(() => {
+      // 확인 중·전송 중에는 갱신을 건너뛴다(카드가 움직이면 손가락이 다른 버튼에 떨어진다).
+      if (confirmingRef.current !== null || sendingRef.current !== null) return;
+      load(true);
+    }, 60_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") load(true);
     };
@@ -293,7 +309,7 @@ export default function PoolPage() {
                   ) : (
                     <button
                       onClick={() => expressNotify(job)}
-                      disabled={sendingId === job.id}
+                      disabled={sendingId !== null}
                       className="mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#CBD5E0] text-[#4A5568] hover:bg-[#EDF2F7] active:bg-[#EDF2F7]"
                     >
                       {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
@@ -426,14 +442,14 @@ export default function PoolPage() {
                     <div className="mt-3 flex gap-2">
                       <button
                         onClick={() => setConfirmingId(null)}
-                        disabled={sendingId === job.id}
+                        disabled={sendingId !== null}
                         className="flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-[#4A5568] border border-[#CBD5E0]"
                       >
                         아니요
                       </button>
                       <button
                         onClick={() => expressInterest(job)}
-                        disabled={sendingId === job.id}
+                        disabled={sendingId !== null}
                         className="flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-[#FFCB3C] text-[#1A202C] active:bg-[#E0B500] disabled:opacity-70"
                       >
                         {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
@@ -457,7 +473,7 @@ export default function PoolPage() {
                         </p>
                         <button
                           onClick={() => expressImmediate(job)}
-                          disabled={sendingId === job.id}
+                          disabled={sendingId !== null}
                           className="w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#FFCB3C] text-[#1A202C] hover:bg-[#FFF9E6] active:bg-[#FFF9E6]"
                         >
                           {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}
