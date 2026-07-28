@@ -60,7 +60,11 @@ export async function GET() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([sido, m]) => ({
         sido,
-        items: [...m.entries()].sort((x, y) => y[1] - x[1]).map(([name, count]) => ({ name, count })),
+        // 이름순 — '고양시'와 '고양시 덕양구'처럼 계층이 섞인 값이 붙어 보여야
+        // 시 단위만 골라 그 시의 대부분이 조용히 빠지는 일을 막는다.
+        items: [...m.entries()]
+          .sort((x, y) => x[0].localeCompare(y[0], "ko"))
+          .map(([name, count]) => ({ name, count, key: `${sido}>${name}` })),
       })),
     unknown: { sido: sidoUnknown, sigungu: sigunguUnknown },
   });

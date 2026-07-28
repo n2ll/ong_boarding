@@ -13,7 +13,7 @@ export interface ExposureRule {
   sido?: string[]; // 시도(지역) 화이트리스트
   /**
    * 시군구(구 단위) 화이트리스트 — 시·도로는 '강남권/용산권'을 가를 수 없어서 추가했다.
-   * 동명이구(중구·서구)가 있어 **정확 일치**를 유지한다(접두 확장은 '고른 값 ≠ 걸리는 사람'을 만든다).
+   * 값은 `sigunguKey()`의 복합키(`서울특별시>강남구`) 또는 `'미확인'`. 구 이름만 담으면 동명이구가 교차로 걸린다.
    */
   sigungu?: string[];
   availability?: string[]; // 가용성 값 화이트리스트
@@ -31,7 +31,7 @@ export interface ExposureRule {
 export interface ExposureApplicant {
   id: number;
   sido: string | null;
-  sigungu?: string | null;
+  sigungu: string | null;
   availability: string | null;
   /** 자유 입력 값이라 정규화해서 비교한다(있음/없음/미확인). 호출부가 반드시 함께 넘길 것 — 없으면 차량 규칙이 fail-closed. */
   own_vehicle?: string | null;
@@ -62,10 +62,25 @@ export const VEHICLE_RULE_VALUES = ["있음", "없음", "미확인"] as const;
  */
 export const UNKNOWN_RULE_VALUE = "미확인";
 
-/** 텍스트 축(지역·시군구) 판정 — 값이 비면 '미확인'을 고른 규칙만 통과시킨다. */
+/** 텍스트 축(지역) 판정 — 값이 비면 '미확인'을 고른 규칙만 통과시킨다. */
 function matchesTextAxis(allow: string[], v: string | null | undefined): boolean {
   const s = (v ?? "").trim();
   return s ? allow.includes(s) : allow.includes(UNKNOWN_RULE_VALUE);
+}
+
+/** 시도 값이 없는 사람을 묶는 그룹 이름 — 옵션 API·규칙 키·에디터가 같은 문자열을 쓴다. */
+export const SIGUNGU_NO_SIDO = "시도 미확인";
+
+/**
+ * 시군구 규칙 키 — `시도>시군구` 복합키.
+ * 구 이름만으로 비교하면 동명이구(중구·서구가 서울·인천·부산에 모두 있다) 때문에
+ * 에디터에서 '서울특별시 > 중구'를 골라도 인천·부산 중구가 함께 걸린다(표시와 판정이 어긋난다).
+ */
+export function sigunguKey(sido: string | null | undefined, sigungu: string | null | undefined): string | null {
+  const g = (sigungu ?? "").trim();
+  if (!g) return null;
+  const s = (sido ?? "").trim() || SIGUNGU_NO_SIDO;
+  return `${s}>${g}`;
 }
 
 export type ExposureMode = "include" | "exclude";
@@ -103,7 +118,9 @@ export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, now
     if (!matchesTextAxis(rule.sido, a.sido)) return false;
   }
   if (rule.sigungu && rule.sigungu.length) {
-    if (!matchesTextAxis(rule.sigungu, a.sigungu)) return false;
+    // 복합키(시도>시군구) 비교 — 값이 비면 '미확인'을 고른 규칙만 통과.
+    const key = sigunguKey(a.sido, a.sigungu);
+    if (key === null ? !rule.sigungu.includes(UNKNOWN_RULE_VALUE) : !rule.sigungu.includes(key)) return false;
   }
   if (rule.availability && rule.availability.length) {
     if (!a.availability || !rule.availability.includes(a.availability)) return false;

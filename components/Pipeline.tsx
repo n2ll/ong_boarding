@@ -1914,7 +1914,17 @@ export function Pipeline() {
         </div>
       )}
 
-      <ApplicantDetailPanel isOpen={selectedApplicantId != null} onClose={() => setSelectedApplicantId(null)} applicantId={selectedApplicantId} onChanged={loadApplicants} />
+      <ApplicantDetailPanel
+        isOpen={selectedApplicantId != null}
+        onClose={() => setSelectedApplicantId(null)}
+        applicantId={selectedApplicantId}
+        /* 진행 중 공고 포인터 — 이 화면엔 공고 선택기가 없어, 없으면 여러 공고 진행자의 AI 토글이 409로 막힌다. */
+        jobId={
+          (rawApplicants.find((a) => a.id === selectedApplicantId) as { current_job_id?: number | null } | undefined)
+            ?.current_job_id ?? null
+        }
+        onChanged={loadApplicants}
+      />
 
       {/* Modals for Bulk Actions */}
       {/* 1. Bulk Stage Change Modal */}

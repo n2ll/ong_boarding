@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
-import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE } from "@/lib/exposure";
+import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/exposure";
 
 /**
  * J · 타겟 공고 노출 편집기 — 공고 생성 폼·수정 모달 공용.
@@ -113,7 +113,7 @@ export function ExposureEditor({
   const { data: options } = useSWR<{
     sidos: string[];
     availabilities: string[];
-    sigunguGroups?: { sido: string; items: { name: string; count: number }[] }[];
+    sigunguGroups?: { sido: string; items: { name: string; count: number; key: string }[] }[];
     unknown?: { sido: number; sigungu: number };
   }>(
     targeted ? "/api/admin/exposure" : null,
@@ -275,14 +275,19 @@ export function ExposureEditor({
             <div className="flex flex-col gap-2">
               {(options?.sigunguGroups ?? []).map((g) => (
                 <div key={g.sido}>
-                  <div className="text-[10.5px] font-bold text-[#CBD5E0] mb-1">{g.sido}</div>
+                  <div className="text-[10.5px] font-bold text-[#CBD5E0] mb-1">
+                    {g.sido}
+                    {g.sido === SIGUNGU_NO_SIDO && <span className="font-semibold"> — 주소 정리가 필요한 분들</span>}
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {g.items.map((it) => (
                       <Chip
-                        key={`${g.sido}:${it.name}`}
+                        key={it.key}
                         label={`${it.name} ${it.count}`}
-                        on={value.rule.sigungu.includes(it.name)}
-                        onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, it.name) })}
+                        /* 저장 값은 '시도>시군구' 복합키 — 이름만 담으면 동명이구(중구·서구)가 교차로 걸려
+                           화면의 시도 그룹과 실제 판정 범위가 어긋난다. */
+                        on={value.rule.sigungu.includes(it.key)}
+                        onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, it.key) })}
                       />
                     ))}
                   </div>
