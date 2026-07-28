@@ -55,12 +55,19 @@ export async function resolveCandidateTarget(
   }
 
   type Row = TargetCandidate & { jobs?: { title: string | null } | { title: string | null }[] | null };
-  // 시스템 더미 공고(__baemin_system__ 등)는 매니저가 고르는 대상이 아니다 — 후보 목록에서 뺀다.
-  const rows = ((data ?? []) as Row[]).filter((r) => {
+  const titleOf = (r: Row): string | null => {
     const rel = r.jobs;
     const j = Array.isArray(rel) ? rel[0] : rel;
-    return !isSystemJobTitle(j?.title ?? "");
-  });
+    return j?.title ?? null;
+  };
+  // ⚠️ 시스템 더미 공고(__baemin_system__ 등)도 **대상 후보다.** 여기서 지우면 안 된다:
+  //  - 인계 큐(agent/handoffs)는 시스템 공고 후보를 일부러 '배민 지원 (공고 미지정)' 카드로 보여주고
+  //    그 job_id로 pause/resume을 호출한다 → 지우면 'AI 재개'가 404로 죽는다.
+  //  - 배민·당근 인입은 시스템 공고 후보로 스크리닝을 시작한다(job_candidates 대부분이 이 행이다)
+  //    → 지우면 매니저 발송 시 'AI 자동응답 정지' 전이가 조용히 스킵돼 매니저·AI 이중 응답이 난다.
+  // isSystemJobTitle은 '목록·검색에서 숨김' 판정이라 액션 대상 제거에 쓸 헬퍼가 아니다.
+  // 시스템 공고는 **매니저가 고를 목록의 라벨에서만** 이름을 감춘다(아래 options).
+  const rows = (data ?? []) as Row[];
 
   if (rows.length === 0) return { ok: false, reason: "none" };
 
@@ -81,9 +88,9 @@ export async function resolveCandidateTarget(
     ok: false,
     reason: "ambiguous",
     options: [...byJob.values()].map((r) => {
-      const rel = r.jobs;
-      const j = Array.isArray(rel) ? rel[0] : rel;
-      return { job_id: r.job_id, title: j?.title ?? null };
+      const t = titleOf(r);
+      // 시스템 더미 공고는 내부 제목(__baemin_system__)을 그대로 보여주지 않는다(인계 큐와 같은 라벨 규칙).
+      return { job_id: r.job_id, title: isSystemJobTitle(t ?? "") ? "공고 미지정" : t };
     }),
   };
 }
