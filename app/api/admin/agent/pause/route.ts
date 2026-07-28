@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { resolveCandidateTarget } from "@/lib/agent/candidate-target";
 
 export const dynamic = "force-dynamic";
 
@@ -30,23 +31,30 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServiceClient();
-    // job_id가 오면 그 공고 후보를, 아니면 최신 후보(하위호환)를 대상으로.
-    let q = supabase
-      .from("job_candidates")
-      .select("id, agent_stage, agent_state")
-      .eq("applicant_id", applicant_id)
-      .not("agent_stage", "is", null);
-    if (job_id != null && Number.isFinite(Number(job_id))) {
-      q = q.eq("job_id", Number(job_id));
+    // 대상 후보 판정은 공동 함수로(lib/agent/candidate-target) — 공고를 명시하면 그 공고만 보고,
+    // 명시하지 않았는데 대상이 여러 개면 아무 것도 건드리지 않고 골라 달라고 되돌린다.
+    // (예전엔 '없으면 최신 후보' 폴백이라 엉뚱한 공고의 AI를 끄고, 그 뒤 재개가 400으로 실패했다.)
+    const target = await resolveCandidateTarget(
+      supabase,
+      Number(applicant_id),
+      job_id != null && Number.isFinite(Number(job_id)) ? Number(job_id) : null,
+      { want: "active" }
+    );
+    if (!target.ok && target.reason === "ambiguous") {
+      return NextResponse.json(
+        {
+          error: "진행 중인 공고가 여러 개예요 — 어느 공고인지 골라 주세요.",
+          code: "ambiguous_job",
+          options: target.options,
+        },
+        { status: 409 }
+      );
     }
-    const { data: jc } = await q
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const jc = target.ok ? target.candidate : null;
 
     if (!jc) {
       return NextResponse.json(
-        { error: "활성 job_candidate를 찾을 수 없습니다." },
+        { error: "AI가 응대 중인 공고가 없어요 — 이미 중단됐거나 아직 시작되지 않았어요." },
         { status: 404 }
       );
     }

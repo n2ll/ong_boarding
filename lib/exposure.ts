@@ -11,6 +11,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // 자동 노출 규칙 — 파이프라인 필터 스키마 재사용(지역·가용성·선탑완료·코호트) + 차량.
 export interface ExposureRule {
   sido?: string[]; // 시도(지역) 화이트리스트
+  /**
+   * 시군구(구 단위) 화이트리스트 — 시·도로는 '강남권/용산권'을 가를 수 없어서 추가했다.
+   * 값은 `sigunguKey()`의 복합키(`서울특별시>강남구`) 또는 `'미확인'`. 구 이름만 담으면 동명이구가 교차로 걸린다.
+   */
+  sigungu?: string[];
   availability?: string[]; // 가용성 값 화이트리스트
   /**
    * 차량 보유 화이트리스트 — 정규화 값('있음' | '없음' | '미확인').
@@ -26,6 +31,7 @@ export interface ExposureRule {
 export interface ExposureApplicant {
   id: number;
   sido: string | null;
+  sigungu: string | null;
   availability: string | null;
   /** 자유 입력 값이라 정규화해서 비교한다(있음/없음/미확인). 호출부가 반드시 함께 넘길 것 — 없으면 차량 규칙이 fail-closed. */
   own_vehicle?: string | null;
@@ -50,6 +56,33 @@ export function normalizeVehicleOwned(raw: string | null | undefined): "있음" 
 /** 노출 규칙에서 고를 수 있는 차량 값 — UI 칩과 서버 정규화가 같은 집합을 쓴다. */
 export const VEHICLE_RULE_VALUES = ["있음", "없음", "미확인"] as const;
 
+/**
+ * 값이 비어 있는 사람을 가리키는 규칙 값 — 매니저가 이걸 골라야 그 사람들이 통과한다.
+ * 조용한 탈락을 없애기 위한 장치다(시군구 미상 194명 · 시간대 미상 205명이 규칙마다 사라지던 문제).
+ */
+export const UNKNOWN_RULE_VALUE = "미확인";
+
+/** 텍스트 축(지역) 판정 — 값이 비면 '미확인'을 고른 규칙만 통과시킨다. */
+function matchesTextAxis(allow: string[], v: string | null | undefined): boolean {
+  const s = (v ?? "").trim();
+  return s ? allow.includes(s) : allow.includes(UNKNOWN_RULE_VALUE);
+}
+
+/** 시도 값이 없는 사람을 묶는 그룹 이름 — 옵션 API·규칙 키·에디터가 같은 문자열을 쓴다. */
+export const SIGUNGU_NO_SIDO = "시도 미확인";
+
+/**
+ * 시군구 규칙 키 — `시도>시군구` 복합키.
+ * 구 이름만으로 비교하면 동명이구(중구·서구가 서울·인천·부산에 모두 있다) 때문에
+ * 에디터에서 '서울특별시 > 중구'를 골라도 인천·부산 중구가 함께 걸린다(표시와 판정이 어긋난다).
+ */
+export function sigunguKey(sido: string | null | undefined, sigungu: string | null | undefined): string | null {
+  const g = (sigungu ?? "").trim();
+  if (!g) return null;
+  const s = (sido ?? "").trim() || SIGUNGU_NO_SIDO;
+  return `${s}>${g}`;
+}
+
 export type ExposureMode = "include" | "exclude";
 
 /** 들어온 jsonb를 안전한 ExposureRule로 정규화(알 수 없는 키·타입 제거). null이면 규칙 없음. */
@@ -63,8 +96,10 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
       ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.trim() !== "" && x.length <= 100))].slice(0, 50)
       : undefined;
   const sido = strArr(r.sido);
+  const sigungu = strArr(r.sigungu);
   const availability = strArr(r.availability);
   if (sido && sido.length) out.sido = sido;
+  if (sigungu && sigungu.length) out.sigungu = sigungu;
   if (availability && availability.length) out.availability = availability;
   // 차량 — 허용 3값만 남긴다(자유 문자열이 규칙에 들어와 아무도 매칭되지 않는 상태 방지).
   const vehicle = strArr(r.vehicle)?.filter((v) => (VEHICLE_RULE_VALUES as readonly string[]).includes(v));
@@ -80,7 +115,12 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
 export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, nowMs: number = Date.now()): boolean {
   if (!rule) return false;
   if (rule.sido && rule.sido.length) {
-    if (!a.sido || !rule.sido.includes(a.sido)) return false;
+    if (!matchesTextAxis(rule.sido, a.sido)) return false;
+  }
+  if (rule.sigungu && rule.sigungu.length) {
+    // 복합키(시도>시군구) 비교 — 값이 비면 '미확인'을 고른 규칙만 통과.
+    const key = sigunguKey(a.sido, a.sigungu);
+    if (key === null ? !rule.sigungu.includes(UNKNOWN_RULE_VALUE) : !rule.sigungu.includes(key)) return false;
   }
   if (rule.availability && rule.availability.length) {
     if (!a.availability || !rule.availability.includes(a.availability)) return false;
@@ -185,7 +225,7 @@ export async function fetchApplicantsForExposure(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("id, name, sido, availability, own_vehicle, applied_at, created_at")
+      .select("id, name, sido, sigungu, availability, own_vehicle, applied_at, created_at")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
@@ -195,6 +235,7 @@ export async function fetchApplicantsForExposure(
         id: number;
         name: string | null;
         sido: string | null;
+        sigungu: string | null;
         availability: string | null;
         own_vehicle: string | null;
         applied_at: string | null;

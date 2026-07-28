@@ -374,7 +374,12 @@ export function ConversationThread({
       toast.success("문자(SMS)를 발송했어요");
       setInputValue("");
       await loadMessages({ silent: true });
-      setAgentStage("paused");
+      // 서버가 AI 자동응답 정지를 건너뛴 경우(진행 중 공고가 여러 개) — 'AI 꺼짐'으로 낙관 갱신하면 거짓 표시가 된다.
+      if (json.paused_skipped === "ambiguous") {
+        toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요 — 필요하면 공고를 고르고 'AI 끄기'를 눌러 주세요.");
+      } else {
+        setAgentStage("paused");
+      }
       onChanged?.();
     } catch {
       toast.error("문자 발송에 실패했어요");

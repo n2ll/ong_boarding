@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   const supabase = createServiceClient();
   const { data: applicant, error } = await supabase
     .from("applicants")
-    .select("id, name, lat, lng, availability, sido, own_vehicle, applied_at, created_at")
+    .select("id, name, lat, lng, availability, sido, sigungu, own_vehicle, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
 
@@ -108,6 +108,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   const exApplicant: ExposureApplicant = {
     id: applicant.id as number,
     sido: (applicant as { sido?: string | null }).sido ?? null,
+    sigungu: (applicant as { sigungu?: string | null }).sigungu ?? null,
     availability: (applicant as { availability?: string | null }).availability ?? null,
     own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
     applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,

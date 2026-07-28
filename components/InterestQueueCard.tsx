@@ -372,6 +372,8 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
           void mutate();
         }}
         applicantId={detailId}
+        /* 관심을 누른 그 공고를 넘긴다 — 공고 선택기가 없는 화면에서 AI 끄기·재개가 막히지 않게. */
+        jobId={items.find((i) => i.applicant_id === detailId)?.job_id ?? null}
         onChanged={() => void mutate()}
       />
     </motion.div>

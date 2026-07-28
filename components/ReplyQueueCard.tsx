@@ -288,6 +288,9 @@ export function ReplyQueueCard({
           setPreviewNonce((n) => n + 1);
         }}
         applicantId={detailId}
+        /* 진행 중 공고 포인터를 함께 넘긴다 — 없으면 여러 공고를 진행하는 사람에게 AI 끄기·재개가
+           '어느 공고인지 골라 주세요'(409)로 막히는데, 이 화면엔 공고 선택기가 없다. */
+        jobId={items.find((i) => i.id === detailId)?.current_job_id ?? null}
         initialTab="chat"
         onChanged={() => {
           void mutate();

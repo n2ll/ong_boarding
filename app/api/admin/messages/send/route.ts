@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { resolveCandidateTarget } from "@/lib/agent/candidate-target";
 import { sendSms } from "@/lib/solapi";
 import { COPILOT_DRAFT_MARKER } from "@/lib/agent/kill-switch";
 
@@ -36,6 +37,9 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // 진행 중 공고가 여러 개여서 AI 자동 응답 정지를 건너뛴 경우 — 클라가 매니저에게 알린다.
+    let pausedSkipped: "ambiguous" | null = null;
 
     // messages 테이블에 저장
     const supabase = createServiceClient();
@@ -79,34 +83,18 @@ export async function POST(req: NextRequest) {
     // 매니저와 AI가 같은 후보에게 동시에 응답하는 충돌 방지.
     const isManagerSend = !AGENT_OR_SYSTEM_SENT_BY.has(sent_by ?? "") && !isCopilotDraftApproval;
     if (isManagerSend && applicant_id) {
-      // 전이 대상 후보: 발송된 공고(job_id)의 후보를 우선, 없으면 최신 활성 후보로 폴백.
-      let jc: { id: number; agent_stage: string | null; agent_state: unknown } | null = null;
-      if (jobId != null) {
-        const { data } = await supabase
-          .from("job_candidates")
-          .select("id, agent_stage, agent_state")
-          .eq("applicant_id", applicant_id)
-          .eq("job_id", jobId)
-          .not("agent_stage", "is", null)
-          .neq("agent_stage", "paused")
-          .neq("agent_stage", "abort")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        jc = data;
-      }
-      if (!jc) {
-        const { data } = await supabase
-          .from("job_candidates")
-          .select("id, agent_stage, agent_state")
-          .eq("applicant_id", applicant_id)
-          .not("agent_stage", "is", null)
-          .neq("agent_stage", "paused")
-          .neq("agent_stage", "abort")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        jc = data;
+      // 전이 대상 후보 — 공동 판정(lib/agent/candidate-target). 공고를 명시하면 그 공고만 보고,
+      // 명시하지 않았는데 진행 중 공고가 여러 개면 **아무 공고도 건드리지 않는다**(예전엔 최신 후보로 폴백해
+      // 엉뚱한 공고의 AI를 끄고, 이후 '재개'가 다른 공고를 보게 되어 400으로 실패했다).
+      // 발송 자체는 막지 않는다 — 매니저 답장이 나가는 게 우선이고, 자동 응답 정지만 건너뛴다.
+      const target = await resolveCandidateTarget(supabase, applicant_id, jobId, { want: "active" });
+      const jc = target.ok ? target.candidate : null;
+      if (!target.ok && target.reason === "ambiguous") {
+        pausedSkipped = "ambiguous";
+        console.warn("[messages/send] 진행 중 공고가 여러 개라 AI 정지를 건너뜀", {
+          applicant_id,
+          options: target.options.map((o) => o.job_id),
+        });
       }
       if (jc) {
         const prevState = (jc.agent_state ?? {}) as Record<string, unknown>;
@@ -152,7 +140,7 @@ export async function POST(req: NextRequest) {
         .in("status", ["pending", "need_info"]);
     }
 
-    return NextResponse.json({ success: true, message: data });
+    return NextResponse.json({ success: true, message: data, paused_skipped: pausedSkipped });
   } catch (err) {
     console.error("[send message error]", err);
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });

@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
-import { VEHICLE_RULE_VALUES } from "@/lib/exposure";
+import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/exposure";
 
 /**
  * J · 타겟 공고 노출 편집기 — 공고 생성 폼·수정 모달 공용.
@@ -18,6 +18,8 @@ import { VEHICLE_RULE_VALUES } from "@/lib/exposure";
 
 export interface ExposureRuleDraft {
   sido: string[];
+  /** 시군구(구 단위) — 시·도로는 권역을 못 가른다. '미확인'을 고르면 시군구 값이 없는 사람도 포함된다. */
+  sigungu: string[];
   availability: string[];
   /** 차량 보유('있음'·'없음'·'미확인') — 공고 요건과 직결되는 축. 비우면 차량과 무관하게 노출. */
   vehicle: string[];
@@ -32,7 +34,7 @@ export interface ExposureDraft {
 
 export const EMPTY_EXPOSURE: ExposureDraft = {
   exposure: "all",
-  rule: { sido: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
+  rule: { sido: [], sigungu: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
 };
 
 /** 서버(jsonb)의 exposure_rule → 편집용 draft. */
@@ -40,6 +42,7 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
     sido: Array.isArray(r.sido) ? r.sido.filter((v): v is string => typeof v === "string") : [],
+    sigungu: Array.isArray(r.sigungu) ? r.sigungu.filter((v): v is string => typeof v === "string") : [],
     availability: Array.isArray(r.availability)
       ? r.availability.filter((v): v is string => typeof v === "string")
       : [],
@@ -53,6 +56,7 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
 export function draftToRule(d: ExposureRuleDraft): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   if (d.sido.length) out.sido = d.sido;
+  if (d.sigungu.length) out.sigungu = d.sigungu;
   if (d.availability.length) out.availability = d.availability;
   if (d.vehicle.length) out.vehicle = d.vehicle;
   if (d.suntopDone) out.suntopDone = true;
@@ -106,7 +110,12 @@ export function ExposureEditor({
   const targeted = value.exposure === "targeted";
 
   // 규칙 빌더 옵션 — 실데이터 distinct 값(지정 노출을 켰을 때만 로드)
-  const { data: options } = useSWR<{ sidos: string[]; availabilities: string[] }>(
+  const { data: options } = useSWR<{
+    sidos: string[];
+    availabilities: string[];
+    sigunguGroups?: { sido: string; items: { name: string; count: number; key: string }[] }[];
+    unknown?: { sido: number; sigungu: number };
+  }>(
     targeted ? "/api/admin/exposure" : null,
     jsonFetcher,
     { revalidateOnFocus: false }
@@ -246,7 +255,56 @@ export function ExposureEditor({
               {(options?.sidos ?? []).map((s) => (
                 <Chip key={s} label={s} on={value.rule.sido.includes(s)} onClick={() => setRule({ sido: toggleIn(value.rule.sido, s) })} />
               ))}
+              {/* 값이 없는 사람도 포함할 수 있게 — 안 고르면 그 인원은 이 조건에서 조용히 빠진다 */}
+              {(options?.unknown?.sido ?? 0) > 0 && (
+                <Chip
+                  label={`미확인 ${options?.unknown?.sido}`}
+                  on={value.rule.sido.includes(UNKNOWN_RULE_VALUE)}
+                  onClick={() => setRule({ sido: toggleIn(value.rule.sido, UNKNOWN_RULE_VALUE) })}
+                />
+              )}
               {options && options.sidos.length === 0 && <span className="text-[12px] text-[#A0AEC0]">지역 데이터 없음</span>}
+            </div>
+          </div>
+
+          {/* 시군구(구 단위) — 시·도로는 강남권/용산권을 못 가른다. 동명이구(중구·서구)가 있어 시도별로 묶어 보여준다. */}
+          <div>
+            <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">
+              시군구 <span className="font-semibold text-[#CBD5E0]">— 권역별 라인이면 여기서 구를 고르세요</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {(options?.sigunguGroups ?? []).map((g) => (
+                <div key={g.sido}>
+                  <div className="text-[10.5px] font-bold text-[#CBD5E0] mb-1">
+                    {g.sido}
+                    {g.sido === SIGUNGU_NO_SIDO && <span className="font-semibold"> — 주소 정리가 필요한 분들</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {g.items.map((it) => (
+                      <Chip
+                        key={it.key}
+                        label={`${it.name} ${it.count}`}
+                        /* 저장 값은 '시도>시군구' 복합키 — 이름만 담으면 동명이구(중구·서구)가 교차로 걸려
+                           화면의 시도 그룹과 실제 판정 범위가 어긋난다. */
+                        on={value.rule.sigungu.includes(it.key)}
+                        onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, it.key) })}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {(options?.unknown?.sigungu ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  <Chip
+                    label={`미확인 ${options?.unknown?.sigungu}`}
+                    on={value.rule.sigungu.includes(UNKNOWN_RULE_VALUE)}
+                    onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, UNKNOWN_RULE_VALUE) })}
+                  />
+                </div>
+              )}
+              {options && (options.sigunguGroups ?? []).length === 0 && (
+                <span className="text-[12px] text-[#A0AEC0]">시군구 데이터 없음</span>
+              )}
             </div>
           </div>
 

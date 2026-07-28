@@ -423,7 +423,12 @@ export function LiveConsole() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ applicant_id: h.applicant_id, job_id: h.job_id }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // 서버가 이유를 준다(예: 진행 중 공고가 여러 개 → 골라 달라). 삼키면 원인을 알 수 없다.
+        const json = await res.json().catch(() => null);
+        toast.error(json?.error || "재개에 실패했어요.");
+        return;
+      }
       toast.success(`${h.applicant_name}님 — AI 응대를 재개했어요.`);
       handleChanged();
     } catch {
