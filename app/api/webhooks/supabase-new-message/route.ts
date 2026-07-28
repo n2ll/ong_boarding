@@ -362,21 +362,24 @@ async function processInbound(
               lng: a.lng,
             });
             // 정책: 한 사람 = 하나의 '진행 중' 공고 (engage·dispatch와 동일)
-            const jobConflict =
-              pick != null && a.current_job_id != null && a.current_job_id !== pick.jobId;
-            if (!pick) {
-              // 활성 공고가 여러 개면 자동 편입을 하지 않는다(추측 편입 금지, lib/agent/engage.pickJobForCampaignReply ③).
-              // 문자는 이미 이 지원자 스레드에 붙어 '내가 답할 차례' 큐에 뜨지만, 자동 응대가 없다는 사실을 알린다.
+            // 활성 공고가 여러 개라 '어느 공고 얘기인지' 확정할 수 없으면 자동 편입을 하지 않는다
+            // (추측 편입 금지, lib/agent/engage.pickJobForCampaignReply ③). 문자는 이미 이 지원자 스레드에 붙어
+            // '내가 답할 차례' 큐에 뜨지만, 자동 응대가 없다는 사실은 알려야 한다.
+            // 활성 공고가 0개(보낼 공고 자체가 없음)일 때는 알리지 않는다 — 매니저가 할 일이 없다.
+            if (pick && pick.jobId === null) {
               await sendSlackText(
-                `💬 캠페인 답장 — 어느 공고인지 확정할 수 없어 자동 편입을 건너뜀: ${applicant.name?.trim() || phone} · 실시간 응대의 '내가 답할 차례'에서 직접 확인해 주세요`
+                `💬 캠페인 답장 — 열린 공고가 ${pick.ambiguousCount}개라 어느 공고인지 확정할 수 없어 자동 편입을 건너뜀: ${applicant.name?.trim() || phone} · 실시간 응대의 '내가 답할 차례'에서 직접 확인해 주세요`
               );
             }
-            if (pick && !jobConflict) {
+            const picked = pick && pick.jobId !== null ? pick : null;
+            const jobConflict =
+              picked != null && a.current_job_id != null && a.current_job_id !== picked.jobId;
+            if (picked && !jobConflict) {
               const { data: upserted, error: upErr } = await supabase
                 .from("job_candidates")
                 .upsert(
                   {
-                    job_id: pick.jobId,
+                    job_id: picked.jobId,
                     applicant_id: applicant.id,
                     agent_stage: "screening",
                     sent_at: new Date().toISOString(),
@@ -393,27 +396,27 @@ async function processInbound(
                 // engage와 동일 축 — current_job_id·인바운드 메시지 job_id 연결 (둘 다 non-fatal)
                 const { error: cjErr } = await supabase
                   .from("applicants")
-                  .update({ current_job_id: pick.jobId })
+                  .update({ current_job_id: picked.jobId })
                   .eq("id", applicant.id);
                 if (cjErr) console.error("[supabase-webhook] campaign-reply current_job_id failed", cjErr);
                 const { error: mjErr } = await supabase
                   .from("messages")
-                  .update({ job_id: pick.jobId })
+                  .update({ job_id: picked.jobId })
                   .eq("id", msg.id);
                 if (mjErr) console.error("[supabase-webhook] campaign-reply msg job_id failed", mjErr);
                 const { error: evErr } = await supabase.from("pool_events").insert({
                   applicant_id: applicant.id,
-                  job_id: pick.jobId,
+                  job_id: picked.jobId,
                   event_type: "auto_engage",
                   meta: {
                     source: "campaign-reply",
-                    picked_by: pick.pickedBy,
+                    picked_by: picked.pickedBy,
                     message_id: String(msg.id),
                   },
                 });
                 if (evErr) console.error("[supabase-webhook] campaign-reply pool_events failed", evErr);
                 await sendSlackText(
-                  `💬 캠페인 답장 → #${pick.jobId} 공고 스크리닝 자동 편입: ${applicant.name?.trim() || phone}`
+                  `💬 캠페인 답장 → #${picked.jobId} 공고 스크리닝 자동 편입: ${applicant.name?.trim() || phone}`
                 );
                 // 그 인바운드를 그대로 라우터로 — 대화 맥락을 보고 자연스럽게 회신(확정 뉘앙스 금지는 라우터 백스톱이 보장)
                 const agentResult = await runAgentForCandidate({
@@ -428,8 +431,8 @@ async function processInbound(
                   matched: true,
                   agent_invoked: true,
                   enrolled: "campaign-reply",
-                  job_id: pick.jobId,
-                  picked_by: pick.pickedBy,
+                  job_id: picked.jobId,
+                  picked_by: picked.pickedBy,
                   agent: agentResult,
                 };
               }

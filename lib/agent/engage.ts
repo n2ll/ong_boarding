@@ -336,6 +336,12 @@ export interface CampaignReplyJobPick {
   pickedBy: CampaignReplyJobPickedBy;
 }
 
+/** 자동 편입 보류 — 활성 공고가 여러 개라 '어느 공고 얘기인지' 추측할 수 없는 경우. 호출부가 사람에게 넘긴다. */
+export interface CampaignReplyAmbiguous {
+  jobId: null;
+  ambiguousCount: number;
+}
+
 /**
  * 캠페인 문자에 '답장으로만' 반응한 지원자(활성 후보 없음)를 편입할 공고 선택.
  *
@@ -349,7 +355,7 @@ export interface CampaignReplyJobPick {
 export async function pickJobForCampaignReply(
   supabase: SupabaseClient,
   applicant: { id: number; lat: number | null; lng: number | null }
-): Promise<CampaignReplyJobPick | null> {
+): Promise<CampaignReplyJobPick | CampaignReplyAmbiguous | null> {
   type JobRow = {
     id: number;
     title: string;
@@ -406,7 +412,7 @@ export async function pickJobForCampaignReply(
       jobs = jobs.filter((j) => j.exposure !== "targeted");
     }
   }
-  if (jobs.length === 0) return null;
+  if (jobs.length === 0) return null; // 보낼 공고 자체가 없음 — 알릴 것도 없다
 
   // ① 관심 클릭 이력(stage NULL 후보) — 지원자가 직접 고른 공고가 최우선(최신순)
   const { data: nullCands, error: candsErr } = await supabase
@@ -448,7 +454,7 @@ export async function pickJobForCampaignReply(
   // 그래서 여러 개면 자동 편입을 포기하고 null을 돌려준다 → 호출부가 매니저 확인으로 넘긴다.
   if (jobs.length > 1) {
     console.log("[engage] campaign-reply 자동 편입 보류 — 활성 공고 다수", { applicantId: applicant.id, activeJobs: jobs.length });
-    return null;
+    return { jobId: null, ambiguousCount: jobs.length };
   }
   return { jobId: jobs[0].id, jobTitle: jobs[0].title, pickedBy: "latest_active" };
 }

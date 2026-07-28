@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
         `- 🤖 코파일럿: 초안 불가(인바운드 없음) ${counts.copilot}명 — 관심 큐에서 [빠른 컨택]으로 수동 진행해주세요.`
       );
     if (counts.failed > 0) lines.push(`- ⚠️ 발송 실패(내일 재시도): ${counts.failed}명`);
-    if (counts.skipped > 0) lines.push(`- 가드 스킵(진행 중/중복/수신거부 등): ${counts.skipped}건 — 관심 큐에서 수동 확인이 필요할 수 있어요.`);
+    if (counts.skipped > 0) lines.push(`- 가드로 건너뜀: ${counts.skipped}건 (진행 중·중복·수신거부 등 — 대개 정상이에요)`);
     if (deferredSameApplicant > 0)
       lines.push(
         `- ⏭ 같은 분의 추가 관심 ${deferredSameApplicant}건은 큐에 남겨뒀어요(한 번에 1건만 자동 진행) — 관심 큐에서 직접 처리해 주세요.`

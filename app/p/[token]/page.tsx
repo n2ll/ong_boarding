@@ -69,6 +69,13 @@ function payLabel(j: PoolJob): string | null {
 }
 
 /** 시작일 → 'YYYY-MM-DD'면 'M월 D일'로, 자유 텍스트면 원문 그대로 */
+/** 주소 권역 표기 — '서울 성동구 성수동1가 12-3' → '서울 성동구'. 상세주소는 확정 후 안내에서만 노출. */
+function shortArea(addr: string | null): string {
+  const t = (addr ?? "").trim().split(/\s+/).filter(Boolean);
+  if (t.length === 0) return "";
+  return t.slice(0, 2).join(" ");
+}
+
 function startDateLabel(raw: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!m) return raw;
@@ -356,7 +363,9 @@ export default function PoolPage() {
                   {(job.branch || job.pickup_address) && (
                     <div className="flex gap-2">
                       <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">{job.branch ? "지점" : "출발지"}</dt>
-                      <dd>{job.branch || job.pickup_address}</dd>
+                      {/* 지점명이 없으면 집결지 주소로 대신 보여주되 **권역까지만** — 상세주소(동/번지 뒤)는
+                          확정 후 만남장소 안내에서 알려준다. 링크만 있으면 누구나 보는 화면이다. */}
+                      <dd className="break-words">{job.branch || shortArea(job.pickup_address)}</dd>
                     </div>
                   )}
                   {job.distance_km !== null && (
