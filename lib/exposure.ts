@@ -34,12 +34,16 @@ export interface ExposureApplicant {
   suntopDone?: boolean; // pool_events(suntop_done)에서 계산해 주입
 }
 
-/** 차량 보유 표기 정규화 — '네'·'예'·'자차' 같은 변형과 빈값을 3값으로 모은다(파이프라인 vehicleClass와 같은 취지). */
+/**
+ * 차량 보유 3값 정규화 — **파이프라인 목록의 차량 판정(vehicleClassOf)과 같은 규칙**이어야 한다.
+ * 매니저가 파이프라인에서 '차량 보유'로 고른 집합과 노출 규칙 '있음'이 다른 사람을 가리키면 안 된다.
+ * 그래서 느슨한 패턴 매칭을 쓰지 않는다 — 자유 입력('업무용 차량 있음' 같은 값)은 '미확인'으로 남기고
+ * 사람이 값을 정리하게 한다(잘못 '없음'으로 분류해 조용히 노출을 끊는 것보다 안전).
+ */
 export function normalizeVehicleOwned(raw: string | null | undefined): "있음" | "없음" | "미확인" {
   const v = (raw ?? "").trim();
-  if (!v || v === "미확인" || v === "미지정") return "미확인";
-  if (/없|무|도보|불가/.test(v)) return "없음";
-  if (/있|네|예|자차|보유|가능|오토바이|이륜|사륜|트럭|승용|밴|카고/.test(v)) return "있음";
+  if (v === "있음" || v === "네" || v === "예") return "있음";
+  if (v === "없음" || v === "아니오") return "없음";
   return "미확인";
 }
 
