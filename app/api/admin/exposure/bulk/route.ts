@@ -189,7 +189,12 @@ export async function POST(req: NextRequest) {
       );
     }
     if (protectRows.length > 0) {
-      const { error: protectInsErr } = await supabase.from("job_exposure_targets").insert(protectRows);
+      // ignoreDuplicates — 기존 행은 그대로 둔다(매니저가 제외해둔 사람을 되살리지 않는다).
+      // 대상 계산과 insert 사이에 관심 클릭·다른 매니저 조작으로 행이 생기면 plain insert는 유니크 제약
+      // 위반으로 배치 전체가 죽는다. 그 경합에서 매니저를 막지 않도록 충돌은 무시한다.
+      const { error: protectInsErr } = await supabase
+        .from("job_exposure_targets")
+        .upsert(protectRows, { onConflict: "job_id,applicant_id", ignoreDuplicates: true });
       if (protectInsErr) {
         console.error("[exposure bulk] linked protect insert failed", protectInsErr);
         return NextResponse.json(

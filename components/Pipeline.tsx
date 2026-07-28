@@ -628,12 +628,17 @@ export function Pipeline() {
   const exposureWillFlip = exposureMode === "include" && exposureMakeTargeted && exposureFlipJobs.length > 0;
   const exposureWillClear = exposureMode === "include" && exposureRuleAction === "clear" && exposureRuleJobs.length > 0;
   // 노출이 좁아지는 공고에서 이미 연결된(관심·후보) 인원 — 이분들은 명단에 자동으로 남는다.
-  const exposureLinkedProtected = [
+  // 공고별 합계라 한 분이 여러 공고에 연결되면 중복으로 세어진다 → 문구는 '명'이 아니라 '건'으로 쓴다.
+  const exposureNarrowingIds = [
     ...new Set([
       ...(exposureWillFlip ? exposureFlipJobs.map((j) => j.id) : []),
       ...(exposureWillClear ? exposureRuleJobs.map((j) => j.id) : []),
     ]),
-  ].reduce((n, id) => n + (impactById.get(id)?.linked ?? 0), 0);
+  ];
+  const exposureLinkedProtected = exposureNarrowingIds.reduce(
+    (n, id) => n + (impactById.get(id)?.linked ?? 0),
+    0
+  );
 
   // 지금 걸린 조건을 조건 바의 라벨 그대로 — 노출을 지정할 때 '어떤 조건으로 고른 명단인지'가
   // 명단 자체보다 중요하다(나중에 왜 이 사람들인지 되짚을 수 있어야 한다).
@@ -685,7 +690,9 @@ export function Pipeline() {
       }
       if (exposureLinkedProtected > 0) {
         lines.push(
-          `이미 이 공고로 연결된 ${exposureLinkedProtected}명은 명단에 자동으로 남겨요 — 이야기 중인 공고가 본인 화면에서 사라지지 않게요(직접 제외해둔 분은 그대로 제외).`
+          exposureNarrowingIds.length === 1
+            ? `이미 이 공고로 연결된 ${exposureLinkedProtected}명은 명단에 자동으로 남겨요 — 이야기 중인 공고가 본인 화면에서 사라지지 않게요(직접 제외해둔 분은 그대로 제외).`
+            : `이미 연결된 ${exposureLinkedProtected}건(공고별 합계)은 명단에 자동으로 남겨요 — 이야기 중인 공고가 본인 화면에서 사라지지 않게요(직접 제외해둔 분은 그대로 제외).`
         );
       }
       lines.push(`노출 명단에 넣을 인원: 지금 고른 ${applicantIds.length}명`);
@@ -733,7 +740,7 @@ export function Pipeline() {
         `${applicantIds.length}명을 공고 ${jobIds.length}개에 ${exposureMode === "include" ? "노출 대상으로 추가" : "노출 제외로 지정"}했어요` +
           (flipped.length > 0 ? ` · 공고 ${flipped.length}개를 '지정 노출'로 전환` : "") +
           (cleared.length > 0 ? ` · 규칙 ${cleared.length}개 삭제` : "") +
-          (json.auto_included > 0 ? ` · 이미 연결된 ${json.auto_included}명 자동 포함` : "") +
+          (json.auto_included > 0 ? ` · 이미 연결된 ${json.auto_included}건 자동 포함` : "") +
           (nonTargeted.length > 0
             ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
             : "")

@@ -194,6 +194,10 @@ interface AnnounceTargetsRes {
   targets: AnnounceTarget[];
   night: boolean;
   sms_title: string;
+  /** 'targeted'면 이 공고는 노출 명단 밖에 있는 사람에게 안내를 보내지 않는다. */
+  exposure?: "all" | "targeted";
+  /** 노출 명단 때문에 빠진 수 — promised는 그중 '먼저 안내 약속'·선탑 완료자(약속을 어기는 쪽). */
+  dropped_by_exposure?: { total: number; promised: number };
 }
 
 // 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
@@ -556,7 +560,7 @@ export function Jobs() {
   const [closing, setClosing] = useState(false);
   // 새 공고 안내 모달 — 등록 직후(대상 ≥1이면 자동)와 행 '대기자에게 안내'(수동)가 같은 모달을 쓴다.
   // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
-  const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean } | null>(null);
+  const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
@@ -1141,7 +1145,7 @@ export function Jobs() {
         try {
           const at = await fetchAnnounceTargets(newJobId);
           if (at.targets.length > 0) {
-            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
           }
         } catch {
           /* noop */
@@ -1454,13 +1458,18 @@ export function Jobs() {
     setAnnounceBusyId(job.id);
     try {
       const at = await fetchAnnounceTargets(Number(job.id));
+      const dropped = at.dropped_by_exposure?.total ?? 0;
       if (at.targets.length === 0) {
         toast.info("안내할 대기자가 없어요", {
-          description: "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
+          // 0명의 이유가 '이력 없음'이 아니라 '노출 명단이 좁아서'일 수 있다 — 원인을 바꿔 말하지 않는다.
+          description:
+            dropped > 0
+              ? `이 공고는 지정 노출이라 노출 명단 밖 ${dropped}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`
+              : "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
         });
         return;
       }
-      setAnnounceModal({ jobId: Number(job.id), smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+      setAnnounceModal({ jobId: Number(job.id), smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
     } catch {
       toast.error("안내 대상을 불러오지 못했어요");
     } finally {
@@ -2636,6 +2645,15 @@ export function Jobs() {
                 {NEW_JOB_NOTICE.replace("{공고명}", announceModal.smsTitle)}
               </div>
               <p className="mt-1.5 text-[11px] text-[#A0AEC0]">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+              {/* 지정 노출로 좁힌 공고는 명단 밖 대기자에게 안내를 보내지 않는다 —
+                  '먼저 안내드릴게요' 약속은 공고 무관이라, 이 수를 숨기면 약속이 조용히 깨진다. */}
+              {(announceModal.dropped?.total ?? 0) > 0 && (
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFAF0] border border-[#FBD38D] text-[12px] text-[#C05621] leading-relaxed">
+                  이 공고는 <b>지정 노출</b>이라 노출 명단 밖 <b>{announceModal.dropped?.total}명</b>이 대상에서 빠졌어요
+                  {(announceModal.dropped?.promised ?? 0) > 0 && <> — 그중 <b>{announceModal.dropped?.promised}명</b>은 &lsquo;먼저 안내드릴게요&rsquo; 약속·선탑 완료자예요</>}.
+                  이분들께도 알리려면 노출 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.
+                </div>
+              )}
               {/* 야간(KST 21~08)엔 발송하지 않는다 — engage와 동일 원칙(isNightKst). */}
               {announceModal.night && (
                 <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[12.5px] font-bold text-[#B7791F]">
