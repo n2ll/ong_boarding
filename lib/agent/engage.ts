@@ -388,7 +388,7 @@ export async function pickJobForCampaignReply(
     try {
       const { data: appRow } = await supabase
         .from("applicants")
-        .select("sido, availability, own_vehicle, applied_at, created_at")
+        .select("sido, sigungu, availability, own_vehicle, applied_at, created_at")
         .eq("id", applicant.id)
         .maybeSingle();
       const targetedIds = jobs.filter((j) => j.exposure === "targeted").map((j) => j.id);
@@ -399,6 +399,7 @@ export async function pickJobForCampaignReply(
       const exA: ExposureApplicant = {
         id: applicant.id,
         sido: (appRow as { sido?: string | null } | null)?.sido ?? null,
+        sigungu: (appRow as { sigungu?: string | null } | null)?.sigungu ?? null,
         availability: (appRow as { availability?: string | null } | null)?.availability ?? null,
         own_vehicle: (appRow as { own_vehicle?: string | null } | null)?.own_vehicle ?? null,
         applied_at: (appRow as { applied_at?: string | null } | null)?.applied_at ?? null,

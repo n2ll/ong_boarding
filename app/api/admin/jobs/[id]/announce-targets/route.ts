@@ -50,6 +50,7 @@ interface ApplicantRow {
   lng: number | null;
   // 지정 노출(targeted) 공고의 노출 판정용
   sido: string | null;
+  sigungu: string | null;
   availability: string | null;
   applied_at: string | null;
   created_at: string | null;
@@ -162,7 +163,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: apps, error: appErr } = await supabase
     .from("applicants")
-    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, lat, lng, sido, availability, applied_at, created_at")
+    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, lat, lng, sido, sigungu, availability, applied_at, created_at")
     .in("id", unionIds);
   if (appErr) {
     console.error("[announce-targets] applicants", appErr);
@@ -197,6 +198,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       {
         id: a.id,
         sido: a.sido,
+        sigungu: a.sigungu,
         availability: a.availability,
         own_vehicle: a.own_vehicle,
         applied_at: a.applied_at,

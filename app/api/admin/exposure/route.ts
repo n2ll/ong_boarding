@@ -17,10 +17,15 @@ export async function GET() {
   const supabase = createServiceClient();
   const sidos = new Set<string>();
   const availabilities = new Set<string>();
+  // 시군구는 이름만으론 구분이 안 된다(중구·서구가 여러 시도에 있다) → 시도별로 묶고 건수를 함께 내려
+  // 에디터가 '서울특별시 > 강남구 13' 형태로 보여줄 수 있게 한다.
+  const sigunguByArea = new Map<string, Map<string, number>>();
+  let sidoUnknown = 0;
+  let sigunguUnknown = 0;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("sido, availability")
+      .select("sido, sigungu, availability")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) {
@@ -29,8 +34,20 @@ export async function GET() {
     }
     const batch = data ?? [];
     for (const r of batch) {
-      const row = r as { sido: string | null; availability: string | null };
-      if (row.sido) sidos.add(row.sido);
+      const row = r as { sido: string | null; sigungu: string | null; availability: string | null };
+      const sido = (row.sido ?? "").trim();
+      const sigungu = (row.sigungu ?? "").trim();
+      if (sido) sidos.add(sido);
+      else sidoUnknown++;
+      if (sigungu) {
+        // 시도가 없는 값(지오코딩 폴백 산물)도 숨기지 않는다 — 숨기면 그 인원은 어떤 규칙으로도 잡을 수 없다.
+        const areaKey = sido || "시도 미확인";
+        const m = sigunguByArea.get(areaKey) ?? new Map<string, number>();
+        m.set(sigungu, (m.get(sigungu) ?? 0) + 1);
+        sigunguByArea.set(areaKey, m);
+      } else {
+        sigunguUnknown++;
+      }
       if (row.availability) availabilities.add(row.availability);
     }
     if (batch.length < 1000) break;
@@ -38,6 +55,14 @@ export async function GET() {
   return NextResponse.json({
     sidos: [...sidos].sort(),
     availabilities: [...availabilities].sort(),
+    // [{ sido, items: [{ name, count }] }] — 시도 오름차순, 그 안에서 인원 많은 순
+    sigunguGroups: [...sigunguByArea.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([sido, m]) => ({
+        sido,
+        items: [...m.entries()].sort((x, y) => y[1] - x[1]).map(([name, count]) => ({ name, count })),
+      })),
+    unknown: { sido: sidoUnknown, sigungu: sigunguUnknown },
   });
 }
 
