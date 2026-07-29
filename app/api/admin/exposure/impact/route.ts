@@ -23,6 +23,7 @@ import {
   normalizeRule,
 } from "@/lib/exposure";
 import { isSystemJobTitle } from "@/lib/jobs";
+import { EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   const { data: jobRows, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, exposure, exposure_rule, recruit_mode")
+    .select(`id, title, exposure, exposure_rule, recruit_mode, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .in("id", ids);
   if (jobErr) {
     console.error("[exposure impact] jobs load failed", jobErr);
@@ -117,7 +118,8 @@ export async function GET(req: NextRequest) {
         rule_conditions: labels.length,
         rule_labels: labels,
         // 지금 규칙에 해당하는 인원 — '규칙 두고 추가'와 '규칙 지우고 명단만'의 차이를 숫자로 보여준다.
-        rule_matched: rule ? pool.filter((a) => matchesRule(a, rule, now)).length : 0,
+        // 반경 축은 공고 기준점이 필요하다 — 공고를 함께 넘기지 않으면 fail-closed로 0명이 된다.
+        rule_matched: rule ? pool.filter((a) => matchesRule(a, rule, { nowMs: now, job: j as unknown as GeoJob })).length : 0,
         include_count: includeCount.get(j.id) ?? 0,
         exclude_count: excludeCount.get(j.id) ?? 0,
         linked: linked.get(j.id)?.size ?? 0,

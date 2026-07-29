@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import type { GeoJob } from "@/lib/geo";
 import { sendSlackText } from "@/lib/slack";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { getAgentMode } from "@/lib/agent/kill-switch";
@@ -93,11 +94,13 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
         own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
         work_hours: (applicant as { work_hours?: string | null }).work_hours ?? null,
         available_slots: (applicant as { available_slots?: string[] | null }).available_slots ?? null,
+        lat: (applicant as { lat?: number | null }).lat ?? null,
+        lng: (applicant as { lng?: number | null }).lng ?? null,
         applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
         created_at: (applicant as { created_at?: string | null }).created_at ?? null,
         suntopDone,
       };
-      if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId))) {
+      if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId), { job: job as unknown as GeoJob })) {
         return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
       }
     } catch (e) {

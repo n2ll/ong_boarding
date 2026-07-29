@@ -11,6 +11,7 @@ import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
 import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
+import { jobSupportsRadius } from "@/lib/geo";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule")
+    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule, distance_basis")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -257,6 +258,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 반경 규칙 쓰기 가드 — 기준점(집결지 좌표)이 없으면 그 규칙은 아무도 통과 못 한다(수정 PATCH와 같은 규칙).
+  const normalizedNewRule = normalizeRule(exposure_rule);
+  if (
+    normalizedNewRule?.radiusKm &&
+    !jobSupportsRadius({
+      pickup_lat: resolvedPickupLat,
+      pickup_lng: resolvedPickupLng,
+      dropoff_lat: resolvedDropoffLat,
+      dropoff_lng: resolvedDropoffLng,
+      distance_basis: null,
+    })
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "거리 반경 규칙은 집결지 좌표가 있어야 쓸 수 있어요 — 집결지 주소를 넣어 좌표가 잡힌 뒤에 설정해 주세요(지금 저장하면 아무에게도 안 보입니다).",
+      },
+      { status: 400 }
+    );
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -284,7 +306,7 @@ export async function POST(req: NextRequest) {
       // (유일 호출자 등록 모달은 recruit_mode를 항상 전송하므로 이 기본값은 방어용.) asRecruitMode의 레거시 파싱 fallback은 별개로 external 유지.
       recruit_mode: recruit_mode ?? "internal",
       exposure: exposure ?? "all",
-      exposure_rule: normalizeRule(exposure_rule),
+      exposure_rule: normalizedNewRule,
       site_manager_id: site_manager_id ?? null,
       created_by: created_by ?? null,
       work_period: work_period || null,

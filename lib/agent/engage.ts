@@ -23,6 +23,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
+import type { GeoJob } from "../geo";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 import {
@@ -417,12 +418,14 @@ export async function pickJobForCampaignReply(
         own_vehicle: (appRow as { own_vehicle?: string | null } | null)?.own_vehicle ?? null,
         work_hours: (appRow as { work_hours?: string | null } | null)?.work_hours ?? null,
         available_slots: (appRow as { available_slots?: string[] | null } | null)?.available_slots ?? null,
+        lat: applicant.lat,
+        lng: applicant.lng,
         applied_at: (appRow as { applied_at?: string | null } | null)?.applied_at ?? null,
         created_at: (appRow as { created_at?: string | null } | null)?.created_at ?? null,
         suntopDone,
       };
       jobs = jobs.filter(
-        (j) => j.exposure !== "targeted" || isExposed(exA, normalizeRule(j.exposure_rule), overrides.get(j.id))
+        (j) => j.exposure !== "targeted" || isExposed(exA, normalizeRule(j.exposure_rule), overrides.get(j.id), { job: j as unknown as GeoJob })
       );
     } catch (e) {
       console.error("[engage] campaign-reply exposure gate failed — targeted 공고 제외(fail-closed)", e);

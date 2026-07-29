@@ -21,6 +21,10 @@ export interface ExposureRuleDraft {
   sido: string[];
   /** 희망 시간대(4슬롯 정규 키) — '미확인'을 고르면 시간대를 못 정한 분도 포함된다. */
   slot: string[];
+  /** 집결지 거리 반경(km). ""면 반경 조건 없음. 공고 좌표가 없으면 저장이 막힌다(서버 400). */
+  radiusKm: number | "";
+  /** 좌표 없는 분(주소가 플레이스홀더라 지오코딩 불가)을 반경 규칙에 포함할지 — 다른 축의 '미확인'과 같은 역할. */
+  radiusIncludeUnknown: boolean;
   /** 시군구(구 단위) — 시·도로는 권역을 못 가른다. '미확인'을 고르면 시군구 값이 없는 사람도 포함된다. */
   sigungu: string[];
   availability: string[];
@@ -37,7 +41,7 @@ export interface ExposureDraft {
 
 export const EMPTY_EXPOSURE: ExposureDraft = {
   exposure: "all",
-  rule: { sido: [], slot: [], sigungu: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
+  rule: { sido: [], slot: [], sigungu: [], availability: [], vehicle: [], radiusKm: "", radiusIncludeUnknown: false, suntopDone: false, cohortMonths: "" },
 };
 
 /** 서버(jsonb)의 exposure_rule → 편집용 draft. */
@@ -46,6 +50,8 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
   return {
     sido: Array.isArray(r.sido) ? r.sido.filter((v): v is string => typeof v === "string") : [],
     slot: Array.isArray(r.slot) ? r.slot.filter((v): v is string => typeof v === "string") : [],
+    radiusKm: typeof r.radiusKm === "number" && r.radiusKm > 0 ? r.radiusKm : "",
+    radiusIncludeUnknown: r.radiusIncludeUnknown === true,
     sigungu: Array.isArray(r.sigungu) ? r.sigungu.filter((v): v is string => typeof v === "string") : [],
     availability: Array.isArray(r.availability)
       ? r.availability.filter((v): v is string => typeof v === "string")
@@ -61,6 +67,10 @@ export function draftToRule(d: ExposureRuleDraft): Record<string, unknown> | nul
   const out: Record<string, unknown> = {};
   if (d.sido.length) out.sido = d.sido;
   if (d.slot.length) out.slot = d.slot;
+  if (typeof d.radiusKm === "number" && d.radiusKm > 0) {
+    out.radiusKm = d.radiusKm;
+    if (d.radiusIncludeUnknown) out.radiusIncludeUnknown = true;
+  }
   if (d.sigungu.length) out.sigungu = d.sigungu;
   if (d.availability.length) out.availability = d.availability;
   if (d.vehicle.length) out.vehicle = d.vehicle;
@@ -133,7 +143,13 @@ export function ExposureEditor({
   );
 
   // "규칙 해당 N명" 미리보기 — draft 규칙 변경을 500ms 디바운스해 POST
-  const [preview, setPreview] = useState<{ count: number; total: number; sample: string[] } | null>(null);
+  const [preview, setPreview] = useState<{
+    count: number;
+    total: number;
+    sample: string[];
+    radius_unavailable?: boolean;
+    geo_unknown?: number;
+  } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   // 미리보기 조회 실패를 '규칙 비어 있음'과 구분(D12) — 에러를 빈 규칙으로 위장하지 않는다.
   const [previewError, setPreviewError] = useState(false);
@@ -162,7 +178,8 @@ export function ExposureEditor({
       fetch("/api/admin/exposure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rule }),
+        // 반경 축은 공고 기준점이 필요하다 — 저장된 공고면 그 공고로 계산한다(없으면 '계산 불가'로 표시).
+        body: JSON.stringify({ rule, job_id: jobId ?? null }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((json) => {
@@ -177,7 +194,7 @@ export function ExposureEditor({
         });
     }, 500);
     return () => clearTimeout(timer);
-  }, [targeted, ruleJson]);
+  }, [targeted, ruleJson, jobId]);
 
   // 유효 노출 명단(수정 모달 전용) — 서버에 '저장된' exposure/rule 기준
   const {
@@ -389,6 +406,62 @@ export function ExposureEditor({
             )}
           </div>
 
+          {/* 집결지 거리 반경 — 권역 라인의 핵심 축. 기준점(집결지만/경유지 포함)은 공고 수정에서 고른다.
+              좌표 없는 분은 어떤 반경으로도 안 걸리므로 '주소 미확인 포함'을 따로 둔다(조용한 탈락 방지). */}
+          <div>
+            <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">
+              집결지 거리{" "}
+              <span className="font-semibold text-[#CBD5E0]">
+                {jobId ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요" : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
+              </span>
+            </div>
+            {jobId ? (
+              <>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {[5, 10, 15, 20, 30].map((km) => (
+                    <Chip
+                      key={km}
+                      label={`${km}km`}
+                      on={value.rule.radiusKm === km}
+                      // 같은 값을 다시 누르면 해제 — 반경 조건을 끄는 방법이 있어야 한다.
+                      onClick={() => setRule({ radiusKm: value.rule.radiusKm === km ? "" : km })}
+                    />
+                  ))}
+                  {value.rule.radiusKm !== "" && (
+                    <button
+                      type="button"
+                      onClick={() => setRule({ radiusKm: "", radiusIncludeUnknown: false })}
+                      className="text-[11px] font-bold text-[#C53030] hover:underline px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    >
+                      해제
+                    </button>
+                  )}
+                </div>
+                {value.rule.radiusKm !== "" && (
+                  <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#4A5568] mt-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={value.rule.radiusIncludeUnknown}
+                      onChange={(e) => setRule({ radiusIncludeUnknown: e.target.checked })}
+                      className="accent-[#1A202C]"
+                    />
+                    주소를 몰라 거리를 못 재는 분도 포함
+                    {typeof preview?.geo_unknown === "number" && ` (${preview.geo_unknown}명)`}
+                  </label>
+                )}
+                {value.rule.radiusKm !== "" && preview?.radius_unavailable && (
+                  <p className="text-[11px] font-bold text-[#C53030] mt-1 leading-snug">
+                    이 공고는 집결지 좌표가 없어 거리를 계산할 수 없어요 — 이대로 저장하면 막힙니다(집결지 주소를 먼저 저장해 주세요).
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-[11px] text-[#A0AEC0]">
+                등록을 마치면 수정 모달에서 반경을 고를 수 있어요. 지금은 지역·시군구로 좁혀 주세요.
+              </p>
+            )}
+          </div>
+
           <div>
             <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">가용성</div>
             <div className="flex flex-wrap gap-1.5">
@@ -448,6 +521,11 @@ export function ExposureEditor({
               <span className="flex items-center gap-1.5 text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
             ) : previewError ? (
               <span className="text-[#C53030]">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
+            ) : preview?.radius_unavailable ? (
+              // 반경 규칙인데 기준점이 없다 → '0명'으로 보여주면 조건이 까다로운 줄 오해한다.
+              <span className="text-[#C53030]">
+                거리를 계산할 수 없어 해당 인원을 셀 수 없어요 — 이 공고에 집결지 좌표가 없습니다.
+              </span>
             ) : preview ? (
               <span className="text-[#2B6CB0]">
                 규칙 해당 {preview.count}명 <span className="text-[#A0AEC0] font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>

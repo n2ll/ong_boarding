@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
+import { DISTANCE_BASIS_VALUES, EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -38,6 +39,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   // J 타겟 노출 — 노출 범위(all/targeted) + 자동 노출 규칙(jsonb)
   "exposure",
   "exposure_rule",
+  // 거리 기준점 — 라인마다 집결지·경유지 관계가 달라 공고마다 고른다(lib/geo).
+  "distance_basis",
 ]);
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -107,6 +110,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "근무시간이 너무 깁니다(최대 80자)." }, { status: 400 });
   }
   if (update.slot === "") update.slot = null;
+  if (
+    typeof update.distance_basis === "string" &&
+    !(DISTANCE_BASIS_VALUES as readonly string[]).includes(update.distance_basis)
+  ) {
+    return NextResponse.json({ error: "distance_basis 값이 잘못되었습니다." }, { status: 400 });
+  }
   if (
     typeof update.recruit_mode === "string" &&
     !["external", "internal", "both"].includes(update.recruit_mode)
@@ -216,12 +225,56 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // 노출을 좁히는 저장이면, 파이프라인의 '이 명단에게만 노출'과 **같은 공식**으로 먼저 보호한다.
   // 좁히는 경로가 둘(파이프라인 일괄 배정 · 이 수정 모달)인데 여기에만 보호가 없으면
   // 이야기 중인 공고가 지원자 화면에서 사라진다(AI만 그 공고를 말하는 상태). 같은 개념 두 공식 금지.
+  // 반경 규칙 쓰기 가드 — 기준점(집결지 좌표)이 없으면 그 규칙은 **아무도 통과 못 한다**.
+  // 노출을 만지지 않고 **집결지 주소만 지우는 저장**에도 걸려야 한다(그때 공고가 조용히 사라진다).
+  if (
+    "exposure_rule" in update ||
+    "pickup_address" in update ||
+    "pickup_lat" in update ||
+    "dropoff_address" in update ||
+    "dropoff_lat" in update ||
+    "distance_basis" in update
+  ) {
+    const { data: geoCur, error: geoErr } = await supabase
+      .from("jobs")
+      .select(`exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
+      .eq("id", id)
+      .maybeSingle();
+    if (geoErr) {
+      console.error("[jobs PATCH] 반경 가드 조회 실패", geoErr);
+      return NextResponse.json({ error: "공고 조회 실패 — 아무것도 바꾸지 않았습니다." }, { status: 500 });
+    }
+    const cur = geoCur as ({ exposure_rule?: unknown } & GeoJob) | null;
+    const ruleAfter =
+      "exposure_rule" in update ? normalizeRule(update.exposure_rule) : normalizeRule(cur?.exposure_rule);
+    if (ruleAfter?.radiusKm) {
+      const pick = <T,>(k: keyof GeoJob, curVal: T): T =>
+        (k in update ? (update[k as string] as T) : curVal);
+      const geoAfter: GeoJob = {
+        pickup_lat: pick("pickup_lat", cur?.pickup_lat ?? null),
+        pickup_lng: pick("pickup_lng", cur?.pickup_lng ?? null),
+        dropoff_lat: pick("dropoff_lat", cur?.dropoff_lat ?? null),
+        dropoff_lng: pick("dropoff_lng", cur?.dropoff_lng ?? null),
+        distance_basis: pick("distance_basis", cur?.distance_basis ?? null),
+      };
+      if (!jobSupportsRadius(geoAfter)) {
+        return NextResponse.json(
+          {
+            error:
+              "이 공고엔 거리 반경 규칙이 걸려 있어 집결지 좌표가 필요해요 — 주소를 지우면 아무에게도 안 보이게 됩니다. 반경 규칙을 먼저 해제하거나 집결지 주소를 남겨 주세요.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   let autoIncluded = 0;
   let narrowingExposure = false;
   if ("exposure" in update || "exposure_rule" in update) {
     const { data: cur, error: curErr } = await supabase
       .from("jobs")
-      .select("exposure, exposure_rule, recruit_mode")
+      .select(`exposure, exposure_rule, recruit_mode, ${EXPOSURE_JOB_GEO_COLUMNS}`)
       .eq("id", id)
       .maybeSingle();
     if (curErr) {

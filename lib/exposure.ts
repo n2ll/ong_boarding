@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "./admin/types";
+import { distanceToJobKm, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type GeoJob } from "./geo";
 
 /**
  * J · 타겟 공고 노출 — 규칙 매처 + 유효 노출 판정 (파이프라인 필터 의미와 단일 소스).
@@ -30,6 +31,14 @@ export interface ExposureRule {
    * 실데이터 645명: 슬롯 확정 408명 · 미확인 237명(값이 '~' 한 글자이거나 야간·새벽 근무).
    */
   slot?: string[];
+  /**
+   * 집결지 거리 반경(km) — 이 안에 사는 사람만. `'미확인'` 개념이 없는 유일한 축이라
+   * 좌표 없는 분(실측 186명)은 `radiusIncludeUnknown`을 켜야 통과한다.
+   * 기준점(집결지만 / 경유지 포함)은 **공고가 정한다**(jobs.distance_basis) — lib/geo 단일 공식.
+   */
+  radiusKm?: number;
+  /** 좌표 없는 분을 반경 규칙에 포함할지 — 조용한 탈락을 없애기 위한 명시 선택(다른 축의 '미확인'과 같은 역할). */
+  radiusIncludeUnknown?: boolean;
   suntopDone?: boolean; // 선탑 완료자만
   cohortMonths?: number; // 원지원(없으면 등록)일이 최근 N개월 이내
 }
@@ -48,6 +57,9 @@ export interface ExposureApplicant {
    */
   work_hours: string | null;
   available_slots: string[] | null;
+  /** 거리 판정 재료 — **필수**. 옵셔널로 두면 배선을 빠뜨린 지점에서 전원이 조용히 탈락한다. */
+  lat: number | null;
+  lng: number | null;
   applied_at: string | null;
   created_at: string | null;
   suntopDone?: boolean; // pool_events(suntop_done)에서 계산해 주입
@@ -122,6 +134,11 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
     (v) => (SLOTS as readonly string[]).includes(v) || v === UNKNOWN_RULE_VALUE
   );
   if (slot && slot.length) out.slot = slot;
+  // 반경 — 1~100km 정수만. 0·음수·거대값이 들어와 아무도(또는 전원이) 걸리는 상태 방지.
+  if (typeof r.radiusKm === "number" && r.radiusKm > 0 && r.radiusKm <= 100) {
+    out.radiusKm = Math.round(r.radiusKm);
+    if (r.radiusIncludeUnknown === true) out.radiusIncludeUnknown = true;
+  }
   if (r.suntopDone === true) out.suntopDone = true;
   if (typeof r.cohortMonths === "number" && r.cohortMonths > 0 && r.cohortMonths <= 120) {
     out.cohortMonths = Math.floor(r.cohortMonths);
@@ -148,14 +165,26 @@ export function describeRule(rule: ExposureRule | null): string[] {
     out.push(
       `시간대 ${rule.slot.map((s) => SLOT_LABEL[s as SlotKey] ?? s).join("·")}`
     );
+  if (rule.radiusKm)
+    out.push(`반경 ${rule.radiusKm}km${rule.radiusIncludeUnknown ? "(주소 미확인 포함)" : ""}`);
   if (rule.suntopDone) out.push("선탑(동승) 완료자만");
   if (rule.cohortMonths) out.push(`최근 ${rule.cohortMonths}개월 안에 지원`);
   return out;
 }
 
-/** applicant가 규칙에 매칭되나. 규칙 없으면 false(자동 노출 없음). nowMs 주입 가능(테스트/일관성). */
-export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, nowMs: number = Date.now()): boolean {
+/**
+ * 판정 컨텍스트 — 시각과 **대상 공고**. 거리 축이 생기면서 '규칙 + 사람'만으로는 판정이 불가능해졌다.
+ * job을 넘기지 않으면 반경 규칙은 fail-closed(아무도 통과 못 함)라, 호출부가 반드시 채워야 한다.
+ */
+export interface ExposureContext {
+  nowMs?: number;
+  job?: GeoJob | null;
+}
+
+/** applicant가 규칙에 매칭되나. 규칙 없으면 false(자동 노출 없음). */
+export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, ctx: ExposureContext): boolean {
   if (!rule) return false;
+  const nowMs = ctx.nowMs ?? Date.now();
   if (rule.sido && rule.sido.length) {
     if (!matchesTextAxis(rule.sido, a.sido)) return false;
   }
@@ -180,6 +209,14 @@ export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, now
       : rule.slot.includes(UNKNOWN_RULE_VALUE);
     if (!ok) return false;
   }
+  if (typeof rule.radiusKm === "number" && rule.radiusKm > 0) {
+    // 기준점은 공고가 정한다. 공고를 안 넘긴 호출부·좌표 없는 공고·좌표 없는 지원자는 모두 null →
+    // '미확인 포함'을 켠 규칙만 통과시킨다(조용한 탈락 방지 + fail-closed 유지).
+    const km = distanceToJobKm({ lat: a.lat, lng: a.lng }, ctx.job ?? null);
+    if (km === null) {
+      if (!rule.radiusIncludeUnknown) return false;
+    } else if (km > rule.radiusKm) return false;
+  }
   if (rule.suntopDone && !a.suntopDone) return false;
   if (typeof rule.cohortMonths === "number" && rule.cohortMonths > 0) {
     const ref = a.applied_at ?? a.created_at;
@@ -195,11 +232,11 @@ export function isExposed(
   a: ExposureApplicant,
   rule: ExposureRule | null,
   override: ExposureMode | undefined,
-  nowMs: number = Date.now()
+  ctx: ExposureContext
 ): boolean {
   if (override === "exclude") return false;
   if (override === "include") return true;
-  return matchesRule(a, rule, nowMs);
+  return matchesRule(a, rule, ctx);
 }
 
 /**
@@ -433,7 +470,7 @@ export async function fetchApplicantsForExposure(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("id, name, sido, sigungu, availability, own_vehicle, work_hours, available_slots, applied_at, created_at")
+      .select("id, name, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
@@ -448,6 +485,8 @@ export async function fetchApplicantsForExposure(
         own_vehicle: string | null;
         work_hours: string | null;
         available_slots: string[] | null;
+        lat: number | null;
+        lng: number | null;
         applied_at: string | null;
         created_at: string | null;
       };

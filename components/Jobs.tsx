@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLab
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
+import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
 
 interface JobRow {
   id: string;
@@ -279,6 +280,8 @@ interface EditJobForm {
   startDate: string;
   pickupAddress: string;
   dropoffAddress: string;
+  /** 거리 계산 기준 — 라인마다 집결지·경유지 관계가 달라 공고마다 고른다(lib/geo). */
+  distanceBasis: DistanceBasis;
   exposureDraft: ExposureDraft;
   /**
    * 모달을 열던 시점의 노출 값 — 저장 시 '내가 노출을 건드렸는지' 판정용.
@@ -1193,7 +1196,7 @@ export function Jobs() {
 
   const openEdit = useCallback(async (id: string) => {
     setEditDroppedBranch(null);
-    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", distanceBasis: DEFAULT_DISTANCE_BASIS, exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
@@ -1226,6 +1229,7 @@ export function Jobs() {
         startDate: j.start_date ?? "",
         pickupAddress: j.pickup_address ?? "",
         dropoffAddress: j.dropoff_address ?? "",
+        distanceBasis: normalizeDistanceBasis(j.distance_basis),
         exposureDraft: {
           exposure: j.exposure === "targeted" ? "targeted" : "all",
           rule: ruleToDraft(j.exposure_rule),
@@ -1364,6 +1368,7 @@ export function Jobs() {
           start_date: editForm.startDate || null,
           pickup_address: editForm.pickupAddress.trim() || null,
           dropoff_address: editForm.dropoffAddress.trim() || null,
+          distance_basis: editForm.distanceBasis,
         }),
       });
       const json = await res.json();
@@ -2609,6 +2614,37 @@ export function Jobs() {
                       <div>
                         <label className="block text-[13px] font-bold text-[#4A5568] mb-2">마지막 경유지(배송 종료 지점)</label>
                         <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                      </div>
+                      {/* 거리 기준 — 노출 반경 규칙·거리 정렬·'대기자에게 안내' 조건 매칭이 **모두 이 값**을 쓴다.
+                          집결지=경유지인 라인은 차이가 없지만, 멀리 떨어진 라인은 대상 수가 크게 갈린다
+                          (실측: 용산·한남 라인은 15km 대상이 190명 ↔ 296명). */}
+                      <div>
+                        <label className="block text-[13px] font-bold text-[#4A5568] mb-2">거리를 어디에서 재나요</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(Object.keys(DISTANCE_BASIS_LABEL) as DistanceBasis[]).map((b) => {
+                            const sel = editForm.distanceBasis === b;
+                            return (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setEditForm({ ...editForm, distanceBasis: b })}
+                                className={`text-left p-3 rounded-xl border transition-colors ${sel ? "border-[#1A202C] bg-white ring-1 ring-[#1A202C]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                              >
+                                <div className={`text-[13px] font-bold ${sel ? "text-[#1A202C]" : "text-[#4A5568]"}`}>
+                                  {b === "pickup" ? "집결지만" : "가까운 곳 아무거나"}
+                                </div>
+                                <div className="text-[11px] text-[#A0AEC0] mt-0.5 leading-snug">
+                                  {b === "pickup"
+                                    ? "매일 출근하는 곳 기준. 지원자가 보는 '집에서 약 N km'와 같아요."
+                                    : "집결지·마지막 경유지 중 가까운 쪽. 대상이 더 넓어져요(기본)."}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-[#A0AEC0] mt-1.5 leading-snug">
+                          노출 반경 규칙 · 거리 정렬 · &lsquo;대기자에게 안내&rsquo;의 15km 조건이 모두 이 기준을 씁니다.
+                        </p>
                       </div>
                       {/* AI 응대 근거 — 정책·근무 문의(급여는 위 '공고 설정'의 급여 그룹에서). 등록 모달과 같은 섹션에 둔다. */}
                       <div className="p-4 bg-[#FFFBEC] border border-[#FAF089] rounded-xl flex flex-col gap-4">
