@@ -381,9 +381,10 @@ export function ExposureEditor({
             </div>
             {(options?.unknown?.slot ?? 0) > 0 && (
               <p className="text-[10.5px] text-[#A0AEC0] mt-1 leading-snug">
-                미확인 {options?.unknown?.slot}명은 지원 당시 시간대를 안 남기셨거나 야간·새벽 근무예요
-                {(options?.unknown?.slot_partial ?? 0) > 0 && ` (그중 ${options?.unknown?.slot_partial}명은 요일만 확인됨)`}.
-                고르지 않으면 이 규칙에서 빠집니다.
+                미확인 {options?.unknown?.slot}명 — 지원 당시 시간대를 안 남기신 분
+                {(options?.unknown?.slot_partial ?? 0) > 0 &&
+                  `, 그리고 요일이나 시각을 적었지만 오전·오후로 판정할 수 없는 분 ${options?.unknown?.slot_partial}명(야간·새벽 근무 포함)`}
+                이에요. 고르지 않으면 이 규칙에서 빠집니다.
               </p>
             )}
           </div>
@@ -438,7 +439,11 @@ export function ExposureEditor({
             </label>
           </div>
 
-          <div className="text-[12px] font-bold border-t border-[#EDF2F7] pt-2.5">
+          <p className="text-[10.5px] text-[#A0AEC0] leading-snug border-t border-[#EDF2F7] pt-2">
+            여기 숫자는 <b className="text-[#718096]">노출 기준 인재풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
+            문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
+          </p>
+          <div className="text-[12px] font-bold pt-1">
             {previewLoading ? (
               <span className="flex items-center gap-1.5 text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
             ) : previewError ? (

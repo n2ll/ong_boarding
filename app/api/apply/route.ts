@@ -131,6 +131,10 @@ export async function POST(req: NextRequest) {
       branch1,
       branch2: branch2 || null,
       work_hours: Array.isArray(workHours) ? workHours.join(", ") : workHours,
+      // 폼을 다시 제출하면 그게 **가장 최신 본인 답**이다 — 예전 대화에서 AI가 채운 자기 신고를 비운다.
+      // 안 비우면 판정이 available_slots를 절대 우선해서(applicantAvailableSlots) 방금 고른 시간대가 무시된다.
+      available_slots: null,
+      available_slots_updated_at: null,
       introduction: introduction?.trim() || null,
       experience: experience || null,
       available_date: availableDate,

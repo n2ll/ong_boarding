@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
-import { Applicant, calcAge, SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
+import { Applicant, calcAge, SLOTS, SLOT_LABEL, SLOT_UNKNOWN, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -681,7 +681,7 @@ export function Pipeline() {
   if (channelFilter.size > 0) conditionLabels.push(`지원 채널 ${[...channelFilter].join("·")}`);
   if (slotFilter.size > 0)
     conditionLabels.push(
-      `희망 근무 ${[...slotFilter].map((k) => SLOT_LABEL[k as SlotKey] ?? k).join("·")}`
+      `희망 근무 ${[...slotFilter].map((k) => (k === SLOT_UNKNOWN ? "미확인" : SLOT_LABEL[k as SlotKey] ?? k)).join("·")}`
     );
   if (availabilityFilter.size > 0) conditionLabels.push(`가용성 ${[...availabilityFilter].join("·")}`);
   if (excludeActive) conditionLabels.push("이미 일하는 분 제외");
@@ -963,7 +963,13 @@ export function Pipeline() {
     if (vehicleFilter === "walk" && c.vehicleClass !== "도보") return false;
     if (vehicleFilter === "unknown" && c.vehicleClass !== "미확인") return false;
     // 정규 키 비교 — 라벨('평일 오전')이 아니라 키('평일오전')로 판정한다(노출 규칙과 동일 집합).
-    if (slotFilter.size && !c.slotKeys.some((k) => slotFilter.has(k))) return false;
+    if (slotFilter.size) {
+      // 판정된 슬롯이 없는 분(미확인)은 4칩으로는 절대 안 걸린다 — '미확인' 칩으로만 고를 수 있다.
+      const hit = c.slotKeys.length
+        ? c.slotKeys.some((k) => slotFilter.has(k))
+        : slotFilter.has(SLOT_UNKNOWN);
+      if (!hit) return false;
+    }
     if (statusFilter.size && !statusFilter.has(c.status)) return false;
     if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
     if (regionFilter === "capital" && !isCapitalArea(c.sido)) return false;
@@ -1672,11 +1678,13 @@ export function Pipeline() {
                   <div>
                     <label className="block text-[12px] font-bold text-[#4A5568] mb-2">희망 근무(슬롯)</label>
                     <div className="flex flex-wrap gap-1.5">
-                      {SLOTS.map((s) => {
+                      {[...SLOTS, SLOT_UNKNOWN].map((s) => {
                         const on = slotFilter.has(s);
                         return (
-                          <button key={s} onClick={() => toggleSetValue(setSlotFilter, s)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#FFCB3C] border-[#FFCB3C] text-[#1A202C]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
-                            {SLOT_LABEL[s]}
+                          <button key={s} onClick={() => toggleSetValue(setSlotFilter, s)}
+                            title={s === SLOT_UNKNOWN ? "시간대를 알 수 없는 분(지원 폼에 안 남겼거나 야간·새벽 근무) — 4칩 중 무엇을 골라도 이분들은 안 걸려요" : undefined}
+                            className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#FFCB3C] border-[#FFCB3C] text-[#1A202C]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {s === SLOT_UNKNOWN ? "미확인" : SLOT_LABEL[s as SlotKey]}
                           </button>
                         );
                       })}

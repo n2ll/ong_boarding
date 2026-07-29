@@ -14,7 +14,9 @@ ALTER TABLE applicants
   ADD COLUMN IF NOT EXISTS available_slots text[],
   ADD COLUMN IF NOT EXISTS available_slots_updated_at timestamptz;
 
--- 정규 키 외 값 차단(빈 배열은 '알려줬지만 해당 슬롯 없음'이라 허용).
+-- 정규 키 외 값 차단. 빈 배열도 제약은 통과하지만 **판정에서는 '신고 없음'과 같게 동작한다**
+-- (applicantAvailableSlots는 self.length > 0일 때만 자기 신고를 채택한다). '4슬롯 다 안 됨'을
+-- 별도로 기록할 필요가 생기면 그때 판정 규칙과 함께 정의한다 — 지금 그 값을 쓰는 곳은 없다.
 DO $$
 BEGIN
   IF NOT EXISTS (

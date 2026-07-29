@@ -266,6 +266,12 @@ export async function PATCH(
       // 값을 바꾸면 언제 바뀐 값인지 함께 기록 — 오래된 자기 신고를 구분할 수 있게.
       updates.available_slots_updated_at = value.length > 0 ? new Date().toISOString() : null;
     }
+    // 매니저가 희망 근무(work_hours)를 고치면 오래된 자기 신고를 비운다 — 안 비우면 고친 값이
+    // 판정에 반영되지 않는다(available_slots가 절대 우선). 같은 요청에서 둘을 함께 보낸 경우는 존중.
+    if (key === "work_hours" && !("available_slots" in body)) {
+      updates.available_slots = null;
+      updates.available_slots_updated_at = null;
+    }
     if (key === "confirmed_slot" && value && !isValidConfirmedSlot(value)) {
       return NextResponse.json(
         { error: `invalid confirmed_slot: ${value}` },

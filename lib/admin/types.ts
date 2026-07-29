@@ -221,6 +221,9 @@ export function matchesSlot(workHours: string | null | undefined, slot: SlotKey)
     });
 }
 
+/** 값이 없는 사람을 고르는 필터 값 — 노출 규칙의 '미확인'과 같은 문자열(두 화면이 같은 뜻으로 쓴다). */
+export const SLOT_UNKNOWN = "미확인";
+
 /** 4슬롯 표시 라벨 — 화면마다 '평일오전'/'평일 오전'/'평일 · 오전'으로 갈렸던 표기를 한 곳에서 정한다. */
 export const SLOT_LABEL: Record<SlotKey, string> = {
   평일오전: "평일 오전",
@@ -289,9 +292,12 @@ export function applicantAvailableSlots(a: {
   // ③ 자유 입력 — 요일과 시각을 각각 해석한다(콤마가 요일 구분자라 토큰 분리가 안 통한다).
   // '평일'·'주말' 단어를 **먼저** 반영하고 지운다 — 안 지우면 '평일'의 '일'이 일요일로 읽혀
   // 평일만 가능한 분이 주말 전용으로 뒤집힌다.
-  const hasWeekdayWord = raw.includes("평일");
-  const hasWeekendWord = raw.includes("주말");
-  const dayScan = raw.replace(/평일/g, "").replace(/주말/g, "");
+  // '매일'·'주7일'은 평일+주말 둘 다다. 이 단어들을 먼저 처리하고 지우지 않으면 '평일'·'매일'의 '일'이
+  // 일요일로 읽혀 **평일 근무자가 주말 전용으로 정반대 분류**된다(AI가 뽑은 자유 텍스트에서 실제로 오는 형태).
+  const everyDay = /매일|주\s*7\s*일/.test(raw);
+  const hasWeekdayWord = everyDay || raw.includes("평일");
+  const hasWeekendWord = everyDay || raw.includes("주말");
+  const dayScan = raw.replace(/평일|주말|매일/g, "");
   const weekday = hasWeekdayWord || /[월화수목금]/.test(dayScan);
   const weekend = hasWeekendWord || /[토일]/.test(dayScan);
   if (!weekday && !weekend) return { slots: [], partial: false, source: "none" };
@@ -305,7 +311,14 @@ export function applicantAvailableSlots(a: {
   );
   // 시각이 없으면 요일만 아는 상태(`월, 화, 수, 목, 금 ~` 형태) — 슬롯을 추측하지 않는다.
   if (times.length === 0) return { slots: [], partial: true, source: "parsed" };
-  const start = times[0];
+  let start = times[0];
+  // 문자열에 '오후'가 명시돼 있고 시각이 12시간제로 적혔으면 그대로 읽는다(추측이 아니라 표기 반영).
+  // 이게 없으면 `오후 1:30~5:30`이 새벽으로 뒤집혀 미확인이 된다.
+  const pmMarked = /오후/.test(raw) && !/오전/.test(raw);
+  if (pmMarked && start < 12) {
+    start += 12;
+    for (let i = 1; i < times.length; i++) if (times[i] < 12) times[i] += 12;
+  }
   if (start >= NIGHT_START) return { slots: [], partial: true, source: "parsed" }; // 야간 시작
   let end = times.length > 1 ? times[1] : null;
   // 시작과 종료가 같은 값(`0:00~0:00`·`7:00~7:00`)은 범위가 아니다 — 12시간제 보정으로 그럴싸한
