@@ -23,6 +23,7 @@ import { triageInbound } from "@/lib/agent/baemin-triage";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { runAgentForCandidate } from "@/lib/agent/router";
 import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
+import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 
 export const dynamic = "force-dynamic";
 // 등록 1건은 한 요청에서 Claude를 최대 2회(triage Haiku + 스크리닝 Sonnet) 부른다 — 플랫폼 기본
@@ -202,6 +203,14 @@ export async function POST(
         .upsert({ job_id: jobId, applicant_id: appId, agent_stage: "screening", sent_at: new Date().toISOString() }, { onConflict: "job_id,applicant_id" })
         .select("id").single();
       await supabase.from("applicants").update({ current_job_id: jobId }).eq("id", appId);
+      // 지정 노출 공고면 이 분을 노출 명단에 남긴다 — 노출 판정은 후보 여부를 보지 않아서,
+      // 명단에 없으면 AI는 이 공고를 응대하는데 본인 링크에는 그 공고가 없는 상태가 된다.
+      // (실패해도 분류·응대는 계속한다 — 매니저가 파이프라인에서 명단에 추가할 수 있다.)
+      try {
+        await ensureExposureIncludeForLinked(supabase, jobId, [appId]);
+      } catch (e) {
+        console.error("[inbox/classify job] exposure include failed", e);
+      }
       // 인입 문자 ↔ 지원자·공고 링크. AI 호출보다 **먼저** 하고 에러를 확인한다 —
       // 이 링크가 없으면 실시간 응대 목록의 '초안 검토' 신호가 뜨지 않아(미리보기가 messages.applicant_id
       // 기준) 초안만 만들고 매니저가 못 찾는 무응답 방치가 된다. 실패 시 Claude 과금 전에 끊는다.

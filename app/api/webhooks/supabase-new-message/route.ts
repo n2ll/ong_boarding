@@ -366,9 +366,16 @@ async function processInbound(
             // (추측 편입 금지, lib/agent/engage.pickJobForCampaignReply ③). 문자는 이미 이 지원자 스레드에 붙어
             // '내가 답할 차례' 큐에 뜨지만, 자동 응대가 없다는 사실은 알려야 한다.
             // 활성 공고가 0개(보낼 공고 자체가 없음)일 때는 알리지 않는다 — 매니저가 할 일이 없다.
+            // 단 '열린 공고는 있는데 전부 이분의 노출 명단 밖'은 다르다 — 공고를 명단으로 좁히면 생기는
+            // 상태이고, 이때 알리지 않으면 일할 수 있다고 답장한 사람이 응대도 알림도 못 받는다.
             if (pick && pick.jobId === null) {
+              const who = applicant.name?.trim() || phone;
               await sendSlackText(
-                `💬 캠페인 답장 — 열린 공고가 ${pick.ambiguousCount}개라 어느 공고인지 확정할 수 없어 자동 편입을 건너뜀: ${applicant.name?.trim() || phone} · 실시간 응대의 '내가 답할 차례'에서 직접 확인해 주세요`
+                pick.exposureGateFailed
+                  ? `⚠️ 캠페인 답장 — 노출 대상 판정을 못 해서(조회 실패) 열린 공고 ${pick.exposureBlockedCount}개 전부를 보류했어요: ${who} · 시스템 오류 가능성이 있으니 실시간 응대에서 직접 확인해 주세요`
+                  : pick.exposureBlockedCount
+                    ? `💬 캠페인 답장 — 열린 공고 ${pick.exposureBlockedCount}개가 모두 이분의 노출 대상(명단·규칙) 밖이라 자동 편입을 건너뜀: ${who} · 명단에 추가할지 / 직접 답할지 실시간 응대의 '내가 답할 차례'에서 확인해 주세요`
+                    : `💬 캠페인 답장 — 열린 공고가 ${pick.ambiguousCount}개라 어느 공고인지 확정할 수 없어 자동 편입을 건너뜀: ${who} · 실시간 응대의 '내가 답할 차례'에서 직접 확인해 주세요`
               );
             }
             const picked = pick && pick.jobId !== null ? pick : null;

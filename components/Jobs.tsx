@@ -194,6 +194,10 @@ interface AnnounceTargetsRes {
   targets: AnnounceTarget[];
   night: boolean;
   sms_title: string;
+  /** 'targeted'면 이 공고는 노출 명단 밖에 있는 사람에게 안내를 보내지 않는다. */
+  exposure?: "all" | "targeted";
+  /** 노출 명단 때문에 빠진 수 — promised는 그중 '먼저 안내 약속'·선탑 완료자(약속을 어기는 쪽). */
+  dropped_by_exposure?: { total: number; promised: number };
 }
 
 // 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
@@ -276,6 +280,13 @@ interface EditJobForm {
   pickupAddress: string;
   dropoffAddress: string;
   exposureDraft: ExposureDraft;
+  /**
+   * 모달을 열던 시점의 노출 값 — 저장 시 '내가 노출을 건드렸는지' 판정용.
+   * 파이프라인 '이 명단에게만 노출'이 같은 두 컬럼(exposure·exposure_rule)을 쓰기 때문에,
+   * 노출을 만지지도 않은 저장이 그 결과를 통째로 되돌리는 lost update가 생긴다
+   * (전환이 취소되고, 되돌릴 수 없다며 지운 규칙이 부활한다). 안 만졌으면 아예 전송하지 않는다.
+   */
+  exposureBaseline: ExposureDraft;
 }
 
 // ── 수정 모달 접이식 섹션 요약 ──
@@ -556,7 +567,7 @@ export function Jobs() {
   const [closing, setClosing] = useState(false);
   // 새 공고 안내 모달 — 등록 직후(대상 ≥1이면 자동)와 행 '대기자에게 안내'(수동)가 같은 모달을 쓴다.
   // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
-  const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean } | null>(null);
+  const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
@@ -737,6 +748,12 @@ export function Jobs() {
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "후보 추가에 실패했어요");
+        // partial = 후보는 이미 추가됐고 뒤 단계만 실패 — 화면이 DB와 어긋나면 재시도가 '0명 추가'로 보인다.
+        if (json.partial) {
+          setPickerOpen(false);
+          loadCandidates(candPanel.jobId);
+          loadJobs();
+        }
         return;
       }
       toast.success(`${json.added ?? 0}명을 후보로 추가했어요`, {
@@ -1141,7 +1158,14 @@ export function Jobs() {
         try {
           const at = await fetchAnnounceTargets(newJobId);
           if (at.targets.length > 0) {
-            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
+          } else if ((at.dropped_by_exposure?.total ?? 0) > 0) {
+            // 대상 0명이 '이력이 없어서'가 아니라 '노출 명단이 좁아서'인 경우 — 등록 경로에서도 침묵하지 않는다.
+            toast.info("안내할 대기자가 없어요", {
+              description: `이 공고는 지정 노출이라 명단 밖 ${at.dropped_by_exposure?.total}명이 대상에서 빠졌어요${
+                (at.dropped_by_exposure?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_exposure?.promised}명은 '먼저 안내드릴게요' 약속)` : ""
+              }. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`,
+            });
           }
         } catch {
           /* noop */
@@ -1169,7 +1193,7 @@ export function Jobs() {
 
   const openEdit = useCallback(async (id: string) => {
     setEditDroppedBranch(null);
-    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
@@ -1203,6 +1227,11 @@ export function Jobs() {
         pickupAddress: j.pickup_address ?? "",
         dropoffAddress: j.dropoff_address ?? "",
         exposureDraft: {
+          exposure: j.exposure === "targeted" ? "targeted" : "all",
+          rule: ruleToDraft(j.exposure_rule),
+        },
+        // 같은 값을 기준선으로 보관 — 저장 시 이 값과 같으면 노출 필드를 전송하지 않는다.
+        exposureBaseline: {
           exposure: j.exposure === "targeted" ? "targeted" : "all",
           rule: ruleToDraft(j.exposure_rule),
         },
@@ -1242,6 +1271,64 @@ export function Jobs() {
       });
       if (!ok) return;
     }
+    // 노출을 이 창에서 실제로 바꿨는지 — 안 바꿨으면 노출 필드를 아예 보내지 않는다.
+    // 파이프라인 '이 명단에게만 노출'이 같은 컬럼을 쓰기 때문에, 급여만 고친 저장이 방금 좁힌 노출을
+    // 되돌리거나(전환 취소) 되돌릴 수 없다며 지운 규칙을 부활시키는 사고가 난다.
+    // 배열 원소 **순서**는 규칙의 의미가 아니다 — 칩을 껐다 켜서 순서만 달라진 걸 '바꿨다'로 보면
+    // 불필요한 노출 전송·보호 쓰기·낯선 안내가 뜬다. 비교 전에 배열을 정렬한다.
+    const ruleFingerprint = (d: ExposureDraft) => {
+      const r = draftToRule(d.rule);
+      if (!r) return "null";
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(r).sort()) {
+        const v = r[k];
+        sorted[k] = Array.isArray(v) ? [...v].map(String).sort() : v;
+      }
+      return JSON.stringify(sorted);
+    };
+    const exposureChanged =
+      editForm.exposureDraft.exposure !== editForm.exposureBaseline.exposure ||
+      ruleFingerprint(editForm.exposureDraft) !== ruleFingerprint(editForm.exposureBaseline);
+    // 바꿨다면, 그 사이 다른 화면(파이프라인)에서 노출이 바뀌었는지 확인하고 덮어쓸지 묻는다.
+    if (exposureChanged) {
+      let serverState: { exposure: "all" | "targeted"; rule: string } | null = null;
+      try {
+        const cur = await fetch(`/api/admin/jobs/${editForm.id}`).then((r) => (r.ok ? r.json() : null));
+        const j = cur?.job as { exposure?: string | null; exposure_rule?: unknown } | undefined;
+        if (j) {
+          serverState = {
+            exposure: j.exposure === "targeted" ? "targeted" : "all",
+            rule: ruleFingerprint({ exposure: "all", rule: ruleToDraft(j.exposure_rule) }),
+          };
+        }
+      } catch {
+        /* 아래에서 fail-closed로 처리 */
+      }
+      if (!serverState) {
+        // 확인할 수 없으면 조용히 덮어쓰지 않는다 — 이 확인이 '되돌릴 수 없이 지운 규칙 부활'의 유일한 방어선이다.
+        const ok = await confirm({
+          title: "지금 저장된 노출 설정을 확인할 수 없어요",
+          description:
+            "이 창의 노출 값으로 덮어쓰면, 그 사이 다른 화면(인재풀 '이 명단에게만 노출')에서 바꾼 전환·규칙이 사라질 수 있어요.\n확실하지 않으면 취소하고 창을 닫았다 다시 열어 주세요.",
+          confirmText: "그래도 덮어쓰기",
+          destructive: true,
+        });
+        if (!ok) return;
+      } else if (
+        serverState.exposure !== editForm.exposureBaseline.exposure ||
+        serverState.rule !== ruleFingerprint(editForm.exposureBaseline)
+      ) {
+        const ok = await confirm({
+          title: "이 공고의 노출 설정이 방금 다른 화면에서 바뀌었어요",
+          description: `지금 서버: ${serverState.exposure === "targeted" ? "지정 노출" : "전체 노출"}${
+            serverState.rule === "null" ? " · 자동 규칙 없음" : " · 자동 규칙 있음"
+          }\n이 창의 값으로 덮어쓰면 그 변경(노출 명단 전환·규칙)이 사라질 수 있어요.`,
+          confirmText: "이 창 값으로 덮어쓰기",
+          destructive: true,
+        });
+        if (!ok) return;
+      }
+    }
     setEditSaving(true);
     try {
       const res = await fetch(`/api/admin/jobs/${editForm.id}`, {
@@ -1264,8 +1351,13 @@ export function Jobs() {
           pay_amount: editForm.payType && editForm.payType !== "협의" && editForm.payAmount !== "" ? Number(editForm.payAmount) : null,
           ai_facts: editForm.aiFacts.trim() || null,
           recruit_mode: editForm.recruitMode,
-          exposure: editForm.exposureDraft.exposure,
-          exposure_rule: draftToRule(editForm.exposureDraft.rule),
+          // 노출은 이 창에서 바꿨을 때만 전송 — 서버는 본문에 없는 필드를 건드리지 않는다.
+          ...(exposureChanged
+            ? {
+                exposure: editForm.exposureDraft.exposure,
+                exposure_rule: draftToRule(editForm.exposureDraft.rule),
+              }
+            : {}),
           work_period: editForm.workPeriod || null,
           closes_at: editForm.closesAt ? new Date(editForm.closesAt).toISOString() : null,
           slot: editForm.slot || null,
@@ -1281,7 +1373,13 @@ export function Jobs() {
       }
       // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
       const geoNote = geocodeResultNote(json.job, editForm.pickupAddress, editForm.dropoffAddress);
-      toast.success("공고를 수정했어요.", geoNote ? { description: geoNote } : undefined);
+      // 노출을 좁혔다면 서버가 이미 연결된 인원을 명단에 남긴다 — 그 사실을 알려준다(확정·배정이 아니다).
+      const autoNote =
+        typeof json.auto_included === "number" && json.auto_included > 0
+          ? `이미 이 공고로 연결된 ${json.auto_included}명은 노출 명단에 남겼어요(직접 제외한 분은 그대로 제외).`
+          : "";
+      const desc = [geoNote, autoNote].filter(Boolean).join(" ");
+      toast.success("공고를 수정했어요.", desc ? { description: desc } : undefined);
       setEditForm(null);
       await loadJobs();
     } catch {
@@ -1454,13 +1552,18 @@ export function Jobs() {
     setAnnounceBusyId(job.id);
     try {
       const at = await fetchAnnounceTargets(Number(job.id));
+      const dropped = at.dropped_by_exposure?.total ?? 0;
       if (at.targets.length === 0) {
         toast.info("안내할 대기자가 없어요", {
-          description: "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
+          // 0명의 이유가 '이력 없음'이 아니라 '노출 명단이 좁아서'일 수 있다 — 원인을 바꿔 말하지 않는다.
+          description:
+            dropped > 0
+              ? `이 공고는 지정 노출이라 노출 명단 밖 ${dropped}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`
+              : "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
         });
         return;
       }
-      setAnnounceModal({ jobId: Number(job.id), smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night });
+      setAnnounceModal({ jobId: Number(job.id), smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
     } catch {
       toast.error("안내 대상을 불러오지 못했어요");
     } finally {
@@ -2636,6 +2739,15 @@ export function Jobs() {
                 {NEW_JOB_NOTICE.replace("{공고명}", announceModal.smsTitle)}
               </div>
               <p className="mt-1.5 text-[11px] text-[#A0AEC0]">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+              {/* 지정 노출로 좁힌 공고는 명단 밖 대기자에게 안내를 보내지 않는다 —
+                  '먼저 안내드릴게요' 약속은 공고 무관이라, 이 수를 숨기면 약속이 조용히 깨진다. */}
+              {(announceModal.dropped?.total ?? 0) > 0 && (
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFAF0] border border-[#FBD38D] text-[12px] text-[#C05621] leading-relaxed">
+                  이 공고는 <b>지정 노출</b>이라 노출 명단 밖 <b>{announceModal.dropped?.total}명</b>이 대상에서 빠졌어요
+                  {(announceModal.dropped?.promised ?? 0) > 0 && <> — 그중 <b>{announceModal.dropped?.promised}명</b>은 &lsquo;먼저 안내드릴게요&rsquo; 약속·선탑 완료자예요</>}.
+                  이분들께도 알리려면 노출 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.
+                </div>
+              )}
               {/* 야간(KST 21~08)엔 발송하지 않는다 — engage와 동일 원칙(isNightKst). */}
               {announceModal.night && (
                 <div className="mt-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[12.5px] font-bold text-[#B7791F]">

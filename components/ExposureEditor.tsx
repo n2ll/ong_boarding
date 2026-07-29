@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
+import { useConfirm } from "./ConfirmDialog";
 import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/exposure";
 
 /**
@@ -68,6 +69,10 @@ interface RosterPerson {
   id: number;
   name: string | null;
   via: "rule" | "include" | "both";
+  /** 이 공고로 이야기 중(관심·후보, 이탈 제외) — 명단에서 빼면 본인 화면에서 공고가 사라진다. */
+  linked?: boolean;
+  /** 노출을 좁힐 때 시스템이 자동으로 남긴 행(added_by='auto_linked') — 매니저가 고른 인원과 구분. */
+  auto?: boolean;
 }
 interface RosterResp {
   exposure: string;
@@ -107,6 +112,7 @@ export function ExposureEditor({
   onChange: (next: ExposureDraft) => void;
   jobId?: number;
 }) {
+  const confirm = useConfirm();
   const targeted = value.exposure === "targeted";
 
   // 규칙 빌더 옵션 — 실데이터 distinct 값(지정 노출을 켰을 때만 로드)
@@ -182,8 +188,28 @@ export function ExposureEditor({
 
   // 제외의 두 갈래: 순수 수동 include(via='include')는 행 삭제(DELETE)로 되돌린다 — exclude로
   // 덮어쓰면 include 이력이 소실돼 복원이 불가능해진다. 규칙 매칭(rule/both)은 exclude 오버라이드.
-  const overrideCall = async (applicantId: number, action: "exclude" | "remove-include" | "restore") => {
+  const overrideCall = async (
+    applicantId: number,
+    action: "exclude" | "remove-include" | "restore",
+    linked = false
+  ) => {
     if (!jobId || rosterBusy) return;
+    // 이야기 중인 분을 빼는 건 되돌리기 어려운 결과(본인 화면에서 공고가 사라지는데 AI 응대는 계속된다)
+    // → 한 단계 확인. 확정 뉘앙스 없이 사실만 말한다.
+    if (linked && action !== "restore") {
+      const ok = await confirm({
+        title: "이 분은 지금 이 공고로 이야기 중이에요",
+        description:
+          // 저장된 노출이 '전체'면 아직 명단이 효력을 갖지 않는다 — 사라진다고 단정하지 않는다.
+          (roster?.exposure === "targeted"
+            ? "명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라져요. AI 응대는 계속되기 때문에, 지원자는 볼 수 없는 공고를 이야기하는 상태가 됩니다."
+            : "이 공고는 지금 '전체 노출'이라 바로 사라지지는 않지만, 나중에 '지정 노출'로 바꾸는 순간 이 분에게 공고가 보이지 않게 됩니다(AI 응대는 계속됩니다).") +
+          "\n제외로 기록되므로 노출을 좁힐 때 자동으로 되살아나지 않아요. 되돌리려면 아래 '제외해둔 인원'에서 복원하세요.",
+        confirmText: "그래도 빼기",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     setRosterBusy(true);
     try {
       const isDelete = action !== "exclude";
@@ -248,6 +274,23 @@ export function ExposureEditor({
       {targeted && (
         <div className="rounded-xl border border-[#E2E8F0] bg-[#FAFCFF] p-3.5 space-y-3">
           <div className="text-[12.5px] font-bold text-[#4A5568]">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
+          {/* 역방향 동선 — 여기 있는 축(지역·가용성·차량…)으로 안 잡히는 대상은 인재풀에서 직접 골라야 한다.
+              **저장된 공고(jobId)에서만** 안내한다 — 등록 폼에서 이 링크를 타면 작성 중 내용을 잃고,
+              아직 공고가 없어 명단을 만들 수도 없다. */}
+          {jobId && (
+          <p className="text-[11px] text-[#718096] leading-snug">
+            여기 조건으로 못 가르는 대상이면{" "}
+            <a
+              href="/pipeline"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-[#2B6CB0] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
+            >
+              인재풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
+            </a>
+            을 쓰세요. 새 탭에서 열려요 — <b className="text-[#B7791F]">거기서 노출을 바꾸면 이 창의 노출 값은 옛 값이 됩니다.</b> 돌아와서는 이 창을 닫고 다시 열어 주세요.
+          </p>
+          )}
 
           <div>
             <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">지역(시도)</div>
@@ -397,7 +440,8 @@ export function ExposureEditor({
               <RefreshCw size={12} /> 새로고침
             </button>
           </div>
-          <p className="text-[11px] text-[#A0AEC0] leading-snug">이 명단은 <b className="text-[#718096]">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-[#718096]">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는 파이프라인에서 인원 선택 → &lsquo;노출 대상으로 추가&rsquo;.</p>
+          <p className="text-[11px] text-[#A0AEC0] leading-snug">이 명단은 <b className="text-[#718096]">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-[#718096]">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는{" "}
+            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-[#2B6CB0] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded">인재풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
           {rosterLoading ? (
             <div className="flex items-center gap-2 text-[12px] text-[#A0AEC0]"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</div>
           ) : roster ? (
@@ -409,12 +453,20 @@ export function ExposureEditor({
                   {roster.effective.map((p) => (
                     <div key={p.id} className="flex items-center gap-2 py-1.5 text-[12.5px]">
                       <span className="font-bold text-[#1A202C]">{p.name ?? `#${p.id}`}</span>
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{VIA_LABEL[p.via]}</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
+                      {/* 이야기 중인 분을 '수동 추가'와 같게 보여주면, 클릭 한 번에 보호가 사라진다 */}
+                      {p.linked && (
+                        <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFFAF0] text-[#C05621] border border-[#FBD38D]" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
+                          이 공고로 이야기 중
+                        </span>
+                      )}
                       <button
                         type="button"
-                        onClick={() => overrideCall(p.id, p.via === "include" ? "remove-include" : "exclude")}
+                        /* 이야기 중인 분은 **행 삭제(remove-include)가 아니라 exclude**로 뺀다 —
+                           삭제만 하면 다음 노출 축소 때 자동 보호가 같은 사람을 다시 넣어, 확인 문구와 반대로 조용히 되돌아간다. */
+                        onClick={() => overrideCall(p.id, p.via === "include" && !p.linked ? "remove-include" : "exclude", p.linked === true)}
                         disabled={rosterBusy}
-                        title={p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
+                        title={p.linked ? "이 분은 이 공고로 이야기 중이에요 — 빼면 본인 화면에서 공고가 사라지고 AI 응대는 계속됩니다(확인 후 적용)" : p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
                         className="ml-auto flex items-center gap-1 text-[11px] font-bold text-[#C53030] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
                       >
                         <UserX size={11} /> 제외
@@ -430,6 +482,12 @@ export function ExposureEditor({
                     {roster.excluded.map((p) => (
                       <div key={p.id} className="flex items-center gap-2 py-1 text-[12px] text-[#718096]">
                         <span className="font-semibold line-through">{p.name ?? `#${p.id}`}</span>
+                        {/* 제외됐는데 이야기 중인 분 — AI만 그 공고를 말하는 상태다. 여기서 발견·복원할 수 있어야 한다. */}
+                        {p.linked && (
+                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" title="이 분은 이 공고로 이야기 중인데 노출에서 제외돼 있어요 — 본인 화면에서는 이 공고를 볼 수 없습니다.">
+                            이야기 중인데 제외됨
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => overrideCall(p.id, "restore")}

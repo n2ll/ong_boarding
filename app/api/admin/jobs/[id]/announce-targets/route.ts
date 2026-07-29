@@ -213,13 +213,23 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // 새 공고 안내 제외 상태: 인력풀 제외(부적합·이탈) + 이미 투입 확정된 인력(확정인력) —
   // 확정자는 재컨택 대상이 아니다(라우터 AI 침묵 PR#65와 대칭). waitlist_notice 보유자여도 제외.
   const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈", "확정인력"]);
-  const eligible = (a: ApplicantRow): boolean => {
+  // 지정 노출 명단 때문에 빠진 인원 집계 — waitlist_notice('새 공고 올라오면 먼저 안내드릴게요')는
+  // **공고 무관 약속**이라, 공고를 지정 노출로 좁히면 약속자가 조용히 대상에서 사라진다.
+  // 그러면 모달은 그냥 작은 숫자를 보여주고, 0명일 때는 "이력이 없다"고 잘못 안내한다.
+  // 매니저가 '좁힌 명단 때문에 빠졌다'는 걸 알 수 있게 이유를 숫자로 돌려준다.
+  const droppedByExposure = { total: 0, promised: 0 };
+  const eligible = (a: ApplicantRow, group: AnnounceGroup): boolean => {
     if (!a.phone || !a.access_token) return false; // 문구에 맞춤링크가 들어가므로 발송 불가 인원 제외
     if (a.sms_opt_out_at) return false;
     if (EXCLUDED_POOL_STATUS.has(a.status ?? "")) return false;
     if (candSet.has(a.id)) return false;
     if (fatigueSet.has(a.id)) return false;
-    if (!exposedForAnnounce(a)) return false; // 지정 노출 공고: 노출 대상만 안내
+    if (!exposedForAnnounce(a)) {
+      // 지정 노출 공고: 노출 대상만 안내
+      droppedByExposure.total++;
+      if (group === "suntop" || group === "promised") droppedByExposure.promised++;
+      return false;
+    }
     return true;
   };
 
@@ -247,8 +257,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const targets: { id: number; name: string | null; phone: string; access_token: string; group: AnnounceGroup }[] = [];
   const push = (id: number, group: AnnounceGroup) => {
     const a = infoById.get(id);
-    if (!a || !eligible(a)) return;
+    if (!a) return;
+    // 거리·차량 미달은 노출과 무관한 탈락이라 **먼저** 걸러 노출 집계를 오염시키지 않는다.
     if (group === "matched" && !matchesJob(a)) return;
+    if (!eligible(a, group)) return;
     targets.push({ id: a.id, name: a.name, phone: a.phone as string, access_token: a.access_token as string, group });
   };
   for (const id of suntopIds) push(id, "suntop");
@@ -264,5 +276,13 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     matched: capped.filter((t) => t.group === "matched").length,
   };
 
-  return NextResponse.json({ groups, targets: capped, night, sms_title: smsTitle });
+  return NextResponse.json({
+    groups,
+    targets: capped,
+    night,
+    sms_title: smsTitle,
+    // 지정 노출 여부와 '명단 때문에 빠진 수' — 0명일 때 이유를 이력 부족으로 잘못 안내하지 않기 위해.
+    exposure: targetedJob ? "targeted" : "all",
+    dropped_by_exposure: droppedByExposure,
+  });
 }

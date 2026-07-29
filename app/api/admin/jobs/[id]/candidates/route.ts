@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { haversineKm } from "@/lib/kakao-geocode";
+import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const jobId = Number(params.id);
@@ -103,5 +104,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "후보 추가 실패" }, { status: 500 });
   }
 
-  return NextResponse.json({ added: data?.length ?? 0, candidates: data ?? [] });
+  // 지정 노출 공고면 방금 붙인 후보를 노출 명단에 남긴다 — 좁히는 시점의 보호는 그 순간의 명단만
+  // 지키므로, 전환 뒤 추가한 후보는 '지원자는 못 보는데 AI는 말하는' 상태가 된다.
+  let exposureIncluded = 0;
+  try {
+    exposureIncluded = await ensureExposureIncludeForLinked(supabase, jobId, ids);
+  } catch (e) {
+    console.error("[candidates POST] exposure include failed", e);
+    return NextResponse.json(
+      {
+        // 이 공고가 '지정 노출'일 때만 도달하는 경로다(전체 노출이면 훅이 0을 반환하고 끝).
+        error:
+          "후보는 추가했지만 노출 명단에 남기지 못했어요 — 이 공고는 지정 노출이라, 인재풀에서 '이 명단에게만 노출'로 이분들을 명단에 추가해야 본인 링크에 공고가 보입니다.",
+        added: data?.length ?? 0,
+        partial: true,
+      },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ added: data?.length ?? 0, candidates: data ?? [], exposure_included: exposureIncluded });
 }
