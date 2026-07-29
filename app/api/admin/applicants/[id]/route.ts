@@ -9,6 +9,7 @@ import {
   VALID_AVAILABILITY,
   isValidConfirmedSlot,
 } from "@/lib/admin/applicant-validation";
+import { SLOTS } from "@/lib/admin/types";
 
 export const dynamic = "force-dynamic";
 
@@ -222,6 +223,9 @@ const ALLOWED_FIELDS = new Set([
   "availability", "line_experience",
   // 수신거부 수동 등록/해제 (ISO string | null) — 변경 시 pool_events(opt_out_set/cleared) 기록
   "sms_opt_out_at",
+  // 희망 시간대 자기 신고(4슬롯 키 배열 | null) — 노출 규칙·조건 바가 이 값을 우선 판정한다.
+  // AI가 대화 중 채운 값을 매니저가 지우거나 바로잡을 수 있어야 한다(안 그러면 판정이 영구히 고착된다).
+  "available_slots",
 ]);
 
 // 검증 상수·헬퍼는 벌크 라우트(bulk-status)와 공유 — lib/admin/applicant-validation.ts
@@ -246,6 +250,27 @@ export async function PATCH(
         { error: `invalid status: ${value}` },
         { status: 400 }
       );
+    }
+    // 희망 시간대 자기 신고 — 4슬롯 정규 키 배열 또는 null만. DB CHECK 제약과 같은 집합이라
+    // 여기서 막지 않으면 저장이 통째로 실패하거나(제약 위반) 판정이 안 걸리는 값이 들어온다.
+    if (key === "available_slots" && value !== null) {
+      const ok =
+        Array.isArray(value) &&
+        value.every((v) => typeof v === "string" && (SLOTS as readonly string[]).includes(v));
+      if (!ok) {
+        return NextResponse.json(
+          { error: "available_slots는 평일오전·평일오후·주말오전·주말오후 배열이거나 null이어야 합니다." },
+          { status: 400 }
+        );
+      }
+      // 값을 바꾸면 언제 바뀐 값인지 함께 기록 — 오래된 자기 신고를 구분할 수 있게.
+      updates.available_slots_updated_at = value.length > 0 ? new Date().toISOString() : null;
+    }
+    // 매니저가 희망 근무(work_hours)를 고치면 오래된 자기 신고를 비운다 — 안 비우면 고친 값이
+    // 판정에 반영되지 않는다(available_slots가 절대 우선). 같은 요청에서 둘을 함께 보낸 경우는 존중.
+    if (key === "work_hours" && !("available_slots" in body)) {
+      updates.available_slots = null;
+      updates.available_slots_updated_at = null;
     }
     if (key === "confirmed_slot" && value && !isValidConfirmedSlot(value)) {
       return NextResponse.json(

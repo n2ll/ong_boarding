@@ -46,6 +46,9 @@ interface ApplicantRow {
   status: string | null;
   sms_opt_out_at: string | null;
   own_vehicle: string | null;
+  // 희망 시간대 판정 재료 — 노출 규칙에 시간대 축이 있으면 이 값으로 판정한다.
+  work_hours: string | null;
+  available_slots: string[] | null;
   lat: number | null;
   lng: number | null;
   // 지정 노출(targeted) 공고의 노출 판정용
@@ -163,7 +166,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: apps, error: appErr } = await supabase
     .from("applicants")
-    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, lat, lng, sido, sigungu, availability, applied_at, created_at")
+    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, work_hours, available_slots, lat, lng, sido, sigungu, availability, applied_at, created_at")
     .in("id", unionIds);
   if (appErr) {
     console.error("[announce-targets] applicants", appErr);
@@ -201,6 +204,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         sigungu: a.sigungu,
         availability: a.availability,
         own_vehicle: a.own_vehicle,
+        work_hours: a.work_hours,
+        available_slots: a.available_slots,
         applied_at: a.applied_at,
         created_at: a.created_at,
         suntopDone: suntopDoneSet.has(a.id),

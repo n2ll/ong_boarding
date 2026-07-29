@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
-import { Applicant, calcAge, shortWorkHours } from "@/lib/admin/types";
+import { Applicant, calcAge, SLOTS, SLOT_LABEL, SLOT_UNKNOWN, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,6 +111,8 @@ interface CardData {
   channel: string;
   branch: string;
   slot: string;
+  /** 희망 시간대 판정 결과(정규 키) — 조건 바·노출 규칙이 같은 함수를 쓰게 하기 위한 값. */
+  slotKeys: SlotKey[];
   tag: string;
   vehicleClass: VehicleClass;
   region: string;
@@ -292,7 +294,20 @@ type ApplicantRow = Applicant & { sms_opt_out_at?: string | null; access_token?:
 
 function toCard(a: ApplicantRow): CardData {
   const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
-  const slot = shortWorkHours(a.confirmed_slot || a.work_hours) || "-";
+  // 조건 바 '희망 근무' 판정 — 표시용 문자열 포함 검사(예전 방식)는 자유 입력 171명을 통째로 놓쳤다.
+  // 노출 규칙과 같은 함수를 쓴다(confirmed_slot은 비마트 전용 개념이라 제외).
+  const slotJudgment = applicantAvailableSlots({
+    work_hours: a.work_hours,
+    available_slots: (a as { available_slots?: string[] | null }).available_slots ?? null,
+  });
+  const slotKeys = slotJudgment.slots;
+  // **표시도 같은 판정으로** — 예전엔 confirmed_slot(비마트 확정 슬롯)을 보여주면서 필터는 다른 값으로
+  // 판정해, 카드에 '평일 오전'이 적힌 사람이 '평일 오전' 조건에서 빠지는 모순이 났다(실측 30명 중 14명).
+  const slot = slotKeys.length
+    ? slotKeys.map((k) => SLOT_LABEL[k]).join(", ") + (slotJudgment.source === "self" ? " (본인 확인)" : "")
+    : slotJudgment.partial
+      ? "미확인(요일만)"
+      : "미확인";
   return {
     id: String(a.id),
     name: a.name ?? "-",
@@ -300,6 +315,7 @@ function toCard(a: ApplicantRow): CardData {
     channel: channelLabel(a.source),
     branch,
     slot,
+    slotKeys,
     tag: vehicleTag(a),
     vehicleClass: vehicleClassOf(a),
     region: a.sigungu ?? a.location ?? "-",
@@ -510,7 +526,8 @@ export function Pipeline() {
   const applySegment = (seg: SavedSegment) => {
     setChannelFilter(new Set(seg.channels));
     setVehicleFilter(seg.vehicle);
-    setSlotFilter(new Set(seg.slots));
+    // 예전 저장본은 라벨('평일 오전')이 들어 있다 — 공백을 지워 정규 키로 흡수한다(적용이 조용히 0명 되는 것 방지).
+    setSlotFilter(new Set((seg.slots ?? []).map((v) => v.replace(/\s/g, ""))));
     setQuery(seg.query ?? "");
     setStatusFilter(new Set(seg.statuses ?? []));
     setAvailabilityFilter(new Set(seg.availability ?? []));
@@ -662,7 +679,10 @@ export function Pipeline() {
       vehicleFilter === "vehicle" ? "차량 보유" : vehicleFilter === "walk" ? "도보" : "차량 미확인"
     );
   if (channelFilter.size > 0) conditionLabels.push(`지원 채널 ${[...channelFilter].join("·")}`);
-  if (slotFilter.size > 0) conditionLabels.push(`희망 근무 ${[...slotFilter].join("·")}`);
+  if (slotFilter.size > 0)
+    conditionLabels.push(
+      `희망 근무 ${[...slotFilter].map((k) => (k === SLOT_UNKNOWN ? "미확인" : SLOT_LABEL[k as SlotKey] ?? k)).join("·")}`
+    );
   if (availabilityFilter.size > 0) conditionLabels.push(`가용성 ${[...availabilityFilter].join("·")}`);
   if (excludeActive) conditionLabels.push("이미 일하는 분 제외");
   if (excludeRecentPing) conditionLabels.push("최근 14일 캠페인 문자 보낸 분 제외");
@@ -883,7 +903,7 @@ export function Pipeline() {
     : 0;
 
   const availableChannels = Array.from(new Set(allCards.map((c) => c.channel))).sort();
-  const SLOT_TOKENS = ["평일 오전", "평일 오후", "주말 오전", "주말 오후"];
+
   const STATUS_TOKENS = ["스크리닝 전", "대기자", "스크리닝 중", "스크리닝 완료", "확정인력"];
   const EXCLUDED_STATUS_TOKENS = ["부적합", "이탈", "기타"];
   const AVAILABILITY_TOKENS = ["즉시가능", "이번주가능", "휴면", "미확인"];
@@ -942,7 +962,14 @@ export function Pipeline() {
     if (vehicleFilter === "vehicle" && c.vehicleClass !== "확정") return false;
     if (vehicleFilter === "walk" && c.vehicleClass !== "도보") return false;
     if (vehicleFilter === "unknown" && c.vehicleClass !== "미확인") return false;
-    if (slotFilter.size && ![...slotFilter].some((s) => c.slot.includes(s))) return false;
+    // 정규 키 비교 — 라벨('평일 오전')이 아니라 키('평일오전')로 판정한다(노출 규칙과 동일 집합).
+    if (slotFilter.size) {
+      // 판정된 슬롯이 없는 분(미확인)은 4칩으로는 절대 안 걸린다 — '미확인' 칩으로만 고를 수 있다.
+      const hit = c.slotKeys.length
+        ? c.slotKeys.some((k) => slotFilter.has(k))
+        : slotFilter.has(SLOT_UNKNOWN);
+      if (!hit) return false;
+    }
     if (statusFilter.size && !statusFilter.has(c.status)) return false;
     if (availabilityFilter.size && !availabilityFilter.has(c.availability ?? "미확인")) return false;
     if (regionFilter === "capital" && !isCapitalArea(c.sido)) return false;
@@ -1651,11 +1678,13 @@ export function Pipeline() {
                   <div>
                     <label className="block text-[12px] font-bold text-[#4A5568] mb-2">희망 근무(슬롯)</label>
                     <div className="flex flex-wrap gap-1.5">
-                      {SLOT_TOKENS.map((s) => {
+                      {[...SLOTS, SLOT_UNKNOWN].map((s) => {
                         const on = slotFilter.has(s);
                         return (
-                          <button key={s} onClick={() => toggleSetValue(setSlotFilter, s)} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#FFCB3C] border-[#FFCB3C] text-[#1A202C]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
-                            {s}
+                          <button key={s} onClick={() => toggleSetValue(setSlotFilter, s)}
+                            title={s === SLOT_UNKNOWN ? "시간대를 알 수 없는 분(지원 폼에 안 남겼거나 야간·새벽 근무) — 4칩 중 무엇을 골라도 이분들은 안 걸려요" : undefined}
+                            className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold border transition-colors ${on ? 'bg-[#FFCB3C] border-[#FFCB3C] text-[#1A202C]' : 'bg-white border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7]'}`}>
+                            {s === SLOT_UNKNOWN ? "미확인" : SLOT_LABEL[s as SlotKey]}
                           </button>
                         );
                       })}

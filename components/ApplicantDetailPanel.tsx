@@ -8,7 +8,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { calcAge, STATUS_COLORS, SLOTS, matchesSlot } from "@/lib/admin/types";
+import { calcAge, STATUS_COLORS, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
@@ -65,6 +65,8 @@ interface ApplicantFull {
   vehicle_type: string | null;
   experience: string | null;
   work_hours: string | null;
+  /** 지원자가 최근에 알려준 가능 시간대(4슬롯 키) — 노출 규칙·조건 바가 이 값을 우선 판정한다. */
+  available_slots?: string[] | null;
   branch1: string | null;
   branch2: string | null;
   available_date: string | null;
@@ -253,16 +255,18 @@ function appliedMonth(iso: string | null): string | null {
 }
 
 /** 핵심 판단 카드 셀 — 값이 없으면 회색 축약(빈 값 나열로 시선 낭비 방지) */
-function KeyCell({ label, value, empty = "미입력", sub, title }: {
+function KeyCell({ label, value, empty = "미입력", sub, title, action }: {
   label: string;
   value: string | null | undefined;
   empty?: string;
   sub?: string;
   title?: string;
+  /** 라벨 옆 작은 보조 액션(예: 자기 신고 값 지우기) — 없으면 렌더하지 않는다. */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-0.5 min-w-0" title={title}>
-      <span className="text-[11px] font-bold text-[#A0AEC0]">{label}</span>
+      <span className="text-[11px] font-bold text-[#A0AEC0] flex items-center gap-1">{label}{action}</span>
       {value ? (
         <span className="text-[13px] font-semibold text-[#1A202C] truncate">{value}</span>
       ) : (
@@ -423,6 +427,24 @@ export function ApplicantDetailContent({
   const a = detail.applicant;
   const cands = detail.candidates;
   const age = calcAge(a.birth_date);
+  // 시간대 판정 — 노출 규칙·조건 바와 **같은 함수**. 화면과 판정이 어긋나면 매니저가 원인을 못 찾는다.
+  const slotJudgment = applicantAvailableSlots({ work_hours: a.work_hours, available_slots: a.available_slots });
+  const slotDisplay = {
+    text: slotJudgment.slots.length
+      ? slotJudgment.slots.map((k) => SLOT_LABEL[k]).join(", ") +
+        (slotJudgment.source === "self" ? " (본인 확인)" : "")
+      : slotJudgment.partial
+        ? "미확인 (요일만 확인됨)"
+        : "",
+    title:
+      slotJudgment.source === "self"
+        ? `대화·입력으로 확인된 값이에요. 지원 당시 폼 원문: ${a.work_hours ?? "-"}`
+        : slotJudgment.source === "parsed"
+          ? `지원 당시 폼 원문에서 해석한 값이에요: ${a.work_hours ?? "-"}`
+          : slotJudgment.source === "form_token"
+            ? "지원 폼에서 고른 시간대예요"
+            : `시간대를 알 수 없어요(폼 원문: ${a.work_hours ?? "-"}). 노출 규칙에서 '미확인'을 함께 골라야 이분이 대상에 들어옵니다.`,
+  };
 
   // 표시 대상 후보 (jobId 지정 시 그 공고, 아니면 최신)
   const focusCand = (jobId != null ? cands.find((c) => c.job_id === jobId) : cands[0]) ?? null;
@@ -537,6 +559,19 @@ export function ApplicantDetailContent({
   const saveFields = () => {
     if (!dirty) return;
     patch(edit, "저장했어요.");
+  };
+
+  // 대화로 채워진 시간대 되돌리기 — 이 값이 노출 규칙 판정의 1순위라, 잘못 채워지면 매니저가
+  // 지울 수단이 있어야 한다(없으면 그 사람이 여러 공고에서 조용히 빠진 채 고착된다).
+  const [clearingSlots, setClearingSlots] = useState(false);
+  const clearAvailableSlots = async () => {
+    if (clearingSlots || busy) return;
+    setClearingSlots(true);
+    try {
+      await patch({ available_slots: null }, "확인된 시간대를 지웠어요 — 지원 당시 값으로 판정합니다.");
+    } finally {
+      setClearingSlots(false);
+    }
   };
 
   // 확정 모달 열기 — 기존 확정 슬롯(있으면)을 미리 선택해 둔다.
@@ -799,7 +834,7 @@ export function ApplicantDetailContent({
     { label: "이동수단", value: a.own_vehicle },
     { label: "면허", value: a.license_type },
     { label: "경력", value: a.experience },
-    { label: "희망 근무", value: a.work_hours },
+    { label: "희망 근무(지원 당시 원문)", value: a.work_hours },
     { label: "희망 지점", value: a.branch1 },
     { label: "거주 지역", value: a.location },
   ];
@@ -954,7 +989,27 @@ export function ApplicantDetailContent({
             empty="기록 없음"
             title={a.applied_at ? `처음 지원한 날: ${new Date(a.applied_at).toLocaleDateString("ko-KR")}` : "처음 지원한 시점 기록이 없어요"}
           />
-          <KeyCell label="희망 시간" value={a.work_hours} />
+          {/* 시간대는 **판정 결과**를 보여준다 — 노출 규칙·조건 바가 쓰는 값과 화면이 달라지면
+              '왜 이 사람이 빠졌는지'를 알 수 없다. 자기 신고(AI 대화·매니저 입력)면 그 사실과 되돌리기를 함께. */}
+          <KeyCell
+            label="희망 시간"
+            value={slotDisplay.text}
+            empty="미확인"
+            title={slotDisplay.title}
+            action={
+              slotJudgment.source === "self" ? (
+                <button
+                  type="button"
+                  onClick={clearAvailableSlots}
+                  disabled={clearingSlots}
+                  title="대화·입력으로 채워진 시간대를 지웁니다. 지우면 지원 당시 폼 값으로 판정하고, 이후 대화에서 다시 확인될 수 있어요."
+                  className="text-[10px] font-bold text-[#C53030] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] rounded"
+                >
+                  지우기
+                </button>
+              ) : undefined
+            }
+          />
           {/* 다른 라인 활동 — 인재풀 목록에서 뺀 '활동중' 신호를 사람 단위로 여기서 확인한다.
               '확인 안 됨'(미연동·조회 실패)과 '활동 없음'을 구분해 적는다 — 둘을 같게 보여주면 이미 일하는 분에게 연락하게 된다. */}
           <KeyCell
