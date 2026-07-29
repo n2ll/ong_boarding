@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchApplicantsForExposure, matchesRule, normalizeRule } from "@/lib/exposure";
+import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,14 @@ export async function GET() {
   const sigunguByArea = new Map<string, Map<string, number>>();
   let sidoUnknown = 0;
   let sigunguUnknown = 0;
+  // 시간대 — 슬롯별 인원 + 미확인(그중 요일만 아는 partial). 조용한 탈락을 없애려면 미확인 수를 보여줘야 한다.
+  const slotCounts = new Map<SlotKey, number>();
+  let slotUnknown = 0;
+  let slotPartial = 0;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("sido, sigungu, availability")
+      .select("sido, sigungu, availability, work_hours, available_slots")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) {
@@ -34,7 +39,21 @@ export async function GET() {
     }
     const batch = data ?? [];
     for (const r of batch) {
-      const row = r as { sido: string | null; sigungu: string | null; availability: string | null };
+      const row = r as {
+        sido: string | null;
+        sigungu: string | null;
+        availability: string | null;
+        work_hours: string | null;
+        available_slots: string[] | null;
+      };
+      // 시간대 — 규칙 판정과 **같은 함수**로 센다. 화면의 '해당 N명'과 실제 판정이 어긋나면 안 된다.
+      const j = applicantAvailableSlots({ work_hours: row.work_hours, available_slots: row.available_slots });
+      if (j.slots.length === 0) {
+        slotUnknown++;
+        if (j.partial) slotPartial++;
+      } else {
+        for (const s of j.slots) slotCounts.set(s, (slotCounts.get(s) ?? 0) + 1);
+      }
       const sido = (row.sido ?? "").trim();
       const sigungu = (row.sigungu ?? "").trim();
       if (sido) sidos.add(sido);
@@ -66,7 +85,9 @@ export async function GET() {
           .sort((x, y) => x[0].localeCompare(y[0], "ko"))
           .map(([name, count]) => ({ name, count, key: `${sido}>${name}` })),
       })),
-    unknown: { sido: sidoUnknown, sigungu: sigunguUnknown },
+    // 4슬롯 고정 순서 + 실제 인원 — 값이 0인 슬롯도 내려 매니저가 '왜 없지'를 알 수 있게 한다.
+    slots: SLOTS.map((s) => ({ key: s, label: SLOT_LABEL[s], count: slotCounts.get(s) ?? 0 })),
+    unknown: { sido: sidoUnknown, sigungu: sigunguUnknown, slot: slotUnknown, slot_partial: slotPartial },
   });
 }
 

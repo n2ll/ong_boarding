@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: applicant } = await supabase
     .from("applicants")
-    .select("id, name, availability, sido, sigungu, own_vehicle, applied_at, created_at")
+    .select("id, name, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
   if (!applicant) {
@@ -90,6 +90,8 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
         sigungu: (applicant as { sigungu?: string | null }).sigungu ?? null,
         availability: (applicant as { availability?: string | null }).availability ?? null,
         own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
+        work_hours: (applicant as { work_hours?: string | null }).work_hours ?? null,
+        available_slots: (applicant as { available_slots?: string[] | null }).available_slots ?? null,
         applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
         created_at: (applicant as { created_at?: string | null }).created_at ?? null,
         suntopDone,

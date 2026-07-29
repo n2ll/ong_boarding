@@ -147,7 +147,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,
-        branch1, branch2, work_hours, available_date, self_ownership, introduction, experience, status, baemin_id
+        branch1, branch2, work_hours, available_slots, available_date, self_ownership, introduction, experience, status, baemin_id
       )
     `)
     .eq("id", candidate_id)

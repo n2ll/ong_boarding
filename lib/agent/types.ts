@@ -118,6 +118,8 @@ export interface ApplicantContext {
   branch1: string | null;
   branch2: string | null;
   work_hours: string | null;
+  /** 자기 신고 희망 시간대(4슬롯 키) — 스크리닝이 이미 채워진 값을 다시 묻지 않게 하는 데 쓴다. */
+  available_slots: string[] | null;
   available_date: string | null;
   self_ownership: string | null;
   introduction: string | null;

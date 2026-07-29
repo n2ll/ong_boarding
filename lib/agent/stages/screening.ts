@@ -9,6 +9,7 @@
  */
 
 import { emptyScreening, isComplete, mergeAgentState } from "../checklist";
+import { applicantAvailableSlots } from "../../admin/types";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
@@ -18,6 +19,7 @@ import {
   isGeneralCollectedComplete,
   isGeneralLineJob,
   mergeGeneralCollected,
+  normalizeCollectedSlots,
   readGeneralCollected,
   type GeneralScreeningCollected,
 } from "../general-line";
@@ -198,6 +200,13 @@ const SYSTEM_PROMPT_BODY_GENERAL = `너는 옹고잉(내이루리) 배송 크루
 4. **선탑(동승) 가능 요일·시간대** — 실 투입 전 인계 준비용. "선탑(동승 교육) 가능하신 요일·시간대가 어떻게 되세요?"
    → collected.선탑_가능시간에 기록 (예: "평일 오전", "화·목 가능").
 5. 지원자 질문 모두 응답 → 지원자_질문_해소: true ("더 질문 없어요" 응답 또는 처음부터 질문 없었으면 true 처리)
+
+### 곁들여 채우는 항목 — 근무 가능 시간대 (선택, 없어도 진행)
+[지원자 정보]의 희망 시간대가 비어 있거나 '미확인'이면, 위 항목을 물을 때 **한 번만** 곁들여 물어도 된다:
+"보통 평일 오전·오후, 주말 오전·오후 중 어느 때가 편하세요?" 지원자가 답하면 collected.가능시간대에
+해당하는 것만 넣어라(평일오전/평일오후/주말오전/주말오후). **이 항목은 필수가 아니다** — 답을 안 주거나
+애매하면 비워 두고 그냥 진행해라. 답을 받으려고 되묻거나 진행을 멈추지 마라. 추측해서 채우는 것도 금지.
+(선탑_가능시간과 다른 항목이다 — 이건 실제 근무 가능 시간대다.)
 
 직전에 시스템이 이미 첫 확인질문(차종·본인명의)을 보냈다면 다시 인사·자기소개하지 말고 답변부터 받아라.
 
@@ -416,6 +425,12 @@ const TOOL_GENERAL = {
           시작가능일: { type: "string", description: "시작 가능일 (예: '다음 주 월요일부터', '즉시')" },
           선탑_가능시간: { type: "string", description: "선탑(동승) 가능 요일·시간대 (예: '평일 오전', '화·목')" },
           법인차_렌트_희망: { type: "boolean", description: "차종 미달/차량 없음 상태에서 법인차 렌트 안내에 관심을 보였으면 true" },
+          가능시간대: {
+            type: "array",
+            items: { type: "string", enum: ["평일오전", "평일오후", "주말오전", "주말오후"] },
+            description:
+              "지원자가 말한 **근무** 가능 시간대를 4슬롯으로. 확실할 때만 넣고 애매하면 비워라(추측 금지). 선탑 가능시간과 다른 항목이다.",
+          },
         },
       },
       transition: {
@@ -494,7 +509,15 @@ function formatApplicant(a: StageContext["applicant"]): string {
     `이름: ${a.name ?? "(없음)"}`,
     `전화: ${a.phone}`,
     `1지망: ${a.branch1 ?? "-"} / 2지망: ${a.branch2 ?? "-"}`,
-    `희망시간대: ${a.work_hours ?? "-"}`,
+    // 자기 신고 값이 있으면 그것을 먼저 — 이미 확인된 분에게 시간대를 또 묻지 않게 한다.
+    // 폼 값이 '~' 한 글자인 분이 237명이라, 그때만 '미확인'으로 보여 곁들여 묻는 판단 근거가 된다.
+    `희망시간대: ${
+      a.available_slots?.length
+        ? `${a.available_slots.join(", ")} (본인 확인)`
+        : applicantAvailableSlots({ work_hours: a.work_hours, available_slots: null }).slots.join(", ") ||
+          "미확인"
+    }`,
+    `희망시간대(폼 원문): ${a.work_hours ?? "-"}`,
     `시작가능일(폼): ${a.available_date ?? "-"}`,
     `차량 보유(폼): ${a.own_vehicle ?? "-"} / 차종: ${a.vehicle_type ?? "-"}`,
     `면허: ${a.license_type ?? "-"}`,
@@ -696,6 +719,20 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
       if (v !== (ctx.applicant.vehicle_type ?? "")) patch.vehicle_type = v;
       if (ctx.applicant.own_vehicle !== "있음") patch.own_vehicle = "있음";
       if (Object.keys(patch).length > 0) applicant_patch = patch;
+    }
+  }
+  // 대화로 확인된 **근무 가능 시간대**를 available_slots로 승격 — 노출 규칙 '희망 시간대' 축이 이 값을 우선한다.
+  // 정규 키만 저장한다(DB CHECK 제약과 같은 집합) — 자유 문자열이 오면 저장이 통째로 실패하기 때문.
+  if (general && collected?.가능시간대?.length) {
+    const slots = normalizeCollectedSlots(collected.가능시간대);
+    const prev = (ctx.applicant as { available_slots?: string[] | null }).available_slots ?? [];
+    const changed = slots.length > 0 && (slots.length !== prev.length || slots.some((s) => !prev.includes(s)));
+    if (changed) {
+      applicant_patch = {
+        ...(applicant_patch ?? {}),
+        available_slots: slots,
+        available_slots_updated_at: new Date().toISOString(),
+      };
     }
   }
 

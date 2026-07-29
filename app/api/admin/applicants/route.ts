@@ -46,6 +46,8 @@ const LIST_COLUMNS = [
   "access_token", "applied_at",
   // 답장 큐 공고별 필터 — 진행 중 공고 포인터
   "current_job_id",
+  // 희망 시간대 축 — 자기 신고 값(work_hours보다 우선). 없으면 조건 바 '희망 근무'가 옛 값으로 판정된다.
+  "available_slots",
 ].join(", ");
 
 export async function GET(req: NextRequest) {

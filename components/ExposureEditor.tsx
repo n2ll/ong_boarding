@@ -19,6 +19,8 @@ import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/
 
 export interface ExposureRuleDraft {
   sido: string[];
+  /** 희망 시간대(4슬롯 정규 키) — '미확인'을 고르면 시간대를 못 정한 분도 포함된다. */
+  slot: string[];
   /** 시군구(구 단위) — 시·도로는 권역을 못 가른다. '미확인'을 고르면 시군구 값이 없는 사람도 포함된다. */
   sigungu: string[];
   availability: string[];
@@ -35,7 +37,7 @@ export interface ExposureDraft {
 
 export const EMPTY_EXPOSURE: ExposureDraft = {
   exposure: "all",
-  rule: { sido: [], sigungu: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
+  rule: { sido: [], slot: [], sigungu: [], availability: [], vehicle: [], suntopDone: false, cohortMonths: "" },
 };
 
 /** 서버(jsonb)의 exposure_rule → 편집용 draft. */
@@ -43,6 +45,7 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
     sido: Array.isArray(r.sido) ? r.sido.filter((v): v is string => typeof v === "string") : [],
+    slot: Array.isArray(r.slot) ? r.slot.filter((v): v is string => typeof v === "string") : [],
     sigungu: Array.isArray(r.sigungu) ? r.sigungu.filter((v): v is string => typeof v === "string") : [],
     availability: Array.isArray(r.availability)
       ? r.availability.filter((v): v is string => typeof v === "string")
@@ -57,6 +60,7 @@ export function ruleToDraft(raw: unknown): ExposureRuleDraft {
 export function draftToRule(d: ExposureRuleDraft): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   if (d.sido.length) out.sido = d.sido;
+  if (d.slot.length) out.slot = d.slot;
   if (d.sigungu.length) out.sigungu = d.sigungu;
   if (d.availability.length) out.availability = d.availability;
   if (d.vehicle.length) out.vehicle = d.vehicle;
@@ -120,7 +124,8 @@ export function ExposureEditor({
     sidos: string[];
     availabilities: string[];
     sigunguGroups?: { sido: string; items: { name: string; count: number; key: string }[] }[];
-    unknown?: { sido: number; sigungu: number };
+    slots?: { key: string; label: string; count: number }[];
+    unknown?: { sido: number; sigungu: number; slot: number; slot_partial: number };
   }>(
     targeted ? "/api/admin/exposure" : null,
     jsonFetcher,
@@ -349,6 +354,38 @@ export function ExposureEditor({
                 <span className="text-[12px] text-[#A0AEC0]">시군구 데이터 없음</span>
               )}
             </div>
+          </div>
+
+          {/* 희망 시간대 — 폼 4슬롯 토큰과 자유 입력(`월,화,수,목,금 9:00~18:00`)을 같은 함수로 판정한다.
+              미확인은 값이 '~' 한 글자이거나 야간·새벽 근무인 분들이라, 고르지 않으면 조용히 빠진다. */}
+          <div>
+            <div className="text-[11.5px] font-bold text-[#A0AEC0] mb-1.5">
+              희망 시간대 <span className="font-semibold text-[#CBD5E0]">— 오전·오후 라인이면 여기서 고르세요</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(options?.slots ?? []).map((s) => (
+                <Chip
+                  key={s.key}
+                  label={`${s.label} ${s.count}`}
+                  on={value.rule.slot.includes(s.key)}
+                  onClick={() => setRule({ slot: toggleIn(value.rule.slot, s.key) })}
+                />
+              ))}
+              {(options?.unknown?.slot ?? 0) > 0 && (
+                <Chip
+                  label={`미확인 ${options?.unknown?.slot}`}
+                  on={value.rule.slot.includes(UNKNOWN_RULE_VALUE)}
+                  onClick={() => setRule({ slot: toggleIn(value.rule.slot, UNKNOWN_RULE_VALUE) })}
+                />
+              )}
+            </div>
+            {(options?.unknown?.slot ?? 0) > 0 && (
+              <p className="text-[10.5px] text-[#A0AEC0] mt-1 leading-snug">
+                미확인 {options?.unknown?.slot}명은 지원 당시 시간대를 안 남기셨거나 야간·새벽 근무예요
+                {(options?.unknown?.slot_partial ?? 0) > 0 && ` (그중 ${options?.unknown?.slot_partial}명은 요일만 확인됨)`}.
+                고르지 않으면 이 규칙에서 빠집니다.
+              </p>
+            )}
           </div>
 
           <div>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "./admin/types";
 
 /**
  * J · 타겟 공고 노출 — 규칙 매처 + 유효 노출 판정 (파이프라인 필터 의미와 단일 소스).
@@ -23,6 +24,12 @@ export interface ExposureRule {
    * (실데이터 645명 전원 own_vehicle 값 보유: 있음 389 · 없음 165 · 미확인 91 — 가장 잘 채워진 축이다.)
    */
   vehicle?: string[];
+  /**
+   * 희망 시간대 화이트리스트 — 4슬롯 정규 키('평일오전'…) 또는 `'미확인'`.
+   * 판정은 `applicantAvailableSlots`(자기 신고 → 폼 토큰 → 자유 입력 파서) 하나만 쓴다.
+   * 실데이터 645명: 슬롯 확정 408명 · 미확인 237명(값이 '~' 한 글자이거나 야간·새벽 근무).
+   */
+  slot?: string[];
   suntopDone?: boolean; // 선탑 완료자만
   cohortMonths?: number; // 원지원(없으면 등록)일이 최근 N개월 이내
 }
@@ -35,6 +42,12 @@ export interface ExposureApplicant {
   availability: string | null;
   /** 자유 입력 값이라 정규화해서 비교한다(있음/없음/미확인). 호출부가 반드시 함께 넘길 것 — 없으면 차량 규칙이 fail-closed. */
   own_vehicle?: string | null;
+  /**
+   * 희망 시간대 판정 재료 — **필수**로 둔다(옵셔널이면 배선을 빠뜨린 판정 지점에서 전원이 조용히 탈락한다).
+   * 시군구·차량 축에서 실제로 겪은 사고라 타입으로 강제한다.
+   */
+  work_hours: string | null;
+  available_slots: string[] | null;
   applied_at: string | null;
   created_at: string | null;
   suntopDone?: boolean; // pool_events(suntop_done)에서 계산해 주입
@@ -104,6 +117,11 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
   // 차량 — 허용 3값만 남긴다(자유 문자열이 규칙에 들어와 아무도 매칭되지 않는 상태 방지).
   const vehicle = strArr(r.vehicle)?.filter((v) => (VEHICLE_RULE_VALUES as readonly string[]).includes(v));
   if (vehicle && vehicle.length) out.vehicle = vehicle;
+  // 시간대 — 4슬롯 정규 키 + '미확인'만. 자유 문자열('평일 오전' 공백형 등)이 들어와 아무도 안 걸리는 상태 방지.
+  const slot = strArr(r.slot)?.filter(
+    (v) => (SLOTS as readonly string[]).includes(v) || v === UNKNOWN_RULE_VALUE
+  );
+  if (slot && slot.length) out.slot = slot;
   if (r.suntopDone === true) out.suntopDone = true;
   if (typeof r.cohortMonths === "number" && r.cohortMonths > 0 && r.cohortMonths <= 120) {
     out.cohortMonths = Math.floor(r.cohortMonths);
@@ -126,6 +144,10 @@ export function describeRule(rule: ExposureRule | null): string[] {
   if (rule.sigungu?.length) out.push(`시군구 ${rule.sigungu.map((k) => k.replace(">", " ")).join("·")}`);
   if (rule.availability?.length) out.push(`가용성 ${rule.availability.join("·")}`);
   if (rule.vehicle?.length) out.push(`차량 ${rule.vehicle.join("·")}`);
+  if (rule.slot?.length)
+    out.push(
+      `시간대 ${rule.slot.map((s) => SLOT_LABEL[s as SlotKey] ?? s).join("·")}`
+    );
   if (rule.suntopDone) out.push("선탑(동승) 완료자만");
   if (rule.cohortMonths) out.push(`최근 ${rule.cohortMonths}개월 안에 지원`);
   return out;
@@ -148,6 +170,15 @@ export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, now
   if (rule.vehicle && rule.vehicle.length) {
     // own_vehicle을 안 넘긴 호출부에서는 '미확인'으로 본다 — 조용히 전원 통과시키지 않는다(fail-closed 방향).
     if (!rule.vehicle.includes(normalizeVehicleOwned(a.own_vehicle))) return false;
+  }
+  if (rule.slot && rule.slot.length) {
+    // 판정은 applicantAvailableSlots 하나만 — 파이프라인 조건 바와 같은 집합을 가리켜야 한다.
+    // 슬롯을 못 정한 사람(요일만 아는 경우·야간·새벽 포함)은 '미확인'을 고른 규칙만 통과.
+    const { slots } = applicantAvailableSlots({ work_hours: a.work_hours, available_slots: a.available_slots });
+    const ok = slots.length
+      ? slots.some((s) => rule.slot!.includes(s))
+      : rule.slot.includes(UNKNOWN_RULE_VALUE);
+    if (!ok) return false;
   }
   if (rule.suntopDone && !a.suntopDone) return false;
   if (typeof rule.cohortMonths === "number" && rule.cohortMonths > 0) {
@@ -402,7 +433,7 @@ export async function fetchApplicantsForExposure(
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("id, name, sido, sigungu, availability, own_vehicle, applied_at, created_at")
+      .select("id, name, sido, sigungu, availability, own_vehicle, work_hours, available_slots, applied_at, created_at")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
@@ -415,6 +446,8 @@ export async function fetchApplicantsForExposure(
         sigungu: string | null;
         availability: string | null;
         own_vehicle: string | null;
+        work_hours: string | null;
+        available_slots: string[] | null;
         applied_at: string | null;
         created_at: string | null;
       };

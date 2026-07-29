@@ -203,6 +203,10 @@ export function shortWorkHours(wh: string | null | undefined): string {
 }
 
 // work_hours 텍스트(콤마 join된 4슬롯 중 선택값) → 슬롯 매칭
+//
+// ⚠️ 이건 **비마트 슬롯 보드 전용**이다(지점×슬롯 확정/대기 집계, effectiveSlot과 짝). '이 사람이 언제
+// 가능한가'를 묻는 노출 규칙·파이프라인 조건은 applicantAvailableSlots()를 쓴다 — 다른 질문이라 다른 함수다.
+// 여기에 자유 입력 파서를 넣으면 슬롯 보드의 대기 인원 수가 조용히 바뀐다(같은 개념이 아니므로 통합하지 말 것).
 export function matchesSlot(workHours: string | null | undefined, slot: SlotKey): boolean {
   if (!workHours) return false;
   const wantPyeongil = slot.startsWith("평일");
@@ -215,6 +219,101 @@ export function matchesSlot(workHours: string | null | undefined, slot: SlotKey)
       const timeOk = wantMorning ? tok.includes("오전") : tok.includes("오후");
       return dayOk && timeOk;
     });
+}
+
+/** 4슬롯 표시 라벨 — 화면마다 '평일오전'/'평일 오전'/'평일 · 오전'으로 갈렸던 표기를 한 곳에서 정한다. */
+export const SLOT_LABEL: Record<SlotKey, string> = {
+  평일오전: "평일 오전",
+  평일오후: "평일 오후",
+  주말오전: "주말 오전",
+  주말오후: "주말 오후",
+};
+
+/**
+ * 자유 입력 시간대 → 오전/오후 판정 경계.
+ * 4슬롯(오전 09~14 · 오후 12~17)은 낮 근무 체계라, 야간·새벽 근무는 어느 슬롯도 아니다(미확인으로 남긴다).
+ * 실데이터 검증에서 창 겹침(09~14 / 12~17)으로 판정하면 `13:00~18:00`이 '오전'으로 잡히는 오탐이 나서,
+ * 12시 경계 + 야간·새벽 제외로 바꿨다.
+ */
+const NIGHT_START = 18; // 이 시각 이후 시작 = 야간(4슬롯 밖)
+const DAWN_END = 9; // 이 시각 이전 종료 = 새벽(4슬롯 밖)
+
+export interface SlotJudgment {
+  slots: SlotKey[];
+  /** 요일은 알지만 시간대를 모른다(또는 4슬롯 밖 야간) — 슬롯은 비우고 사실만 표시한다. */
+  partial: boolean;
+  source: "self" | "form_token" | "parsed" | "none";
+}
+
+/**
+ * 희망 시간대 판정 — **이 함수 하나만** 쓴다(노출 규칙 · 파이프라인 조건 바 공용).
+ *
+ * 실데이터(645명)가 세 모양이라 그대로 비교하면 3분의 1만 잡힌다:
+ *  ① 폼 4슬롯 토큰 250명 — `평일(월~금) 오전 타임 (09:00 ~ 14:00)` → 토큰 그대로 판정
+ *  ② 자유 입력 171명 — `월, 화, 수, 목, 금 9:00~18:00` → 요일→평일/주말, 시각 창 겹침→오전/오후
+ *  ③ 단서 없음 206명 — 값이 `~` 한 글자(폼 잔여물) → 어떤 파서로도 못 채운다 → '미확인'
+ *
+ * 파서는 **추측하지 않는다**: 요일·시각이 문자로 있을 때만 해석하고, 시각이 없으면 partial로 남긴다.
+ * 종료시각이 시작보다 작으면(9:00~6:00 처럼 12시간제 표기) +12시간으로 본다 — 그래도 창에 안 걸리면 partial.
+ *
+ * confirmed_slot은 **쓰지 않는다** — 비마트 슬롯 체계 전용 개념(사장님 확인). '언제 가능한가'와 다른 질문이다.
+ */
+export function applicantAvailableSlots(a: {
+  available_slots?: string[] | null;
+  work_hours?: string | null;
+}): SlotJudgment {
+  // ① 자기 신고(최근에 직접 알려준 값)가 있으면 그것만 본다.
+  const self = (a.available_slots ?? []).filter((s): s is SlotKey =>
+    (SLOTS as readonly string[]).includes(s)
+  );
+  if (self.length > 0) return { slots: [...new Set(self)], partial: false, source: "self" };
+
+  const raw = (a.work_hours ?? "").trim();
+  if (!raw) return { slots: [], partial: false, source: "none" };
+
+  // ② 폼 4슬롯 토큰 — 콤마로 나뉜 각 토큰이 (평일|주말)+(오전|오후)를 함께 가질 때만 채택.
+  const tokenSlots = new Set<SlotKey>();
+  for (const tok of raw.split(",").map((t) => t.trim())) {
+    const day = tok.includes("주말") ? "주말" : tok.includes("평일") ? "평일" : null;
+    const time = tok.includes("오전") ? "오전" : tok.includes("오후") ? "오후" : null;
+    if (day && time) tokenSlots.add(`${day}${time}` as SlotKey);
+  }
+  if (tokenSlots.size > 0) return { slots: [...tokenSlots], partial: false, source: "form_token" };
+
+  // ③ 자유 입력 — 요일 문자와 시각을 각각 해석한다(콤마가 요일 구분자라 토큰 분리가 안 통한다).
+  const weekday = /[월화수목금]/.test(raw);
+  const weekend = /[토일]/.test(raw);
+  if (!weekday && !weekend) return { slots: [], partial: false, source: "none" };
+
+  const dayParts: ("평일" | "주말")[] = [];
+  if (weekday) dayParts.push("평일");
+  if (weekend) dayParts.push("주말");
+
+  const times = [...raw.matchAll(/(\d{1,2}):(\d{2})/g)].map(
+    (m) => Number(m[1]) + Number(m[2]) / 60
+  );
+  // 시각이 없으면 요일만 아는 상태(`월, 화, 수, 목, 금 ~` 형태) — 슬롯을 추측하지 않는다.
+  if (times.length === 0) return { slots: [], partial: true, source: "parsed" };
+  const start = times[0];
+  if (start >= NIGHT_START) return { slots: [], partial: true, source: "parsed" }; // 야간 시작
+  let end = times.length > 1 ? times[1] : null;
+  if (end !== null && end <= start) {
+    // `9:00~6:00` 처럼 종료를 12시간제로 적은 경우 → 오후로 읽는다.
+    end += 12;
+    // 보정해도 여전히 시작보다 이르면 다음날까지 이어지는 교대·야간 — 슬롯 판정 불가.
+    if (end <= start) return { slots: [], partial: true, source: "parsed" };
+  }
+  if (end !== null && end < DAWN_END) return { slots: [], partial: true, source: "parsed" }; // 새벽 종료
+
+  // 오전 = 12시 전에 시작 · 오후 = 12시 후까지 근무. 종료를 모르면 시작 시각만으로 한쪽만 인정한다.
+  const timeParts: ("오전" | "오후")[] = [];
+  if (start < 12) timeParts.push("오전");
+  if (end === null ? start >= 12 : end > 12) timeParts.push("오후");
+  if (timeParts.length === 0) return { slots: [], partial: true, source: "parsed" };
+
+  const out = new Set<SlotKey>();
+  for (const d of dayParts) for (const t of timeParts) out.add(`${d}${t}` as SlotKey);
+  return { slots: [...out], partial: false, source: "parsed" };
 }
 
 // 확정 슬롯 매트릭스·PPC 표용 — 매니저가 확정한 slot이 있으면 그것, 없으면 희망(work_hours)로 폴백.

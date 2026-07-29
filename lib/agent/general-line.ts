@@ -41,6 +41,27 @@ export interface GeneralScreeningCollected {
   시작가능일?: string;
   선탑_가능시간?: string;
   법인차_렌트_희망?: boolean;
+  /**
+   * 근무 가능 시간대(4슬롯 정규 키) — 대화 중 자연스럽게 확인되면 채운다. **필수 아님**(advance 조건에 넣지 않는다).
+   * 실데이터 645명 중 237명은 시간대가 미확인이고(값이 '~' 한 글자이거나 야간·새벽), 파서로는 채울 수 없다.
+   * 여기서 채운 값은 applicants.available_slots로 승격돼 노출 규칙 '희망 시간대' 축에 쓰인다.
+   */
+  가능시간대?: string[];
+}
+
+/** 4슬롯 정규 키 — DB CHECK 제약과 같은 집합(자유 문자열이 들어오면 저장이 실패한다). */
+const VALID_SLOT_KEYS = ["평일오전", "평일오후", "주말오전", "주말오후"];
+
+/** AI가 준 시간대 값에서 정규 키만 남긴다(공백형 '평일 오전'도 흡수). 빈 배열이면 수집 없음. */
+export function normalizeCollectedSlots(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out = new Set<string>();
+  for (const raw of v) {
+    if (typeof raw !== "string") continue;
+    const k = raw.replace(/\s/g, "");
+    if (VALID_SLOT_KEYS.includes(k)) out.add(k);
+  }
+  return [...out];
 }
 
 /** meta에서 수집값 읽기 (없으면 빈 객체). */
@@ -61,10 +82,15 @@ export function mergeGeneralCollected(
   if (update.시작가능일?.trim()) next.시작가능일 = update.시작가능일.trim();
   if (update.선탑_가능시간?.trim()) next.선탑_가능시간 = update.선탑_가능시간.trim();
   if (typeof update.법인차_렌트_희망 === "boolean") next.법인차_렌트_희망 = update.법인차_렌트_희망;
+  const slots = normalizeCollectedSlots(update.가능시간대);
+  if (slots.length) next.가능시간대 = slots;
   return next;
 }
 
-/** 수집 항목(③시작 가능일 ④선탑 가능 시간대)이 채워졌는지 — advance 코드 가드. */
+/**
+ * 수집 항목(③시작 가능일 ④선탑 가능 시간대)이 채워졌는지 — advance 코드 가드.
+ * ⚠️ `가능시간대`(근무 가능 시간대)는 **여기 넣지 않는다** — 못 받아도 진행에 지장이 없어야 한다(사장님 결정).
+ */
 export function isGeneralCollectedComplete(c: GeneralScreeningCollected): boolean {
   return !!(c.시작가능일?.trim() && c.선탑_가능시간?.trim());
 }
@@ -76,6 +102,7 @@ export function buildGeneralCollectedSummary(c: GeneralScreeningCollected): stri
     "· 본인 명의 정산: 확인됨",
     `· 시작 가능일: ${c.시작가능일?.trim() || "-"}`,
     `· 선탑 가능 요일·시간대: ${c.선탑_가능시간?.trim() || "-"}`,
+    `· 근무 가능 시간대: ${c.가능시간대?.length ? c.가능시간대.join(", ") : "-"}`,
     `· 법인차 렌트 희망: ${c.법인차_렌트_희망 ? "예" : "아니오"}`,
   ].join("\n");
 }
