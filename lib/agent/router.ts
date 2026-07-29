@@ -17,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed } from "../jobs";
 import { isGeneralLineJob } from "./general-line";
+import { ensureExposureIncludeForLinked } from "../exposure";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { getSystemMessage } from "./system-messages";
 import { mergeAgentState } from "./checklist";
@@ -322,6 +323,34 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // stage가 applicants 행에 patch할 필드를 실어보냈으면 적용 (예: onboarding의 baemin_id 추출값)
   // draft(코파일럿) 모드에서는 applicants 변경 부수효과 0 — 건너뛴다.
   if (!draftMode && result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
+    // ⚠️ 노출 규칙 축(available_slots·own_vehicle)을 바꾸는 patch는 **노출을 좁히는 쓰기**다.
+    // 대화로 시간대가 '평일오후'로 확정되면, '평일오전' 규칙으로 좁힌 공고에서 이 사람이 빠진다 —
+    // 그런데 job_candidates는 그대로라 지원자는 볼 수 없는 공고를 AI만 계속 이야기한다(M1b가 막은 상태).
+    // 그래서 patch **전에** 이 사람이 진행 중인 지정 노출 공고의 명단에 남긴다(같은 공식 재사용).
+    const RULE_AXIS_FIELDS = ["available_slots", "own_vehicle"];
+    if (RULE_AXIS_FIELDS.some((k) => k in result.applicant_patch!)) {
+      try {
+        const { data: cands } = await supabase
+          .from("job_candidates")
+          .select("job_id")
+          .eq("applicant_id", applicant.id)
+          .or("agent_stage.is.null,agent_stage.neq.abort");
+        const jobIds = [
+          ...new Set(
+            (cands ?? [])
+              .map((c) => (c as { job_id: number | null }).job_id)
+              .filter((v): v is number => typeof v === "number")
+          ),
+        ];
+        for (const jid of jobIds) {
+          // targeted 공고가 아니면 함수가 0을 돌려주고 끝난다(전체 노출은 보호가 필요 없다).
+          await ensureExposureIncludeForLinked(supabase, jid, [applicant.id]);
+        }
+      } catch (e) {
+        // 보호 실패로 응대를 멈추지는 않는다 — 다만 노출이 끊길 수 있으므로 로그로 남긴다.
+        console.error("[router] 규칙 축 patch 전 노출 명단 보호 실패", e);
+      }
+    }
     const { error: patchErr } = await supabase
       .from("applicants")
       .update(result.applicant_patch)

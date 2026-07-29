@@ -230,11 +230,17 @@ export const SLOT_LABEL: Record<SlotKey, string> = {
 };
 
 /**
- * 자유 입력 시간대 → 오전/오후 판정 경계.
- * 4슬롯(오전 09~14 · 오후 12~17)은 낮 근무 체계라, 야간·새벽 근무는 어느 슬롯도 아니다(미확인으로 남긴다).
- * 실데이터 검증에서 창 겹침(09~14 / 12~17)으로 판정하면 `13:00~18:00`이 '오전'으로 잡히는 오탐이 나서,
- * 12시 경계 + 야간·새벽 제외로 바꿨다.
+ * 자유 입력 시간대 → 오전/오후 판정 규칙.
+ *
+ * **12시를 기준으로 앞뒤 각 2시간 이상 근무하면 그 슬롯**으로 본다(실무자에게도 이 한 줄로 설명된다).
+ * 4슬롯은 낮 근무 체계라 야간·새벽은 어느 슬롯도 아니다 — 미확인으로 남긴다(추측 금지).
+ *
+ * 검증하며 버린 두 방식:
+ *  · 시작 시각만 보기(오전=12시 전 시작) → `9:00~13:00`이 오후 라인에도 걸렸다(오후 겹침 1시간).
+ *  · 폼 시간 창 겹침(오전 09~14 / 오후 12~17) → `13:00~18:00`이 '오전'(1시간 겹침)으로,
+ *    `6:00~10:00`은 아침 근무인데 '미확인'으로 뒤집혔다.
  */
+const SLOT_MIN_HOURS = 2; // 12시 앞(또는 뒤)으로 이만큼 일해야 그 슬롯으로 인정
 const NIGHT_START = 18; // 이 시각 이후 시작 = 야간(4슬롯 밖)
 const DAWN_END = 9; // 이 시각 이전 종료 = 새벽(4슬롯 밖)
 
@@ -280,9 +286,14 @@ export function applicantAvailableSlots(a: {
   }
   if (tokenSlots.size > 0) return { slots: [...tokenSlots], partial: false, source: "form_token" };
 
-  // ③ 자유 입력 — 요일 문자와 시각을 각각 해석한다(콤마가 요일 구분자라 토큰 분리가 안 통한다).
-  const weekday = /[월화수목금]/.test(raw);
-  const weekend = /[토일]/.test(raw);
+  // ③ 자유 입력 — 요일과 시각을 각각 해석한다(콤마가 요일 구분자라 토큰 분리가 안 통한다).
+  // '평일'·'주말' 단어를 **먼저** 반영하고 지운다 — 안 지우면 '평일'의 '일'이 일요일로 읽혀
+  // 평일만 가능한 분이 주말 전용으로 뒤집힌다.
+  const hasWeekdayWord = raw.includes("평일");
+  const hasWeekendWord = raw.includes("주말");
+  const dayScan = raw.replace(/평일/g, "").replace(/주말/g, "");
+  const weekday = hasWeekdayWord || /[월화수목금]/.test(dayScan);
+  const weekend = hasWeekendWord || /[토일]/.test(dayScan);
   if (!weekday && !weekend) return { slots: [], partial: false, source: "none" };
 
   const dayParts: ("평일" | "주말")[] = [];
@@ -297,7 +308,10 @@ export function applicantAvailableSlots(a: {
   const start = times[0];
   if (start >= NIGHT_START) return { slots: [], partial: true, source: "parsed" }; // 야간 시작
   let end = times.length > 1 ? times[1] : null;
-  if (end !== null && end <= start) {
+  // 시작과 종료가 같은 값(`0:00~0:00`·`7:00~7:00`)은 범위가 아니다 — 12시간제 보정으로 그럴싸한
+  // 답을 만들면 판정 불가한 쓰레기 값이 '확정'으로 새어 들어온다.
+  if (end !== null && end === start) return { slots: [], partial: true, source: "parsed" };
+  if (end !== null && end < start) {
     // `9:00~6:00` 처럼 종료를 12시간제로 적은 경우 → 오후로 읽는다.
     end += 12;
     // 보정해도 여전히 시작보다 이르면 다음날까지 이어지는 교대·야간 — 슬롯 판정 불가.
@@ -305,10 +319,20 @@ export function applicantAvailableSlots(a: {
   }
   if (end !== null && end < DAWN_END) return { slots: [], partial: true, source: "parsed" }; // 새벽 종료
 
-  // 오전 = 12시 전에 시작 · 오후 = 12시 후까지 근무. 종료를 모르면 시작 시각만으로 한쪽만 인정한다.
   const timeParts: ("오전" | "오후")[] = [];
-  if (start < 12) timeParts.push("오전");
-  if (end === null ? start >= 12 : end > 12) timeParts.push("오후");
+  if (end === null) {
+    // 종료를 모르면 시작 시각만으로 한쪽만 인정한다(범위를 모르는데 넓게 잡지 않는다).
+    timeParts.push(start < 12 ? "오전" : "오후");
+  } else {
+    const beforeNoon = Math.max(0, Math.min(end, 12) - start);
+    const afterNoon = Math.max(0, end - Math.max(start, 12));
+    if (beforeNoon >= SLOT_MIN_HOURS) timeParts.push("오전");
+    if (afterNoon >= SLOT_MIN_HOURS) timeParts.push("오후");
+    // 짧은 근무(예: 10:30~12:30)는 어느 쪽도 2시간을 못 채운다 — 더 긴 쪽으로 판정한다.
+    if (timeParts.length === 0 && beforeNoon !== afterNoon) {
+      timeParts.push(beforeNoon > afterNoon ? "오전" : "오후");
+    }
+  }
   if (timeParts.length === 0) return { slots: [], partial: true, source: "parsed" };
 
   const out = new Set<SlotKey>();

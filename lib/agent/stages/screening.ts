@@ -726,8 +726,10 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
   if (general && collected?.가능시간대?.length) {
     const slots = normalizeCollectedSlots(collected.가능시간대);
     const prev = (ctx.applicant as { available_slots?: string[] | null }).available_slots ?? [];
-    const changed = slots.length > 0 && (slots.length !== prev.length || slots.some((s) => !prev.includes(s)));
-    if (changed) {
+    // **한 번만** 쓴다(이미 값이 있으면 덮지 않는다). 뒤 턴에서 지원자가 슬롯 하나만 다시 언급해도
+    // 모델은 '정정'인지 '부분 언급'인지 구분할 수 없어, 덮어쓰면 가능 시간대가 영구히 좁아진다.
+    // 값을 바꾸는 건 매니저 몫 — 지원자 상세에서 지우면 다음 대화에서 다시 채워진다.
+    if (slots.length > 0 && prev.length === 0) {
       applicant_patch = {
         ...(applicant_patch ?? {}),
         available_slots: slots,

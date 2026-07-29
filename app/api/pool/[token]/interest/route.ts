@@ -17,6 +17,7 @@ import { sendSlackText } from "@/lib/slack";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import {
+  ensureExposureIncludeForLinked,
   isExposed,
   normalizeRule,
   fetchOverridesForApplicant,
@@ -115,6 +116,15 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (jcErr) {
     console.error("[pool interest] jc upsert failed", jcErr);
     return NextResponse.json({ error: "처리 실패" }, { status: 500 });
+  }
+
+  // 1a) 지정 노출 공고면 이 분을 노출 명단에 남긴다 — 뒤에 AI 대화로 규칙 축(시간대·차량)이 바뀌어도
+  //     방금 관심을 표시한 공고가 본인 링크에서 사라지지 않게(M1b 불변식과 같은 공식).
+  //     기존 exclude 행은 보존되므로 매니저가 일부러 뺀 사람을 되살리지 않는다. 실패해도 관심 표시는 유지.
+  try {
+    await ensureExposureIncludeForLinked(supabase, jobId, [applicant.id as number]);
+  } catch (e) {
+    console.error("[pool interest] exposure include for linked failed (non-fatal)", e);
   }
 
   // 1b) 재관심 재부상 — 관심 처리 큐는 agent_stage IS NULL + contacted_at IS NULL로 잡는다.

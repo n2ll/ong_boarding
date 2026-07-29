@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
-import { Applicant, calcAge, shortWorkHours, SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
+import { Applicant, calcAge, SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -294,13 +294,20 @@ type ApplicantRow = Applicant & { sms_opt_out_at?: string | null; access_token?:
 
 function toCard(a: ApplicantRow): CardData {
   const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
-  const slot = shortWorkHours(a.confirmed_slot || a.work_hours) || "-";
   // 조건 바 '희망 근무' 판정 — 표시용 문자열 포함 검사(예전 방식)는 자유 입력 171명을 통째로 놓쳤다.
   // 노출 규칙과 같은 함수를 쓴다(confirmed_slot은 비마트 전용 개념이라 제외).
-  const slotKeys = applicantAvailableSlots({
+  const slotJudgment = applicantAvailableSlots({
     work_hours: a.work_hours,
     available_slots: (a as { available_slots?: string[] | null }).available_slots ?? null,
-  }).slots;
+  });
+  const slotKeys = slotJudgment.slots;
+  // **표시도 같은 판정으로** — 예전엔 confirmed_slot(비마트 확정 슬롯)을 보여주면서 필터는 다른 값으로
+  // 판정해, 카드에 '평일 오전'이 적힌 사람이 '평일 오전' 조건에서 빠지는 모순이 났다(실측 30명 중 14명).
+  const slot = slotKeys.length
+    ? slotKeys.map((k) => SLOT_LABEL[k]).join(", ") + (slotJudgment.source === "self" ? " (본인 확인)" : "")
+    : slotJudgment.partial
+      ? "미확인(요일만)"
+      : "미확인";
   return {
     id: String(a.id),
     name: a.name ?? "-",
