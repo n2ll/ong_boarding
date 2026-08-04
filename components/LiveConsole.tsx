@@ -204,6 +204,11 @@ export function LiveConsole() {
   const [handoffCat, setHandoffCat] = useState<string>("all");
   // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
   const focusJobIdRef = useRef<number | null>(null);
+  // 그 공고가 '살아있는 결속' 밖일 때(시스템 더미·마감 공고의 paused 건) 탭에 끼워 넣을 링크.
+  // 인계 큐는 마감·시스템 공고도 그대로 띄우는데(의도) /active-jobs는 그 둘을 제외한다 —
+  // 그러면 큐에서 고른 공고가 목록에 없어 **조용히 다른 공고로 떨어지고**, 인계된 대화가 화면에서
+  // 사라진 채 매니저 답장이 엉뚱한 공고로 적재된다(#{공고명} 치환까지 그 공고 값으로 나간다).
+  const focusLinkRef = useRef<ActiveJob | null>(null);
   // 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영하는 모달
   const [promote, setPromote] = useState<Handoff | null>(null);
   const [promoteField, setPromoteField] = useState<"pay_info" | "policy_notes">("pay_info");
@@ -366,11 +371,19 @@ export function LiveConsole() {
         const json = await res.json();
         if (cancelled) return;
         const jobs = (json.jobs ?? []) as ActiveJob[];
-        setActiveJobs(jobs);
+        // 큐에서 고른 공고가 살아있는 결속 목록에 없으면(마감·시스템 공고) 그 링크를 끼워 넣는다 —
+        // 조용히 다른 공고로 떨어지지 않게. 판정(gatherLiveJobLinks)은 건드리지 않는다:
+        // 이건 '매니저가 지목한 예외 탭'이고 살아있는 결속의 정의가 아니다(목록 배지 = 탭 수 불변식 유지).
+        const wanted = focusJobIdRef.current;
+        const extra = focusLinkRef.current;
+        const merged =
+          wanted != null && extra != null && !jobs.some((j) => j.job_id === wanted) ? [...jobs, extra] : jobs;
+        setActiveJobs(merged);
         // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 **대화가 진행 중인 공고**를 먼저.
         // (탭에 관심만 누른 공고까지 들어오면서, 먼저 생겼다는 이유로 빈 대화창이 기본이 되는 걸 막는다.)
-        setSelectedJobId(defaultFocusJobId(jobs, focusJobIdRef.current));
+        setSelectedJobId(defaultFocusJobId(merged, wanted));
         focusJobIdRef.current = null;
+        focusLinkRef.current = null;
       } catch {
         if (!cancelled) {
           setActiveJobs([]);
@@ -414,10 +427,17 @@ export function LiveConsole() {
   // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
   const selectHandoff = (h: Handoff) => {
     focusJobIdRef.current = h.job_id;
+    // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
+    focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null };
     if (h.applicant_id === selectedChatId) {
       // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
       // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
+      // 그 공고가 탭 목록에 없으면(마감·시스템 공고) 함께 끼워 넣는다 — 없으면 탭 바에서 사라진 채
+      // 선택만 바뀌어, 매니저가 어느 공고로 답장하는지 화면에서 확인할 수 없다.
+      setActiveJobs((prev) => (prev.some((j) => j.job_id === h.job_id) ? prev : [...prev, focusLinkRef.current!]));
       setSelectedJobId(h.job_id);
+      focusJobIdRef.current = null;
+      focusLinkRef.current = null;
     } else {
       setSelectedChatId(h.applicant_id);
     }
@@ -647,7 +667,7 @@ export function LiveConsole() {
             <div className="flex gap-1 flex-wrap">
               {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
                   한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
-              {handoffs.length !== handoffGroups.length && (
+              {visibleHandoffs.length !== handoffGroups.length && (
                 <span className="w-full text-[11.5px] font-bold text-[#718096]">
                   {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
                 </span>
@@ -707,8 +727,10 @@ export function LiveConsole() {
                           <div className="flex items-center justify-between gap-2 mb-1">
                             <span className={`shrink-0 px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
                             {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
+                            {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
+                                공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
                             <span className="text-[11px] font-bold text-[#4A5568] truncate" title={h.job_title}>
-                              {(h.branch && h.branch.trim()) || h.job_title}
+                              {h.is_system_job ? h.job_title : (h.branch && h.branch.trim()) || h.job_title}
                             </span>
                             {multi && <span className={`shrink-0 text-[11px] font-bold ${ageStyle(h.age_days)}`}>{h.age_days === 0 ? "오늘" : `${h.age_days}일`}</span>}
                           </div>

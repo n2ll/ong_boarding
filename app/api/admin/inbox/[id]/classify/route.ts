@@ -202,7 +202,10 @@ export async function POST(
         .from("job_candidates")
         .upsert({ job_id: jobId, applicant_id: appId, agent_stage: "screening", sent_at: new Date().toISOString() }, { onConflict: "job_id,applicant_id" })
         .select("id").single();
-      await supabase.from("applicants").update({ current_job_id: jobId }).eq("id", appId);
+      // 확정인력의 결속 포인터는 덮지 않는다 — `current_job_id`는 만남장소·첫날 안내의 **발송 대상 공고**다.
+      // 확정된 분이 다른 공고 문의로 인입되면 그 공고로 포인터가 옮겨져, 다음 안내가 엉뚱한 라인의
+      // 집결지·시작일로 조립된다. (lib/agent/transitions.ts:160도 같은 가드를 쓴다.)
+      await supabase.from("applicants").update({ current_job_id: jobId }).eq("id", appId).neq("status", "확정인력");
       // 지정 노출 공고면 이 분을 노출 명단에 남긴다 — 노출 판정은 후보 여부를 보지 않아서,
       // 명단에 없으면 AI는 이 공고를 응대하는데 본인 링크에는 그 공고가 없는 상태가 된다.
       // (실패해도 분류·응대는 계속한다 — 매니저가 파이프라인에서 명단에 추가할 수 있다.)

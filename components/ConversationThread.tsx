@@ -374,11 +374,15 @@ export function ConversationThread({
       toast.success("문자(SMS)를 발송했어요");
       setInputValue("");
       await loadMessages({ silent: true });
-      // 서버가 AI 자동응답 정지를 건너뛴 경우(진행 중 공고가 여러 개) — 'AI 꺼짐'으로 낙관 갱신하면 거짓 표시가 된다.
-      if (json.paused_skipped === "ambiguous") {
+      // **서버가 실제로 멈춘 것만 배지에 반영한다.** 낙관 갱신은 거짓 표시를 만든다 —
+      // 관심만 누른 공고(진행 단계 없음) 탭에서 답장하면 멈출 후보가 아예 없는데도 '수동 응대'로 바뀌어,
+      // 매니저는 AI가 멈춘 줄 알고 손을 떼지만 다른 공고의 AI는 계속 돌아 이중 응답이 된다.
+      if (json.paused_job_id != null) {
+        setAgentStage("paused");
+      } else if (json.paused_skipped === "ambiguous") {
         toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요 — 필요하면 공고를 고르고 'AI 끄기'를 눌러 주세요.");
       } else {
-        setAgentStage("paused");
+        toast.info("이 공고에는 멈출 AI 응대가 없어 그대로예요 — 다른 공고에서 AI가 돌고 있다면 그 탭에서 꺼 주세요.");
       }
       onChanged?.();
     } catch {

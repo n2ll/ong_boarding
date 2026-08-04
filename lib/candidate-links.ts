@@ -30,6 +30,22 @@ export interface LiveJobLink {
   created_at: string | null;
 }
 
+/**
+ * 결속 하나가 '살아있는지' 판단 — 마감 여부가 **이미 계산된** 경우용.
+ * 서버가 `job_effectively_closed`를 내려주는 화면(지원자 상세)이 같은 기준을 쓰게 하기 위한 입구다.
+ * 판정식은 이 함수 하나뿐이고 `isLiveLink`도 여기로 위임한다 — 같은 개념 두 공식 금지.
+ */
+export function isLiveLinkResolved(args: {
+  agentStage: string | null | undefined;
+  jobTitle: string | null | undefined;
+  jobEffectivelyClosed: boolean;
+}): boolean {
+  if (args.agentStage === "abort") return false;
+  if (typeof args.jobTitle !== "string" || isSystemJobTitle(args.jobTitle)) return false;
+  if (args.jobEffectivelyClosed) return false;
+  return true;
+}
+
 /** 결속 하나가 '살아있는지' 판단 — 목록·탭·상세가 공유하는 유일한 기준. */
 export function isLiveLink(args: {
   agentStage: string | null | undefined;
@@ -37,10 +53,11 @@ export function isLiveLink(args: {
   jobStatus: string | null | undefined;
   jobClosesAt: string | null | undefined;
 }): boolean {
-  if (args.agentStage === "abort") return false;
-  if (typeof args.jobTitle !== "string" || isSystemJobTitle(args.jobTitle)) return false;
-  if (isJobEffectivelyClosed(args.jobStatus, args.jobClosesAt)) return false;
-  return true;
+  return isLiveLinkResolved({
+    agentStage: args.agentStage,
+    jobTitle: args.jobTitle,
+    jobEffectivelyClosed: isJobEffectivelyClosed(args.jobStatus, args.jobClosesAt),
+  });
 }
 
 /**
@@ -55,15 +72,27 @@ export async function gatherLiveJobLinks(
   const links = new Map<number, LiveJobLink[]>();
   if (ids.length === 0) return { links, error: null };
 
-  const { data, error } = await supabase
-    .from("job_candidates")
-    .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, status, closes_at )")
-    .in("applicant_id", ids)
-    .order("created_at", { ascending: true });
+  // 649명 × 결속이면 한 번의 조회가 PostgREST 기본 상한(1000행)에 **오류 없이 잘린다**(error=null).
+  // 잘리면 배지가 조용히 사라져 '공고에 안 붙은 사람'으로 보이므로 페이지로 나눠 전부 가져온다.
+  // 종료(abort)는 어차피 버릴 행이라 DB에서 먼저 뺀다 — 단 NULL(관심)은 반드시 남겨야 한다
+  // (`.neq("agent_stage","abort")`만 쓰면 NULL이 통째로 빠져 이 모듈의 존재 이유가 사라진다).
+  const PAGE = 1000;
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("job_candidates")
+      .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, status, closes_at )")
+      .in("applicant_id", ids)
+      .or("agent_stage.is.null,agent_stage.neq.abort")
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { links, error: error.message };
+    const page = data ?? [];
+    rows.push(...(page as unknown as Record<string, unknown>[]));
+    if (page.length < PAGE) break;
+  }
 
-  if (error) return { links, error: error.message };
-
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const j = (row.jobs ?? null) as unknown as
       | { id: number; title: string | null; branch: string | null; status: string | null; closes_at: string | null }
       | null;

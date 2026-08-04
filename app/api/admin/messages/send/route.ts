@@ -40,6 +40,10 @@ export async function POST(req: NextRequest) {
 
     // 진행 중 공고가 여러 개여서 AI 자동 응답 정지를 건너뛴 경우 — 클라가 매니저에게 알린다.
     let pausedSkipped: "ambiguous" | null = null;
+    // **실제로 멈춘 공고 id.** null이면 아무것도 멈추지 않았다는 사실 그대로다 — 클라가 이걸 보고
+    // 'AI 꺼짐' 배지를 켠다. 예전엔 응답에 이 값이 없어, 관심만 누른 공고(진행 단계 없음) 탭에서
+    // 답장하면 멈춘 것이 없는데도 화면이 '수동 응대'로 바뀌어 매니저가 AI가 멈춘 줄 알았다.
+    let pausedJobId: number | null = null;
 
     // messages 테이블에 저장
     const supabase = createServiceClient();
@@ -115,6 +119,7 @@ export async function POST(req: NextRequest) {
             },
           })
           .eq("id", jc.id);
+        pausedJobId = (jc.job_id as number | null) ?? null;
       }
     }
 
@@ -140,7 +145,7 @@ export async function POST(req: NextRequest) {
         .in("status", ["pending", "need_info"]);
     }
 
-    return NextResponse.json({ success: true, message: data, paused_skipped: pausedSkipped });
+    return NextResponse.json({ success: true, message: data, paused_skipped: pausedSkipped, paused_job_id: pausedJobId });
   } catch (err) {
     console.error("[send message error]", err);
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });

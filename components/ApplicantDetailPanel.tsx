@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { calcAge, STATUS_COLORS, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
+import { isLiveLinkResolved } from "@/lib/candidate-links";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
 import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
@@ -311,6 +312,8 @@ function CollapsibleSection({ title, summary, open, onToggle, children }: {
 export function ApplicantDetailContent({
   applicantId,
   jobId = null,
+  focusJobId: focusJobIdProp,
+  onFocusJobChange,
   variant = "panel",
   onChanged,
   detail: externalDetail,
@@ -320,6 +323,10 @@ export function ApplicantDetailContent({
 }: {
   applicantId: number;
   jobId?: number | null;
+  /** 표시 기준 공고를 부모가 들고 있을 때(드로어) — 상세 탭과 대화 탭이 같은 공고를 보게 한다.
+   *  주지 않으면(응대 화면) 이 컴포넌트가 내부 state로 관리한다. */
+  focusJobId?: number | null;
+  onFocusJobChange?: (jobId: number | null) => void;
   variant?: "panel" | "drawer";
   onChanged?: () => void;
   detail?: Detail | null;
@@ -335,9 +342,13 @@ export function ApplicantDetailContent({
   // 패널 안에서 매니저가 직접 고른 표시 공고. null이면 부르는 화면이 준 jobId를 따른다.
   // 이 패널의 확정·후속 발송·체크리스트는 모두 '표시 중인 공고' 기준이라, 여러 공고에 붙은 분에게는
   // 어느 공고를 보고 있는지 고를 수 있어야 한다(예전엔 가장 최근 공고로 고정돼 선택지가 없었다).
-  const [focusOverride, setFocusOverride] = useState<number | null>(null);
+  const [focusOverrideLocal, setFocusOverrideLocal] = useState<number | null>(null);
   // 부르는 화면이 공고를 바꾸면(응대 화면 탭) 그 선택이 이깁니다 — 패널의 옛 선택이 남아 어긋나지 않게.
-  useEffect(() => { setFocusOverride(null); }, [applicantId, jobId]);
+  useEffect(() => { setFocusOverrideLocal(null); }, [applicantId, jobId]);
+  // 부모가 표시 기준 공고를 들고 있으면 그 값을 쓴다(드로어: 상세 탭·대화 탭이 같은 공고를 봐야 한다).
+  const controlled = onFocusJobChange != null;
+  const focusOverride = controlled ? (focusJobIdProp ?? null) : focusOverrideLocal;
+  const setFocusOverride = (v: number | null) => (controlled ? onFocusJobChange!(v) : setFocusOverrideLocal(v));
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
   const reload = externalReload ?? local.reload;
   const loading = externalDetail !== undefined ? false : local.loading;
@@ -456,6 +467,12 @@ export function ApplicantDetailContent({
   // (기본값을 '최신'에서 바꾸지 않는다 — 확정 모달·후속 발송의 대상이 조용히 달라지면 안 된다.)
   const focusJobId = focusOverride ?? jobId;
   const focusCand = (focusJobId != null ? cands.find((c) => c.job_id === focusJobId) : cands[0]) ?? null;
+  // 이 목록은 **이력**이라 종료·마감·시스템 공고까지 다 보여준다. 하지만 "지금 붙어 있는 자리 N건"을
+  // 셀 때는 인력풀 목록 칩·응대 화면 탭과 **같은 판정**을 써야 한다 — 안 그러면 목록 1건 · 탭 1건 ·
+  // 상세 2건으로 갈려서, 이 커밋이 세우려던 불변식이 정작 확정이 일어나는 화면에서 깨진다.
+  const liveCands = cands.filter((c) =>
+    isLiveLinkResolved({ agentStage: c.agent_stage, jobTitle: c.job_title, jobEffectivelyClosed: c.job_effectively_closed })
+  );
   const isPurePool = cands.length === 0;
   // 표시 중인 공고가 internal(도시락 등) 라인인가 — 배민 전용 필드(슬롯·지점·배민ID·배민 온보딩)를
   // 이 상세 패널 전반에서 숨기거나 라인 언어로 치환하는 단일 판정(확정 모달과 동일 규칙).
@@ -1077,14 +1094,17 @@ export function ApplicantDetailContent({
         {!isPurePool && (
           <CollapsibleSection
             title="지원 공고"
-            summary={`${cands.length}건${focusCand ? ` · 스크리닝 ${screeningDone}/${SCREENING_KEYS.length}` : ""}`}
+            summary={`${liveCands.length}건${cands.length > liveCands.length ? ` · 지난 ${cands.length - liveCands.length}` : ""}${focusCand ? ` · 스크리닝 ${screeningDone}/${SCREENING_KEYS.length}` : ""}`}
             open={jobsOpen}
             onToggle={() => toggleSection("jobs", jobsOpen)}
           >
-            {cands.length > 1 && (
+            {liveCands.length > 1 && (
               <div className="mb-2 text-[11.5px] font-bold text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-2.5 py-1.5 leading-snug">
-                이 분은 공고 {cands.length}건에 붙어 있어요 — 아래에서 공고를 누르면 그 공고 기준으로 바뀝니다
-                (체크리스트·확정·후속 발송 모두 <b>표시 중</b> 공고에 적용돼요).
+                이 분은 공고 {liveCands.length}건에 붙어 있어요 — 아래에서 공고를 누르면 그 공고 기준으로 바뀝니다
+                (체크리스트·확정 창 대상이 <b>표시 중</b> 공고를 따라가요).
+                {/* 후속 안내는 '확정된 공고' 기준이라 표시 중과 다를 수 있다 — 여기서 같이 움직인다고 적으면 거짓이다. */}
+                <br />
+                만남장소·첫날·앱안내는 <b>확정된 공고</b> 기준으로 나가요.
               </div>
             )}
             <div className="space-y-2">
@@ -1114,7 +1134,11 @@ export function ApplicantDetailContent({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[13px] font-bold text-[#1A202C] line-clamp-1">{c.job_title ?? `공고 #${c.job_id}`}</span>
+                      {/* 시스템 더미 공고는 제목 원문(`__baemin_system__`)을 그대로 보여주지 않는다 —
+                          인계 큐·대상 판정과 같은 라벨 규칙('공고 미지정'). */}
+                      <span className="text-[13px] font-bold text-[#1A202C] line-clamp-1">
+                        {isSystemJobTitle(c.job_title ?? "") ? "공고 미지정 (내부 처리용)" : c.job_title ?? `공고 #${c.job_id}`}
+                      </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {selectable && isFocus && (
                           <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#1A202C] text-white">표시 중</span>
@@ -1129,6 +1153,8 @@ export function ApplicantDetailContent({
                       {c.job_branch && <span className="flex items-center gap-1"><MapPin size={11} /> {c.job_branch}</span>}
                       {c.client_name && <span className="flex items-center gap-1"><Building2 size={11} /> {c.client_name}</span>}
                       {c.job_effectively_closed && <span className="font-bold text-[#A0AEC0]">마감된 공고</span>}
+                      {/* 지금 붙어 있는 자리가 아닌 행 — 위 '공고 N건'에 세지 않는다는 것을 눈으로도 알 수 있게. */}
+                      {c.agent_stage === "abort" && <span className="font-bold text-[#A0AEC0]">종료된 건</span>}
                     </div>
                   </div>
                 );
@@ -1229,6 +1255,17 @@ export function ApplicantDetailContent({
                   <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">첫날규칙</button>
                   <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EDF2F7] text-[#4A5568] border border-[#E2E8F0] hover:bg-[#E2E8F0] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">앱안내</button>
                 </div>
+                {/* **발송 대상 공고를 이름으로 밝힌다** — 이 발송은 '표시 중' 공고가 아니라 확정 결속
+                    (current_job_id)을 따른다. 공고 6~7개가 동시에 열리면 매니저는 표시 중 공고를 보고
+                    발송을 누르게 되고, 미리보기 본문의 주소만으로는 대상이 다른 것을 알아채기 어렵다. */}
+                <p className="text-[10.5px] text-[#276749] mt-1.5">
+                  발송 대상 공고: <b>{followupCand ? (isSystemJobTitle(followupCand.job_title ?? "") ? "공고 미지정 (슬롯 단위 라인)" : followupCand.job_title) : "미지정"}</b>
+                </p>
+                {confirmedJobId != null && focusCand && confirmedJobId !== focusCand.job_id && (
+                  <p className="text-[10.5px] font-bold text-[#C05621] mt-0.5 leading-relaxed">
+                    표시 중 공고와 달라요 — 다른 공고로 보내려면 그 공고로 다시 확정해야 해요.
+                  </p>
+                )}
                 {/* 만남장소가 왜 안 눌리는지/왜 문안이 안 채워지는지 그 자리에서 알려준다(발송 후 400으로만 알게 되던 문제). */}
                 {venueHardBlock ? (
                   <p className="text-[10.5px] text-[#B7791F] mt-1.5 leading-relaxed">만남장소 발송 불가 — {venueHardBlock}</p>
@@ -1557,6 +1594,10 @@ export function ApplicantDetailPanel({
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
+  // 표시 기준 공고를 드로어가 들고 있는다 — 상세 탭에서 공고를 바꾼 뒤 '대화 내역'으로 넘어가면
+  // 예전엔 부르는 화면이 준 jobId로 되돌아가, 매니저가 보고 있는 공고와 **다른 공고로 답장**이 적재됐다.
+  const [focusJobId, setFocusJobId] = useState<number | null>(jobId);
+  useEffect(() => { setFocusJobId(jobId); }, [applicantId, jobId]);
 
   // 전역 킬스위치 — 드로어 대화 탭에서 'AI 응대 중' 오표시·수동 발송 잠금이 남지 않도록
   // LiveConsole과 동일 판정을 전달 (env 강제 중단 포함). 코파일럿(draft) 모드도 함께 전달.
@@ -1638,6 +1679,8 @@ export function ApplicantDetailPanel({
               <ApplicantDetailContent
                 applicantId={applicantId}
                 jobId={jobId}
+                focusJobId={focusJobId}
+                onFocusJobChange={setFocusJobId}
                 variant="drawer"
                 detail={detail}
                 reload={() => { reload(); onChanged?.(); }}
@@ -1647,11 +1690,11 @@ export function ApplicantDetailPanel({
               />
             ) : a ? (
               <ConversationThread
-                key={applicantId}
+                key={`${applicantId}:${focusJobId ?? "all"}`}
                 applicantId={applicantId}
                 applicantName={a.name}
                 phone={a.phone}
-                jobId={jobId}
+                jobId={focusJobId}
                 smsOptOutAt={a.sms_opt_out_at}
                 globalKill={globalKill}
                 copilotMode={copilotMode}

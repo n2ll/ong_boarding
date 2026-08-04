@@ -1994,7 +1994,7 @@ export function Pipeline() {
                                     붙은 분이 한 자리만 진행 중인 것처럼 보였다. 칩을 누르면 그 공고 기준으로 상세가 열린다.
                                     (칩 개수 = 상세의 공고 탭 수 — 같은 판정 함수를 쓴다.) */}
                                 <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                  {c.jobLinks.length > 1 ? (
+                                  {c.jobLinks.length > 0 ? (
                                     <>
                                       {c.jobLinks.slice(0, 2).map((l) => {
                                         const interestOnly = l.agent_stage == null;
@@ -2033,7 +2033,9 @@ export function Pipeline() {
                                       })()}
                                     </>
                                   ) : c.agentStage ? (
-                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">공고지원 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
+                                    /* 살아있는 결속이 0건인데 단계가 남아 있다 = 종료·마감된 공고 이력뿐이다.
+                                       예전 '공고지원 · 스크리닝' 표기는 지금 진행 중인 것처럼 읽혀 오해를 낳았다. */
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]" title="지금 붙어 있는 공고는 없어요 — 지난 공고 이력이에요">지난 공고 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
                                   ) : (
                                     <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">순수 인재풀</span>
                                   )}
