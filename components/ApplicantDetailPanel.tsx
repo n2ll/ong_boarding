@@ -332,6 +332,12 @@ export function ApplicantDetailContent({
   onAutoOpenConfirmConsumed?: () => void;
 }) {
   const local = useApplicantDetail(externalDetail !== undefined ? null : applicantId);
+  // 패널 안에서 매니저가 직접 고른 표시 공고. null이면 부르는 화면이 준 jobId를 따른다.
+  // 이 패널의 확정·후속 발송·체크리스트는 모두 '표시 중인 공고' 기준이라, 여러 공고에 붙은 분에게는
+  // 어느 공고를 보고 있는지 고를 수 있어야 한다(예전엔 가장 최근 공고로 고정돼 선택지가 없었다).
+  const [focusOverride, setFocusOverride] = useState<number | null>(null);
+  // 부르는 화면이 공고를 바꾸면(응대 화면 탭) 그 선택이 이깁니다 — 패널의 옛 선택이 남아 어긋나지 않게.
+  useEffect(() => { setFocusOverride(null); }, [applicantId, jobId]);
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
   const reload = externalReload ?? local.reload;
   const loading = externalDetail !== undefined ? false : local.loading;
@@ -446,8 +452,10 @@ export function ApplicantDetailContent({
             : `시간대를 알 수 없어요(폼 원문: ${a.work_hours ?? "-"}). 노출 규칙에서 '미확인'을 함께 골라야 이분이 대상에 들어옵니다.`,
   };
 
-  // 표시 대상 후보 (jobId 지정 시 그 공고, 아니면 최신)
-  const focusCand = (jobId != null ? cands.find((c) => c.job_id === jobId) : cands[0]) ?? null;
+  // 표시 대상 후보 — 패널에서 고른 공고 > 부르는 화면이 준 공고 > 최신.
+  // (기본값을 '최신'에서 바꾸지 않는다 — 확정 모달·후속 발송의 대상이 조용히 달라지면 안 된다.)
+  const focusJobId = focusOverride ?? jobId;
+  const focusCand = (focusJobId != null ? cands.find((c) => c.job_id === focusJobId) : cands[0]) ?? null;
   const isPurePool = cands.length === 0;
   // 표시 중인 공고가 internal(도시락 등) 라인인가 — 배민 전용 필드(슬롯·지점·배민ID·배민 온보딩)를
   // 이 상세 패널 전반에서 숨기거나 라인 언어로 치환하는 단일 판정(확정 모달과 동일 규칙).
@@ -1073,19 +1081,58 @@ export function ApplicantDetailContent({
             open={jobsOpen}
             onToggle={() => toggleSection("jobs", jobsOpen)}
           >
+            {cands.length > 1 && (
+              <div className="mb-2 text-[11.5px] font-bold text-[#B7791F] bg-[#FFFBEC] border border-[#FAF089] rounded-lg px-2.5 py-1.5 leading-snug">
+                이 분은 공고 {cands.length}건에 붙어 있어요 — 아래에서 공고를 누르면 그 공고 기준으로 바뀝니다
+                (체크리스트·확정·후속 발송 모두 <b>표시 중</b> 공고에 적용돼요).
+              </div>
+            )}
             <div className="space-y-2">
-              {cands.map((c) => (
-                <div key={c.id} className={`rounded-xl border p-3 ${focusCand?.id === c.id ? "border-[#FFCB3C] bg-[#FFFBEB]" : "border-[#E2E8F0] bg-white"}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-bold text-[#1A202C] line-clamp-1">{c.job_title ?? `공고 #${c.job_id}`}</span>
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF5FF] text-[#805AD5] shrink-0">{STAGE_LABEL[c.agent_stage ?? ""] ?? c.agent_stage ?? "-"}</span>
+              {cands.map((c) => {
+                const isFocus = focusCand?.id === c.id;
+                // 공고가 1건이면 고를 것이 없어 버튼으로 만들지 않는다(누를 수 있어 보이는 오해 방지).
+                const selectable = cands.length > 1;
+                return (
+                  <div
+                    key={c.id}
+                    role={selectable ? "button" : undefined}
+                    tabIndex={selectable ? 0 : undefined}
+                    aria-pressed={selectable ? isFocus : undefined}
+                    onClick={selectable ? () => setFocusOverride(c.job_id) : undefined}
+                    onKeyDown={
+                      selectable
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setFocusOverride(c.job_id);
+                            }
+                          }
+                        : undefined
+                    }
+                    className={`rounded-xl border p-3 ${isFocus ? "border-[#FFCB3C] bg-[#FFFBEB]" : "border-[#E2E8F0] bg-white"} ${
+                      selectable ? "cursor-pointer hover:border-[#CBD5E0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[13px] font-bold text-[#1A202C] line-clamp-1">{c.job_title ?? `공고 #${c.job_id}`}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {selectable && isFocus && (
+                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#1A202C] text-white">표시 중</span>
+                        )}
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF5FF] text-[#805AD5]">
+                          {/* 단계가 비어 있으면 '관심만 누른 상태' — '-'로 두면 매니저가 이유를 알 수 없다. */}
+                          {STAGE_LABEL[c.agent_stage ?? ""] ?? c.agent_stage ?? "관심"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 text-[11.5px] text-[#718096] flex-wrap">
+                      {c.job_branch && <span className="flex items-center gap-1"><MapPin size={11} /> {c.job_branch}</span>}
+                      {c.client_name && <span className="flex items-center gap-1"><Building2 size={11} /> {c.client_name}</span>}
+                      {c.job_effectively_closed && <span className="font-bold text-[#A0AEC0]">마감된 공고</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 mt-1.5 text-[11.5px] text-[#718096] flex-wrap">
-                    {c.job_branch && <span className="flex items-center gap-1"><MapPin size={11} /> {c.job_branch}</span>}
-                    {c.client_name && <span className="flex items-center gap-1"><Building2 size={11} /> {c.client_name}</span>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* 스크리닝 / 온보딩 진행 — 표시 중인 공고 기준 */}

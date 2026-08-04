@@ -5,6 +5,7 @@ import { sendSms } from "@/lib/solapi";
 import { ensureDanggeunSystemJob } from "@/lib/agent/danggeun-job";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
+import { gatherLiveJobLinks } from "@/lib/candidate-links";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,17 @@ export async function GET(req: NextRequest) {
       ...a,
       agent_stage: stageByApplicant.get(a.id) ?? null,
     }));
+
+    // 살아있는 공고 결속(관심 포함)을 함께 내려준다 — 목록 배지 "공고 N건"용.
+    // 위 agent_stage는 '가장 최근 행의 단계'(종료·마감 공고 포함)로 예전부터 쓰던 값이라 그대로 둔다.
+    // 배지에 쓰는 집합은 응대 화면 탭·상세 포커스와 **같은 함수**여야 해서 여기서 따로 계산한다
+    // (목록에 3건이라 적혀 있으면 열었을 때 탭도 3개 — lib/candidate-links.ts).
+    const { links, error: linkErr } = await gatherLiveJobLinks(supabase, ids);
+    if (linkErr) {
+      // 배지가 없어도 목록은 쓸 수 있다 — 500으로 올리지 않고 로그만 남긴다.
+      console.error("[applicants] job_links 조회 실패", linkErr);
+    }
+    withStage = withStage.map((a) => ({ ...a, job_links: links.get(a.id) ?? [] }));
 
     // 현재 공고(current_job_id)의 라인 형태(recruit_mode)를 함께 내려준다 — 대시보드·목록의
     // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
