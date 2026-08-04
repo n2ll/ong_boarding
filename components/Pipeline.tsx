@@ -14,6 +14,7 @@ import { Applicant, calcAge, SLOTS, SLOT_LABEL, SLOT_UNKNOWN, applicantAvailable
 import { distanceToJobKm, jobAnchors, type GeoJob } from "@/lib/geo";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
+import { summarizeLinks, type LiveJobLink } from "@/lib/candidate-links";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
@@ -121,6 +122,8 @@ interface CardData {
   lastActive: string;
   phone: string | null;
   agentStage: string | null;
+  /** 지금 붙어 있는 공고들(관심 포함). 배지 건수 = 상세 패널에서 보이는 공고 탭 수여야 한다. */
+  jobLinks: LiveJobLink[];
   status: string;
   availability: string | null;
   availabilityUpdatedAtIso: string | null;
@@ -291,7 +294,13 @@ function appliedMonth(iso: string | null): string | null {
 }
 
 // 목록 API가 추가로 내려주는 컬럼 — 공용 Applicant 타입엔 아직 없어 로컬 확장으로 소비.
-type ApplicantRow = Applicant & { sms_opt_out_at?: string | null; access_token?: string | null; applied_at?: string | null };
+type ApplicantRow = Applicant & {
+  sms_opt_out_at?: string | null;
+  access_token?: string | null;
+  applied_at?: string | null;
+  /** 지금 붙어 있는 공고들(관심 포함) — 상세 패널의 공고 목록·응대 화면 탭과 같은 집합(lib/candidate-links). */
+  job_links?: LiveJobLink[] | null;
+};
 
 function toCard(a: ApplicantRow): CardData {
   const branch = a.confirmed_branch?.trim() || a.branch1?.trim() || a.branch?.trim() || "-";
@@ -325,6 +334,7 @@ function toCard(a: ApplicantRow): CardData {
     lastActive: a.last_message_at ? relTime(a.last_message_at) : "연락 이력 없음",
     phone: a.phone ?? null,
     agentStage: a.agent_stage ?? null,
+    jobLinks: a.job_links ?? [],
     status: a.status,
     availability: a.availability ?? null,
     availabilityUpdatedAtIso: a.availability_updated_at ?? null,
@@ -358,7 +368,12 @@ export function Pipeline() {
   );
   const searchParams = useSearchParams();
   const { branch: scopeBranch } = useBranchScope();
-  const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
+  // 상세 패널 선택 — **사람과 공고를 한 값으로 묶는다.** 두 state로 두면 사람은 바뀌었는데 공고가
+  // 남아 엉뚱한 공고 기준으로 확정·발송이 열릴 수 있다. wantJobId는 '이 공고 기준으로 열어라'는 요청이고,
+  // 그 공고에 결속이 없으면 패널이 기본(최신)으로 되돌린다.
+  const [sel, setSel] = useState<{ applicantId: number; wantJobId: number | null } | null>(null);
+  const selectedApplicantId = sel?.applicantId ?? null;
+  const openApplicant = (id: number, wantJobId: number | null = null) => setSel({ applicantId: id, wantJobId });
   const [view, setView] = useState<"kanban" | "list" | "map" | "funnel">("list");
   const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
 
@@ -1186,7 +1201,7 @@ export function Pipeline() {
     // 확정은 드래그로 처리하지 않는다 — status만 바뀌면 공고 미결속·AI 미정지의 '반쪽 확정'이 된다.
     // 상세 패널을 열어 정식 확정 모달(대상 공고·시작일·지점)로 유도한다(단일 경로 수렴).
     if (COLUMN_TO_STATUS[destColId] === "확정인력") {
-      setSelectedApplicantId(Number(cardId));
+      openApplicant(Number(cardId));
       toast.info("확정은 상세에서 대상 공고를 지정해 완료해요 — 상세 패널을 열었어요.");
       return;
     }
@@ -1795,7 +1810,7 @@ export function Pipeline() {
               {/* 컬럼은 드래그 낙관 갱신용 원본(columns)을 유지하고, 표시만 조건 결과로 좁힌다 —
                   예전엔 조건·검색이 칸반에 전혀 걸리지 않아 검색창을 쳐도 아무 반응이 없었다. */}
               {kanbanColumns.map((column, idx) => (
-                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => setSelectedApplicantId(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
+                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => openApplicant(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
               ))}
             </div>
           )}
@@ -1813,7 +1828,7 @@ export function Pipeline() {
               onRefresh={() => void mutateFunnel()}
               isValidating={funnelValidating}
               query={q}
-              onCardClick={(id) => setSelectedApplicantId(id)}
+              onCardClick={(id) => openApplicant(id)}
             />
           )}
 
@@ -1959,7 +1974,7 @@ export function Pipeline() {
                       return (
                         <tr
                           key={c.id}
-                          onClick={() => setSelectedApplicantId(Number(c.id))}
+                          onClick={() => openApplicant(Number(c.id))}
                           className={`border-b border-[#F1F4F8] last:border-0 transition-colors hover:bg-[#F7FAFC] cursor-pointer group ${isSelected ? 'bg-[#FFFBEC] hover:bg-[#FFFBEC]' : 'bg-white'}`}
                         >
                           <td className="px-5 py-4">
@@ -1974,9 +1989,53 @@ export function Pipeline() {
                               </div>
                               <div>
                                 <div className="text-[14px] font-bold text-[#1A202C]">{c.name}{c.age > 0 && <span className="text-[13px] font-medium text-[#718096] ml-1">{c.age}세</span>}</div>
-                                <div className="flex items-center gap-1.5 mt-1">
-                                  {c.agentStage ? (
-                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EBF8FF] text-[#3182CE]">공고지원 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
+                                {/* 이름 아래 한 줄 — 공고가 2건 이상이면 공고별 칩으로 바꾼다.
+                                    '공고지원 · 스크리닝' 한 개는 가장 최근 공고 하나만 말해줘서, 여러 자리에
+                                    붙은 분이 한 자리만 진행 중인 것처럼 보였다. 칩을 누르면 그 공고 기준으로 상세가 열린다.
+                                    (칩 개수 = 상세의 공고 탭 수 — 같은 판정 함수를 쓴다.) */}
+                                <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                  {c.jobLinks.length > 0 ? (
+                                    <>
+                                      {c.jobLinks.slice(0, 2).map((l) => {
+                                        const interestOnly = l.agent_stage == null;
+                                        const paused = l.agent_stage === "paused";
+                                        return (
+                                          <button
+                                            key={l.job_id}
+                                            onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id), l.job_id); }}
+                                            title={`${l.title} — ${interestOnly ? "관심만 누른 자리" : STAGE_KO[l.agent_stage ?? ""] ?? l.agent_stage}. 클릭하면 이 공고 기준으로 상세를 엽니다.`}
+                                            className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${
+                                              interestOnly
+                                                ? "bg-[#FFFBEC] text-[#B7791F]"
+                                                : paused
+                                                  ? "bg-[#EDF2F7] text-[#4A5568]"
+                                                  : "bg-[#EBF8FF] text-[#3182CE]"
+                                            }`}
+                                          >
+                                            {(l.branch && l.branch.trim()) || l.title}
+                                          </button>
+                                        );
+                                      })}
+                                      {c.jobLinks.length > 2 && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id)); }}
+                                          title={c.jobLinks.map((l) => l.title).join("\n")}
+                                          className="cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#4A5568] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                                        >
+                                          +{c.jobLinks.length - 2}
+                                        </button>
+                                      )}
+                                      {(() => {
+                                        const s = summarizeLinks(c.jobLinks);
+                                        return s.interest > 0 && s.talking + s.paused === 0 ? (
+                                          <span className="text-[10.5px] font-bold text-[#B7791F]">관심 {s.interest}건</span>
+                                        ) : null;
+                                      })()}
+                                    </>
+                                  ) : c.agentStage ? (
+                                    /* 살아있는 결속이 0건인데 단계가 남아 있다 = 종료·마감된 공고 이력뿐이다.
+                                       예전 '공고지원 · 스크리닝' 표기는 지금 진행 중인 것처럼 읽혀 오해를 낳았다. */
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]" title="지금 붙어 있는 공고는 없어요 — 지난 공고 이력이에요">지난 공고 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
                                   ) : (
                                     <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#EDF2F7] text-[#718096]">순수 인재풀</span>
                                   )}
@@ -2291,12 +2350,15 @@ export function Pipeline() {
 
       <ApplicantDetailPanel
         isOpen={selectedApplicantId != null}
-        onClose={() => setSelectedApplicantId(null)}
+        onClose={() => setSel(null)}
         applicantId={selectedApplicantId}
-        /* 진행 중 공고 포인터 — 이 화면엔 공고 선택기가 없어, 없으면 여러 공고 진행자의 AI 토글이 409로 막힌다. */
+        /* 표시 기준 공고 — 목록의 공고 배지를 눌러 들어왔으면 그 공고, 아니면 진행 중 공고 포인터.
+           (포인터라도 넘겨야 여러 공고 진행자의 AI 토글이 409로 막히지 않는다. 패널 안에서 다시 고를 수 있다.) */
         jobId={
-          (rawApplicants.find((a) => a.id === selectedApplicantId) as { current_job_id?: number | null } | undefined)
-            ?.current_job_id ?? null
+          sel?.wantJobId ??
+          ((rawApplicants.find((a) => a.id === selectedApplicantId) as { current_job_id?: number | null } | undefined)
+            ?.current_job_id ??
+            null)
         }
         onChanged={loadApplicants}
       />

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
 import { getBrowserClient } from "@/lib/supabase";
+import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
 
 interface Applicant {
   id: number;
@@ -25,12 +26,8 @@ interface Applicant {
   sms_opt_out_at?: string | null;
 }
 
-interface ActiveJob {
-  job_id: number;
-  title: string;
-  branch: string | null;
-  agent_stage: string | null;
-}
+/** /api/admin/applicants/[id]/active-jobs 응답 — lib/candidate-links의 LiveJobLink와 같은 모양이어야 한다. */
+type ActiveJob = LiveJobLink;
 
 /** /api/admin/messages/preview 응답의 지원자별 마지막 메시지 요약 */
 interface LastMessagePreview {
@@ -207,6 +204,11 @@ export function LiveConsole() {
   const [handoffCat, setHandoffCat] = useState<string>("all");
   // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
   const focusJobIdRef = useRef<number | null>(null);
+  // 그 공고가 '살아있는 결속' 밖일 때(시스템 더미·마감 공고의 paused 건) 탭에 끼워 넣을 링크.
+  // 인계 큐는 마감·시스템 공고도 그대로 띄우는데(의도) /active-jobs는 그 둘을 제외한다 —
+  // 그러면 큐에서 고른 공고가 목록에 없어 **조용히 다른 공고로 떨어지고**, 인계된 대화가 화면에서
+  // 사라진 채 매니저 답장이 엉뚱한 공고로 적재된다(#{공고명} 치환까지 그 공고 값으로 나간다).
+  const focusLinkRef = useRef<ActiveJob | null>(null);
   // 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영하는 모달
   const [promote, setPromote] = useState<Handoff | null>(null);
   const [promoteField, setPromoteField] = useState<"pay_info" | "policy_notes">("pay_info");
@@ -369,12 +371,19 @@ export function LiveConsole() {
         const json = await res.json();
         if (cancelled) return;
         const jobs = (json.jobs ?? []) as ActiveJob[];
-        setActiveJobs(jobs);
-        // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 첫 번째(없으면 전체).
-        const fj = focusJobIdRef.current;
-        const wanted = fj != null && jobs.some((j) => j.job_id === fj) ? fj : null;
-        setSelectedJobId(wanted ?? (jobs.length > 0 ? jobs[0].job_id : null));
+        // 큐에서 고른 공고가 살아있는 결속 목록에 없으면(마감·시스템 공고) 그 링크를 끼워 넣는다 —
+        // 조용히 다른 공고로 떨어지지 않게. 판정(gatherLiveJobLinks)은 건드리지 않는다:
+        // 이건 '매니저가 지목한 예외 탭'이고 살아있는 결속의 정의가 아니다(목록 배지 = 탭 수 불변식 유지).
+        const wanted = focusJobIdRef.current;
+        const extra = focusLinkRef.current;
+        const merged =
+          wanted != null && extra != null && !jobs.some((j) => j.job_id === wanted) ? [...jobs, extra] : jobs;
+        setActiveJobs(merged);
+        // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 **대화가 진행 중인 공고**를 먼저.
+        // (탭에 관심만 누른 공고까지 들어오면서, 먼저 생겼다는 이유로 빈 대화창이 기본이 되는 걸 막는다.)
+        setSelectedJobId(defaultFocusJobId(merged, wanted));
         focusJobIdRef.current = null;
+        focusLinkRef.current = null;
       } catch {
         if (!cancelled) {
           setActiveJobs([]);
@@ -396,6 +405,18 @@ export function LiveConsole() {
 
   // 인계 큐: 카테고리 필터 적용(이미 오래된 순으로 서버 정렬됨)
   const visibleHandoffs = handoffCat === "all" ? handoffs : handoffs.filter((h) => h.category === handoffCat);
+  // **한 사람 = 한 카드** — 공고를 여러 개 동시에 열면 한 분이 공고 수만큼 카드로 불어난다(같은 사람에게
+  // 전화를 세 번 하게 되는 지점). 사람으로 묶고 그 안에서 공고별 줄로 나눈다.
+  // Map은 삽입 순서를 유지하므로 '가장 오래 방치된 사람이 위'라는 서버 정렬이 그대로 보존된다.
+  const handoffGroups = useMemo(() => {
+    const byApplicant = new Map<number, Handoff[]>();
+    for (const h of visibleHandoffs) {
+      const arr = byApplicant.get(h.applicant_id);
+      if (arr) arr.push(h);
+      else byApplicant.set(h.applicant_id, [h]);
+    }
+    return Array.from(byApplicant.values());
+  }, [visibleHandoffs]);
   // 카테고리 칩에 쓸 집계
   const catCounts = handoffs.reduce<Record<string, number>>((acc, h) => {
     acc[h.category] = (acc[h.category] ?? 0) + 1;
@@ -406,10 +427,17 @@ export function LiveConsole() {
   // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
   const selectHandoff = (h: Handoff) => {
     focusJobIdRef.current = h.job_id;
+    // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
+    focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null };
     if (h.applicant_id === selectedChatId) {
       // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
       // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
+      // 그 공고가 탭 목록에 없으면(마감·시스템 공고) 함께 끼워 넣는다 — 없으면 탭 바에서 사라진 채
+      // 선택만 바뀌어, 매니저가 어느 공고로 답장하는지 화면에서 확인할 수 없다.
+      setActiveJobs((prev) => (prev.some((j) => j.job_id === h.job_id) ? prev : [...prev, focusLinkRef.current!]));
       setSelectedJobId(h.job_id);
+      focusJobIdRef.current = null;
+      focusLinkRef.current = null;
     } else {
       setSelectedChatId(h.applicant_id);
     }
@@ -637,6 +665,13 @@ export function LiveConsole() {
             )
           ) : activeTab === "intervention" ? (
             <div className="flex gap-1 flex-wrap">
+              {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
+                  한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
+              {visibleHandoffs.length !== handoffGroups.length && (
+                <span className="w-full text-[11.5px] font-bold text-[#718096]">
+                  {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
+                </span>
+              )}
               <button onClick={() => setHandoffCat("all")} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
                 const sample = handoffs.find((h) => h.category === cid)!;
@@ -655,56 +690,86 @@ export function LiveConsole() {
         {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {visibleHandoffs.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
-            {visibleHandoffs.map((h) => {
-              const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
+            {handoffGroups.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
+            {handoffGroups.map((items) => {
+              const head = items[0];
+              const multi = items.length > 1;
+              // 카드 위치는 '가장 오래 방치된 건' 기준(서버 정렬) — 머리글 경과일도 그 값으로 맞춘다.
+              const worstAge = Math.max(...items.map((h) => h.age_days));
+              const groupSelected = selectedChatId === head.applicant_id;
               return (
                 <div
-                  key={h.candidate_id}
-                  className={`rounded-xl transition-all ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
+                  key={head.applicant_id}
+                  className={`rounded-xl transition-all ${groupSelected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
                 >
-                  <button onClick={() => selectHandoff(h)} className="w-full text-left p-3.5 pb-2 cursor-pointer">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
-                      <span className={`text-[11.5px] font-bold ${ageStyle(h.age_days)}`}>⏱ {h.age_days === 0 ? "오늘" : `${h.age_days}일 방치`}</span>
-                    </div>
-                    <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
-                      {h.applicant_name}
-                      {h.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{h.branch}</span>}
-                    </div>
-                    {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
-                  </button>
-                  <div className="flex items-center justify-between gap-2 px-3.5 pb-2.5 pt-0.5">
-                    <span className="text-[11px] font-bold text-[#A0AEC0] truncate">→ {h.suggested_action}</span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
-                      {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
-                        <button
-                          onClick={() => openPromote(h)}
-                          className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95"
-                          title="매니저 답변을 공고 단가·정책 필드에 저장 → 다음부터 AI가 직접 응대"
+                  <div className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-1.5">
+                    <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{head.applicant_name}</span>
+                      {multi && (
+                        <span
+                          className="shrink-0 px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#FFF5F5] text-[#C53030]"
+                          title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
-                          공고에 반영
-                        </button>
+                          공고 {items.length}건
+                        </span>
                       )}
-                      {!["manual", "auto"].includes(h.category) && (
-                        <button
-                          onClick={() => openKb(h)}
-                          className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95"
-                          title="매니저 답변을 공통/지점 지식에 등록 → 다음부터 AI가 직접 응대"
-                        >
-                          지식 등록
-                        </button>
-                      )}
-                      <button
-                        onClick={() => resumeHandoff(h)}
-                        className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
-                        title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
-                      >
-                        AI 재개
-                      </button>
                     </div>
+                    <span className={`shrink-0 text-[11.5px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
                   </div>
+                  {items.map((h) => {
+                    const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
+                    return (
+                      <div
+                        key={h.candidate_id}
+                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-[#FFCB3C] bg-[#FFFBEC]" : "border-[#EDF2F7] bg-white hover:border-[#CBD5E0]"}`}
+                      >
+                        <button onClick={() => selectHandoff(h)} className="w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className={`shrink-0 px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                            {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
+                            {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
+                                공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
+                            <span className="text-[11px] font-bold text-[#4A5568] truncate" title={h.job_title}>
+                              {h.is_system_job ? h.job_title : (h.branch && h.branch.trim()) || h.job_title}
+                            </span>
+                            {multi && <span className={`shrink-0 text-[11px] font-bold ${ageStyle(h.age_days)}`}>{h.age_days === 0 ? "오늘" : `${h.age_days}일`}</span>}
+                          </div>
+                          {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
+                        </button>
+                        <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
+                          <span className="text-[11px] font-bold text-[#A0AEC0] truncate">→ {h.suggested_action}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
+                            {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
+                              <button
+                                onClick={() => openPromote(h)}
+                                className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95"
+                                title="매니저 답변을 공고 단가·정책 필드에 저장 → 다음부터 AI가 직접 응대"
+                              >
+                                공고에 반영
+                              </button>
+                            )}
+                            {!["manual", "auto"].includes(h.category) && (
+                              <button
+                                onClick={() => openKb(h)}
+                                className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95"
+                                title="매니저 답변을 공통/지점 지식에 등록 → 다음부터 AI가 직접 응대"
+                              >
+                                지식 등록
+                              </button>
+                            )}
+                            <button
+                              onClick={() => resumeHandoff(h)}
+                              className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
+                              title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
+                            >
+                              AI 재개
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -830,10 +895,17 @@ export function LiveConsole() {
               공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
           {activeJobs.length > 1 && (
             <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-2 flex items-center gap-2 overflow-x-auto">
-              <span className="text-[11px] font-bold text-[#A0AEC0] shrink-0">진행 공고 {activeJobs.length}건 · 탭 전환</span>
+              <span className="text-[11px] font-bold text-[#A0AEC0] shrink-0">
+                붙어 있는 공고 {activeJobs.length}건 · 탭 전환
+                {activeJobs.some((j) => j.agent_stage == null) && (
+                  <span className="ml-1 font-medium">(관심만 누른 자리 포함)</span>
+                )}
+              </span>
               {activeJobs.map((j) => {
                 const selected = selectedJobId === j.job_id;
                 const paused = j.agent_stage === "paused";
+                // 아직 대화가 없는 자리(관심만 누름) — 'AI'로 적으면 응대가 돌고 있다는 거짓 신호가 된다.
+                const interestOnly = j.agent_stage == null;
                 const label = (j.branch && j.branch.trim()) || j.title;
                 return (
                   <button
@@ -845,17 +917,23 @@ export function LiveConsole() {
                         ? "bg-[#1A202C] text-white shadow-sm"
                         : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7] hover:border-[#CBD5E0]"
                     }`}
-                    title={`${j.title} — 클릭해 이 공고 대화로 전환`}
+                    title={
+                      interestOnly
+                        ? `${j.title} — 관심만 누른 자리예요(아직 대화 없음). 클릭하면 이 공고로 전환합니다.`
+                        : `${j.title} — 클릭해 이 공고 대화로 전환`
+                    }
                   >
                     {label}
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                        paused
-                          ? selected ? "bg-[#4A5568] text-white" : "bg-[#EDF2F7] text-[#4A5568]"
-                          : selected ? "bg-[#3182CE] text-white" : "bg-[#EBF8FF] text-[#3182CE]"
+                        interestOnly
+                          ? selected ? "bg-[#B7791F] text-white" : "bg-[#FFFBEC] text-[#B7791F]"
+                          : paused
+                            ? selected ? "bg-[#4A5568] text-white" : "bg-[#EDF2F7] text-[#4A5568]"
+                            : selected ? "bg-[#3182CE] text-white" : "bg-[#EBF8FF] text-[#3182CE]"
                       }`}
                     >
-                      {paused ? "수동 응대" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
+                      {interestOnly ? "관심" : paused ? "수동 응대" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
                     </span>
                   </button>
                 );
