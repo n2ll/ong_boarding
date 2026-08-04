@@ -113,6 +113,10 @@ export default function PoolPage() {
   const [notifyIds, setNotifyIds] = useState<Set<number>>(new Set());
   // 요건이 다른 자리 접기 — 기본 접힘. 펼치면 그대로 유지(읽는 중 다시 접히면 오클릭).
   const [showOthers, setShowOthers] = useState(false);
+  // 이 화면에서 관심을 눌러 띄운 후속 박스('바로 시작 가능?')는 세션 내 유지 —
+  // AUTO 모드는 관심 클릭 즉시 AI 문자가 나가 status가 talking으로 바뀌는데, 그때 박스를 치우면
+  // 손이 향하던 버튼이 60초 안에 눈앞에서 사라진다. 새 로드에선 비어 있어 '대화 중엔 생략' 규칙 그대로.
+  const [followupIds, setFollowupIds] = useState<Set<number>>(new Set());
 
   const toggleExpanded = (id: number) =>
     setExpandedIds((prev) => {
@@ -174,12 +178,24 @@ export default function PoolPage() {
               const byId = new Map(incoming.map((j) => [j.id, j]));
               // 이미 보고 있던 카드는 **위치를 유지**하고 내용만 최신으로(정렬이 바뀌면 오클릭이 난다).
               // 서버에서 사라진 공고는 화면에서도 뺀다 — 남기면 마감된 자리가 계속 '모집 중'으로 보인다.
-              const kept = prev.filter((j) => byId.has(j.id)).map((j) => byId.get(j.id) as PoolJob);
+              // 그룹(맞는 자리 / 접힌 자리)도 **순서의 일부**다 — 읽는 중 카드가 그룹을 넘나들면
+              // 열려 있던 확인 패널이 접힌 그룹으로 사라지고, 아래 카드가 위로 당겨져 손가락이
+              // 다른 공고의 [관심 있어요]에 떨어진다(이 병합이 막으려던 바로 그 오클릭).
+              // fit·fit_reasons는 한 판정이므로 쌍으로 고정한다 — 다음 전체 로드에서 갱신된다.
+              const kept = prev
+                .filter((j) => byId.has(j.id))
+                .map((j) => {
+                  const n = byId.get(j.id) as PoolJob;
+                  return { ...n, fit: j.fit, fit_reasons: j.fit_reasons };
+                });
               // 새로 올라온 공고는 맨 뒤에 붙인다(기존 카드 위치를 밀지 않는다).
               const prevIds = new Set(prev.map((j) => j.id));
               const added = incoming.filter((j) => !prevIds.has(j.id));
               // 확인 패널을 띄운 공고가 사라졌으면 확인 상태도 해제한다.
               if (confirmingRef.current !== null && !byId.has(confirmingRef.current)) setConfirmingId(null);
+              // 마감되면 카드 모양 자체가 바뀐다(관심 버튼 없는 '마감됨' 카드) — 확인 패널을 열어둔 채
+              // 두면 존재하지 않는 버튼을 기다리며 60초 갱신이 계속 건너뛰어진다.
+              if (confirmingRef.current !== null && byId.get(confirmingRef.current)?.expired) setConfirmingId(null);
               return [...kept, ...added];
             });
           } else {
@@ -190,7 +206,17 @@ export default function PoolPage() {
             .filter((j: PoolJob) => j.interested && j.status !== "ended")
             .map((j: PoolJob) => j.id);
           const serverNotify = (json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id);
-          setDoneIds((prev) => new Set([...(background ? prev : []), ...serverDone]));
+          // 종료(ended)된 건은 **합집합에서 빼준다** — 안 빼면 세션 중 매니저가 보류·종료해도
+          // 낡은 로컬 doneIds가 '접수됐어요 — 매니저가 연락드릴게요'를 유지해, M4가 없애려던
+          // 거짓 약속이 열린 화면에서 그대로 되살아난다.
+          const serverEnded = new Set<number>(
+            (json.jobs ?? []).filter((j: PoolJob) => j.status === "ended").map((j: PoolJob) => j.id)
+          );
+          setDoneIds((prev) => {
+            const merged = new Set([...(background ? prev : []), ...serverDone]);
+            for (const id of serverEnded) merged.delete(id);
+            return merged;
+          });
           setNotifyIds((prev) => new Set([...(background ? prev : []), ...serverNotify]));
         })
         .catch(() => {
@@ -228,6 +254,7 @@ export default function PoolPage() {
       });
       if (res.ok) {
         setDoneIds((prev) => new Set(prev).add(job.id));
+        setFollowupIds((prev) => new Set(prev).add(job.id));
         setConfirmingId(null);
       } else {
         const json = await res.json().catch(() => null);
@@ -519,7 +546,7 @@ export default function PoolPage() {
                   </div>
                 )}
 
-                {done && job.status !== "talking" && job.status !== "paused" && (
+                {done && (followupIds.has(job.id) || (job.status !== "talking" && job.status !== "paused")) && (
                   <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
@@ -554,24 +581,46 @@ export default function PoolPage() {
             );
           };
           // 서버가 정한 순서를 그대로 따른다(재정렬 금지) — 여기서는 그룹으로 나누기만 한다.
-          const activeMain = jobs.filter((j) => !j.expired && j.fit !== "warn");
-          const activeOthers = jobs.filter((j) => !j.expired && j.fit === "warn");
+          //
+          // ⚠️ **이미 시작된 자리는 접지 않는다.** 관심을 눌렀거나 이야기 중인 카드가 요건 불일치로
+          // 기본 접힘 뒤에 숨으면, M1b가 세운 '이야기 중인 공고가 본인 화면에서 사라지면 안 된다'는
+          // 불변식이 시각적으로 되돌아간다(AI만 그 공고를 말하는 상태와 같은 체감). 접기는 **아직
+          // 손대지 않은 자리**를 정리하는 장치일 뿐이다.
+          const isFolded = (j: PoolJob) => j.fit === "warn" && j.status === "none";
+          const activeMain = jobs.filter((j) => !j.expired && !isFolded(j));
+          const activeOthers = jobs.filter((j) => !j.expired && isFolded(j));
           const expiredJobs = jobs.filter((j) => j.expired);
+          // 활성 카드가 전부 접히면 위 영역이 **카드 0장**이 된다 — 헤더는 "[관심 있어요]를 눌러주세요"라고
+          // 하는데 그 버튼이 화면에 없고, 빈 상태 안내도 뜨지 않는다(활성 공고는 있으니까).
+          // 실측: 실공고 6개가 전부 차량 필수라 차량 없는 165명이 정확히 이 상태였다. 그때는 자동으로 펼친다.
+          const forceShowOthers = activeMain.length === 0 && activeOthers.length > 0;
           return (
             <div className="flex flex-col gap-4">
               {activeMain.map(renderCard)}
               {activeOthers.length > 0 && (
                 <section>
                   {/* 요건이 어긋난 자리는 접어두되 **숨기지 않는다** — 차량이 새로 생겼을 수 있고 판단은 지원자 몫. */}
-                  <button
-                    onClick={() => setShowOthers((v) => !v)}
-                    className="w-full py-4 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-dashed border-[#CBD5E0] text-[#718096] hover:bg-[#F7FAFC] active:bg-[#F7FAFC]"
-                  >
-                    {showOthers
-                      ? "조건이 다른 자리 접기 ▲"
-                      : `조건이 다를 수 있는 자리 ${activeOthers.length}개 더 보기 ▼`}
-                  </button>
-                  {showOthers && (
+                  {forceShowOthers ? (
+                    // 전부 접힐 상황 — 안내 한 줄을 주고 카드를 그대로 보여준다(빈 화면 금지).
+                    <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 mb-4">
+                      <p className="text-[16px] font-bold text-[#1A202C] leading-snug">
+                        지금 올라온 자리는 등록해 주신 정보와 조건이 좀 달라요
+                      </p>
+                      <p className="mt-1 text-[14px] text-[#718096] leading-relaxed">
+                        그래도 괜찮으시면 관심을 눌러 주세요 — 매니저가 확인 후 연락드립니다.
+                      </p>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowOthers((v) => !v)}
+                      className="w-full py-4 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-dashed border-[#CBD5E0] text-[#718096] hover:bg-[#F7FAFC] active:bg-[#F7FAFC]"
+                    >
+                      {showOthers
+                        ? "조건이 다른 자리 접기 ▲"
+                        : `조건이 다를 수 있는 자리 ${activeOthers.length}개 더 보기 ▼`}
+                    </button>
+                  )}
+                  {(showOthers || forceShowOthers) && (
                     <div className="mt-4 flex flex-col gap-4">{activeOthers.map(renderCard)}</div>
                   )}
                 </section>

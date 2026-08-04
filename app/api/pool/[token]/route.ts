@@ -66,10 +66,13 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   }
 
   // 이미 관심/지원으로 연결된 공고 + 진행 단계 — 카드 상황 배지(lib/pool-status)의 재료.
-  const { data: jcs } = await supabase
+  const { data: jcs, error: jcsErr } = await supabase
     .from("job_candidates")
     .select("job_id, agent_stage")
     .eq("applicant_id", applicant.id);
+  // 500으로 올리지 않는다 — 문자 받고 링크를 연 시니어의 화면 전체를 마커 조회 하나로 비우는 건 더 나쁘다.
+  // 대신 조용히 지나가지 않게 로그를 남긴다(배지·접수 상태 없이 응답이 나간 사실이 진단 가능하도록).
+  if (jcsErr) console.error("[pool GET] job_candidates fetch failed — 배지·접수 상태 없이 응답", jcsErr);
   const linkedJobIds = new Set((jcs ?? []).map((r) => r.job_id as number));
   const stageByJob = new Map<number, string | null>();
   for (const r of jcs ?? []) {
@@ -77,11 +80,12 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   }
 
   // '다음 급구 알림' 요청 이력 — 마감 카드 버튼 상태 재수화용 (새로고침 시 중복 접수 방지)
-  const { data: notifies } = await supabase
+  const { data: notifies, error: notifiesErr } = await supabase
     .from("pool_events")
     .select("job_id")
     .eq("applicant_id", applicant.id)
     .eq("event_type", "notify_request");
+  if (notifiesErr) console.error("[pool GET] notify_request fetch failed — '이미 신청함' 표시 없이 응답", notifiesErr);
   const notifiedJobIds = new Set((notifies ?? []).map((r) => r.job_id as number));
 
   // 지정 노출(targeted) 게이팅 — 이 지원자가 대상인 공고만 노출. 규칙(자동)+수동(include/exclude) 판정.

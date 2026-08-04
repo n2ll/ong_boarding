@@ -33,12 +33,22 @@ export interface PoolFitResult {
 export function jobSlotTokens(slot: string | null | undefined): SlotKey[] {
   const raw = (slot ?? "").replace(/\s/g, "");
   if (!raw) return [];
+  // 부정 표기는 판정하지 않는다 — '평일오전 제외, 오후만'이 '평일오전'으로 **정반대** 해석된다.
+  if (/제외|말고|불가|아님|빼고/.test(raw)) return [];
   const out: SlotKey[] = [];
   for (const key of SLOTS) {
     // '평일오전'(공백 제거 후) 형태가 그대로 들어 있을 때만 — '평일'+'오전'이 떨어져 있으면
     // '평일 저녁, 주말 오전' 같은 값에서 '평일오전'을 만들어내는 오탐이 된다.
     if (raw.includes(key)) out.push(key);
   }
+  if (out.length === 0) return [];
+  // **반쪽 캡처 방어** — 잡은 토큰으로 설명되지 않는 요일·시간 단어가 남으면 판정을 포기한다.
+  // `평일 오전~오후`는 ['평일오전']만, `평일/주말 오전`은 ['주말오전']만 잡혀 '확신에 찬 오판'이 된다:
+  // 실제로는 맞는 공고인데 "시간대가 달라요"라는 거짓 문장과 함께 접힌 그룹으로 강등됐다
+  // (실측: 슬롯 판정자 250명 중 52~98명). 전부 잡거나(쉼표·중점 나열) 전부 포기(unknown) — 한쪽만 잡지 않는다.
+  let rest = raw;
+  for (const key of out) rest = rest.split(key).join("");
+  if (/평일|주말|매일|오전|오후/.test(rest)) return [];
   return out;
 }
 
