@@ -324,6 +324,9 @@ export function applicantAvailableSlots(a: {
   // 시작과 종료가 같은 값(`0:00~0:00`·`7:00~7:00`)은 범위가 아니다 — 12시간제 보정으로 그럴싸한
   // 답을 만들면 판정 불가한 쓰레기 값이 '확정'으로 새어 들어온다.
   if (end !== null && end === start) return { slots: [], partial: true, source: "parsed" };
+  // 종료가 `0:00`이면 범위가 아니다(폼 잔여물) 또는 자정을 넘기는 교대다 — 어느 쪽이든 슬롯 판정 불가.
+  // 아래 12시간제 보정(+12)에 넘기면 `0:30~0:00`이 `0:30~12:00`(오전 확정)으로 그럴싸하게 새어 들어온다.
+  if (end !== null && end === 0) return { slots: [], partial: true, source: "parsed" };
   if (end !== null && end < start) {
     // `9:00~6:00` 처럼 종료를 12시간제로 적은 경우 → 오후로 읽는다.
     end += 12;

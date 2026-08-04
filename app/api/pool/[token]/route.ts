@@ -20,6 +20,8 @@ import {
   type ExposureApplicant,
   type ExposureMode,
 } from "@/lib/exposure";
+import { judgePoolFit } from "@/lib/pool-fit";
+import { poolJobStatus } from "@/lib/pool-status";
 
 export const dynamic = "force-dynamic";
 
@@ -63,19 +65,27 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
   }
 
-  // 이미 관심/지원으로 연결된 공고 표시
-  const { data: jcs } = await supabase
+  // 이미 관심/지원으로 연결된 공고 + 진행 단계 — 카드 상황 배지(lib/pool-status)의 재료.
+  const { data: jcs, error: jcsErr } = await supabase
     .from("job_candidates")
-    .select("job_id")
+    .select("job_id, agent_stage")
     .eq("applicant_id", applicant.id);
+  // 500으로 올리지 않는다 — 문자 받고 링크를 연 시니어의 화면 전체를 마커 조회 하나로 비우는 건 더 나쁘다.
+  // 대신 조용히 지나가지 않게 로그를 남긴다(배지·접수 상태 없이 응답이 나간 사실이 진단 가능하도록).
+  if (jcsErr) console.error("[pool GET] job_candidates fetch failed — 배지·접수 상태 없이 응답", jcsErr);
   const linkedJobIds = new Set((jcs ?? []).map((r) => r.job_id as number));
+  const stageByJob = new Map<number, string | null>();
+  for (const r of jcs ?? []) {
+    stageByJob.set(r.job_id as number, (r as { agent_stage?: string | null }).agent_stage ?? null);
+  }
 
   // '다음 급구 알림' 요청 이력 — 마감 카드 버튼 상태 재수화용 (새로고침 시 중복 접수 방지)
-  const { data: notifies } = await supabase
+  const { data: notifies, error: notifiesErr } = await supabase
     .from("pool_events")
     .select("job_id")
     .eq("applicant_id", applicant.id)
     .eq("event_type", "notify_request");
+  if (notifiesErr) console.error("[pool GET] notify_request fetch failed — '이미 신청함' 표시 없이 응답", notifiesErr);
   const notifiedJobIds = new Set((notifies ?? []).map((r) => r.job_id as number));
 
   // 지정 노출(targeted) 게이팅 — 이 지원자가 대상인 공고만 노출. 규칙(자동)+수동(include/exclude) 판정.
@@ -148,6 +158,18 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
               }
             )
           : null;
+      // fit — 요건이 명시적으로 어긋났다고 확정될 때만 warn(순서·접기 전용, 노출과 무관).
+      const fitResult = judgePoolFit(
+        {
+          vehicle_required: (j as { vehicle_required?: boolean | null }).vehicle_required ?? null,
+          slot: (j as { slot?: string | null }).slot ?? null,
+        },
+        {
+          own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
+          work_hours: (applicant as { work_hours?: string | null }).work_hours ?? null,
+          available_slots: (applicant as { available_slots?: string[] | null }).available_slots ?? null,
+        }
+      );
       return {
         id: j.id,
         title: j.title,
@@ -171,10 +193,19 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
         distance_km: d === null ? null : Math.round(d * 10) / 10,
         interested: linkedJobIds.has(j.id as number),
         notified: notifiedJobIds.has(j.id as number),
+        // fit — 'warn'만 아래 접힌 그룹으로. 'unknown'(정보 없음)은 맞는 자리와 같은 위 그룹(조용한 강등 금지).
+        fit: fitResult.fit,
+        fit_reasons: fitResult.reasons,
+        // 상황 배지 — 이 공고에서 내가 어디까지 했는지(관심/이야기 중/확인 중/종료).
+        status: poolJobStatus(linkedJobIds.has(j.id as number), stageByJob.get(j.id as number)),
       };
     })
     .sort((a, b) => {
       if (a.expired !== b.expired) return a.expired ? 1 : -1; // 진행 중 공고 먼저
+      // 요건이 어긋난 자리(warn)는 아래로 — 순서는 서버가 확정한다(클라이언트는 재정렬 금지 규칙).
+      const warnA = a.fit === "warn" ? 1 : 0;
+      const warnB = b.fit === "warn" ? 1 : 0;
+      if (warnA !== warnB) return warnA - warnB;
       if (a.distance_km !== null && b.distance_km !== null) return a.distance_km - b.distance_km;
       if (a.distance_km !== null) return -1;
       if (b.distance_km !== null) return 1;
