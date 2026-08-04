@@ -309,7 +309,8 @@ function exposureSummary(f: EditJobForm): string {
   if (f.exposureDraft.exposure !== "targeted") return "전체 인재풀에 보여줘요";
   const r = f.exposureDraft.rule;
   const rule = draftToRule(r);
-  const conds = rule ? Object.keys(rule).length : 0;
+  // radiusIncludeUnknown은 반경 조건의 부속 옵션 — 따로 세면 '조건 2개'로 부풀어 보인다.
+  const conds = rule ? Object.keys(rule).filter((k) => k !== "radiusIncludeUnknown").length : 0;
   return conds > 0 ? `지정 대상에게만 · 조건 ${conds}개` : "지정 대상에게만";
 }
 function workSummary(f: EditJobForm): string {
@@ -1036,9 +1037,17 @@ export function Jobs() {
       // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
       // 단 external은 pull 미노출 → 지정 노출이 고아로 복제되지 않게 전체 노출로 리셋(D10 일관성).
       const dupRule = ruleToDraft(j.exposure_rule);
+      // 반경은 복제하지 않는다 — 등록 모달엔 반경을 보거나 끌 UI가 없어(공고 저장 후에만 설정 가능),
+      // 보이지 않는 규칙이 등록 가드(집결지 좌표 필요)에 걸리면 원인을 알 수 없는 등록 실패가 된다.
+      const dupHadRadius = dupRule.radiusKm !== "";
+      dupRule.radiusKm = "";
+      dupRule.radiusIncludeUnknown = false;
       setNewJobExposure(
         dupExternal ? EMPTY_EXPOSURE : { exposure: j.exposure === "targeted" ? "targeted" : "all", rule: dupRule }
       );
+      if (!dupExternal && dupHadRadius) {
+        toast.info("원본의 거리 반경 조건은 복제되지 않아요 — 등록 후 공고 수정에서 다시 설정하세요(집결지 좌표가 잡힌 뒤에 가능).");
+      }
       // 수동 명단 전용(규칙 없는) 지정 노출 공고를 복제하면 노출 0명 공고가 될 수 있어 경고.
       if (!dupExternal && j.exposure === "targeted" && !draftToRule(dupRule)) {
         toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
@@ -2574,6 +2583,8 @@ export function Jobs() {
                         value={editForm.exposureDraft}
                         onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
                         jobId={Number(editForm.id)}
+                        /* 방금 고른 거리 기준으로 미리보기 계산 — 저장된 기준으로 재면 같은 모달에서 296명을 보고 190명을 저장하게 된다 */
+                        distanceBasis={editForm.distanceBasis}
                       />
                     </>
                   </EditSection>

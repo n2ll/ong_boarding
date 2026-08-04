@@ -379,7 +379,8 @@ export async function pickJobForCampaignReply(
   };
   const { data: jobRows, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, exposure, exposure_rule, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    // distance_basis까지 — 안 읽으면 pickup 기준 공고가 nearest(더 넓은 쪽)로 판정돼 본인 링크에는 없는 공고에 자동 편입된다.
+    .select("id, title, status, closes_at, exposure, exposure_rule, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, distance_basis")
     .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(200);

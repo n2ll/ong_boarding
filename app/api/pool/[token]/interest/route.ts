@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import type { GeoJob } from "@/lib/geo";
+import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { sendSlackText } from "@/lib/slack";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { getAgentMode } from "@/lib/agent/kill-switch";
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: applicant } = await supabase
     .from("applicants")
-    .select("id, name, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at")
+    .select("id, name, availability, sido, sigungu, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
   if (!applicant) {
@@ -64,7 +64,8 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, recruit_mode, exposure, exposure_rule")
+    // 반경 축 판정 재료 — 게이트가 pool GET과 같은 컬럼을 봐야 한다(빠지면 카드는 보이는데 클릭만 400).
+    .select(`id, title, status, closes_at, recruit_mode, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("id", jobId)
     .maybeSingle();
   // pull 노출 대상(internal·both)이 아니면 접근 거부 — GET에서 안 보이는 공고에 관심 표시가 새는 걸 막는다.

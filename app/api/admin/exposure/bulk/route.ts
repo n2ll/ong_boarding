@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { isSystemJobTitle } from "@/lib/jobs";
 import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
+import { EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 
@@ -34,16 +35,16 @@ function parseIds(v: unknown): number[] {
 async function loadValidJobs(supabase: ReturnType<typeof createServiceClient>, jobIds: number[]) {
   const { data, error } = await supabase
     .from("jobs")
-    .select("id, title, exposure, exposure_rule, recruit_mode")
+    .select(`id, title, exposure, exposure_rule, recruit_mode, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .in("id", jobIds);
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as {
+  const rows = (data ?? []) as ({
     id: number;
     title: string;
     exposure: string | null;
     exposure_rule: unknown;
     recruit_mode: string | null;
-  }[];
+  } & GeoJob)[];
   return rows.filter((j) => !isSystemJobTitle(j.title));
 }
 
@@ -129,8 +130,24 @@ export async function POST(req: NextRequest) {
           flipAllowed.has(j.id) &&
           // external(새로 모집)은 맞춤 공고 링크에 애초에 뜨지 않는다(pool GET이 internal·both만 노출).
           // targeted로 바꾸면 명단은 효력이 없고, 공개 지원 링크의 후보 연결만 끊긴다.
-          j.recruit_mode !== "external"
+          j.recruit_mode !== "external" &&
+          // 유지될 규칙에 반경이 있는데 기준점(좌표)이 없으면 전환하지 않는다 —
+          // 전환되는 순간 그 규칙은 아무도 통과 못 해, 수정 모달의 쓰기 가드가 막는 상태를 여기로 우회해 만들게 된다.
+          !(ruleAction !== "clear" && normalizeRule(j.exposure_rule)?.radiusKm && !jobSupportsRadius(j))
       )
+    : [];
+  const skippedFlipNoGeo = makeTargeted
+    ? jobs
+        .filter(
+          (j) =>
+            j.exposure !== "targeted" &&
+            flipAllowed.has(j.id) &&
+            j.recruit_mode !== "external" &&
+            ruleAction !== "clear" &&
+            normalizeRule(j.exposure_rule)?.radiusKm &&
+            !jobSupportsRadius(j)
+        )
+        .map((j) => j.id)
     : [];
   const skippedFlipExternal = makeTargeted
     ? jobs.filter((j) => j.exposure !== "targeted" && j.recruit_mode === "external").map((j) => j.id)
@@ -238,6 +255,8 @@ export async function POST(req: NextRequest) {
     flipped: flippedIds,
     // 전환하지 않은 external 공고 — 조용한 부분 성공으로 보이지 않게 호출부가 알린다.
     skipped_flip_external: skippedFlipExternal,
+    // 반경 규칙이 있는데 집결지 좌표가 없어 전환하지 않은 공고 — 호출부가 이유를 말해준다.
+    skipped_flip_no_geo: skippedFlipNoGeo,
     rule_cleared: clearedIds,
     auto_included: autoIncluded,
     // 걸러진 것들 — 조용한 부분 성공으로 보이지 않게 명시(호출부가 안내 표시).

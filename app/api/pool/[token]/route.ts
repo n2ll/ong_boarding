@@ -134,10 +134,18 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     .map((j) => {
       const d =
         hasGeo
-          // 거리 표시도 공고가 정한 기준으로 — 규칙 판정과 다른 숫자를 보여주면 안 된다(lib/geo 단일 공식).
+          // 카드의 '집에서 약 N km'는 **통근(집결지) 거리**다 — 출발지 주소 옆에 붙는 숫자라
+          // 노출 판정 기준(distance_basis)과 무관하게 항상 집결지로 잰다(경유지가 섞이면
+          // 실제 통근보다 짧아 보인다). 판정 기준은 규칙 쪽(isExposed)에서만 쓴다.
           ? distanceToJobKm(
               { lat: applicant.lat as number, lng: applicant.lng as number },
-              j as unknown as GeoJob
+              {
+                pickup_lat: (j as { pickup_lat?: number | null }).pickup_lat ?? null,
+                pickup_lng: (j as { pickup_lng?: number | null }).pickup_lng ?? null,
+                dropoff_lat: null,
+                dropoff_lng: null,
+                distance_basis: "pickup",
+              }
             )
           : null;
       return {

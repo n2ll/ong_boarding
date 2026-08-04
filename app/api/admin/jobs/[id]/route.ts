@@ -111,9 +111,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
   if (update.slot === "") update.slot = null;
   if (
-    typeof update.distance_basis === "string" &&
-    !(DISTANCE_BASIS_VALUES as readonly string[]).includes(update.distance_basis)
+    "distance_basis" in update &&
+    (typeof update.distance_basis !== "string" ||
+      !(DISTANCE_BASIS_VALUES as readonly string[]).includes(update.distance_basis))
   ) {
+    // 문자열 검사만 하면 숫자·null이 통과해 DB CHECK 제약에서 500이 난다(그때는 보호 행이 이미 쓰였다).
     return NextResponse.json({ error: "distance_basis 값이 잘못되었습니다." }, { status: 400 });
   }
   if (
@@ -204,6 +206,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (geo) {
       update.pickup_lat = geo.lat;
       update.pickup_lng = geo.lng;
+    } else {
+      // 실패 시 옛 좌표를 남기면 주소는 새 곳, 좌표는 옛 곳 — 반경 규칙·거리 정렬·안내 대상이
+      // 전부 예전 집결지를 겨냥한다(가드도 '좌표 있음'으로 통과). 좌표를 비워 사실을 맞춘다.
+      update.pickup_lat = null;
+      update.pickup_lng = null;
     }
   } else if (update.pickup_address === null || update.pickup_address === "") {
     update.pickup_lat = null;
@@ -216,6 +223,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (geo) {
       update.dropoff_lat = geo.lat;
       update.dropoff_lng = geo.lng;
+    } else {
+      update.dropoff_lat = null;
+      update.dropoff_lng = null;
     }
   } else if (update.dropoff_address === null || update.dropoff_address === "") {
     update.dropoff_lat = null;
@@ -225,8 +235,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // 노출을 좁히는 저장이면, 파이프라인의 '이 명단에게만 노출'과 **같은 공식**으로 먼저 보호한다.
   // 좁히는 경로가 둘(파이프라인 일괄 배정 · 이 수정 모달)인데 여기에만 보호가 없으면
   // 이야기 중인 공고가 지원자 화면에서 사라진다(AI만 그 공고를 말하는 상태). 같은 개념 두 공식 금지.
-  // 반경 규칙 쓰기 가드 — 기준점(집결지 좌표)이 없으면 그 규칙은 **아무도 통과 못 한다**.
+  // 반경 규칙 쓰기 가드 + 좁힘 감지 — 기준점(집결지 좌표)이 없으면 그 규칙은 **아무도 통과 못 한다**.
   // 노출을 만지지 않고 **집결지 주소만 지우는 저장**에도 걸려야 한다(그때 공고가 조용히 사라진다).
+  // 기준(nearest→pickup)·좌표 변경은 반경 규칙 공고에서 노출 축소이기도 하다(실측 296→190) —
+  // 아래에서 geoNarrowing으로 M1b 보호(연결 인원 pin)를 함께 돌린다.
+  let geoNarrowing = false;
   if (
     "exposure_rule" in update ||
     "pickup_address" in update ||
@@ -237,17 +250,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   ) {
     const { data: geoCur, error: geoErr } = await supabase
       .from("jobs")
-      .select(`exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
+      .select(`exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
       .eq("id", id)
       .maybeSingle();
     if (geoErr) {
       console.error("[jobs PATCH] 반경 가드 조회 실패", geoErr);
       return NextResponse.json({ error: "공고 조회 실패 — 아무것도 바꾸지 않았습니다." }, { status: 500 });
     }
-    const cur = geoCur as ({ exposure_rule?: unknown } & GeoJob) | null;
+    const cur = geoCur as ({ exposure?: string | null; exposure_rule?: unknown } & GeoJob) | null;
+    const exposureAfter =
+      ("exposure" in update ? (update.exposure as string | null) : cur?.exposure) ?? "all";
     const ruleAfter =
       "exposure_rule" in update ? normalizeRule(update.exposure_rule) : normalizeRule(cur?.exposure_rule);
-    if (ruleAfter?.radiusKm) {
+    // 전체 노출 공고는 규칙이 효력이 없고, 규칙 편집기도 지정 노출에서만 열린다 —
+    // 여기서 막으면 반경을 지울 UI가 없는 막다른 길이 된다. 지정 노출일 때만 가드.
+    if (exposureAfter === "targeted" && ruleAfter?.radiusKm) {
       const pick = <T,>(k: keyof GeoJob, curVal: T): T =>
         (k in update ? (update[k as string] as T) : curVal);
       const geoAfter: GeoJob = {
@@ -266,6 +283,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           { status: 400 }
         );
       }
+      // 기준점 재료가 하나라도 바뀌면 대상이 줄 수 있다 — 넓어지는 변경까지 포함해 보호를 돌린다
+      // (M1b와 같은 판단: 방향 계산의 실패 모드보다 과다 보호가 안전).
+      geoNarrowing =
+        "pickup_address" in update || "pickup_lat" in update ||
+        "dropoff_address" in update || "dropoff_lat" in update ||
+        "distance_basis" in update;
     }
   }
 
@@ -323,6 +346,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (error || !data) {
     console.error("[jobs PATCH]", error);
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
+  }
+
+  // 기준·좌표 변경만으로도(노출 필드를 안 만져도) 반경 대상이 줄 수 있다 — 같은 보호를 돌린다.
+  if (geoNarrowing && !narrowingExposure) {
+    const { inserted, error: protectErr } = await writeExposureProtectRows(supabase, [id]);
+    if (protectErr) {
+      console.error("[jobs PATCH] geo narrowing protect failed", protectErr);
+      return NextResponse.json(
+        { error: "이미 연결된 인원을 노출 명단에 남기지 못했어요 — 아무것도 바꾸지 않았습니다." },
+        { status: 500 }
+      );
+    }
+    autoIncluded += inserted;
+    narrowingExposure = true;
   }
 
   // 보호를 읽은 시점과 저장 사이엔 아직 넓은 노출이라, 그 창에 들어온 관심 클릭은 후보 행만 생기고

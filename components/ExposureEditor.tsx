@@ -121,10 +121,13 @@ export function ExposureEditor({
   value,
   onChange,
   jobId,
+  distanceBasis,
 }: {
   value: ExposureDraft;
   onChange: (next: ExposureDraft) => void;
   jobId?: number;
+  /** 부모 폼에서 편집 중인 거리 기준 — 미리보기가 저장된 값 대신 이걸로 계산한다(수정 모달 전용). */
+  distanceBasis?: string;
 }) {
   const confirm = useConfirm();
   const targeted = value.exposure === "targeted";
@@ -179,7 +182,7 @@ export function ExposureEditor({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 반경 축은 공고 기준점이 필요하다 — 저장된 공고면 그 공고로 계산한다(없으면 '계산 불가'로 표시).
-        body: JSON.stringify({ rule, job_id: jobId ?? null }),
+        body: JSON.stringify({ rule, job_id: jobId ?? null, distance_basis: distanceBasis ?? null }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((json) => {
@@ -194,7 +197,7 @@ export function ExposureEditor({
         });
     }, 500);
     return () => clearTimeout(timer);
-  }, [targeted, ruleJson, jobId]);
+  }, [targeted, ruleJson, jobId, distanceBasis]);
 
   // 유효 노출 명단(수정 모달 전용) — 서버에 '저장된' exposure/rule 기준
   const {

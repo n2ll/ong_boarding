@@ -11,6 +11,7 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
 import { Applicant, calcAge, SLOTS, SLOT_LABEL, SLOT_UNKNOWN, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
+import { distanceToJobKm, jobAnchors, type GeoJob } from "@/lib/geo";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -375,7 +376,7 @@ export function Pipeline() {
   const loadApplicants = () => { void mutateApplicants(); };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
-  const { data: jobsData, mutate: mutateJobs } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null }> }>("/api/admin/jobs?status=active");
+  const { data: jobsData, mutate: mutateJobs } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null; distance_basis?: string | null }> }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
   const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null, exposure: j.exposure ?? "all" })), [visibleJobs]);
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
@@ -459,20 +460,20 @@ export function Pipeline() {
       ),
     [visibleJobs]
   );
-  // 선택된 거리 기준 공고의 양 끝점(상차지·마지막경유지) 좌표 — 존재하는 것만 담는다. 둘 다 없으면 null(거리 정렬 비활성).
-  const distanceJobCoords = useMemo(() => {
+  // 선택된 거리 기준 공고 — 정렬은 그 공고가 정한 기준(distance_basis)을 그대로 따른다(lib/geo 단일 공식).
+  // 예전엔 여기서 min(상차지, 경유지)를 하드코딩해, '집결지만' 기준 공고의 노출 대상과 정렬 순위가 어긋났다.
+  const distanceJob = useMemo(() => {
     if (distanceJobId === null) return null;
     const j = distanceJobs.find((x) => x.id === distanceJobId);
     if (!j) return null;
-    const pickup =
-      typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
-        ? { lat: j.pickup_lat, lng: j.pickup_lng }
-        : null;
-    const dropoff =
-      typeof j.dropoff_lat === "number" && typeof j.dropoff_lng === "number"
-        ? { lat: j.dropoff_lat, lng: j.dropoff_lng }
-        : null;
-    return pickup || dropoff ? { pickup, dropoff } : null;
+    const geo: GeoJob = {
+      pickup_lat: j.pickup_lat ?? null,
+      pickup_lng: j.pickup_lng ?? null,
+      dropoff_lat: j.dropoff_lat ?? null,
+      dropoff_lng: j.dropoff_lng ?? null,
+      distance_basis: j.distance_basis ?? null,
+    };
+    return jobAnchors(geo).length > 0 ? geo : null;
   }, [distanceJobId, distanceJobs]);
 
   // 조건·검색이 바뀌면 선택 해제 — 화면에서 사라진 인원에게 벌크 발송이 나가는 사고 방지.
@@ -821,6 +822,7 @@ export function Pipeline() {
       const flipped: number[] = json.flipped ?? [];
       const cleared: number[] = json.rule_cleared ?? [];
       const skippedExternal: number[] = json.skipped_flip_external ?? [];
+      const skippedNoGeo: number[] = json.skipped_flip_no_geo ?? [];
       toast.success(
         `${applicantIds.length}명을 공고 ${jobIds.length}개에 ${exposureMode === "include" ? "노출 대상으로 추가" : "노출 제외로 지정"}했어요` +
           (flipped.length > 0 ? ` · 공고 ${flipped.length}개를 '지정 노출'로 전환` : "") +
@@ -828,6 +830,9 @@ export function Pipeline() {
           (json.auto_included > 0 ? ` · 이미 연결된 ${json.auto_included}건 자동 포함` : "") +
           (skippedExternal.length > 0
             ? ` — ${skippedExternal.length}개 공고는 '새로 모집'이라 전환하지 않았어요(맞춤 공고 링크에 뜨지 않는 공고예요)`
+            : "") +
+          (skippedNoGeo.length > 0
+            ? ` — ${skippedNoGeo.length}개 공고는 거리 반경 규칙이 있는데 집결지 좌표가 없어 전환하지 않았어요(공고 수정에서 주소를 먼저 저장하세요)`
             : "") +
           (nonTargeted.length > 0
             ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
@@ -995,23 +1000,24 @@ export function Pipeline() {
     if (reactionOnly && lastReactionAt(summary) === null) return false;
     return true;
   });
-  // 카드별 거리(km) — 후보↔{상차지, 마지막경유지} 중 '가까운 쪽'을 순위 근거로 쓴다(어느 끝이든 가까우면 상위).
-  //   distByCardId: 정렬 키 = min(상차지 거리, 마지막경유지 거리) (존재하는 끝만).
-  //   distDetailByCardId: 배지용 개별 거리(둘 중 있는 것만). 거리모드+공고좌표+카드좌표 모두 있을 때만 산출.
+  // 카드별 거리(km) — 정렬 키는 공고가 정한 기준(distance_basis)의 distanceToJobKm.
+  //   distDetailByCardId: 배지용 개별 거리(집결지·경유지 각각, 있는 것만) — 정렬 근거를 눈으로 확인하는 용도.
   const distByCardId: Record<string, number> = {};
   const distDetailByCardId: Record<string, { pickup: number | null; dropoff: number | null }> = {};
-  if (sortMode === "distance" && distanceJobCoords) {
+  if (sortMode === "distance" && distanceJob) {
     for (const c of postFilteredCards) {
       if (typeof c.lat !== "number" || typeof c.lng !== "number") continue;
-      const pickup = distanceJobCoords.pickup
-        ? distKm(c.lat, c.lng, distanceJobCoords.pickup.lat, distanceJobCoords.pickup.lng)
-        : null;
-      const dropoff = distanceJobCoords.dropoff
-        ? distKm(c.lat, c.lng, distanceJobCoords.dropoff.lat, distanceJobCoords.dropoff.lng)
-        : null;
-      const both = [pickup, dropoff].filter((d): d is number => d !== null);
-      if (both.length === 0) continue;
-      distByCardId[c.id] = Math.min(...both);
+      const km = distanceToJobKm({ lat: c.lat, lng: c.lng }, distanceJob);
+      if (km === null) continue;
+      distByCardId[c.id] = km;
+      const pickup =
+        typeof distanceJob.pickup_lat === "number" && typeof distanceJob.pickup_lng === "number"
+          ? distKm(c.lat, c.lng, distanceJob.pickup_lat, distanceJob.pickup_lng)
+          : null;
+      const dropoff =
+        typeof distanceJob.dropoff_lat === "number" && typeof distanceJob.dropoff_lng === "number"
+          ? distKm(c.lat, c.lng, distanceJob.dropoff_lat, distanceJob.dropoff_lng)
+          : null;
       distDetailByCardId[c.id] = { pickup, dropoff };
     }
   }

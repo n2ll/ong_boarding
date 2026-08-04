@@ -111,6 +111,12 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       job = (jobRow as unknown as GeoJob) ?? null;
     }
+    // 수정 모달이 '방금 고른'(아직 저장 안 한) 거리 기준을 넘기면 그걸로 계산 —
+    // 저장된 기준으로 재면 같은 화면에서 미리보기와 저장 결과 인원이 어긋난다(실측 296↔190).
+    const basisOverride = body?.distance_basis;
+    if (job && (basisOverride === "pickup" || basisOverride === "nearest")) {
+      job = { ...job, distance_basis: basisOverride };
+    }
     const radiusNeedsJob = typeof rule?.radiusKm === "number" && rule.radiusKm > 0;
     const radiusUnavailable = radiusNeedsJob && !jobSupportsRadius(job);
     const matched = rule ? applicants.filter((a) => matchesRule(a, rule, { nowMs: now, job })) : [];

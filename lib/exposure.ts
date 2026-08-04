@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "./admin/types";
-import { distanceToJobKm, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type GeoJob } from "./geo";
+import { distanceToJobKm, jobSupportsRadius, type GeoJob } from "./geo";
 
 /**
  * J · 타겟 공고 노출 — 규칙 매처 + 유효 노출 판정 (파이프라인 필터 의미와 단일 소스).
@@ -135,9 +135,13 @@ export function normalizeRule(raw: unknown): ExposureRule | null {
   );
   if (slot && slot.length) out.slot = slot;
   // 반경 — 1~100km 정수만. 0·음수·거대값이 들어와 아무도(또는 전원이) 걸리는 상태 방지.
-  if (typeof r.radiusKm === "number" && r.radiusKm > 0 && r.radiusKm <= 100) {
-    out.radiusKm = Math.round(r.radiusKm);
-    if (r.radiusIncludeUnknown === true) out.radiusIncludeUnknown = true;
+  if (typeof r.radiusKm === "number") {
+    // 반올림 **후** 검증 — 0.3이 0으로 저장되면 '조건 1개'로 보이는데 아무것도 거르지 않는다.
+    const km = Math.round(r.radiusKm);
+    if (km >= 1 && km <= 100) {
+      out.radiusKm = km;
+      if (r.radiusIncludeUnknown === true) out.radiusIncludeUnknown = true;
+    }
   }
   if (r.suntopDone === true) out.suntopDone = true;
   if (typeof r.cohortMonths === "number" && r.cohortMonths > 0 && r.cohortMonths <= 120) {
@@ -210,8 +214,11 @@ export function matchesRule(a: ExposureApplicant, rule: ExposureRule | null, ctx
     if (!ok) return false;
   }
   if (typeof rule.radiusKm === "number" && rule.radiusKm > 0) {
-    // 기준점은 공고가 정한다. 공고를 안 넘긴 호출부·좌표 없는 공고·좌표 없는 지원자는 모두 null →
-    // '미확인 포함'을 켠 규칙만 통과시킨다(조용한 탈락 방지 + fail-closed 유지).
+    // '공고 기준점 없음'과 '지원자 좌표 없음'은 다른 상태다.
+    //  · 공고 기준점 없음(좌표 없는 공고·공고 미전달) = 규칙 오설정 → 전원 차단(fail-closed).
+    //    '미확인 포함'은 지원자 주소를 모르는 경우를 위한 스위치지, 오설정을 전원 통과로 뒤집는 스위치가 아니다.
+    //  · 지원자 좌표 없음 → '미확인 포함'을 켠 규칙만 통과(조용한 탈락 방지).
+    if (!jobSupportsRadius(ctx.job ?? null)) return false;
     const km = distanceToJobKm({ lat: a.lat, lng: a.lng }, ctx.job ?? null);
     if (km === null) {
       if (!rule.radiusIncludeUnknown) return false;
