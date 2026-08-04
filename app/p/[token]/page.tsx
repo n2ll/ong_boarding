@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { POOL_STATUS_DONE_LABEL } from "@/lib/pool-status";
 import { useParams } from "next/navigation";
 
 interface PoolJob {
@@ -30,6 +31,11 @@ interface PoolJob {
   distance_km: number | null;
   interested: boolean;
   notified: boolean;
+  /** 서버 fit 판정 — 'warn'(요건이 확정적으로 어긋남)만 아래 접힌 그룹. 카드는 절대 숨기지 않는다. */
+  fit: "ok" | "warn" | "unknown";
+  fit_reasons: string[];
+  /** 이 공고에서 내가 어디까지 했는지 — 카드 상황 배지(lib/pool-status와 같은 상태 집합). */
+  status: "none" | "interested" | "talking" | "paused" | "ended";
 }
 
 const PERIOD_LABEL: Record<string, string> = {
@@ -105,6 +111,8 @@ export default function PoolPage() {
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [immediateIds, setImmediateIds] = useState<Set<number>>(new Set());
   const [notifyIds, setNotifyIds] = useState<Set<number>>(new Set());
+  // 요건이 다른 자리 접기 — 기본 접힘. 펼치면 그대로 유지(읽는 중 다시 접히면 오클릭).
+  const [showOthers, setShowOthers] = useState(false);
 
   const toggleExpanded = (id: number) =>
     setExpandedIds((prev) => {
@@ -177,7 +185,10 @@ export default function PoolPage() {
           } else {
             setJobs(json.jobs ?? []);
           }
-          const serverDone = (json.jobs ?? []).filter((j: PoolJob) => j.interested).map((j: PoolJob) => j.id);
+          // ended(종료 건)는 접수 상태로 합치지 않는다 — 버튼이 '다시 관심 있어요'로 살아 있어야 한다.
+          const serverDone = (json.jobs ?? [])
+            .filter((j: PoolJob) => j.interested && j.status !== "ended")
+            .map((j: PoolJob) => j.id);
           const serverNotify = (json.jobs ?? []).filter((j: PoolJob) => j.notified).map((j: PoolJob) => j.id);
           setDoneIds((prev) => new Set([...(background ? prev : []), ...serverDone]));
           setNotifyIds((prev) => new Set([...(background ? prev : []), ...serverNotify]));
@@ -293,8 +304,9 @@ export default function PoolPage() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4">
-          {jobs.map((job) => {
+        {(() => {
+          // 카드 JSX는 그대로 추출만 — 그룹(위/접힘/마감)을 나눠 두 번 이상 쓰기 위한 함수화.
+          const renderCard = (job: PoolJob) => {
             // 마감된 공고 — 조용히 사라지는 대신 '다음 기회 알림' 수집 카드로 3일간 노출
             if (job.expired) {
               const notified = notifyIds.has(job.id);
@@ -329,11 +341,25 @@ export default function PoolPage() {
               );
             }
 
+            // ended(이 공고 건 종료)는 서버 재수화(serverDone)에서 이미 빠진다 — 그래서 doneIds만 보면
+            // '다시 관심'을 누른 직후(로컬 클릭)만 접수 상태가 된다. 예전엔 종료 건에도 '연락드릴게요'가
+            // 남아 오지 않는 연락을 기다리게 했다.
             const done = doneIds.has(job.id);
             const pay = payLabel(job);
             return (
               <section key={job.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
+                  {/* 상황 배지 — '나 이 자리 어디까지 했더라'를 카드가 먼저 답한다(문구 규칙은 lib/pool-status). */}
+                  {job.status === "talking" && (
+                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">
+                      💬 이야기 중
+                    </span>
+                  )}
+                  {job.status === "paused" && (
+                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8]">
+                      매니저 확인 중
+                    </span>
+                  )}
                   {job.work_period && (
                     <span
                       className={`inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold ${
@@ -393,12 +419,16 @@ export default function PoolPage() {
                     <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">차량</dt>
                     <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
                   </div>
-                  {/* 공고 요건과 등록된 본인 정보가 어긋나면 알려준다 — 카드를 감추지는 않는다(차량이 새로 생겼을 수도 있다).
-                      7장이 한꺼번에 보이는 상황에서 '나와 맞는 자리'를 스스로 가리게 돕는 최소 장치. */}
-                  {job.vehicle_required && ownVehicle === "없음" && (
+                  {/* 요건이 어긋난 이유 — 서버 fit 판정(lib/pool-fit)의 문장을 그대로 보여준다(판정 한 곳).
+                      카드를 감추지는 않는다 — 차량이 새로 생겼을 수 있고, 판단은 지원자 몫. */}
+                  {job.fit_reasons.length > 0 && (
                     <div className="mt-1 rounded-lg bg-[#FFFBEC] border border-[#F6E4B0] px-3 py-2 text-[14px] font-bold text-[#B7791F] leading-snug">
-                      이 일자리는 <b>본인 차량이 필요</b>해요. 저희가 받은 정보에는 차량이 없다고 되어 있어요
-                      {done ? " — 차량 여부는 매니저가 연락드릴 때 확인할게요." : " — 차량이 준비되셨다면 관심을 눌러 주세요."}
+                      {job.fit_reasons.map((r, i) => (
+                        <p key={i}>{r}</p>
+                      ))}
+                      <p className="mt-1 font-semibold text-[#B7791F]">
+                        {done ? "매니저가 연락드릴 때 함께 확인할게요." : "그래도 괜찮으시면 관심을 눌러 주세요."}
+                      </p>
                     </div>
                   )}
                 </dl>
@@ -447,10 +477,16 @@ export default function PoolPage() {
                     } disabled:cursor-default`}
                   >
                     {done
-                      ? "✓ 접수됐어요 — 매니저가 연락드릴게요"
+                      ? job.status === "talking"
+                        ? POOL_STATUS_DONE_LABEL.talking
+                        : job.status === "paused"
+                          ? POOL_STATUS_DONE_LABEL.paused
+                          : POOL_STATUS_DONE_LABEL.interested
                       : sendingId !== null
                         ? "잠시만요…"
-                        : "관심 있어요"}
+                        : job.status === "ended"
+                          ? "다시 관심 있어요"
+                          : "관심 있어요"}
                   </button>
                 ) : (
                   // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
@@ -483,7 +519,7 @@ export default function PoolPage() {
                   </div>
                 )}
 
-                {done && (
+                {done && job.status !== "talking" && job.status !== "paused" && (
                   <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
@@ -516,8 +552,34 @@ export default function PoolPage() {
                 )}
               </section>
             );
-          })}
-        </div>
+          };
+          // 서버가 정한 순서를 그대로 따른다(재정렬 금지) — 여기서는 그룹으로 나누기만 한다.
+          const activeMain = jobs.filter((j) => !j.expired && j.fit !== "warn");
+          const activeOthers = jobs.filter((j) => !j.expired && j.fit === "warn");
+          const expiredJobs = jobs.filter((j) => j.expired);
+          return (
+            <div className="flex flex-col gap-4">
+              {activeMain.map(renderCard)}
+              {activeOthers.length > 0 && (
+                <section>
+                  {/* 요건이 어긋난 자리는 접어두되 **숨기지 않는다** — 차량이 새로 생겼을 수 있고 판단은 지원자 몫. */}
+                  <button
+                    onClick={() => setShowOthers((v) => !v)}
+                    className="w-full py-4 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-dashed border-[#CBD5E0] text-[#718096] hover:bg-[#F7FAFC] active:bg-[#F7FAFC]"
+                  >
+                    {showOthers
+                      ? "조건이 다른 자리 접기 ▲"
+                      : `조건이 다를 수 있는 자리 ${activeOthers.length}개 더 보기 ▼`}
+                  </button>
+                  {showOthers && (
+                    <div className="mt-4 flex flex-col gap-4">{activeOthers.map(renderCard)}</div>
+                  )}
+                </section>
+              )}
+              {expiredJobs.map(renderCard)}
+            </div>
+          );
+        })()}
 
         <footer className="mt-8 text-center text-[13px] text-[#A0AEC0] leading-relaxed">
           이 페이지는 본인 전용 링크예요. 다른 분과 공유하지 말아주세요.
