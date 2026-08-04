@@ -40,6 +40,7 @@ import { sendSlackText } from "@/lib/slack";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import { runAgentForCandidate } from "@/lib/agent/router";
 import { pickCandidateForInbound, handleAmbiguousInbound } from "@/lib/agent/inbound-routing";
+import { classifyAvailabilitySignal } from "@/lib/agent/availability";
 import { sendSms } from "@/lib/solapi";
 import type { AgentState } from "@/lib/agent/types";
 
@@ -128,7 +129,33 @@ export async function GET(req: NextRequest) {
         .limit(1);
       if (outAfter && outAfter.length > 0) continue;
 
-      // a) 어느 공고 건인지는 **웹훅과 같은 함수**가 정한다(lib/agent/inbound-routing).
+      // a) 이 인바운드에 대한 초안(코파일럿 pending/auto_sent 기록)이 있으면 처리된 것 — 제외
+      //    ⚠️ 라우팅·보류보다 **먼저** 본다. 이미 초안이 걸린 인바운드로 후보를 보류시키면
+      //    매니저가 검토 중인 대화를 뒤에서 멈추는 셈이 된다.
+      const { data: drafts } = await supabase
+        .from("message_drafts")
+        .select("id")
+        .eq("inbound_message_id", String(inbound.id))
+        .limit(1);
+      if (drafts && drafts.length > 0) continue;
+
+      // b) AI가 이 인바운드 이후 이미 실행됐으면(빈 응답 stay 등) 제외 — 재응답 루프 방지.
+      //    판정은 후보 1건이 아니라 **그 지원자의 모든 후보 중 최신 실행 시각**으로 한다.
+      //    한 사람이 여러 라인에 병행 투입되는 것이 정상이고, 실행된 후보가 그 턴에 paused/abort로
+      //    빠지면 아래 라우팅이 '다른 활성 후보'를 고르게 되는데, 그 행만 보면 실행 흔적이 없어
+      //    같은 인바운드에 auto로 다시 응답해버린다(문자함 등록의 '자동 발송 안 함' 게이트 우회 경로).
+      const { data: allCands } = await supabase
+        .from("job_candidates")
+        .select("agent_state")
+        .eq("applicant_id", applicantId);
+      const lastRunAt = (allCands ?? []).reduce<string | null>((max, c) => {
+        const st = (c.agent_state ?? {}) as AgentState;
+        const v = typeof st.meta?.last_run_at === "string" ? st.meta.last_run_at : null;
+        return v && (!max || Date.parse(v) > Date.parse(max)) ? v : max;
+      }, null);
+      if (lastRunAt && Date.parse(lastRunAt) >= Date.parse(inbound.created_at)) continue;
+
+      // c) 어느 공고 건인지는 **웹훅과 같은 함수**가 정한다(lib/agent/inbound-routing).
       //    예전엔 여기서 '활성 단계 최신 1건'을 그냥 골라, 같은 답장이 웹훅으로 잡히면 A 공고
       //    sweeper로 잡히면 B 공고로 응대되는 갈림이 있었다.
       const route = await pickCandidateForInbound(supabase, applicantId, String(inbound.body ?? "").trim());
@@ -141,6 +168,15 @@ export async function GET(req: NextRequest) {
             .eq("id", applicantId)
             .maybeSingle();
           const a = appRow as { name: string | null; phone: string | null } | null;
+          // 수신거부 답장에 되묻기 문자가 나가지 않게, 웹훅과 **같은 분류 함수**로 판정한다.
+          // (sweeper가 잡는 건 웹훅이 놓친 문자라 분류 자체가 안 된 상태다.)
+          let inboundOptOut: boolean | null = null;
+          try {
+            const cls = await classifyAvailabilitySignal({ body: String(inbound.body ?? "") });
+            inboundOptOut = cls.signal === "opt_out";
+          } catch (e) {
+            console.error("[inbound-sweeper] 수신거부 분류 실패(unknown으로 진행)", e);
+          }
           const handled = await handleAmbiguousInbound(supabase, {
             applicantId,
             phone: a?.phone ?? null,
@@ -148,6 +184,7 @@ export async function GET(req: NextRequest) {
             options: route.options,
             why: route.why,
             mode,
+            inboundOptOut,
             sendSms: (to, body) => sendSms(to, body),
             notify: (t) => sendSlackText(t),
           });
@@ -160,31 +197,6 @@ export async function GET(req: NextRequest) {
         continue;
       }
       const jc = route.candidate;
-
-      // c) 이 인바운드에 대한 초안(코파일럿 pending/auto_sent 기록)이 있으면 처리된 것 — 제외
-      const { data: drafts } = await supabase
-        .from("message_drafts")
-        .select("id")
-        .eq("inbound_message_id", String(inbound.id))
-        .limit(1);
-      if (drafts && drafts.length > 0) continue;
-
-      // d) AI가 이 인바운드 이후 이미 실행됐으면(빈 응답 stay 등) 제외 — 재응답 루프 방지.
-      //    판정은 위에서 고른 후보 1건이 아니라 **그 지원자의 모든 후보 중 최신 실행 시각**으로 한다.
-      //    한 사람이 여러 라인에 병행 투입되는 것이 정상이고, 실행된 후보가 그 턴에 paused/abort로
-      //    빠지면(문자함 등록의 매니저 인계·advance 보류 등) 위 (a)가 '다른 활성 후보'를 고르게 되는데,
-      //    그 행만 보면 실행 흔적이 없어 같은 인바운드에 auto로 다시 응답해버린다
-      //    (= 문자함 등록의 '자동 발송 안 함' 게이트가 cron으로 우회되던 경로).
-      const { data: allCands } = await supabase
-        .from("job_candidates")
-        .select("agent_state")
-        .eq("applicant_id", applicantId);
-      const lastRunAt = (allCands ?? []).reduce<string | null>((max, c) => {
-        const st = (c.agent_state ?? {}) as AgentState;
-        const v = typeof st.meta?.last_run_at === "string" ? st.meta.last_run_at : null;
-        return v && (!max || Date.parse(v) > Date.parse(max)) ? v : max;
-      }, null);
-      if (lastRunAt && Date.parse(lastRunAt) >= Date.parse(inbound.created_at)) continue;
 
       // 회수 — 웹훅과 동일 라우터 경로. received_at이 과거라 답장 텀 sleep 없이 즉시,
       // 이 메시지가 그 지원자의 최신 인바운드라 coalesce 가드에도 걸리지 않는다.

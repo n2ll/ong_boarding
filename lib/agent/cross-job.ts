@@ -16,6 +16,7 @@
  */
 
 import type { OtherActiveJob, StageResult, StageTransition } from "./types";
+import { coarseArea } from "../geo";
 
 const STAGE_KO: Record<string, string> = {
   exploration: "탐색",
@@ -42,7 +43,9 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
     ["근무기간", (j.work_period ?? "").trim() || null],
     ["시작일", (j.start_date ?? "").trim() || null],
     ["급여", payLine(j)],
-    ["집결지", (j.pickup_address ?? "").trim() || null],
+    // **상세 주소는 싣지 않는다** — 집결지 상세는 확정 후 매니저가 안내하는 값이다.
+    // 지원자 카드(/p/[token])와 같은 함수로 '서울 서초구'까지만(lib/geo.coarseArea).
+    ["집결지(대략)", coarseArea(j.pickup_address) || null],
     ["본인 차량", j.vehicle_required == null ? null : j.vehicle_required ? "필요" : "필요 없음"],
   ];
   const known: [string, string][] = [];
@@ -54,9 +57,14 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
   return { known, missing };
 }
 
-/** 이 공고에 답할 수 있는 값이 하나도 없나 — 라우터 백스톱의 판단 재료. */
+/**
+ * 이 공고에 답할 수 있는 값이 하나도 없나 — 라우터 백스톱의 판단 재료.
+ * ⚠️ '본인 차량'은 제외한다 — `jobs.vehicle_required`는 NOT NULL DEFAULT true라 **아무도 입력하지 않아도
+ *    항상 값이 있다.** 그걸 근거로 세면 제목만 있는 빈 공고도 '답할 값이 있다'가 되어 이 백스톱이
+ *    영원히 발화하지 않는 죽은 코드가 된다(게이트 지적).
+ */
 export function hasNoAnswerableFacts(j: OtherActiveJob): boolean {
-  return splitJobFacts(j).known.length === 0;
+  return splitJobFacts(j).known.filter(([k]) => k !== "본인 차량").length === 0;
 }
 
 /** user 프롬프트에 넣을 "다른 진행 공고" 블록. 없으면 빈 문자열. */
@@ -89,13 +97,14 @@ export const CROSS_JOB_RULE = `
 1. 메시지가 **다른 공고**의 정보를 묻는데, 그 값이 위 목록에 **적혀 있으면** → 그 값을 **그대로 인용해** 답해도 된다.
    - 적힌 값을 바꾸거나 계산하거나 단위를 환산하지 마라. 없는 값을 현재 공고 값으로 메우는 것은 금지다.
    - 답할 때 어느 자리 이야기인지 밝혀라(예: "용산 자리는 평일 오전이에요").
-   - 이때 **answered_other_job_id에 그 공고 번호를 넣어라**(어느 자리에 답했는지 기록용). transition은 stay.
+   - 이때 **answered_other_job_id에 그 공고 번호를, answered_other_job_fields에 인용한 항목명 전부를** 넣어라. transition은 stay.
 2. 다른 공고 질문인데 그 항목이 **'미기재'로 표시되어 있거나 목록에 아예 없으면** → **반드시 transition: pause**.
    추측 금지, 현재 공고 값으로 대신 답하지 말고, 현재 공고 질문으로 화제를 돌려 답하지도 마라.
    pause 시 reply_text는 "확인 후 매니저가 안내드릴게요" 정도로 짧게 두고 handoff_category는 cross_job.
 3. 어느 공고를 말하는지 **불명확하면** 정중히 되물어 확인하라. 예: "혹시 ○○ 자리 말씀이실까요?" (이때는 pause 아님)
 4. 다른 공고를 **스치듯 언급만** 하고 정보를 요구하지 않으면, 짧게 인지만 하고 [현재 공고] 진행을 이어가도 된다.
 5. 메시지가 [현재 공고]에 관한 것이면 평소대로 진행하고 answered_other_job_id는 비워라.
+- ⚠️ 집결지는 **대략 지역까지만** 안내한다. 상세 주소·화주사명·현장 연락처를 물으면 값이 있어도 답하지 말고 transition: pause(handoff_category: cross_job).
 - ⚠️ 다른 공고 이야기를 한 턴은 **현재 공고의 체크리스트를 진전시키지 않는다** — 그 턴에 advance를 고르지 마라.
 - ⚠️ 여러 공고가 있다고 해서 "여러 군데 다 가능하세요" 같이 동시 확정/배정을 암시하지 마라. 각 공고는 별개 절차다.
 `;
@@ -105,12 +114,21 @@ export function crossJobSystemSuffix(jobs?: OtherActiveJob[]): string {
   return jobs && jobs.length > 0 ? CROSS_JOB_RULE : "";
 }
 
+/** 블록에 실리는 항목명 — tool enum과 백스톱이 같은 이름을 쓴다. */
+export const CROSS_JOB_FIELD_NAMES = ["근무시간", "근무기간", "시작일", "급여", "집결지(대략)", "본인 차량"] as const;
+
 /** 각 stage의 *_turn tool input_schema.properties에 그대로 spread. */
 export const crossJobToolProperties = {
   answered_other_job_id: {
     type: "number" as const,
     description:
       "이번 답변이 [현재 공고]가 아니라 **다른 공고**에 관한 것이면 그 공고 번호(#뒤 숫자). 현재 공고 이야기면 생략.",
+  },
+  answered_other_job_fields: {
+    type: "array" as const,
+    items: { type: "string" as const, enum: [...CROSS_JOB_FIELD_NAMES] },
+    description:
+      "answered_other_job_id를 채웠으면, 그 공고에서 **인용한 항목명 전부**. 목록에 없는 값을 말했다면 비워 둬라.",
   },
 };
 
@@ -124,7 +142,7 @@ export const crossJobToolProperties = {
  * 반환값이 null이면 강등할 것이 없다는 뜻.
  */
 export function crossJobBackstop(
-  result: Pick<StageResult, "answered_other_job_id" | "transition">,
+  result: Pick<StageResult, "answered_other_job_id" | "answered_other_job_fields" | "transition">,
   jobs?: OtherActiveJob[]
 ): { transition: StageTransition; why: string } | null {
   const answered = result.answered_other_job_id;
@@ -153,9 +171,32 @@ export function crossJobBackstop(
       why: "no_facts",
     };
   }
-  if (result.transition.kind === "advance") {
+  // **항목 단위 검증** — 모델이 인용했다고 신고한 항목이 그 공고에서 '미기재'면 지어낸 값이다.
+  // id만 검증하면 "그 자리 급여는 얼마예요?"에 없는 급여를 답해도 통과한다.
+  const missing = new Set(splitJobFacts(hit).missing);
+  const invented = (result.answered_other_job_fields ?? []).filter((f) => missing.has(f));
+  if (invented.length > 0) {
     return {
-      transition: { kind: "stay" },
+      transition: {
+        kind: "pause",
+        reason: `AI가 다른 공고(#${answered} ${hit.title})의 미기재 항목(${invented.join(", ")})을 답했다고 신고 — 지어낸 값일 수 있어 발송 보류`,
+        category: "cross_job",
+        suggestedAction: `그 공고에 ${invented.join(", ")}을 채우면 다음부터 AI가 직접 답합니다.`,
+      },
+      why: "invented_field",
+    };
+  }
+
+  if (result.transition.kind === "advance") {
+    // stay로 내리면 그 턴은 **완전 침묵**이 된다 — stage가 advance 턴의 reply_text를 이미 null로
+    // 만들어서 문자도, 초안도, 인계 큐도 남지 않는다. pause로 내려 흔적을 남긴다.
+    return {
+      transition: {
+        kind: "pause",
+        reason: `AI가 다른 공고(#${answered} ${hit.title}) 이야기를 한 턴에 현재 공고 다음 단계 진행을 제안 — 안내 발송 보류`,
+        category: "cross_job",
+        suggestedAction: "지원자가 물은 자리에 답하고, 현재 공고 진행은 매니저가 확인 후 재개하세요.",
+      },
       why: "advance_on_other_job",
     };
   }

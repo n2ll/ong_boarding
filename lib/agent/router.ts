@@ -23,6 +23,7 @@ import { getSystemMessage } from "./system-messages";
 import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
 import { crossJobBackstop } from "./cross-job";
+import { isLiveLink } from "../candidate-links";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
@@ -257,7 +258,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     const { data: others } = await supabase
       .from("job_candidates")
       .select(
-        `agent_stage, jobs:job_id ( id, title, branch, slot, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
+        `agent_stage, jobs:job_id ( id, title, branch, status, closes_at, slot, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
       )
       .eq("applicant_id", applicantIdForHistory)
       .not("agent_stage", "is", null)
@@ -269,6 +270,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             id: number;
             title: string;
             branch: string | null;
+            status: string | null;
+            closes_at: string | null;
             slot: string | null;
             work_period: string | null;
             start_date: string | null;
@@ -279,7 +282,19 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             vehicle_required: boolean | null;
           }
         | null;
-      if (!j || typeof j.title !== "string" || j.title.startsWith("__")) continue;
+      // 마감·시스템·종료 판정은 매니저 화면(목록 배지·공고 탭)과 **같은 함수**를 쓴다.
+      // 마감 공고를 블록에 실으면 AI가 이미 충원된 자리의 급여·집결지를 안내한다.
+      if (
+        !j ||
+        !isLiveLink({
+          agentStage: o.agent_stage as string | null,
+          jobTitle: j.title,
+          jobStatus: j.status,
+          jobClosesAt: j.closes_at,
+        })
+      ) {
+        continue;
+      }
       otherActiveJobs.push({
         job_id: j.id,
         title: j.title,
@@ -392,7 +407,9 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   const crossHit = crossJobBackstop(result, otherActiveJobs);
   if (crossHit) {
     console.warn(`[router] 다른 공고 응대 백스톱(${crossHit.why}) → ${crossHit.transition.kind}`);
-    if (crossHit.transition.kind === "pause") result.reply_text = null;
+    // reply_text를 지우지 않는다 — 지원자 발송 차단은 아래 skipReplyDueToPause가 담당한다.
+    // 여기서 비우면 코파일럿 모드에서 초안이 생기지 않아 매니저가 볼 카드도, 인계 흔적도 없고,
+    // sweeper(10분 cron)가 '아직 처리 안 됐다'고 보고 같은 문자를 계속 재처리한다.
     result.transition = crossHit.transition;
   }
 
@@ -431,6 +448,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
           const headerParts = [COPILOT_DRAFT_MARKER, `[단계: ${stageName}]`];
           if (job?.title && !job.title.startsWith("__")) headerParts.push(`[공고: ${job.title}]`);
           if (label) headerParts.push(`[제안: ${label}]`);
+          if (result.answered_other_job_id != null) headerParts.push(`[다른 공고 응대: #${result.answered_other_job_id}]`);
           const { error: draftErr } = await supabase.from("message_drafts").insert({
             applicant_id: applicant.id,
             applicant_phone: applicant.phone,
@@ -440,8 +458,10 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             // 확정 뉘앙스가 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
             missing_info: nuanceHit
               ? `확정 뉘앙스 문구 감지("${nuanceHit}") — 확정은 매니저가 합니다. 내용 수정 후 발송하세요.`
-              : null,
-            status: nuanceHit ? "need_info" : "pending",
+              : crossHit
+                ? `다른 공고 응대 백스톱(${crossHit.why}) — ${crossHit.transition.kind === "pause" ? crossHit.transition.reason : "현재 공고 진행 보류"}`
+                : null,
+            status: nuanceHit || crossHit ? "need_info" : "pending",
           });
           if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
           else draftCreated = true;

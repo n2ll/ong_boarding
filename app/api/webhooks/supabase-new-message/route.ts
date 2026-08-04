@@ -172,20 +172,12 @@ async function processInbound(
     const route = await pickCandidateForInbound(supabase, applicant.id, text);
     const jc = route.ok ? route.candidate : null;
     // 판별 불가는 **고르지 않는다** — 되묻거나(자동 모드 1회) 매니저에게 넘긴다.
-    let ambiguousHandled: { asked: boolean; pausedCandidates: number } | null = null;
+    // 다만 **처리는 아래 가용성 분류가 끝난 뒤에** 한다 — '그만 보내세요' 답장에 "어느 자리 말씀이세요?"
+    // 문자가 나가면 안 된다(수신거부 판정은 그 블록에서 나온다).
     if (!route.ok && route.reason === "ambiguous") {
       console.warn(`[inbound] applicant ${applicant.id}: ${describeRoute(route)}`);
-      ambiguousHandled = await handleAmbiguousInbound(supabase, {
-        applicantId: applicant.id,
-        phone,
-        applicantName: applicant.name,
-        options: route.options,
-        why: route.why,
-        mode: await getAgentMode(supabase),
-        sendSms: (to, body) => sendSms(to, body),
-        notify: (t) => sendSlackText(t),
-      });
     }
+    let ambiguousHandled: { asked: boolean; pausedCandidates: number } | null = null;
 
     // message에 applicant_id (+ 가능하면 job_id) 채우기
     const msgUpdate: Record<string, unknown> = { applicant_id: applicant.id };
@@ -312,6 +304,20 @@ async function processInbound(
       console.error("[supabase-webhook] availability signal collection failed", e);
     }
 
+    // 판별 불가 처리 — 가용성 분류(수신거부 판정)가 끝난 지금 실행한다.
+    if (!route.ok && route.reason === "ambiguous") {
+      ambiguousHandled = await handleAmbiguousInbound(supabase, {
+        applicantId: applicant.id,
+        phone,
+        applicantName: applicant.name,
+        options: route.options,
+        why: route.why,
+        mode: await getAgentMode(supabase),
+        inboundOptOut,
+        sendSms: (to, body) => sendSms(to, body),
+        notify: (t) => sendSlackText(t),
+      });
+    }
     // 판별 불가(되묻기·보류 처리 완료)는 여기서 끝낸다 — 아래 캠페인 자동 편입으로 내려가면
     // 방금 "어느 자리인지 모르겠다"고 판단한 답장을 근거로 **공고를 골라 편입**하게 된다.
     if (ambiguousHandled) {

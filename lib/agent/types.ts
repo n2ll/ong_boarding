@@ -200,6 +200,8 @@ export interface StageResult {
    * 라우터가 결정적 백스톱으로 쓴다 — 모르는 공고이거나 그 공고에 답할 값이 하나도 없으면 pause로 강등.
    */
   answered_other_job_id?: number | null;
+  /** 그 공고에서 인용했다고 신고한 항목명 — 백스톱이 '미기재 항목을 답했나'를 코드로 검증한다. */
+  answered_other_job_fields?: string[] | null;
 }
 
 export interface Stage {

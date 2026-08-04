@@ -122,6 +122,8 @@ interface ExplorationToolInput {
   suggested_action?: string;
   /** 이번 답변이 다른 공고에 관한 것이면 그 공고 id(모델 자기신고). 라우터가 코드로 검증한다. */
   answered_other_job_id?: number;
+  /** 그 공고에서 인용한 항목명 — 미기재 항목을 답했다고 신고하면 라우터가 pause로 강등한다. */
+  answered_other_job_fields?: string[];
   intent_signal: "exploring" | "ready_to_apply" | "rejected" | "manager_needed";
   reasoning: string;
 }
@@ -312,6 +314,7 @@ function toStageResult(out: ExplorationToolInput, ctx: StageContext): StageResul
     reasoning: out.reasoning,
     // 라우터가 코드로 검증한다(목록에 없는 공고·안내할 값이 없는 공고면 pause로 강등).
     answered_other_job_id: out.answered_other_job_id ?? null,
+    answered_other_job_fields: out.answered_other_job_fields ?? null,
   };
 }
 

@@ -40,7 +40,12 @@ export type InboundRoute =
   /** 활성 후보는 없고 **매니저가 들고 있는 대화(paused)** 만 있다 — AI가 끼어들지 않는다. */
   | { ok: false; reason: "paused" }
   /** 후보가 여럿인데 어느 건인지 정할 수 없다. 고르지 않는다. */
-  | { ok: false; reason: "ambiguous"; options: { job_id: number | null; title: string | null }[]; why: "text_multi" | "no_anchor" };
+  | {
+      ok: false;
+      reason: "ambiguous";
+      options: { job_id: number | null; title: string | null; branch: string | null }[];
+      why: "text_multi" | "no_anchor" | "text_vs_anchor";
+    };
 
 /**
  * 앵커로 인정하는 발송 — **대화**만.
@@ -70,20 +75,43 @@ function tokenVariants(t: string): string[] {
 }
 
 /**
+ * 공고를 **가리키지 못하는 낱말** — 제목에 흔히 들어가지만 자리를 구분하지 않는 말.
+ *
+ * 이게 없으면 '유일성 검사'가 안전판 역할을 못 한다. 유일성은 그 지원자의 후보(보통 2~3건) 안에서만
+ * 세기 때문에, 후보가 적을수록 일반명사가 쉽게 '유일'해진다. 실측으로 재현된 오판:
+ * 후보가 `긴급 백업 배송원 모집`과 도시락 공고 두 건일 때 "이 모집 아직 하나요?"·"배송원 지원했는데요"가
+ * 긴급 공고로 라우팅됐다. 시간대 낱말은 더 위험하다 — 스크리닝이 지원자에게 직접 묻는 말이
+ * "평일 오전·오후, 주말 오전·오후 중 어느 때가 편하세요?"인데, 그 답이 곧 라우팅 근거가 된다.
+ */
+const NON_DISTINGUISHING = new Set([
+  // 직무·모집 일반어
+  "모집", "채용", "지원", "배송", "배송원", "기사", "라인", "업무", "근무", "일자리", "구인",
+  "긴급", "백업", "대체", "증차", "추가", "상시", "단기", "장기", "정규", "계약", "파트", "알바",
+  "초보", "경력", "신입", "남녀", "무관", "기업", "도시락", "식자재", "물류", "센터", "지점",
+  // 시간·요일 — 스크리닝 질문의 답이 그대로 들어온다
+  "평일", "주말", "매일", "오전", "오후", "야간", "새벽", "아침", "저녁", "점심", "종일", "주5일", "주6일",
+  // 급여 단위
+  "일당", "주급", "월급", "시급", "건당", "단가", "급여",
+]);
+
+/** 그 낱말이 자리를 가리킬 수 있나 — 숫자 포함·일반어는 근거로 쓰지 않는다. */
+function usableToken(t: string): boolean {
+  if (t.length < 2) return false;
+  if (/[0-9]/.test(t)) return false;
+  return !NON_DISTINGUISHING.has(t);
+}
+
+/**
  * 인바운드 텍스트가 **어느 공고를 명시했는지** — 후보 공고들 사이에서 유일한 낱말만 근거로 쓴다.
  *
  * 예: 공고가 '용산·한남권 도시락', '강남·신사 도시락' 두 개일 때 '용산'은 유일하니 근거가 되고,
  * '도시락'은 둘 다 가지고 있어 근거가 못 된다(그걸로 고르면 절반은 틀린다).
  * 반환은 **매칭된 공고 id 배열** — 정확히 1건일 때만 채택하는 판단은 호출부(pick)가 한다.
  */
-export function matchJobsByText(
-  text: string,
-  jobs: { job_id: number | null; title: string | null; branch: string | null }[]
-): number[] {
-  const hay = squash(text);
-  if (hay.length < 2) return [];
+export type JobTokenSource = { job_id: number | null; title: string | null; branch: string | null };
 
-  // 공고별 후보 낱말: 지점명 + 제목에서 뽑은 2~5자 한글 토큰(괄호·대괄호 안 수식어는 버린다).
+/** 공고별 **유일 낱말** 집합 — 매칭과 되묻기 문구가 같은 계산을 쓰게 하는 단일 소스. */
+function uniqueTokensByJob(jobs: JobTokenSource[]): Map<number, string[]> {
   const tokensByJob = new Map<number, Set<string>>();
   const freq = new Map<string, number>();
   for (const j of jobs) {
@@ -92,28 +120,42 @@ export function matchJobsByText(
     const add = (raw: string | null | undefined, maxLen: number) => {
       const t = squash(raw ?? "");
       if (t.length < 2 || t.length > maxLen) return;
-      for (const v of tokenVariants(t)) set.add(v);
+      for (const v of tokenVariants(t)) if (usableToken(v)) set.add(v);
     };
     add(j.branch, 12);
     const title = (j.title ?? "").replace(/\[[^\]]*\]|\([^)]*\)/g, " ");
     for (const part of title.split(/[^0-9A-Za-z가-힣]+/)) {
-      // 제목 낱말은 지역·라인 이름 길이대로만(2~5자). '배송원'·'모집' 같은 공통어는 아래 유일성 검사가 걸러낸다.
+      // 제목 낱말은 지역·라인 이름 길이대로만(2~5자).
       add(part, 5);
     }
     tokensByJob.set(j.job_id, set);
     for (const t of set) freq.set(t, (freq.get(t) ?? 0) + 1);
   }
-
-  const hit: number[] = [];
+  const out = new Map<number, string[]>();
   for (const [jobId, set] of tokensByJob) {
     // **다른 후보 공고와 겹치지 않는 낱말**만 근거로 인정한다.
-    for (const t of set) {
-      if ((freq.get(t) ?? 0) !== 1) continue;
-      if (hay.includes(t)) {
-        hit.push(jobId);
-        break;
-      }
-    }
+    out.set(jobId, [...set].filter((t) => (freq.get(t) ?? 0) === 1).sort((a, b) => b.length - a.length));
+  }
+  return out;
+}
+
+/**
+ * 되묻기 문구에 쓸 **그 공고를 가리키는 한 낱말**(유일 낱말 중 가장 긴 것). 없으면 null.
+ * 문구와 매처가 다른 계산을 쓰면, 지원자가 문구대로 답해도 매칭이 안 되는 일이 생긴다(실제로 났다).
+ */
+export function distinguishingTokens(jobs: JobTokenSource[]): Map<number, string | null> {
+  const uniq = uniqueTokensByJob(jobs);
+  const out = new Map<number, string | null>();
+  for (const [jobId, list] of uniq) out.set(jobId, list[0] ?? null);
+  return out;
+}
+
+export function matchJobsByText(text: string, jobs: JobTokenSource[]): number[] {
+  const hay = squash(text);
+  if (hay.length < 2) return [];
+  const hit: number[] = [];
+  for (const [jobId, tokens] of uniqueTokensByJob(jobs)) {
+    if (tokens.some((t) => hay.includes(t))) hit.push(jobId);
   }
   return hit;
 }
@@ -168,24 +210,9 @@ export async function pickCandidateForInbound(
   }
   if (cands.length === 1) return { ok: true, candidate: cands[0], how: "single" };
 
-  // 시스템 더미 공고(당근·배민 일반라인)는 '어느 공고냐'를 물을 대상이 아니다 —
-  // 실공고 후보가 함께 있으면 텍스트·앵커 판단에서 빼고, 그것뿐이면 그대로 쓴다.
-  const real = cands.filter((c) => !isSystemJobTitle(c.job_title ?? ""));
-  const pool = real.length > 0 ? real : cands;
-  if (pool.length === 1) return { ok: true, candidate: pool[0], how: "single" };
-
-  const named = matchJobsByText(
-    inboundText,
-    pool.map((c) => ({ job_id: c.job_id, title: c.job_title, branch: c.job_branch }))
-  );
-  if (named.length === 1) {
-    const hit = pool.find((c) => c.job_id === named[0]);
-    if (hit) return { ok: true, candidate: hit, how: "text" };
-  }
-  const options = pool.map((c) => ({ job_id: c.job_id, title: c.job_title }));
-  if (named.length > 1) return { ok: false, reason: "ambiguous", options, why: "text_multi" };
-
   // 대화 앵커 — 대량·캠페인 발송은 제외한다(발사 때 그게 마지막 outbound가 된다).
+  // **시스템 더미 공고 후보까지 포함해** 찾는다. 예전엔 실공고만 남기고 앵커를 봐서, 당근·배민
+  // 일반라인으로 대화 중인 사람이 실공고에 후보로 올라간 순간 그 대화가 실공고로 통째 재라우팅됐다.
   const { data: lastOut } = await supabase
     .from("messages")
     .select("job_id")
@@ -197,18 +224,37 @@ export async function pickCandidateForInbound(
     .limit(1)
     .maybeSingle();
   const anchorJobId = (lastOut?.job_id as number | null) ?? null;
-  if (anchorJobId != null) {
-    const hit = pool.find((c) => c.job_id === anchorJobId);
-    if (hit) return { ok: true, candidate: hit, how: "anchor" };
+  const anchorCand = anchorJobId != null ? cands.find((c) => c.job_id === anchorJobId) ?? null : null;
+
+  // 텍스트 명시 판단은 실공고들 사이에서 한다(시스템 더미 공고는 이름으로 부를 대상이 아니다).
+  const real = cands.filter((c) => !isSystemJobTitle(c.job_title ?? ""));
+  const pool = real.length > 0 ? real : cands;
+  const options = pool.map((c) => ({ job_id: c.job_id, title: c.job_title, branch: c.job_branch }));
+
+  const named = matchJobsByText(inboundText, options);
+  if (named.length > 1) return { ok: false, reason: "ambiguous", options, why: "text_multi" };
+  if (named.length === 1) {
+    const hit = pool.find((c) => c.job_id === named[0]);
+    // **텍스트가 진행 중인 대화(앵커)와 다른 공고를 가리키면 고르지 않는다.**
+    // 근거 낱말은 제목에서 뽑은 것이라 "그 자리 말고 다른 데 없나요" 같은 문장에서도 잡힌다 —
+    // 확신에 찬 오판보다 사람이 확인하는 편이 안전하다(되묻기·인계 경로가 이미 있다).
+    if (hit && anchorCand && anchorCand.job_id !== hit.job_id) {
+      return { ok: false, reason: "ambiguous", options, why: "text_vs_anchor" };
+    }
+    if (hit) return { ok: true, candidate: hit, how: "text" };
   }
+  if (anchorCand) return { ok: true, candidate: anchorCand, how: "anchor" };
+  if (pool.length === 1) return { ok: true, candidate: pool[0], how: "single" };
   return { ok: false, reason: "ambiguous", options, why: "no_anchor" };
 }
 
-/** 공고 제목을 문자에 넣을 만큼 짧게 — 지점명이 있으면 그것을 쓴다. */
-function shortJobLabel(o: { job_id: number | null; title: string | null }): string {
+/** 공고 제목을 문자에 넣을 만큼 짧게 — 괄호 수식어를 떼고 앞부분만. */
+function shortJobLabel(o: { job_id: number | null; title: string | null; branch: string | null }): string {
   const t = (o.title ?? "").replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-  if (!t) return `공고 ${o.job_id ?? "?"}`;
-  return t.length > 16 ? t.slice(0, 16) + "…" : t;
+  const base = t || `공고 ${o.job_id ?? "?"}`;
+  const head = base.length > 16 ? base.slice(0, 16) + "…" : base;
+  // 제목이 같고 지점만 다른 공고가 있으면 문자에 똑같은 줄이 두 번 찍힌다 — 지점을 붙여 구분한다.
+  return o.branch && o.branch.trim() ? `${head} (${o.branch.trim()})` : head;
 }
 
 /** 되묻기 이력(24시간) — 같은 사람에게 되묻기를 반복하지 않기 위한 근거. */
@@ -217,10 +263,11 @@ export const ROUTE_ASK_EVENT = "route_ask";
 /**
  * 어느 공고인지 정할 수 없을 때의 처리 — **세 인입 경로가 똑같이 행동하게** 여기 모아 둔다.
  *
- * · AI 자동 모드이고 24시간 안에 되묻지 않았다면 → **한 번만 되묻는다.**
- * · 그 외(코파일럿·중지 모드거나, 이미 되물었는데 또 갈렸다면) → **활성 후보 전부를 보류로 내리고**
- *   매니저에게 넘긴다. 아무 공고나 골라 응대하는 것보다 안전하고, 실무자 큐는 '한 사람 = 한 카드'로
- *   묶여 보이므로(M5) 여러 건이 보류돼도 카드가 불어나지 않는다.
+ * · AI 전역 '중지(off)'면 **아무것도 하지 않는다** — 되묻기도 보류도 없다(킬스위치 계약).
+ * · AI 자동 모드이고, 이번 답장이 수신거부 신호가 아니고, 24시간 안에 되묻지 않았고,
+ *   **각 자리를 가리킬 낱말이 실제로 있으면** → 한 번만 되묻는다.
+ * · 그 외 → 활성 후보를 보류로 내리고 매니저에게 넘긴다. 아무 공고나 골라 응대하는 것보다 안전하고,
+ *   실무자 큐는 '한 사람 = 한 카드'로 묶여 보인다(M5).
  *
  * 되묻기 문자는 `job_id`를 비워서 기록한다 — 채우면 그 문자가 다음 답장의 '대화 앵커'가 되어,
  * 판별 못 한 공고를 판별한 것처럼 만들어 버린다.
@@ -231,14 +278,21 @@ export async function handleAmbiguousInbound(
     applicantId: number;
     phone: string | null;
     applicantName: string | null;
-    options: { job_id: number | null; title: string | null }[];
-    why: "text_multi" | "no_anchor";
+    options: { job_id: number | null; title: string | null; branch: string | null }[];
+    why: "text_multi" | "no_anchor" | "text_vs_anchor";
     mode: "auto" | "draft" | "off";
+    /** 이번 답장이 '그만 보내세요'로 분류됐나(null=분류 못 함). true면 되묻기 문자를 보내지 않는다. */
+    inboundOptOut?: boolean | null;
     sendSms: (phone: string, text: string) => Promise<{ success: boolean; messageId?: string | null; error?: string }>;
     notify?: (text: string) => Promise<unknown>;
   }
 ): Promise<{ asked: boolean; pausedCandidates: number }> {
   const { applicantId, phone, applicantName, options, why, mode } = args;
+
+  // 전역 '완전 중지'는 아무 전이도 하지 않는다 — router·sweeper와 같은 계약.
+  // 이 답장은 매니저가 실시간 응대에서 직접 본다.
+  if (mode === "off") return { asked: false, pausedCandidates: 0 };
+
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: asks } = await supabase
     .from("pool_events")
@@ -258,12 +312,21 @@ export async function handleAmbiguousInbound(
   const label = `${applicantName ?? `지원자 ${applicantId}`}님`;
   const listed = options.map(shortJobLabel).join(" / ");
 
-  if (mode === "auto" && !askedRecently && phone && !optedOut) {
+  // **되묻기 문구는 매처와 같은 계산으로 만든다.** 예전엔 "지역 이름으로 답장해 주세요"라고만 적었는데,
+  // 후보 제목이 `강남권`·`강남·신사`처럼 겹치면 '강남'은 유일 낱말이 아니어서 원리상 매칭이 안 된다 —
+  // 지원자가 지시대로 답해도 다시 판별 불가가 되고, 그때는 이미 되물은 뒤라 전 공고가 보류로 떨어졌다.
+  const tokens = distinguishingTokens(options);
+  const askable = options.every((o) => o.job_id != null && tokens.get(o.job_id));
+
+  let sendFailed = false;
+  if (mode === "auto" && !askedRecently && phone && !optedOut && args.inboundOptOut !== true && askable) {
     // 확정 뉘앙스 금지 — 어느 자리 이야기인지만 묻는다. 진행·합격 암시 없음.
-    const text =
-      `안녕하세요, 옹보딩입니다. 지금 여러 자리를 함께 안내드리고 있어서 어느 자리 말씀인지 확인이 필요해요.\n` +
-      `${listed}\n` +
-      `지역 이름으로 답장해 주시면 그 자리 기준으로 안내드릴게요.`;
+    const lines = options.map((o) => `· ${shortJobLabel(o)} → '${tokens.get(o.job_id as number)}'`);
+    const text = [
+      `${label} 지금 여러 자리를 함께 안내드리고 있어 어느 자리 말씀인지 확인이 필요해요.`,
+      ...lines,
+      `따옴표 안 낱말을 그대로 보내주시면 그 자리 기준으로 안내드릴게요.`,
+    ].join("\n");
     const r = await args.sendSms(phone, text);
     if (r.success) {
       await supabase.from("messages").insert({
@@ -286,26 +349,58 @@ export async function handleAmbiguousInbound(
       await args.notify?.(`❓ ${label} 답장이 어느 공고 건인지 판별 불가(${why}) — 한 번 되물었어요. 후보: ${listed}`);
       return { asked: true, pausedCandidates: 0 };
     }
+    sendFailed = true;
     console.error("[inbound-routing] 되묻기 발송 실패", r.error);
   }
 
   // 되묻지 못했거나 이미 되물었다 → 매니저에게 넘긴다(활성 후보 전부 보류).
-  const { data: paused, error: pauseErr } = await supabase
+  // **직전 단계를 행마다 남긴다** — 없으면 'AI 재개'가 exploration으로 되돌려 온보딩 안내가 다시 나간다
+  // (lib/agent/transitions.ts의 pause와 같은 규약: meta.paused_from_stage).
+  const { data: activeRows } = await supabase
     .from("job_candidates")
-    .update({
-      agent_stage: "paused",
-      paused_reason: "답장이 어느 공고 건인지 판별 불가 — 매니저 확인 필요",
-    })
+    .select("id, agent_stage, agent_state")
     .eq("applicant_id", applicantId)
-    .in("agent_stage", AUTO_ROUTE_STAGES as unknown as string[])
-    .select("id");
-  if (pauseErr) console.error("[inbound-routing] 보류 전환 실패", pauseErr);
-  const n = (paused ?? []).length;
+    .in("agent_stage", AUTO_ROUTE_STAGES as unknown as string[]);
+  const now = new Date().toISOString();
+  const reason = "답장이 어느 공고 건인지 판별 불가 — 매니저 확인 필요";
+  let paused = 0;
+  for (const row of activeRows ?? []) {
+    const prevState = ((row.agent_state ?? {}) as Record<string, unknown>) ?? {};
+    const prevMeta = ((prevState.meta ?? {}) as Record<string, unknown>) ?? {};
+    const { error: upErr } = await supabase
+      .from("job_candidates")
+      .update({
+        agent_stage: "paused",
+        paused_reason: reason,
+        agent_state: {
+          ...prevState,
+          meta: {
+            ...prevMeta,
+            paused_from_stage: row.agent_stage,
+            paused_at: now,
+            paused_by: "inbound-routing",
+            pause: { category: "cross_job", summary: reason, suggested_action: "어느 자리 문의인지 확인하고 그 공고 탭에서 답해 주세요." },
+          },
+        },
+      })
+      .eq("id", row.id as number);
+    if (upErr) console.error("[inbound-routing] 보류 전환 실패", upErr);
+    else paused += 1;
+  }
+
+  const whyAsked = sendFailed
+    ? "되묻기 문자 발송이 실패했어요"
+    : !askable
+      ? "공고 제목이 서로 겹쳐 되물을 낱말을 만들 수 없어요"
+      : askedRecently
+        ? "이미 한 번 되물은 뒤예요"
+        : args.inboundOptOut === true
+          ? "이번 답장이 수신거부로 분류돼 되묻지 않았어요"
+          : `AI 모드 ${mode}`;
   await args.notify?.(
-    `🙋 ${label} 답장이 어느 공고 건인지 판별 불가(${why}) — 공고 ${n}건을 보류로 내리고 넘겼어요. 후보: ${listed}` +
-      (mode === "auto" ? " (이미 한 번 되물은 뒤예요)" : ` (AI 모드 ${mode})`)
+    `🙋 ${label} 답장이 어느 공고 건인지 판별 불가(${why}) — 공고 ${paused}건을 보류로 내리고 넘겼어요. 후보: ${listed} (${whyAsked})`
   );
-  return { asked: false, pausedCandidates: n };
+  return { asked: false, pausedCandidates: paused };
 }
 
 /** 되묻기·인계 로그용 한 줄 — 매니저가 Slack·콘솔에서 바로 읽을 수 있게. */
@@ -313,6 +408,11 @@ export function describeRoute(route: InboundRoute): string {
   if (route.ok) return `job ${route.candidate.job_id} (${route.how})`;
   if (route.reason === "none") return "응대 대상 후보 없음";
   if (route.reason === "paused") return "매니저가 들고 있는 대화(보류)만 있음";
+  if (route.why === "text_vs_anchor") {
+    return `텍스트가 가리킨 공고와 진행 중 대화가 다름 — 후보 ${route.options.length}건: ${route.options
+      .map((o) => o.title ?? `#${o.job_id}`)
+      .join(" / ")}`;
+  }
   return `공고 판별 불가(${route.why}) — 후보 ${route.options.length}건: ${route.options
     .map((o) => o.title ?? `#${o.job_id}`)
     .join(" / ")}`;
