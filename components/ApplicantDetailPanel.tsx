@@ -395,6 +395,10 @@ export function ApplicantDetailContent({
   const [suntopClient, setSuntopClient] = useState("");
   const [suntopLine, setSuntopLine] = useState("");
   const [suntopSchedAt, setSuntopSchedAt] = useState("");
+  // 시간대 되돌리기 진행 플래그 — 쓰는 곳(clearAvailableSlots)은 아래쪽이지만 선언은 반드시 여기,
+  // 상세 로딩·실패 조기 return보다 **위**에 둔다. 핸들러 옆에 두면 상세가 도착한 렌더에서만
+  // 호출돼 훅 개수가 렌더마다 달라지고, React가 그 순간 화면을 통째로 날린다(#310).
+  const [clearingSlots, setClearingSlots] = useState(false);
 
   useEffect(() => {
     setEdit({});
@@ -588,7 +592,7 @@ export function ApplicantDetailContent({
 
   // 대화로 채워진 시간대 되돌리기 — 이 값이 노출 규칙 판정의 1순위라, 잘못 채워지면 매니저가
   // 지울 수단이 있어야 한다(없으면 그 사람이 여러 공고에서 조용히 빠진 채 고착된다).
-  const [clearingSlots, setClearingSlots] = useState(false);
+  // (진행 플래그 clearingSlots는 조기 return 위에서 선언한다 — 훅은 렌더마다 같은 순서·개수)
   const clearAvailableSlots = async () => {
     if (clearingSlots || busy) return;
     setClearingSlots(true);
