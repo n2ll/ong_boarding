@@ -33,8 +33,9 @@ export interface MapJob {
   pickup_address: string | null;
 }
 
-// 네이버 지도 SDK는 런타임 전역(window.naver). 타입은 느슨하게 다룬다.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// 네이버 지도 SDK는 런타임 전역(window.naver). 타입은 느슨하게 다룬다(any 의도).
+// eslint-disable 지시문은 두지 않는다 — 우리 lint에는 no-explicit-any 규칙이 없어서
+// '정의되지 않은 규칙' 에러로 lint 자체가 멈춘다(.eslintrc.cjs는 훅 순서만 본다).
 declare global {
   interface Window {
     naver?: any;
