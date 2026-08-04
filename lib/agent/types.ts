@@ -143,6 +143,19 @@ export interface OtherActiveJob {
   title: string;
   branch: string | null;
   stage: StageName;
+  /**
+   * 아래는 '다른 공고 질문에 그 자리에서 답할 수 있는 값'.
+   * ⚠️ 값이 없으면 프롬프트 블록에 **항목명을 '미기재'로 열거**한다 — 빈칸을 숨기면 모델이
+   *    현재 공고 값으로 메워 답한다(그게 다공고 응대의 대표 사고다).
+   */
+  slot?: string | null;
+  work_period?: string | null;
+  start_date?: string | null;
+  pay_info?: string | null;
+  pay_type?: string | null;
+  pay_amount?: number | null;
+  pickup_address?: string | null;
+  vehicle_required?: boolean | null;
 }
 
 export interface StageContext {
@@ -182,6 +195,13 @@ export interface StageResult {
   } | null;
   /** applicants 테이블에 직접 patch할 필드 — onboarding의 baemin_id 같은 추출값 전달용. */
   applicant_patch?: Record<string, unknown>;
+  /**
+   * 이번 답변이 **현재 공고가 아닌 다른 공고**에 관한 것이면 그 공고 id(모델 자기신고).
+   * 라우터가 결정적 백스톱으로 쓴다 — 모르는 공고이거나 그 공고에 답할 값이 하나도 없으면 pause로 강등.
+   */
+  answered_other_job_id?: number | null;
+  /** 그 공고에서 인용했다고 신고한 항목명 — 백스톱이 '미기재 항목을 답했나'를 코드로 검증한다. */
+  answered_other_job_fields?: string[] | null;
 }
 
 export interface Stage {

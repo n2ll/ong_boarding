@@ -12,6 +12,17 @@
  */
 
 /** 거리 계산 기준 — 공고 컬럼 `jobs.distance_basis`와 같은 값 집합. */
+/**
+ * 주소를 **대략 지역까지만** 줄인다(예: "서울 서초구"). 앞 두 토큰만 남긴다.
+ * 지원자 카드(/p/[token])와 에이전트 프롬프트가 같은 공식을 쓰게 하기 위해 여기 둔다 —
+ * 상세 집결지 주소는 확정 후 매니저가 안내하는 값이라 사전에 그대로 노출하지 않는다.
+ */
+export function coarseArea(addr: string | null | undefined): string {
+  const t = (addr ?? "").trim().split(/\s+/).filter(Boolean);
+  if (t.length === 0) return "";
+  return t.slice(0, 2).join(" ");
+}
+
 export type DistanceBasis = "pickup" | "nearest";
 
 export const DISTANCE_BASIS_VALUES: readonly DistanceBasis[] = ["pickup", "nearest"];

@@ -22,6 +22,8 @@ import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { getSystemMessage } from "./system-messages";
 import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
+import { crossJobBackstop } from "./cross-job";
+import { isLiveLink } from "../candidate-links";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
@@ -250,21 +252,62 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // 현재 공고 정보로 잘못 답하지 않도록 컨텍스트로만 제공한다(체크리스트는 건드리지 않음).
   const otherActiveJobs: OtherActiveJob[] = [];
   {
+    // **답할 수 있는 값까지 함께 싣는다** — 예전엔 공고명·단계만 줘서, 다른 공고 질문이면 무조건
+    // 매니저 인계였다(공고 7개면 흔한 질문마다 인계가 쌓인다). 없는 값은 숨기지 않고 '미기재'로
+    // 열거한다(cross-job.ts) — 빈칸을 감추면 모델이 현재 공고 값으로 메운다.
     const { data: others } = await supabase
       .from("job_candidates")
-      .select(`agent_stage, jobs:job_id ( id, title, branch )`)
+      .select(
+        `agent_stage, jobs:job_id ( id, title, branch, status, closes_at, slot, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
+      )
       .eq("applicant_id", applicantIdForHistory)
       .not("agent_stage", "is", null)
       .neq("agent_stage", "abort")
       .neq("id", candidate_id);
     for (const o of others ?? []) {
-      const j = (o.jobs ?? null) as unknown as { id: number; title: string; branch: string | null } | null;
-      if (!j || typeof j.title !== "string" || j.title.startsWith("__")) continue;
+      const j = (o.jobs ?? null) as unknown as
+        | {
+            id: number;
+            title: string;
+            branch: string | null;
+            status: string | null;
+            closes_at: string | null;
+            slot: string | null;
+            work_period: string | null;
+            start_date: string | null;
+            pay_info: string | null;
+            pay_type: string | null;
+            pay_amount: number | null;
+            pickup_address: string | null;
+            vehicle_required: boolean | null;
+          }
+        | null;
+      // 마감·시스템·종료 판정은 매니저 화면(목록 배지·공고 탭)과 **같은 함수**를 쓴다.
+      // 마감 공고를 블록에 실으면 AI가 이미 충원된 자리의 급여·집결지를 안내한다.
+      if (
+        !j ||
+        !isLiveLink({
+          agentStage: o.agent_stage as string | null,
+          jobTitle: j.title,
+          jobStatus: j.status,
+          jobClosesAt: j.closes_at,
+        })
+      ) {
+        continue;
+      }
       otherActiveJobs.push({
         job_id: j.id,
         title: j.title,
         branch: j.branch ?? null,
         stage: (o.agent_stage as StageName) ?? "exploration",
+        slot: j.slot ?? null,
+        work_period: j.work_period ?? null,
+        start_date: j.start_date ?? null,
+        pay_info: j.pay_info ?? null,
+        pay_type: j.pay_type ?? null,
+        pay_amount: j.pay_amount ?? null,
+        pickup_address: j.pickup_address ?? null,
+        vehicle_required: j.vehicle_required ?? null,
       });
     }
   }
@@ -358,6 +401,18 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     if (patchErr) console.error("[router] applicant_patch failed", patchErr);
   }
 
+  // 다른 공고 응대 결정적 백스톱 — 모델 자기신고(answered_other_job_id)를 코드가 검증한다.
+  // 목록에 없는 공고이거나 안내할 값이 하나도 없는 공고로 답했다고 신고하면 지어낸 답일 수 있어
+  // 발송을 막고 매니저에게 넘긴다. 다른 공고 이야기였는데 advance를 골랐으면 stay로 내린다.
+  const crossHit = crossJobBackstop(result, otherActiveJobs);
+  if (crossHit) {
+    console.warn(`[router] 다른 공고 응대 백스톱(${crossHit.why}) → ${crossHit.transition.kind}`);
+    // reply_text를 지우지 않는다 — 지원자 발송 차단은 아래 skipReplyDueToPause가 담당한다.
+    // 여기서 비우면 코파일럿 모드에서 초안이 생기지 않아 매니저가 볼 카드도, 인계 흔적도 없고,
+    // sweeper(10분 cron)가 '아직 처리 안 됐다'고 보고 같은 문자를 계속 재처리한다.
+    result.transition = crossHit.transition;
+  }
+
   // 확정 뉘앙스 금지 결정적 가드 — AI가 확정/배정/출근 지시 문구를 만들면 발송하지 않고
   // pause로 전환(매니저 인계 큐 + Slack). stay/advance 무관하게 우선 적용.
   // draft 모드에서도 동일 검사 — 걸리면 초안을 need_info로 강등해 매니저 수정을 유도한다.
@@ -393,6 +448,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
           const headerParts = [COPILOT_DRAFT_MARKER, `[단계: ${stageName}]`];
           if (job?.title && !job.title.startsWith("__")) headerParts.push(`[공고: ${job.title}]`);
           if (label) headerParts.push(`[제안: ${label}]`);
+          if (result.answered_other_job_id != null) headerParts.push(`[다른 공고 응대: #${result.answered_other_job_id}]`);
           const { error: draftErr } = await supabase.from("message_drafts").insert({
             applicant_id: applicant.id,
             applicant_phone: applicant.phone,
@@ -402,8 +458,10 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             // 확정 뉘앙스가 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
             missing_info: nuanceHit
               ? `확정 뉘앙스 문구 감지("${nuanceHit}") — 확정은 매니저가 합니다. 내용 수정 후 발송하세요.`
-              : null,
-            status: nuanceHit ? "need_info" : "pending",
+              : crossHit
+                ? `다른 공고 응대 백스톱(${crossHit.why}) — ${crossHit.transition.kind === "pause" ? crossHit.transition.reason : "현재 공고 진행 보류"}`
+                : null,
+            status: nuanceHit || crossHit ? "need_info" : "pending",
           });
           if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
           else draftCreated = true;
