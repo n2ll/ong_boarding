@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import {
   isExposed,
   normalizeVehicleOwned,
@@ -23,16 +24,6 @@ import {
 export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function distKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const rad = Math.PI / 180;
-  const dLat = (lat2 - lat1) * rad;
-  const dLng = (lng2 - lng1) * rad;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 export async function GET(_req: NextRequest, { params }: { params: { token: string } }) {
   const token = params.token;
@@ -61,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   // recruit_mode는 DB NOT NULL DEFAULT 'external' — null은 발생하지 않지만, 안전 방향(비공개)으로 in-필터가 null을 자동 제외한다.
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at, exposure, exposure_rule")
+    .select(`id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("status", "active")
     .in("recruit_mode", ["internal", "both"])
     .not("title", "like", "\\_\\_%")
@@ -113,6 +104,8 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
     work_hours: (applicant as { work_hours?: string | null }).work_hours ?? null,
     available_slots: (applicant as { available_slots?: string[] | null }).available_slots ?? null,
+    lat: (applicant as { lat?: number | null }).lat ?? null,
+    lng: (applicant as { lng?: number | null }).lng ?? null,
     applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
     created_at: (applicant as { created_at?: string | null }).created_at ?? null,
     suntopDone: exSuntopDone,
@@ -120,7 +113,8 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   const jobExposed = (j: { id: number; exposure?: string; exposure_rule?: unknown }) => {
     if (j.exposure !== "targeted") return true; // 전체 노출은 항상
     if (exGateFailed) return false; // 판정 불가 시 숨김(fail-closed)
-    return isExposed(exApplicant, normalizeRule(j.exposure_rule), exOverrides.get(j.id));
+    // 반경 축 판정에 공고 기준점이 필요하다 — j를 넘기지 않으면 반경 규칙이 fail-closed로 전원 탈락.
+    return isExposed(exApplicant, normalizeRule(j.exposure_rule), exOverrides.get(j.id), { job: j as unknown as GeoJob });
   };
 
   // 맞춤 정렬 — 좌표가 있으면 가까운 순, 없으면 최신 등록순 유지
@@ -139,8 +133,20 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     })
     .map((j) => {
       const d =
-        hasGeo && typeof j.pickup_lat === "number" && typeof j.pickup_lng === "number"
-          ? distKm(applicant.lat as number, applicant.lng as number, j.pickup_lat, j.pickup_lng)
+        hasGeo
+          // 카드의 '집에서 약 N km'는 **통근(집결지) 거리**다 — 출발지 주소 옆에 붙는 숫자라
+          // 노출 판정 기준(distance_basis)과 무관하게 항상 집결지로 잰다(경유지가 섞이면
+          // 실제 통근보다 짧아 보인다). 판정 기준은 규칙 쪽(isExposed)에서만 쓴다.
+          ? distanceToJobKm(
+              { lat: applicant.lat as number, lng: applicant.lng as number },
+              {
+                pickup_lat: (j as { pickup_lat?: number | null }).pickup_lat ?? null,
+                pickup_lng: (j as { pickup_lng?: number | null }).pickup_lng ?? null,
+                dropoff_lat: null,
+                dropoff_lng: null,
+                distance_basis: "pickup",
+              }
+            )
           : null;
       return {
         id: j.id,

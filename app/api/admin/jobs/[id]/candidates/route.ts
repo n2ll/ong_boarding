@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { haversineKm } from "@/lib/kakao-geocode";
+import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -43,16 +43,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // 보드 '추천순' 정렬과 카드 메타 줄의 근거로 distance_km을 함께 내려준다.
   const { data: job } = await supabase
     .from("jobs")
-    .select("pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    .select(EXPOSURE_JOB_GEO_COLUMNS)
     .eq("id", jobId)
     .maybeSingle();
-  const anchors: { lat: number; lng: number }[] = [];
-  if (typeof job?.pickup_lat === "number" && typeof job?.pickup_lng === "number") {
-    anchors.push({ lat: job.pickup_lat, lng: job.pickup_lng });
-  }
-  if (typeof job?.dropoff_lat === "number" && typeof job?.dropoff_lng === "number") {
-    anchors.push({ lat: job.dropoff_lat, lng: job.dropoff_lng });
-  }
 
   const candidates = (rows ?? []).map((r) => {
     // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어(jobs GET과 동일 패턴).
@@ -60,10 +53,11 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     const a = Array.isArray(rel) ? rel[0] : rel;
     const alat = a?.lat;
     const alng = a?.lng;
-    let distance_km: number | null = null;
-    if (anchors.length > 0 && typeof alat === "number" && typeof alng === "number") {
-      distance_km = Math.min(...anchors.map((p) => haversineKm(alat, alng, p.lat, p.lng)));
-    }
+    // 거리는 lib/geo 단일 공식 — 기준점은 공고가 정한다(distance_basis). 화면마다 다른 숫자를 만들지 않는다.
+    const distance_km = distanceToJobKm(
+      { lat: typeof alat === "number" ? alat : null, lng: typeof alng === "number" ? alng : null },
+      (job ?? null) as unknown as GeoJob | null
+    );
     return { ...r, distance_km };
   });
 

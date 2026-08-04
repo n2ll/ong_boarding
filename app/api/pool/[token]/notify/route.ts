@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { sendSlackText } from "@/lib/slack";
 import {
   isExposed,
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
 
   const { data: applicant } = await supabase
     .from("applicants")
-    .select("id, name, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at")
+    .select("id, name, availability, sido, sigungu, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
     .eq("access_token", token)
     .maybeSingle();
   if (!applicant) {
@@ -52,7 +53,8 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const GRACE_MS = 3 * 24 * 60 * 60 * 1000;
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, recruit_mode, exposure, exposure_rule")
+    // 반경 축 판정 재료 — 게이트가 pool GET과 같은 컬럼을 봐야 한다(빠지면 카드는 보이는데 클릭만 400).
+    .select(`id, title, status, closes_at, recruit_mode, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("id", jobId)
     .maybeSingle();
   const closesMs = job?.closes_at ? new Date(job.closes_at as string).getTime() : null;
@@ -87,11 +89,13 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
         own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
         work_hours: (applicant as { work_hours?: string | null }).work_hours ?? null,
         available_slots: (applicant as { available_slots?: string[] | null }).available_slots ?? null,
+        lat: (applicant as { lat?: number | null }).lat ?? null,
+        lng: (applicant as { lng?: number | null }).lng ?? null,
         applied_at: (applicant as { applied_at?: string | null }).applied_at ?? null,
         created_at: (applicant as { created_at?: string | null }).created_at ?? null,
         suntopDone,
       };
-      if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId))) {
+      if (!isExposed(exA, normalizeRule((job as { exposure_rule?: unknown }).exposure_rule), overrides.get(jobId), { job: job as unknown as GeoJob })) {
         return NextResponse.json({ error: "확인할 수 없는 공고예요" }, { status: 400 });
       }
     } catch (e) {

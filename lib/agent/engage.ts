@@ -23,6 +23,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
+import type { GeoJob } from "../geo";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 import {
@@ -378,7 +379,8 @@ export async function pickJobForCampaignReply(
   };
   const { data: jobRows, error: jobsErr } = await supabase
     .from("jobs")
-    .select("id, title, status, closes_at, exposure, exposure_rule, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng")
+    // distance_basis까지 — 안 읽으면 pickup 기준 공고가 nearest(더 넓은 쪽)로 판정돼 본인 링크에는 없는 공고에 자동 편입된다.
+    .select("id, title, status, closes_at, exposure, exposure_rule, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, distance_basis")
     .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(200);
@@ -417,12 +419,14 @@ export async function pickJobForCampaignReply(
         own_vehicle: (appRow as { own_vehicle?: string | null } | null)?.own_vehicle ?? null,
         work_hours: (appRow as { work_hours?: string | null } | null)?.work_hours ?? null,
         available_slots: (appRow as { available_slots?: string[] | null } | null)?.available_slots ?? null,
+        lat: applicant.lat,
+        lng: applicant.lng,
         applied_at: (appRow as { applied_at?: string | null } | null)?.applied_at ?? null,
         created_at: (appRow as { created_at?: string | null } | null)?.created_at ?? null,
         suntopDone,
       };
       jobs = jobs.filter(
-        (j) => j.exposure !== "targeted" || isExposed(exA, normalizeRule(j.exposure_rule), overrides.get(j.id))
+        (j) => j.exposure !== "targeted" || isExposed(exA, normalizeRule(j.exposure_rule), overrides.get(j.id), { job: j as unknown as GeoJob })
       );
     } catch (e) {
       console.error("[engage] campaign-reply exposure gate failed — targeted 공고 제외(fail-closed)", e);

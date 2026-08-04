@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchApplicantsForExposure, matchesRule, normalizeRule } from "@/lib/exposure";
 import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
+import { EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 
@@ -98,12 +99,36 @@ export async function POST(req: NextRequest) {
   try {
     const applicants = await fetchApplicantsForExposure(supabase);
     const now = Date.now();
-    const matched = rule ? applicants.filter((a) => matchesRule(a, rule, now)) : [];
+    // 반경 축은 **공고 기준점**이 필요하다 — 미리보기가 공고를 받으면 그 공고로 재고,
+    // 못 받으면 그 축을 셀 수 없다는 사실을 그대로 알린다(0명으로 위장하지 않는다).
+    const jobId = Number(body?.job_id);
+    let job: GeoJob | null = null;
+    if (Number.isFinite(jobId) && jobId > 0) {
+      const { data: jobRow } = await supabase
+        .from("jobs")
+        .select(EXPOSURE_JOB_GEO_COLUMNS)
+        .eq("id", jobId)
+        .maybeSingle();
+      job = (jobRow as unknown as GeoJob) ?? null;
+    }
+    // 수정 모달이 '방금 고른'(아직 저장 안 한) 거리 기준을 넘기면 그걸로 계산 —
+    // 저장된 기준으로 재면 같은 화면에서 미리보기와 저장 결과 인원이 어긋난다(실측 296↔190).
+    const basisOverride = body?.distance_basis;
+    if (job && (basisOverride === "pickup" || basisOverride === "nearest")) {
+      job = { ...job, distance_basis: basisOverride };
+    }
+    const radiusNeedsJob = typeof rule?.radiusKm === "number" && rule.radiusKm > 0;
+    const radiusUnavailable = radiusNeedsJob && !jobSupportsRadius(job);
+    const matched = rule ? applicants.filter((a) => matchesRule(a, rule, { nowMs: now, job })) : [];
     return NextResponse.json({
       rule, // 정규화된 규칙(무효 키 제거 결과)을 되돌려줘 UI가 실제 저장될 값을 보여줄 수 있게
       count: matched.length,
       total: applicants.length,
       sample: matched.slice(0, 5).map((a) => a.name ?? `#${a.id}`),
+      // 반경 규칙인데 공고 좌표가 없거나 공고를 못 받았다 → 화면이 '0명'이 아니라 '계산 불가'로 보여야 한다.
+      radius_unavailable: radiusUnavailable,
+      // 좌표 없는 인원 수 — 반경 규칙에서 항상 빠지는 집단(주소가 플레이스홀더라 지오코딩 불가).
+      geo_unknown: applicants.filter((a) => typeof a.lat !== "number" || typeof a.lng !== "number").length,
     });
   } catch (e) {
     console.error("[exposure preview] failed", e);

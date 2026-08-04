@@ -25,7 +25,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { haversineKm } from "@/lib/kakao-geocode";
+import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { isNightKst, smsJobTitle } from "@/lib/agent/engage";
 import { isExposed, normalizeRule, type ExposureMode } from "@/lib/exposure";
 
@@ -68,7 +68,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const supabase = createServiceClient();
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, vehicle_required, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, exposure, exposure_rule")
+    .select(`id, title, vehicle_required, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("id", jobId)
     .maybeSingle();
   if (jobErr) {
@@ -206,12 +206,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
         own_vehicle: a.own_vehicle,
         work_hours: a.work_hours,
         available_slots: a.available_slots,
+        lat: a.lat,
+        lng: a.lng,
         applied_at: a.applied_at,
         created_at: a.created_at,
         suntopDone: suntopDoneSet.has(a.id),
       },
       exposureRule,
-      exposureOverrides.get(a.id)
+      exposureOverrides.get(a.id),
+      { job: job as unknown as GeoJob }
     );
   };
 
@@ -238,19 +241,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return true;
   };
 
-  // C 조건 매칭 — 공고 앵커(상차지·마지막 경유지 중 가까운 쪽) 15km 이내 + 차량 요건.
+  // C 조건 매칭 — 공고가 정한 거리 기준(집결지만 / 집결지·마지막 경유지 중 가까운 쪽) 15km 이내 + 차량 요건.
   // 앵커 좌표가 없는 공고(주소 미입력·지오코딩 실패)는 거리 판정이 불가하므로 C 그룹 없음.
-  const anchors: { lat: number; lng: number }[] = [];
-  if (typeof job.pickup_lat === "number" && typeof job.pickup_lng === "number") {
-    anchors.push({ lat: job.pickup_lat, lng: job.pickup_lng });
-  }
-  if (typeof job.dropoff_lat === "number" && typeof job.dropoff_lng === "number") {
-    anchors.push({ lat: job.dropoff_lat, lng: job.dropoff_lng });
-  }
   const matchesJob = (a: ApplicantRow): boolean => {
-    if (anchors.length === 0 || typeof a.lat !== "number" || typeof a.lng !== "number") return false;
-    const dist = Math.min(...anchors.map((p) => haversineKm(a.lat as number, a.lng as number, p.lat, p.lng)));
-    if (dist > MATCH_RADIUS_KM) return false;
+    // 거리 판정은 lib/geo 단일 공식 — 기준점(집결지만/경유지 포함)은 공고가 정한다(distance_basis).
+    const dist = distanceToJobKm({ lat: a.lat, lng: a.lng }, job as unknown as GeoJob);
+    if (dist === null || dist > MATCH_RADIUS_KM) return false;
     if (job.vehicle_required && a.own_vehicle !== "있음") return false;
     return true;
   };

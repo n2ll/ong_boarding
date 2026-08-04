@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchApplicantsForExposure, matchesRule, normalizeRule, type ExposureMode } from "@/lib/exposure";
+import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, exposure, exposure_rule")
+    .select(`id, title, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("id", id)
     .maybeSingle();
   if (jobErr) {
@@ -84,7 +85,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const effective: Person[] = [];
   const excluded: Person[] = [];
   for (const a of applicants) {
-    const ruleHit = matchesRule(a, rule, now);
+    const ruleHit = matchesRule(a, rule, { nowMs: now, job: job as unknown as GeoJob });
     const ov = modeById.get(a.id);
     const via: "rule" | "include" | "both" | null =
       ruleHit && ov === "include" ? "both" : ov === "include" ? "include" : ruleHit ? "rule" : null;
