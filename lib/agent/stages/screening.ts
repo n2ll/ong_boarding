@@ -11,7 +11,7 @@
 import { emptyScreening, isComplete, mergeAgentState } from "../checklist";
 import { applicantAvailableSlots } from "../../admin/types";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
-import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
+import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import {
   buildLineKnowledgeBlock,
@@ -343,6 +343,8 @@ interface ScreeningToolInput {
   transition_reason: string;
   handoff_category?: string;
   suggested_action?: string;
+  /** 이번 답변이 다른 공고에 관한 것이면 그 공고 id(모델 자기신고). 라우터가 코드로 검증한다. */
+  answered_other_job_id?: number;
   reasoning: string;
 }
 
@@ -383,6 +385,7 @@ const TOOL = {
         description: "abort/pause/advance 사유 한 줄. stay면 빈 문자열.",
       },
       ...handoffToolProperties,
+      ...crossJobToolProperties,
       reasoning: {
         type: "string",
         description: "이 턴의 의사결정 근거 한 줄 (매니저 검토용).",
@@ -444,6 +447,7 @@ const TOOL_GENERAL = {
         description: "abort/pause/advance 사유 한 줄. stay면 빈 문자열.",
       },
       ...handoffToolProperties,
+      ...crossJobToolProperties,
       reasoning: {
         type: "string",
         description: "이 턴의 의사결정 근거 한 줄 (매니저 검토용).",
@@ -744,6 +748,8 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
     transition,
     applicant_patch,
     reasoning: out.reasoning,
+    // 라우터가 코드로 검증한다(목록에 없는 공고·안내할 값이 없는 공고면 pause로 강등).
+    answered_other_job_id: out.answered_other_job_id ?? null,
   };
 }
 

@@ -36,6 +36,7 @@ import { triageInbound, isHardSpam } from "@/lib/agent/baemin-triage";
 import { classifyAvailabilitySignal } from "@/lib/agent/availability";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import { pickJobForCampaignReply } from "@/lib/agent/engage";
+import { pickCandidateForInbound, handleAmbiguousInbound, describeRoute } from "@/lib/agent/inbound-routing";
 import { sendSms } from "@/lib/solapi";
 import { sendSlackText } from "@/lib/slack";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
@@ -164,41 +165,26 @@ async function processInbound(
   // 4a) 매칭됨 → message에 applicant_id 채우고 active candidate에 router 호출
   // ───────────────────────────────────────────────────────────────
   if (applicant) {
-    // 활성 candidate 조회 (멀티-잡 대비 Phase 0)
-    // 예전: 가장 최근 '생성된' 후보 1건만 선택 → 한 지원자가 여러 공고에 활성이면 엉뚱한 공고로 답할 위험.
-    // 지금: 활성 후보를 모두 로드한 뒤 "마지막으로 대화한 공고(직전 outbound의 job_id)"를 우선 선택.
-    //       (없으면 가장 최근 생성 후보로 폴백 → 단일 공고일 땐 기존과 동일 동작)
-    type ActiveCand = { id: number; job_id: number | null; agent_stage: string | null; responded_at: string | null };
-    const { data: activeCands } = await supabase
-      .from("job_candidates")
-      .select("id, job_id, agent_stage, responded_at, created_at")
-      .eq("applicant_id", applicant.id)
-      .not("agent_stage", "is", null)
-      .neq("agent_stage", "abort")
-      .order("created_at", { ascending: false });
-
-    let jc: ActiveCand | null = null;
-    const cands = (activeCands ?? []) as (ActiveCand & { created_at: string })[];
-    if (cands.length === 1) {
-      jc = cands[0];
-    } else if (cands.length > 1) {
-      // 직전 outbound 메시지의 job_id = "지금 대화 중인 공고"로 추정
-      const { data: lastOut } = await supabase
-        .from("messages")
-        .select("job_id")
-        .eq("applicant_id", applicant.id)
-        .eq("direction", "outbound")
-        .not("job_id", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const lastJobId = (lastOut?.job_id as number | null) ?? null;
-      jc =
-        (lastJobId != null ? cands.find((c) => c.job_id === lastJobId) : undefined) ??
-        cands[0];
-      console.warn(
-        `[inbound] applicant ${applicant.id}: ${cands.length}개 공고 동시 진행 — job ${jc.job_id}로 라우팅 (직전 대화 공고: ${lastJobId ?? "없음"})`
-      );
+    // 어느 공고 건인지는 **lib/agent/inbound-routing 한 곳**이 정한다(웹훅·sweeper·draft 공통).
+    // 예전엔 이 세 경로가 각자 다른 기준을 써서, 같은 답장이 어느 경로로 잡히느냐에 따라 다른 공고로
+    // 응대됐다. 앵커(직전 outbound)에서 **대량·캠페인 발송을 제외**하는 것도 여기서 처리한다 —
+    // 안 하면 공고 7개를 동시에 발사할 때 모든 답장이 '마지막 발송 공고'로 몰린다.
+    const route = await pickCandidateForInbound(supabase, applicant.id, text);
+    const jc = route.ok ? route.candidate : null;
+    // 판별 불가는 **고르지 않는다** — 되묻거나(자동 모드 1회) 매니저에게 넘긴다.
+    let ambiguousHandled: { asked: boolean; pausedCandidates: number } | null = null;
+    if (!route.ok && route.reason === "ambiguous") {
+      console.warn(`[inbound] applicant ${applicant.id}: ${describeRoute(route)}`);
+      ambiguousHandled = await handleAmbiguousInbound(supabase, {
+        applicantId: applicant.id,
+        phone,
+        applicantName: applicant.name,
+        options: route.options,
+        why: route.why,
+        mode: await getAgentMode(supabase),
+        sendSms: (to, body) => sendSms(to, body),
+        notify: (t) => sendSlackText(t),
+      });
     }
 
     // message에 applicant_id (+ 가능하면 job_id) 채우기
@@ -324,6 +310,29 @@ async function processInbound(
       }
     } catch (e) {
       console.error("[supabase-webhook] availability signal collection failed", e);
+    }
+
+    // 판별 불가(되묻기·보류 처리 완료)는 여기서 끝낸다 — 아래 캠페인 자동 편입으로 내려가면
+    // 방금 "어느 자리인지 모르겠다"고 판단한 답장을 근거로 **공고를 골라 편입**하게 된다.
+    if (ambiguousHandled) {
+      return {
+        ok: true,
+        matched: true,
+        agent_invoked: false,
+        reason: ambiguousHandled.asked
+          ? "job ambiguous — asked once"
+          : `job ambiguous — paused ${ambiguousHandled.pausedCandidates} candidate(s) for manager`,
+      };
+    }
+    // 매니저가 들고 있는 대화(보류)만 있는 사람도 자동 편입 대상이 아니다 — 예전엔 보류 후보가
+    // jc로 잡혀 이 블록을 그냥 지나갔다(라우팅 단일화로 jc가 null이 되면서 드러난 경로).
+    if (!route.ok && route.reason === "paused") {
+      return {
+        ok: true,
+        matched: true,
+        agent_invoked: false,
+        reason: "candidate paused — manager handles",
+      };
     }
 
     // Agent 호출

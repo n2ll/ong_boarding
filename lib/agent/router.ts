@@ -22,6 +22,7 @@ import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { getSystemMessage } from "./system-messages";
 import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
+import { crossJobBackstop } from "./cross-job";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
@@ -250,21 +251,48 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // 현재 공고 정보로 잘못 답하지 않도록 컨텍스트로만 제공한다(체크리스트는 건드리지 않음).
   const otherActiveJobs: OtherActiveJob[] = [];
   {
+    // **답할 수 있는 값까지 함께 싣는다** — 예전엔 공고명·단계만 줘서, 다른 공고 질문이면 무조건
+    // 매니저 인계였다(공고 7개면 흔한 질문마다 인계가 쌓인다). 없는 값은 숨기지 않고 '미기재'로
+    // 열거한다(cross-job.ts) — 빈칸을 감추면 모델이 현재 공고 값으로 메운다.
     const { data: others } = await supabase
       .from("job_candidates")
-      .select(`agent_stage, jobs:job_id ( id, title, branch )`)
+      .select(
+        `agent_stage, jobs:job_id ( id, title, branch, slot, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
+      )
       .eq("applicant_id", applicantIdForHistory)
       .not("agent_stage", "is", null)
       .neq("agent_stage", "abort")
       .neq("id", candidate_id);
     for (const o of others ?? []) {
-      const j = (o.jobs ?? null) as unknown as { id: number; title: string; branch: string | null } | null;
+      const j = (o.jobs ?? null) as unknown as
+        | {
+            id: number;
+            title: string;
+            branch: string | null;
+            slot: string | null;
+            work_period: string | null;
+            start_date: string | null;
+            pay_info: string | null;
+            pay_type: string | null;
+            pay_amount: number | null;
+            pickup_address: string | null;
+            vehicle_required: boolean | null;
+          }
+        | null;
       if (!j || typeof j.title !== "string" || j.title.startsWith("__")) continue;
       otherActiveJobs.push({
         job_id: j.id,
         title: j.title,
         branch: j.branch ?? null,
         stage: (o.agent_stage as StageName) ?? "exploration",
+        slot: j.slot ?? null,
+        work_period: j.work_period ?? null,
+        start_date: j.start_date ?? null,
+        pay_info: j.pay_info ?? null,
+        pay_type: j.pay_type ?? null,
+        pay_amount: j.pay_amount ?? null,
+        pickup_address: j.pickup_address ?? null,
+        vehicle_required: j.vehicle_required ?? null,
       });
     }
   }
@@ -356,6 +384,16 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       .update(result.applicant_patch)
       .eq("id", applicant.id);
     if (patchErr) console.error("[router] applicant_patch failed", patchErr);
+  }
+
+  // 다른 공고 응대 결정적 백스톱 — 모델 자기신고(answered_other_job_id)를 코드가 검증한다.
+  // 목록에 없는 공고이거나 안내할 값이 하나도 없는 공고로 답했다고 신고하면 지어낸 답일 수 있어
+  // 발송을 막고 매니저에게 넘긴다. 다른 공고 이야기였는데 advance를 골랐으면 stay로 내린다.
+  const crossHit = crossJobBackstop(result, otherActiveJobs);
+  if (crossHit) {
+    console.warn(`[router] 다른 공고 응대 백스톱(${crossHit.why}) → ${crossHit.transition.kind}`);
+    if (crossHit.transition.kind === "pause") result.reply_text = null;
+    result.transition = crossHit.transition;
   }
 
   // 확정 뉘앙스 금지 결정적 가드 — AI가 확정/배정/출근 지시 문구를 만들면 발송하지 않고

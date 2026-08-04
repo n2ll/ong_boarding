@@ -39,6 +39,8 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import { sendSlackText } from "@/lib/slack";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import { runAgentForCandidate } from "@/lib/agent/router";
+import { pickCandidateForInbound, handleAmbiguousInbound } from "@/lib/agent/inbound-routing";
+import { sendSms } from "@/lib/solapi";
 import type { AgentState } from "@/lib/agent/types";
 
 export const dynamic = "force-dynamic";
@@ -126,16 +128,38 @@ export async function GET(req: NextRequest) {
         .limit(1);
       if (outAfter && outAfter.length > 0) continue;
 
-      // a) AI 담당 단계 후보 (최신 1건) — 없으면 응대 대상 아님(풀 답장·수신거부 등은 기존 경로 몫)
-      const { data: cands } = await supabase
-        .from("job_candidates")
-        .select("id, agent_stage, agent_state")
-        .eq("applicant_id", applicantId)
-        .in("agent_stage", ACTIVE_STAGES as unknown as string[])
-        .order("created_at", { ascending: false })
-        .limit(1);
-      const jc = cands?.[0] as { id: number; agent_stage: string; agent_state: unknown } | undefined;
-      if (!jc) continue;
+      // a) 어느 공고 건인지는 **웹훅과 같은 함수**가 정한다(lib/agent/inbound-routing).
+      //    예전엔 여기서 '활성 단계 최신 1건'을 그냥 골라, 같은 답장이 웹훅으로 잡히면 A 공고
+      //    sweeper로 잡히면 B 공고로 응대되는 갈림이 있었다.
+      const route = await pickCandidateForInbound(supabase, applicantId, String(inbound.body ?? "").trim());
+      if (!route.ok) {
+        // 판별 불가는 여기서도 고르지 않는다 — 되묻거나(자동 1회) 매니저에게 넘긴다.
+        if (route.reason === "ambiguous") {
+          const { data: appRow } = await supabase
+            .from("applicants")
+            .select("name, phone")
+            .eq("id", applicantId)
+            .maybeSingle();
+          const a = appRow as { name: string | null; phone: string | null } | null;
+          const handled = await handleAmbiguousInbound(supabase, {
+            applicantId,
+            phone: a?.phone ?? null,
+            applicantName: a?.name ?? null,
+            options: route.options,
+            why: route.why,
+            mode,
+            sendSms: (to, body) => sendSms(to, body),
+            notify: (t) => sendSlackText(t),
+          });
+          results.push({
+            applicant_id: applicantId,
+            action: handled.asked ? "job_ambiguous_asked" : "job_ambiguous_paused",
+            reason: `공고 판별 불가(${route.why}) — 후보 ${route.options.length}건`,
+          });
+        }
+        continue;
+      }
+      const jc = route.candidate;
 
       // c) 이 인바운드에 대한 초안(코파일럿 pending/auto_sent 기록)이 있으면 처리된 것 — 제외
       const { data: drafts } = await supabase

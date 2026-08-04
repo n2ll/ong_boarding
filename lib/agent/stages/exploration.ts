@@ -15,7 +15,7 @@
 
 import { mergeAgentState } from "../checklist";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
-import { crossJobSystemSuffix, formatOtherActiveJobs } from "../cross-job";
+import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
 import { buildLineKnowledgeBlock, isGeneralLineJob } from "../general-line";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
@@ -120,6 +120,8 @@ interface ExplorationToolInput {
   transition_reason: string;
   handoff_category?: string;
   suggested_action?: string;
+  /** 이번 답변이 다른 공고에 관한 것이면 그 공고 id(모델 자기신고). 라우터가 코드로 검증한다. */
+  answered_other_job_id?: number;
   intent_signal: "exploring" | "ready_to_apply" | "rejected" | "manager_needed";
   reasoning: string;
 }
@@ -147,6 +149,7 @@ const TOOL = {
         description: "advance/abort/pause 사유 한 줄. stay면 빈 문자열.",
       },
       ...handoffToolProperties,
+      ...crossJobToolProperties,
       intent_signal: {
         type: "string",
         enum: ["exploring", "ready_to_apply", "rejected", "manager_needed"],
@@ -307,6 +310,8 @@ function toStageResult(out: ExplorationToolInput, ctx: StageContext): StageResul
     state_update,
     transition,
     reasoning: out.reasoning,
+    // 라우터가 코드로 검증한다(목록에 없는 공고·안내할 값이 없는 공고면 pause로 강등).
+    answered_other_job_id: out.answered_other_job_id ?? null,
   };
 }
 

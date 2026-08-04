@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { generateDraftReply, AgentApplicantContext, AgentTurn } from "@/lib/agent";
 import { sendSlackAgentAlert } from "@/lib/slack";
 import { runAgentForCandidate } from "@/lib/agent/router";
+import { pickCandidateForInbound } from "@/lib/agent/inbound-routing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -109,14 +110,11 @@ export async function POST(req: NextRequest) {
   // 없으면 기존 흐름(message_drafts 생성)으로 폴백
   // ─────────────────────────────────────────────────────────────
   if (applicant.id) {
-    const { data: jc } = await supabase
-      .from("job_candidates")
-      .select("id, job_id, agent_stage, responded_at")
-      .eq("applicant_id", applicant.id)
-      .not("agent_stage", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // 어느 공고 건인지는 **웹훅·sweeper와 같은 함수**가 정한다(lib/agent/inbound-routing).
+    // 예전엔 '단계 무관 최신 1건'을 뽑아서, 그 최신 행이 종료(abort)면 다른 공고가 활성인데도
+    // 자동 응대가 안 되고 초안 경로로 떨어졌다. 판별 불가는 고르지 않는다(초안 경로로 폴백).
+    const route = await pickCandidateForInbound(supabase, applicant.id, String(rec.body ?? "").trim());
+    const jc = route.ok ? route.candidate : null;
 
     if (jc && AUTO_AGENT_STAGES.has(jc.agent_stage as string)) {
       // 1) messages 행에 job_id 채워주기 — agent가 history 로드 시 그 공고 컨텍스트만 사용
