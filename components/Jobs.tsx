@@ -326,7 +326,7 @@ function workSummary(f: EditJobForm): string {
 /** '더보기' 메뉴 라벨 — 실제로 들어가는 항목에서 파생한다(없는 항목을 툴팁이 약속하면 그 기능을 찾아 헤맨다). */
 function moreActionsLabel(job: { effectivelyClosed: boolean; recruitMode: RecruitMode }): string {
   const canAnnounce = !job.effectivelyClosed && job.recruitMode !== "external";
-  return [...(canAnnounce ? ["대기자에게 안내"] : []), "복제", job.effectivelyClosed ? "다시 열기" : "마감"].join(" · ");
+  return [...(canAnnounce ? ["대기자에게 안내"] : []), job.effectivelyClosed ? "다시 열기" : "마감"].join(" · ");
 }
 
 function bodySummary(f: EditJobForm): string {
@@ -531,6 +531,9 @@ export function Jobs() {
   const [newJobSiteManagerId, setNewJobSiteManagerId] = useState<number | "">("");
   // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, external 기본이면 등록해도 지원자에게 안 보이는 함정이 된다.
   const [newJobMode, setNewJobMode] = useState<RecruitMode>(DEFAULT_RECRUIT_MODE);
+  // 복제 원본 제목 — 복제본은 제목·본문에 원본 권역이 그대로 남아 있어, 그 사실을 초안 위에 밝힌다
+  // (권역만 다른 라인을 6~7개 만드는 것이 기본 사용법이라 '안 고치고 등록'이 실제 사고다).
+  const [duplicatedFrom, setDuplicatedFrom] = useState<string | null>(null);
   // 복제로 채워진 채널 초안 여부 — 당근·문자 탭이 '원본에 저장돼 있던 내용'임을 안내하는 데만 쓴다.
   const [channelDraftsFromCopy, setChannelDraftsFromCopy] = useState(false);
   // 수정 모달에서 화주사를 바꿔 '떨어져 나간' 지점 — 지점 셀렉트는 그 순간 화면에서 사라지므로(해당 화주사에 지점이 없으면)
@@ -966,6 +969,7 @@ export function Jobs() {
     setNewJobSiteManagerId("");
     setNewJobMode(DEFAULT_RECRUIT_MODE);
     setChannelDraftsFromCopy(false);
+    setDuplicatedFrom(null);
     setNewJobCapacity(1);
     setNewJobPayType("");
     setNewJobPayAmount("");
@@ -986,10 +990,14 @@ export function Jobs() {
     setNewJobSosVehicle(null);
   };
 
-  // 등록 모달 닫기 — 작성 중(AI 초안 생성됨)이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
-  // 통째 사라지던 문제 방지. channelDrafts 유무를 '작업 있음' 프록시로 사용.
+  // 등록에 쓸 본문이 실제로 있나 — '직접 작성'으로 빈 편집칸만 열어둔 상태와 구분한다.
+  // (AI 초안 없이도 등록할 수 있게 하면서, 빈 공고가 등록되는 것은 계속 막는다.)
+  const draftBody = channelDrafts ? (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim() : "";
+
+  // 등록 모달 닫기 — 작성 중이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
+  // 통째 사라지던 문제 방지. 본문 유무를 '작업 있음' 프록시로 사용(빈 편집칸은 확인 없이 닫는다).
   const closeRegisterModal = async () => {
-    if (channelDrafts) {
+    if (draftBody) {
       const ok = await confirm({
         title: "작성 중인 내용을 버릴까요?",
         description: "생성한 AI 초안과 입력한 내용이 모두 사라져요. 등록하지 않고 닫으면 복구할 수 없어요.",
@@ -1005,10 +1013,10 @@ export function Jobs() {
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
   // 정기 라인 재모집 시 반복 입력을 없앤다. 등록은 기존 POST를 그대로 재사용.
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const duplicateJob = async (job: JobRow) => {
-    setDuplicatingId(job.id);
+  const duplicateJob = async (jobId: string) => {
+    setDuplicatingId(jobId);
     try {
-      const res = await fetch(`/api/admin/jobs/${job.id}`);
+      const res = await fetch(`/api/admin/jobs/${jobId}`);
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "공고를 불러오지 못했어요");
@@ -1021,6 +1029,7 @@ export function Jobs() {
       const cb = (j.channel_bodies ?? null) as { danggeun?: string; albamon?: string; sms?: string } | null;
       // 당근·문자 탭에 저장본을 쓰면 그 뒤 수정 모달로 고친 본문이 반영되지 않는다 → 그 사실을 화면에 밝힌다.
       setChannelDraftsFromCopy(Boolean(cb?.danggeun || cb?.sms));
+      setDuplicatedFrom((j.title ?? "").slice(0, 24) || "원본 공고");
       setChannelDrafts({
         danggeun: cb?.danggeun || body,
         // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
@@ -1079,10 +1088,11 @@ export function Jobs() {
   const handleRegisterJob = async () => {
     if (!channelDrafts || registering) return;
     // 등록 시 알바몬(정형) 본문을 공고 원문으로 저장 — AI 스크리닝이 참조하는 캐논 본문.
-    const body = (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim();
-    // '__' 예약 프리픽스로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보이므로 제거(서버도 400으로 방어).
-    const title = stripSystemPrefix((postingTitle || channelDrafts.albamon.split("\n")[0] || "새 공고").trim()).slice(0, 80) || "새 공고";
+    const body = draftBody;
     if (!body) return;
+    // '__' 예약 프리픽스로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보이므로 제거(서버도 400으로 방어).
+    // 제목 폴백은 **실제 저장되는 본문**의 첫 줄에서 뽑는다(알바몬 탭이 비고 당근 탭만 쓴 경우 대비).
+    const title = stripSystemPrefix((postingTitle || body.split("\n")[0] || "새 공고").trim()).slice(0, 80) || "새 공고";
     // 마감시각을 과거로 넣으면 등록 즉시 pull에서 '마감됨'으로 빠져 혼란 — 저장 전 경고.
     if (newJobClosesAt && new Date(newJobClosesAt).getTime() <= Date.now()) {
       toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
@@ -1158,7 +1168,20 @@ export function Jobs() {
           duration: 8000,
         });
       } else {
-        toast.success("새 공고가 등록되었어요.", geoNote ? { description: geoNote } : undefined);
+        // 배치 등록 동선 — 목록에서 카드를 찾아 복제하러 가는 왕복을 없앤다(권역만 다른 라인 6~7개가 기본).
+        const registeredId = typeof json.job?.id === "number" ? String(json.job.id) : null;
+        toast.success("새 공고가 등록되었어요.", {
+          ...(geoNote ? { description: geoNote } : {}),
+          ...(registeredId
+            ? {
+                action: {
+                  label: "복제해서 하나 더 →",
+                  onClick: () => void duplicateJob(registeredId),
+                },
+                duration: 10000,
+              }
+            : {}),
+        });
       }
       setAiModalOpen(false);
       resetNewJobForm();
@@ -1955,6 +1978,16 @@ export function Jobs() {
                   >
                     <Edit2 size={14} /> 수정
                   </button>
+                  {/* 복제를 카드 전면으로 — 권역만 다른 라인 여러 개를 만드는 것이 기본 사용법이라
+                      '더보기' 안에 두면 배치 등록마다 메뉴를 열어야 한다(사장님 지시 2026-08-05). */}
+                  <button
+                    onClick={() => void duplicateJob(job.id)}
+                    disabled={duplicatingId === job.id}
+                    className="flex items-center gap-1 px-2 py-2 whitespace-nowrap shrink-0 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    title="이 공고를 복제해 새 공고 등록 — 제목·본문·노출 규칙이 프리필됩니다"
+                  >
+                    {duplicatingId === job.id ? <Loader2 size={14} className="animate-spin" /> : <CopyPlus size={14} />} 복제
+                  </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -1979,13 +2012,6 @@ export function Jobs() {
                           <Megaphone size={14} className="text-[#A0AEC0]" /> 대기자에게 안내
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onSelect={() => setTimeout(() => void duplicateJob(job), 0)}
-                        disabled={duplicatingId === job.id}
-                        className="text-[12.5px] font-semibold text-[#4A5568] gap-2"
-                      >
-                        <CopyPlus size={14} className="text-[#A0AEC0]" /> 이 공고 복제해서 새로 등록
-                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => setTimeout(() => void handleToggleClose(job), 0)}
                         disabled={statusBusyId === job.id}
@@ -2047,6 +2073,21 @@ export function Jobs() {
                   className="w-full bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3.5 text-[14px] text-[#1A202C] placeholder:text-[#A0AEC0] focus:outline-none focus:border-[#FFCB3C] min-h-[100px] resize-none"
                 />
                 <div className="flex justify-end mt-3">
+                  {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
+                      다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
+                  {!channelDrafts && !isGenerating && (
+                    <button
+                      onClick={() => {
+                        setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
+                        setChannelDraftsFromCopy(false);
+                        setActiveChannel("albamon");
+                      }}
+                      className="px-4 py-2.5 rounded-xl text-[13.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                      title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                    >
+                      직접 작성
+                    </button>
+                  )}
                   <button
                     onClick={handleGenerateJD}
                     disabled={isGenerating || !aiPrompt}
@@ -2058,6 +2099,73 @@ export function Jobs() {
                 </div>
                 <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">공고 설정</b>에서 화주사·지점을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
               </div>
+
+              {/* ⚠️ 초안·제목은 **생성 버튼 바로 아래**에 둔다. 예전엔 '공고 설정' 폼(모집방식·화주사·정원·
+                  근무시간·노출까지 약 160줄) 아래에 있어서, 버튼을 눌러도 로딩 표시와 완성된 초안이 모두
+                  화면 밖에서 만들어졌다 — 토스트만 뜨고 화면은 그대로여서 "초안이 안 보인다"가 됐다.
+                  복제로 열었을 때도 같은 이유로 원본 제목·본문이 안 보였다(지역명을 안 고치고 등록하는 사고). */}
+              {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
+              {(isGenerating || channelDrafts) && (
+                <div className="bg-white border border-[#FFCB3C] rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                  {isGenerating && (
+                    <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
+                      <Wand2 size={28} className="text-[#D69E2E] animate-bounce mb-3" />
+                      <div className="text-[14px] font-bold text-[#1A202C]">AI 옹봇이 채널별 공고를 작성하고 있습니다...</div>
+                      <div className="text-[12px] text-[#718096] mt-1">당근 · 알바몬 · 문자 형식으로 각각 최적화하는 중</div>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-[13px] font-bold text-[#D69E2E] flex items-center gap-1.5">
+                      <Sparkles size={14} /> {draftBody ? "채널별 공고 초안" : "채널별 공고 본문 — 직접 작성"}
+                      {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded">오프라인 템플릿</span>}
+                    </label>
+                    <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
+                  </div>
+                  {duplicatedFrom && (
+                    <div className="mb-3 px-3 py-2 rounded-lg bg-[#FFF5F5] border border-[#FEB2B2] text-[11.5px] font-bold text-[#C53030] leading-relaxed">
+                      복제한 공고예요 — <b>제목·본문에 원본({duplicatedFrom})의 권역·단가가 그대로 남아 있어요.</b> 바꿀 곳을 고치고 등록하세요.
+                    </div>
+                  )}
+                  {channelDraftsFromCopy && (
+                    <div className="mb-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-semibold text-[#B7791F] leading-relaxed">
+                      당근·문자 탭은 <b>원본 공고에 저장돼 있던 초안</b>이에요. 원본을 등록한 뒤 수정 모달에서 본문을 고쳤다면 그 내용은 알바몬 탭에만 반영돼 있어요 — 필요하면 여기서 직접 손봐 주세요.
+                    </div>
+                  )}
+
+                  {channelDrafts && (
+                    <>
+                      {/* 채널 탭 */}
+                      <div className="flex gap-1.5 mb-3">
+                        {([
+                          { id: "danggeun", label: "당근알바" },
+                          { id: "albamon", label: "알바몬" },
+                          { id: "sms", label: "문자(SMS)" },
+                        ] as const).map((ch) => (
+                          <button key={ch.id} onClick={() => setActiveChannel(ch.id)} className={`px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors ${activeChannel === ch.id ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}>{ch.label}</button>
+                        ))}
+                        <div className="flex-1" />
+                        <button onClick={() => copyChannel(channelDrafts[activeChannel], activeChannel === "danggeun" ? "당근알바" : activeChannel === "albamon" ? "알바몬" : "문자")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold bg-[#FFFBEC] border border-[#FFCB3C] text-[#B8860B] hover:bg-[#FFF3C4]">
+                          <Copy size={14} /> 복사
+                        </button>
+                      </div>
+                      <textarea
+                        value={channelDrafts[activeChannel]}
+                        onChange={(e) => setChannelDrafts({ ...channelDrafts, [activeChannel]: e.target.value })}
+                        className="w-full bg-[#FFFBEC] border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-[#2D3748] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FFCB3C] min-h-[260px] font-medium resize-none whitespace-pre-wrap"
+                      />
+                      <div className="mt-2 text-[11.5px] text-[#A0AEC0]">등록 시 <b className="text-[#718096]">알바몬 형식</b> 본문이 공고 원문으로 저장되어 AI 스크리닝이 참조합니다.</div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* E15 · 공고 제목 — 맞춤 공고 링크 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
+              {channelDrafts && (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#A0AEC0] font-semibold">— 맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span></label>
+                  <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                </div>
+              )}
 
               {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
                   모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
@@ -2228,64 +2336,6 @@ export function Jobs() {
                 {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
 
-              {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
-              {(isGenerating || channelDrafts) && (
-                <div className="bg-white border border-[#FFCB3C] rounded-2xl p-5 shadow-sm relative overflow-hidden">
-                  {isGenerating && (
-                    <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
-                      <Wand2 size={28} className="text-[#D69E2E] animate-bounce mb-3" />
-                      <div className="text-[14px] font-bold text-[#1A202C]">AI 옹봇이 채널별 공고를 작성하고 있습니다...</div>
-                      <div className="text-[12px] text-[#718096] mt-1">당근 · 알바몬 · 문자 형식으로 각각 최적화하는 중</div>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-[13px] font-bold text-[#D69E2E] flex items-center gap-1.5">
-                      <Sparkles size={14} /> 채널별 공고 초안
-                      {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded">오프라인 템플릿</span>}
-                    </label>
-                    <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
-                  </div>
-                  {channelDraftsFromCopy && (
-                    <div className="mb-3 px-3 py-2 rounded-lg bg-[#FFFBEC] border border-[#FAF089] text-[11.5px] font-semibold text-[#B7791F] leading-relaxed">
-                      당근·문자 탭은 <b>원본 공고에 저장돼 있던 초안</b>이에요. 원본을 등록한 뒤 수정 모달에서 본문을 고쳤다면 그 내용은 알바몬 탭에만 반영돼 있어요 — 필요하면 여기서 직접 손봐 주세요.
-                    </div>
-                  )}
-
-                  {channelDrafts && (
-                    <>
-                      {/* 채널 탭 */}
-                      <div className="flex gap-1.5 mb-3">
-                        {([
-                          { id: "danggeun", label: "당근알바" },
-                          { id: "albamon", label: "알바몬" },
-                          { id: "sms", label: "문자(SMS)" },
-                        ] as const).map((ch) => (
-                          <button key={ch.id} onClick={() => setActiveChannel(ch.id)} className={`px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors ${activeChannel === ch.id ? "bg-[#1A202C] text-white" : "bg-[#F1F4F8] text-[#718096] hover:bg-[#E2E8F0]"}`}>{ch.label}</button>
-                        ))}
-                        <div className="flex-1" />
-                        <button onClick={() => copyChannel(channelDrafts[activeChannel], activeChannel === "danggeun" ? "당근알바" : activeChannel === "albamon" ? "알바몬" : "문자")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold bg-[#FFFBEC] border border-[#FFCB3C] text-[#B8860B] hover:bg-[#FFF3C4]">
-                          <Copy size={14} /> 복사
-                        </button>
-                      </div>
-                      <textarea
-                        value={channelDrafts[activeChannel]}
-                        onChange={(e) => setChannelDrafts({ ...channelDrafts, [activeChannel]: e.target.value })}
-                        className="w-full bg-[#FFFBEC] border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-[#2D3748] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FFCB3C] min-h-[260px] font-medium resize-none whitespace-pre-wrap"
-                      />
-                      <div className="mt-2 text-[11.5px] text-[#A0AEC0]">등록 시 <b className="text-[#718096]">알바몬 형식</b> 본문이 공고 원문으로 저장되어 AI 스크리닝이 참조합니다.</div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* E15 · 공고 제목 — 맞춤 공고 링크 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
-              {channelDrafts && (
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
-                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">공고 제목 <span className="text-[#A0AEC0] font-semibold">— 맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span></label>
-                  <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                </div>
-              )}
-
               {/* 근무 상세 + AI 응대 근거 — 접이식. pull 카드 표시 필드(근무시간·시작일·집결지)와
                   단가·정책 참고정보를 등록 단계에서 함께 채워 편집 모달 2단계 강제를 없앤다. */}
               {channelDrafts && (
@@ -2391,7 +2441,7 @@ export function Jobs() {
               </button>
               <button
                 onClick={handleRegisterJob}
-                disabled={!channelDrafts || registering}
+                disabled={!draftBody || registering}
                 className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
               >
                 {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
