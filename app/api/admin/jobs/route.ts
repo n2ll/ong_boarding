@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
-import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
+import { isSystemJobTitle, isJobEffectivelyClosed, describeDbConstraintError } from "@/lib/jobs";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
@@ -321,6 +321,9 @@ export async function POST(req: NextRequest) {
 
   if (error || !data) {
     console.error("[jobs POST]", error);
+    // 제약 위반은 사용자 입력 문제다 — 어느 칸이 문제인지 이름으로 돌려준다(500 침묵 금지).
+    const readable = describeDbConstraintError(error);
+    if (readable) return NextResponse.json({ error: readable }, { status: 400 });
     return NextResponse.json({ error: "공고 생성 실패" }, { status: 500 });
   }
 

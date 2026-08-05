@@ -37,3 +37,29 @@ export function isSystemJobTitle(title: string | null | undefined): boolean {
 export function stripSystemPrefix(title: string): string {
   return title.replace(/^_+/, "");
 }
+
+/**
+ * DB 제약 위반(23514 check / 22001 길이 초과)을 매니저가 읽을 수 있는 문장으로 바꾼다.
+ *
+ * 왜: 등록·수정 실패가 "공고 등록에 실패했어요" 한 줄로만 떠서, 어느 칸이 문제인지 알 수 없었다.
+ * 실제로 근무시간에 '평일 오전'을 넣으면 `chk_jobs_slot` 위반으로 500이 났는데(제약은 4-슬롯만
+ * 허용했다) 화면에는 아무 단서도 없었다 — 제약은 완화했지만, 다음 제약에서 같은 침묵이 반복되지
+ * 않게 사유를 이름으로 돌려준다. 매칭되지 않으면 null(호출부가 기존 문구 유지).
+ */
+export function describeDbConstraintError(err: { code?: string; message?: string } | null | undefined): string | null {
+  if (!err) return null;
+  const code = err.code ?? "";
+  const msg = err.message ?? "";
+  if (code !== "23514" && code !== "22001") return null;
+  const named: Record<string, string> = {
+    chk_jobs_slot: "근무시간이 너무 길어요(80자까지). 짧게 줄여 주세요.",
+    chk_jobs_capacity: "모집 인원 값이 올바르지 않아요.",
+    chk_jobs_exposure: "노출 방식 값이 올바르지 않아요 — 전체 노출/지정 노출 중에서 고르세요.",
+    chk_jobs_distance_basis: "거리 기준 값이 올바르지 않아요 — 집결지/가까운 쪽 중에서 고르세요.",
+  };
+  for (const [key, text] of Object.entries(named)) {
+    if (msg.includes(key)) return text;
+  }
+  if (code === "22001") return "입력한 값이 저장 가능한 길이를 넘었어요 — 짧게 줄여 주세요.";
+  return "입력한 값 중 하나가 저장 규칙에 맞지 않아요 — 근무시간·인원·노출 설정을 확인해 주세요.";
+}

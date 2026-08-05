@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { describeDbConstraintError } from "@/lib/jobs";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
@@ -345,6 +346,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (error || !data) {
     console.error("[jobs PATCH]", error);
+    const readable = describeDbConstraintError(error);
+    if (readable) return NextResponse.json({ error: readable }, { status: 400 });
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
   }
 
