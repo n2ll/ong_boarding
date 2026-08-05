@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { slotKeysLabel } from "@/lib/jobs";
 import { createServiceClient } from "@/lib/supabase";
 import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import {
@@ -54,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
   // recruit_mode는 DB NOT NULL DEFAULT 'external' — null은 발생하지 않지만, 안전 방향(비공개)으로 in-필터가 null을 자동 제외한다.
   const { data: jobs, error: jobsErr } = await supabase
     .from("jobs")
-    .select(`id, title, body, branch, slot, start_date, vehicle_required, pickup_address, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
+    .select(`id, title, body, branch, slot, slot_keys, start_date, vehicle_required, pickup_address, pay_type, pay_amount, pay_info, capacity, created_at, work_period, closes_at, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("status", "active")
     .in("recruit_mode", ["internal", "both"])
     .not("title", "like", "\\_\\_%")
@@ -162,7 +163,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
       const fitResult = judgePoolFit(
         {
           vehicle_required: (j as { vehicle_required?: boolean | null }).vehicle_required ?? null,
-          slot: (j as { slot?: string | null }).slot ?? null,
+          slot_keys: (j as { slot_keys?: string[] | null }).slot_keys ?? null,
         },
         {
           own_vehicle: (applicant as { own_vehicle?: string | null }).own_vehicle ?? null,
@@ -177,7 +178,9 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
         // 민감정보(업체명·상세주소·연락처)는 본문 작성 단계에서 제외하는 게 원칙.
         body: j.body,
         branch: j.branch,
-        slot: j.slot,
+        // 표시용 — 상세 시간이 있으면 그것, 없으면 고른 칩 라벨('평일 오전, 평일 오후').
+        // 판정은 위 slot_keys로만 한다(문장을 파싱하지 않는다).
+        slot: j.slot || slotKeysLabel((j as { slot_keys?: string[] | null }).slot_keys) || null,
         start_date: j.start_date,
         vehicle_required: j.vehicle_required,
         pickup_address: j.pickup_address,

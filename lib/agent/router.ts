@@ -24,6 +24,7 @@ import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
 import { crossJobBackstop } from "./cross-job";
 import { isLiveLink } from "../candidate-links";
+import { slotKeysLabel } from "../jobs";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
@@ -258,7 +259,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     const { data: others } = await supabase
       .from("job_candidates")
       .select(
-        `agent_stage, jobs:job_id ( id, title, branch, status, closes_at, slot, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
+        `agent_stage, jobs:job_id ( id, title, branch, status, closes_at, slot, slot_keys, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
       )
       .eq("applicant_id", applicantIdForHistory)
       .not("agent_stage", "is", null)
@@ -273,6 +274,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             status: string | null;
             closes_at: string | null;
             slot: string | null;
+            slot_keys: string[] | null;
             work_period: string | null;
             start_date: string | null;
             pay_info: string | null;
@@ -300,7 +302,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
         title: j.title,
         branch: j.branch ?? null,
         stage: (o.agent_stage as StageName) ?? "exploration",
-        slot: j.slot ?? null,
+        // 상세 시간이 없으면 고른 칩 라벨로 — 값이 있는데 '미기재'로 나가면 인계가 늘어난다.
+        slot: j.slot || slotKeysLabel(j.slot_keys) || null,
         work_period: j.work_period ?? null,
         start_date: j.start_date ?? null,
         pay_info: j.pay_info ?? null,

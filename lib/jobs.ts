@@ -63,3 +63,39 @@ export function describeDbConstraintError(err: { code?: string; message?: string
   if (code === "22001") return "입력한 값이 저장 가능한 길이를 넘었어요 — 짧게 줄여 주세요.";
   return "입력한 값 중 하나가 저장 규칙에 맞지 않아요 — 근무시간·인원·노출 설정을 확인해 주세요.";
 }
+
+/** 시간대 매칭용 4슬롯 어휘 — `jobs.slot_keys`의 유일한 값 집합(노출 규칙·조건 바와 같은 어휘). */
+export const JOB_SLOT_KEYS = ["평일오전", "평일오후", "주말오전", "주말오후"] as const;
+
+/**
+ * `slot_keys` 입력 정규화 — 4슬롯 어휘만 남기고 중복·순서를 고정한다.
+ * 반환: 정규화된 배열(빈 배열이면 null=미지정) / 어휘 밖 값이 섞였으면 **null이 아닌 undefined 대신
+ * `null`을 돌려주지 않고** 호출부가 400을 낼 수 있게 `null`을 '거부' 신호로 쓴다(아래 규약).
+ *
+ * 규약: 입력이 배열이 아니면 `undefined`(=건드리지 않음), 어휘 밖 값이 있으면 `null`(=거부),
+ * 정상이면 정규화 배열(빈 배열은 `[]`로 저장 — '미지정'을 명시적으로 비우는 동작).
+ */
+export function normalizeSlotKeys(input: unknown): string[] | null | undefined {
+  if (input === undefined) return undefined;
+  if (input === null) return [];
+  if (!Array.isArray(input)) return null;
+  const allowed = new Set<string>(JOB_SLOT_KEYS);
+  const out: string[] = [];
+  for (const v of input) {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    if (!allowed.has(t)) return null;
+    if (!out.includes(t)) out.push(t);
+  }
+  // 화면 순서(평일오전→평일오후→주말오전→주말오후)로 고정 — 표시·복제에서 순서가 흔들리지 않게.
+  return JOB_SLOT_KEYS.filter((k) => out.includes(k));
+}
+
+/** 칩 값 → 사람이 읽는 라벨('평일오전' → '평일 오전'). 상세 시간이 비었을 때 표시·AI 안내에 쓴다. */
+export function slotKeysLabel(keys: string[] | null | undefined): string {
+  const list = (keys ?? []).filter((k) => (JOB_SLOT_KEYS as readonly string[]).includes(k));
+  if (list.length === 0) return "";
+  return JOB_SLOT_KEYS.filter((k) => list.includes(k))
+    .map((k) => `${k.slice(0, 2)} ${k.slice(2)}`)
+    .join(", ");
+}
