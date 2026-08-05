@@ -326,7 +326,7 @@ function workSummary(f: EditJobForm): string {
 /** '더보기' 메뉴 라벨 — 실제로 들어가는 항목에서 파생한다(없는 항목을 툴팁이 약속하면 그 기능을 찾아 헤맨다). */
 function moreActionsLabel(job: { effectivelyClosed: boolean; recruitMode: RecruitMode }): string {
   const canAnnounce = !job.effectivelyClosed && job.recruitMode !== "external";
-  return [...(canAnnounce ? ["대기자에게 안내"] : []), "복제", job.effectivelyClosed ? "다시 열기" : "마감"].join(" · ");
+  return [...(canAnnounce ? ["대기자에게 안내"] : []), job.effectivelyClosed ? "다시 열기" : "마감"].join(" · ");
 }
 
 function bodySummary(f: EditJobForm): string {
@@ -990,10 +990,14 @@ export function Jobs() {
     setNewJobSosVehicle(null);
   };
 
-  // 등록 모달 닫기 — 작성 중(AI 초안 생성됨)이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
-  // 통째 사라지던 문제 방지. channelDrafts 유무를 '작업 있음' 프록시로 사용.
+  // 등록에 쓸 본문이 실제로 있나 — '직접 작성'으로 빈 편집칸만 열어둔 상태와 구분한다.
+  // (AI 초안 없이도 등록할 수 있게 하면서, 빈 공고가 등록되는 것은 계속 막는다.)
+  const draftBody = channelDrafts ? (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim() : "";
+
+  // 등록 모달 닫기 — 작성 중이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
+  // 통째 사라지던 문제 방지. 본문 유무를 '작업 있음' 프록시로 사용(빈 편집칸은 확인 없이 닫는다).
   const closeRegisterModal = async () => {
-    if (channelDrafts) {
+    if (draftBody) {
       const ok = await confirm({
         title: "작성 중인 내용을 버릴까요?",
         description: "생성한 AI 초안과 입력한 내용이 모두 사라져요. 등록하지 않고 닫으면 복구할 수 없어요.",
@@ -1009,10 +1013,10 @@ export function Jobs() {
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
   // 정기 라인 재모집 시 반복 입력을 없앤다. 등록은 기존 POST를 그대로 재사용.
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const duplicateJob = async (job: JobRow) => {
-    setDuplicatingId(job.id);
+  const duplicateJob = async (jobId: string) => {
+    setDuplicatingId(jobId);
     try {
-      const res = await fetch(`/api/admin/jobs/${job.id}`);
+      const res = await fetch(`/api/admin/jobs/${jobId}`);
       const json = await res.json();
       if (!res.ok) {
         toast.error(json.error || "공고를 불러오지 못했어요");
@@ -1084,10 +1088,11 @@ export function Jobs() {
   const handleRegisterJob = async () => {
     if (!channelDrafts || registering) return;
     // 등록 시 알바몬(정형) 본문을 공고 원문으로 저장 — AI 스크리닝이 참조하는 캐논 본문.
-    const body = (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim();
-    // '__' 예약 프리픽스로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보이므로 제거(서버도 400으로 방어).
-    const title = stripSystemPrefix((postingTitle || channelDrafts.albamon.split("\n")[0] || "새 공고").trim()).slice(0, 80) || "새 공고";
+    const body = draftBody;
     if (!body) return;
+    // '__' 예약 프리픽스로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보이므로 제거(서버도 400으로 방어).
+    // 제목 폴백은 **실제 저장되는 본문**의 첫 줄에서 뽑는다(알바몬 탭이 비고 당근 탭만 쓴 경우 대비).
+    const title = stripSystemPrefix((postingTitle || body.split("\n")[0] || "새 공고").trim()).slice(0, 80) || "새 공고";
     // 마감시각을 과거로 넣으면 등록 즉시 pull에서 '마감됨'으로 빠져 혼란 — 저장 전 경고.
     if (newJobClosesAt && new Date(newJobClosesAt).getTime() <= Date.now()) {
       toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
@@ -1163,7 +1168,20 @@ export function Jobs() {
           duration: 8000,
         });
       } else {
-        toast.success("새 공고가 등록되었어요.", geoNote ? { description: geoNote } : undefined);
+        // 배치 등록 동선 — 목록에서 카드를 찾아 복제하러 가는 왕복을 없앤다(권역만 다른 라인 6~7개가 기본).
+        const registeredId = typeof json.job?.id === "number" ? String(json.job.id) : null;
+        toast.success("새 공고가 등록되었어요.", {
+          ...(geoNote ? { description: geoNote } : {}),
+          ...(registeredId
+            ? {
+                action: {
+                  label: "복제해서 하나 더 →",
+                  onClick: () => void duplicateJob(registeredId),
+                },
+                duration: 10000,
+              }
+            : {}),
+        });
       }
       setAiModalOpen(false);
       resetNewJobForm();
@@ -1960,6 +1978,16 @@ export function Jobs() {
                   >
                     <Edit2 size={14} /> 수정
                   </button>
+                  {/* 복제를 카드 전면으로 — 권역만 다른 라인 여러 개를 만드는 것이 기본 사용법이라
+                      '더보기' 안에 두면 배치 등록마다 메뉴를 열어야 한다(사장님 지시 2026-08-05). */}
+                  <button
+                    onClick={() => void duplicateJob(job.id)}
+                    disabled={duplicatingId === job.id}
+                    className="flex items-center gap-1 px-2 py-2 whitespace-nowrap shrink-0 text-[12px] font-bold text-[#718096] hover:bg-[#E2E8F0] rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    title="이 공고를 복제해 새 공고 등록 — 제목·본문·노출 규칙이 프리필됩니다"
+                  >
+                    {duplicatingId === job.id ? <Loader2 size={14} className="animate-spin" /> : <CopyPlus size={14} />} 복제
+                  </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -1984,13 +2012,6 @@ export function Jobs() {
                           <Megaphone size={14} className="text-[#A0AEC0]" /> 대기자에게 안내
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onSelect={() => setTimeout(() => void duplicateJob(job), 0)}
-                        disabled={duplicatingId === job.id}
-                        className="text-[12.5px] font-semibold text-[#4A5568] gap-2"
-                      >
-                        <CopyPlus size={14} className="text-[#A0AEC0]" /> 이 공고 복제해서 새로 등록
-                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => setTimeout(() => void handleToggleClose(job), 0)}
                         disabled={statusBusyId === job.id}
@@ -2052,6 +2073,21 @@ export function Jobs() {
                   className="w-full bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3.5 text-[14px] text-[#1A202C] placeholder:text-[#A0AEC0] focus:outline-none focus:border-[#FFCB3C] min-h-[100px] resize-none"
                 />
                 <div className="flex justify-end mt-3">
+                  {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
+                      다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
+                  {!channelDrafts && !isGenerating && (
+                    <button
+                      onClick={() => {
+                        setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
+                        setChannelDraftsFromCopy(false);
+                        setActiveChannel("albamon");
+                      }}
+                      className="px-4 py-2.5 rounded-xl text-[13.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                      title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                    >
+                      직접 작성
+                    </button>
+                  )}
                   <button
                     onClick={handleGenerateJD}
                     disabled={isGenerating || !aiPrompt}
@@ -2080,7 +2116,7 @@ export function Jobs() {
                   )}
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-[13px] font-bold text-[#D69E2E] flex items-center gap-1.5">
-                      <Sparkles size={14} /> 채널별 공고 초안
+                      <Sparkles size={14} /> {draftBody ? "채널별 공고 초안" : "채널별 공고 본문 — 직접 작성"}
                       {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded">오프라인 템플릿</span>}
                     </label>
                     <span className="text-[11px] text-[#A0AEC0]">탭별로 수정·복사할 수 있어요</span>
@@ -2405,7 +2441,7 @@ export function Jobs() {
               </button>
               <button
                 onClick={handleRegisterJob}
-                disabled={!channelDrafts || registering}
+                disabled={!draftBody || registering}
                 className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-[#1A202C] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-2"
               >
                 {registering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
