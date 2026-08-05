@@ -517,6 +517,10 @@ export function Jobs() {
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  // 초안이 나온 뒤에는 프롬프트 카드를 한 줄로 접는다 — 이 카드(입력 100px + 버튼 + 힌트 ≈ 250px)가
+  // 모달(max-h 90vh) 상단을 차지해서, 초안 편집칸(260px)이 1280×720 기준 **70px만 보였다**.
+  // 실측: 초안 textarea box=(y=534, h=260) / 스크롤 영역 하단 ≈ 604 → "생성했는데 안 보인다"의 실제 원인.
+  const [promptOpen, setPromptOpen] = useState(true);
   const [postingTitle, setPostingTitle] = useState("");
   const [channelDrafts, setChannelDrafts] = useState<{ danggeun: string; albamon: string; sms: string } | null>(null);
   const [activeChannel, setActiveChannel] = useState<"danggeun" | "albamon" | "sms">("danggeun");
@@ -940,6 +944,7 @@ export function Jobs() {
         setNewJobExtraOpen(true);
       }
       setActiveChannel("danggeun");
+      setPromptOpen(false); // 초안이 화면 위쪽에 오게 — 조건 입력은 '조건 수정'으로 다시 펼친다
       setAiSource(json.source === "mock" ? "mock" : "ai");
       toast.success(json.source === "mock" ? "초안을 생성했어요 (오프라인 템플릿)." : "AI가 채널별 공고 초안을 완성했어요.");
     } catch {
@@ -961,6 +966,7 @@ export function Jobs() {
   // 등록 모달 입력 초기화 — 등록 성공·모달 닫기에서 공통 사용.
   const resetNewJobForm = () => {
     setAiPrompt("");
+    setPromptOpen(true);
     setChannelDrafts(null);
     setAiSource(null);
     setPostingTitle("");
@@ -1037,6 +1043,7 @@ export function Jobs() {
         sms: cb?.sms || body,
       });
       setActiveChannel("albamon");
+      setPromptOpen(false);
       setPostingTitle((j.title ?? "").slice(0, 80));
       setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
       setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
@@ -2063,42 +2070,65 @@ export function Jobs() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-[#F7FAFC]">
-              {/* Prompt Input */}
-              <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">어떤 포지션을 찾고 계신가요?</label>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="예: 스타벅스 성수점 매장 청소 및 테이블 관리, 주 3일 오전반, 시급 1.1만원, 60대 우대"
-                  className="w-full bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3.5 text-[14px] text-[#1A202C] placeholder:text-[#A0AEC0] focus:outline-none focus:border-[#FFCB3C] min-h-[100px] resize-none"
-                />
-                <div className="flex justify-end mt-3">
-                  {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
-                      다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
-                  {!channelDrafts && !isGenerating && (
+              {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
+              {promptOpen ? (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+                  <label className="block text-[13px] font-bold text-[#4A5568] mb-2">어떤 포지션을 찾고 계신가요?</label>
+                  <textarea
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="예: 스타벅스 성수점 매장 청소 및 테이블 관리, 주 3일 오전반, 시급 1.1만원, 60대 우대"
+                    className="w-full bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3.5 text-[14px] text-[#1A202C] placeholder:text-[#A0AEC0] focus:outline-none focus:border-[#FFCB3C] min-h-[100px] resize-none"
+                  />
+                  <div className="flex justify-end mt-3">
+                    {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
+                        다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
+                    {!channelDrafts && !isGenerating && (
+                      <button
+                        onClick={() => {
+                          setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
+                          setChannelDraftsFromCopy(false);
+                          setActiveChannel("albamon");
+                          setPromptOpen(false);
+                        }}
+                        className="px-4 py-2.5 rounded-xl text-[13.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                        title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                      >
+                        직접 작성
+                      </button>
+                    )}
                     <button
-                      onClick={() => {
-                        setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
-                        setChannelDraftsFromCopy(false);
-                        setActiveChannel("albamon");
-                      }}
-                      className="px-4 py-2.5 rounded-xl text-[13.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
-                      title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                      onClick={handleGenerateJD}
+                      disabled={isGenerating || !aiPrompt}
+                      className="flex items-center gap-1.5 px-5 py-2.5 bg-[#1A202C] text-white hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[13.5px] font-bold transition-colors"
                     >
-                      직접 작성
+                      {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-[#FFCB3C]" />}
+                      {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
                     </button>
-                  )}
+                  </div>
+                  <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">공고 설정</b>에서 화주사·지점을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
+                </div>
+
+              ) : (
+                /* 접힌 상태 — 초안 편집칸을 첫 화면에 올리려고 접는다. 조건은 언제든 다시 펼칠 수 있다. */
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl px-5 py-3.5 shadow-sm flex items-center gap-3">
+                  <Wand2 size={15} className="text-[#D69E2E] shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-bold text-[#4A5568]">
+                      {aiPrompt.trim() ? "AI 초안 생성 조건" : "본문을 직접 편집하는 중"}
+                    </div>
+                    <div className="text-[12.5px] text-[#718096] truncate">
+                      {aiPrompt.trim() || "조건을 입력하면 AI가 채널별 초안을 다시 써줍니다"}
+                    </div>
+                  </div>
                   <button
-                    onClick={handleGenerateJD}
-                    disabled={isGenerating || !aiPrompt}
-                    className="flex items-center gap-1.5 px-5 py-2.5 bg-[#1A202C] text-white hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[13.5px] font-bold transition-colors"
+                    onClick={() => setPromptOpen(true)}
+                    className="shrink-0 px-3.5 py-2 rounded-xl text-[12.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F1F4F8] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
                   >
-                    {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} className="text-[#FFCB3C]" />}
-                    {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
+                    조건 수정 · 다시 생성
                   </button>
                 </div>
-                <p className="text-[11.5px] text-[#A0AEC0] mt-2 leading-relaxed">💡 아래 <b className="text-[#718096]">공고 설정</b>에서 화주사·지점을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
-              </div>
+              )}
 
               {/* ⚠️ 초안·제목은 **생성 버튼 바로 아래**에 둔다. 예전엔 '공고 설정' 폼(모집방식·화주사·정원·
                   근무시간·노출까지 약 160줄) 아래에 있어서, 버튼을 눌러도 로딩 표시와 완성된 초안이 모두
