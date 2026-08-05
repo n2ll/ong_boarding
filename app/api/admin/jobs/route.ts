@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { DANGGEUN_SYSTEM_JOB_TITLE } from "@/lib/agent/danggeun-job";
-import { isSystemJobTitle, isJobEffectivelyClosed } from "@/lib/jobs";
+import { isSystemJobTitle, isJobEffectivelyClosed, describeDbConstraintError, normalizeSlotKeys } from "@/lib/jobs";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule, distance_basis")
+    .select("id, title, body, branch, branch_id, client_id, slot, slot_keys, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule, distance_basis")
     .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
     .order("created_at", { ascending: false });
 
@@ -132,6 +132,7 @@ export async function POST(req: NextRequest) {
     branch_id,
     client_id,
     slot,
+    slot_keys,
     start_date,
     vehicle_required,
     pickup_address,
@@ -162,6 +163,7 @@ export async function POST(req: NextRequest) {
     branch_id?: number | null;
     client_id?: number | null;
     slot?: string | null;
+    slot_keys?: string[] | null;
     start_date?: string | null;
     vehicle_required?: boolean;
     pickup_address?: string | null;
@@ -204,6 +206,11 @@ export async function POST(req: NextRequest) {
   // 비마트/배민은 UI select가 4-슬롯을 제약. 서버 enum은 internal 등록을 막던 막다른 길이었음.
   if (typeof slot === "string" && slot.length > 80) {
     return NextResponse.json({ error: "근무시간이 너무 깁니다(최대 80자)." }, { status: 400 });
+  }
+  // slot_keys(시간대 매칭용 칩 값) — 4슬롯 어휘만. 사람이 읽는 slot과 별개 필드다.
+  const normalizedSlotKeys = normalizeSlotKeys(slot_keys);
+  if (normalizedSlotKeys === null) {
+    return NextResponse.json({ error: "시간대 값이 잘못되었습니다 — 평일/주말 × 오전/오후 중에서 고르세요." }, { status: 400 });
   }
   if (recruit_mode && !RECRUIT_MODES.has(recruit_mode)) {
     return NextResponse.json({ error: "recruit_mode 값이 잘못되었습니다." }, { status: 400 });
@@ -288,6 +295,7 @@ export async function POST(req: NextRequest) {
       branch_id: typeof branch_id === "number" ? branch_id : null,
       client_id: resolvedClientId,
       slot: slot ?? null,
+      slot_keys: normalizedSlotKeys ?? null,
       start_date: start_date ?? null,
       vehicle_required: vehicle_required ?? true,
       pickup_address: pickup_address ?? null,
@@ -321,6 +329,9 @@ export async function POST(req: NextRequest) {
 
   if (error || !data) {
     console.error("[jobs POST]", error);
+    // 제약 위반은 사용자 입력 문제다 — 어느 칸이 문제인지 이름으로 돌려준다(500 침묵 금지).
+    const readable = describeDbConstraintError(error);
+    if (readable) return NextResponse.json({ error: readable }, { status: 400 });
     return NextResponse.json({ error: "공고 생성 실패" }, { status: 500 });
   }
 

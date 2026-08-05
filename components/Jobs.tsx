@@ -111,6 +111,67 @@ const SLOT_KEYS = [
   { key: "주말오후", label: "주말 오후" },
 ];
 
+/**
+ * 근무 시간대 입력 — **칩(멀티선택) + 상세 시간(자유 텍스트)**.
+ *
+ * 왜 둘로 나누나: 예전엔 `jobs.slot` 한 칸이 '사람이 읽는 문장'과 '기계가 맞추는 값'을 겸해서,
+ * 매칭을 하려면 문장을 파싱해야 했다. 그 파싱이 두 번 오판했다 —
+ * `평일 오전~오후`에서 앞만 읽어 **오후도 되는 공고를 오후 가능한 분에게 접었고**(M4 게이트),
+ * 제목의 시간대 낱말이 **답장 라우팅 근거로 샜다**(M6 게이트). 매니저에게 '평일오전, 평일오후'처럼
+ * 기계용 토큰을 대신 적으라고 요구하던 것도 그 때문이다(2026-08-05 철회).
+ * 칩 = 매칭용(`slot_keys`) · 상세 = 표시·AI 안내용(`slot`). 노출 규칙·조건 바와 어휘가 같다.
+ */
+function SlotKeysField({
+  keys,
+  onToggleKey,
+  detail,
+  onDetailChange,
+}: {
+  keys: string[];
+  /** 칩 하나를 뒤집는다 — 부모가 **함수형 갱신**으로 처리한다.
+   *  다음 배열을 여기서 만들어 넘기면, 빠르게 두 개를 연달아 누를 때 두 번째 클릭이 낡은 배열을
+   *  덮어써서 첫 선택이 사라진다(리허설에서 실제로 재현: 평일오전+평일오후 → {평일오후}만 저장). */
+  onToggleKey: (key: string) => void;
+  detail: string;
+  onDetailChange: (next: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">
+        근무 시간대 <span className="text-[#A0AEC0] font-semibold">— 고른 시간대로 맞는 분을 찾아요</span>
+      </label>
+      <div className="flex gap-1.5 flex-wrap">
+        {SLOT_KEYS.map((s) => {
+          const on = keys.includes(s.key);
+          return (
+            <button
+              key={s.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onToggleKey(s.key)}
+              className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${
+                on ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#718096] hover:bg-[#EDF2F7]"
+              }`}
+            >
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+      <input
+        value={detail}
+        onChange={(e) => onDetailChange(e.target.value)}
+        placeholder="상세 시간(선택) — 예: 월~금 07:00~12:00"
+        className="mt-2 w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+      />
+      <p className="text-[11px] text-[#A0AEC0] mt-1 leading-relaxed">
+        상세 시간은 지원자 카드에 그대로 보이고 AI 안내에 쓰여요. <b className="text-[#718096]">맞는 분 찾기는 위 칩</b>으로만 합니다 —
+        칩을 비워두면 시간대로 걸러내지 않습니다.
+      </p>
+    </div>
+  );
+}
+
 // 단계 그룹 표시 순서 — 'interest'는 agent_stage NULL(관심 표시·AI 응대 시작 전)의 가상 키.
 // 관심자가 'AI 탐색 중'으로 오표기되지 않게 exploration과 분리해 최상단에 둔다.
 const STAGE_ORDER = ["interest", "exploration", "screening", "onboarding", "active", "paused", "abort"];
@@ -277,6 +338,7 @@ interface EditJobForm {
   workPeriod: string;
   closesAt: string;
   slot: string;
+  slotKeys: string[];
   startDate: string;
   pickupAddress: string;
   dropoffAddress: string;
@@ -550,6 +612,8 @@ export function Jobs() {
   const [newJobClosesAt, setNewJobClosesAt] = useState("");
   // 근무 상세 — pull(/p/[token]) 카드가 표시하는 필드. slot은 컨벤션상 4개 enum(평일오전 등), start_date는 date, pickup_address는 text.
   const [newJobSlot, setNewJobSlot] = useState("");
+  // 시간대 매칭용 칩 값(4슬롯) — 사람이 읽는 newJobSlot(상세 시간)과 분리.
+  const [newJobSlotKeys, setNewJobSlotKeys] = useState<string[]>([]);
   const [newJobStartDate, setNewJobStartDate] = useState("");
   const [newJobPickupAddress, setNewJobPickupAddress] = useState("");
   // 마지막 경유지(배송 종료 지점) — 상차지와 함께 후보↔공고 거리 정렬(가까운 쪽 기준)에 쓰인다.
@@ -982,6 +1046,7 @@ export function Jobs() {
     setNewJobPeriod("");
     setNewJobClosesAt("");
     setNewJobSlot("");
+    setNewJobSlotKeys([]);
     setNewJobStartDate("");
     setNewJobPickupAddress("");
     setNewJobDropoffAddress("");
@@ -1073,6 +1138,7 @@ export function Jobs() {
       setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");
       setNewJobPeriod(j.work_period ?? "");
       setNewJobSlot(j.slot ?? "");
+      setNewJobSlotKeys(Array.isArray(j.slot_keys) ? j.slot_keys.filter((k: unknown): k is string => typeof k === "string") : []);
       // 시작일은 복제하지 않는다 — 원본의 지난 날짜가 그대로 실려 지원자 화면과 만남장소 문자('일시')에 나간다.
       // 마감시각을 복제하지 않는 것과 같은 이유(라인별로 다시 정해야 하는 값).
       setNewJobStartDate("");
@@ -1147,6 +1213,7 @@ export function Jobs() {
           policy_notes: newJobPolicyNotes.trim() || null,
           ai_facts: newJobAiFacts.trim() || null,
           slot: newJobSlot || null,
+          slot_keys: newJobSlotKeys,
           start_date: newJobStartDate || null,
           pickup_address: newJobPickupAddress.trim() || null,
           dropoff_address: newJobDropoffAddress.trim() || null,
@@ -1235,7 +1302,7 @@ export function Jobs() {
 
   const openEdit = useCallback(async (id: string) => {
     setEditDroppedBranch(null);
-    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", startDate: "", pickupAddress: "", dropoffAddress: "", distanceBasis: DEFAULT_DISTANCE_BASIS, exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
+    setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", slotKeys: [], startDate: "", pickupAddress: "", dropoffAddress: "", distanceBasis: DEFAULT_DISTANCE_BASIS, exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
@@ -1265,6 +1332,7 @@ export function Jobs() {
         workPeriod: j.work_period ?? "",
         closesAt: isoToLocalInput(j.closes_at ?? null),
         slot: j.slot ?? "",
+        slotKeys: Array.isArray(j.slot_keys) ? j.slot_keys.filter((k: unknown): k is string => typeof k === "string") : [],
         startDate: j.start_date ?? "",
         pickupAddress: j.pickup_address ?? "",
         dropoffAddress: j.dropoff_address ?? "",
@@ -1404,6 +1472,7 @@ export function Jobs() {
           work_period: editForm.workPeriod || null,
           closes_at: editForm.closesAt ? new Date(editForm.closesAt).toISOString() : null,
           slot: editForm.slot || null,
+          slot_keys: editForm.slotKeys,
           start_date: editForm.startDate || null,
           pickup_address: editForm.pickupAddress.trim() || null,
           dropoff_address: editForm.dropoffAddress.trim() || null,
@@ -2384,27 +2453,14 @@ export function Jobs() {
                   {newJobExtraOpen && (
                     <div className="px-5 pb-5 flex flex-col gap-4 border-t border-[#F1F4F8] pt-4">
                       <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">근무시간</label>
-                          {/* 4-슬롯(평일오전 등)은 비마트 배차 전용. internal 정기배송 라인은 자유 텍스트로 입력. */}
-                          {newJobMode === "internal" ? (
-                            <input
-                              value={newJobSlot}
-                              onChange={(e) => setNewJobSlot(e.target.value)}
-                              placeholder="예: 월~토 오전 7시~"
-                              className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
-                            />
-                          ) : (
-                            <select
-                              value={newJobSlot}
-                              onChange={(e) => setNewJobSlot(e.target.value)}
-                              className="w-full px-3.5 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
-                            >
-                              <option value="">미지정</option>
-                              {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                            </select>
-                          )}
-                        </div>
+                        <SlotKeysField
+                          keys={newJobSlotKeys}
+                          onToggleKey={(key) =>
+                            setNewJobSlotKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+                          }
+                          detail={newJobSlot}
+                          onDetailChange={setNewJobSlot}
+                        />
                         <div>
                           <label className="block text-[12.5px] font-bold text-[#4A5568] mb-1.5">시작일</label>
                           <input
@@ -2679,20 +2735,23 @@ export function Jobs() {
                 >
                     <>
                       <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[13px] font-bold text-[#4A5568] mb-2">근무시간</label>
-                          {/* internal 정기배송 라인은 4-슬롯 대신 자유 텍스트 근무시간. */}
-                          {editForm.recruitMode === "internal" ? (
-                            <input value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} placeholder="예: 월~토 오전 7시~" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
-                          ) : (
-                            <select value={editForm.slot} onChange={(e) => setEditForm({ ...editForm, slot: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
-                              <option value="">미지정</option>
-                              {/* 모집 방식을 바꾸면 컨트롤이 4-슬롯 select로 변한다 — 저장돼 있던 자유텍스트가 빈 칸으로 보이지 않게 그 값도 옵션으로 남긴다(저장값은 그대로 유지). */}
-                              {editForm.slot && !SLOT_KEYS.some((s) => s.key === editForm.slot) && <option value={editForm.slot}>{editForm.slot} (직접 입력한 값)</option>}
-                              {SLOT_KEYS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                            </select>
-                          )}
-                        </div>
+                        <SlotKeysField
+                          keys={editForm.slotKeys}
+                          onToggleKey={(key) =>
+                            setEditForm((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    slotKeys: prev.slotKeys.includes(key)
+                                      ? prev.slotKeys.filter((k) => k !== key)
+                                      : [...prev.slotKeys, key],
+                                  }
+                                : prev
+                            )
+                          }
+                          detail={editForm.slot}
+                          onDetailChange={(next) => setEditForm((prev) => (prev ? { ...prev, slot: next } : prev))}
+                        />
                         <div>
                           <label className="block text-[13px] font-bold text-[#4A5568] mb-2">시작일</label>
                           <input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />

@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { describeDbConstraintError, normalizeSlotKeys } from "@/lib/jobs";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
@@ -17,6 +18,8 @@ const ALLOWED_PATCH_FIELDS = new Set([
   // 화주사 — 잘못 귀속된 공고를 수정 모달에서 바로잡을 수 있게(예전엔 허용 목록에 없어 조용히 무시됐다).
   "client_id",
   "slot",
+  // 시간대 매칭용 칩 값(4슬롯 배열) — 사람이 읽는 slot과 분리. 서버가 어휘를 검증한다.
+  "slot_keys",
   "start_date",
   "vehicle_required",
   "pickup_address",
@@ -96,6 +99,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
   if ("client_id" in update && update.client_id !== null && typeof update.client_id !== "number") {
     return NextResponse.json({ error: "client_id 값이 잘못되었습니다." }, { status: 400 });
+  }
+  // 시간대 매칭용 칩 값 — 등록(POST)과 **같은 함수**로 어휘를 검증·정규화한다.
+  if ("slot_keys" in update) {
+    const normalized = normalizeSlotKeys(update.slot_keys);
+    if (normalized === null) {
+      return NextResponse.json({ error: "시간대 값이 잘못되었습니다 — 평일/주말 × 오전/오후 중에서 고르세요." }, { status: 400 });
+    }
+    update.slot_keys = normalized ?? null;
   }
   if (
     typeof update.status === "string" &&
@@ -345,6 +356,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (error || !data) {
     console.error("[jobs PATCH]", error);
+    const readable = describeDbConstraintError(error);
+    if (readable) return NextResponse.json({ error: readable }, { status: 400 });
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
   }
 
