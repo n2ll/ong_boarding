@@ -93,6 +93,20 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
   const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.job_id === jobFilter);
   const count = items.length;
   const immediateCount = items.filter((it) => it.immediate).length;
+  // **한 사람 = 한 카드** — 공고를 여러 개 동시에 열면 한 분이 여러 공고에 관심을 누르는 것이 기본이 된다.
+  // 예전엔 그만큼 줄이 생겨서 매니저가 같은 이름을 N번 처리하고, 지원자는 거의 같은 문자를 N통 받았다.
+  // 사람으로 묶고 그 안에서 공고별 줄로 나눈다(사람 확인 필요 큐와 같은 방식).
+  // ⚠️ 위 count는 그대로 '건수'다 — 대시보드 배지·헤더 숫자와 어긋나면 안 된다(카드 수 ≠ 건수).
+  // Map은 삽입 순서를 유지하므로 서버 정렬(최근 관심 순)이 보존된다.
+  const groups = useMemo(() => {
+    const byApplicant = new Map<number, QueueItem[]>();
+    for (const it of items) {
+      const arr = byApplicant.get(it.applicant_id);
+      if (arr) arr.push(it);
+      else byApplicant.set(it.applicant_id, [it]);
+    }
+    return Array.from(byApplicant.values());
+  }, [items]);
 
   // '관심 표시 상대시각'이 화면에 머무는 동안 갱신되도록 1분 틱 (SosLedgerCard 경과 라벨과 동일 패턴)
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -245,77 +259,94 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
         <div className="py-4 text-center text-[13px] text-[#A0AEC0]">처리 대기 중인 관심 표시가 없어요. 다시 연락 문자를 받은 후보가 맞춤 공고 링크에서 관심을 누르면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
-          {items.map((it) => {
-            const badge = availabilityBadge(it.availability, it.immediate);
-            const busy = busyId === it.candidate_id;
-            const optOut = !!it.sms_opt_out_at;
+          {groups.map((rows) => {
+            const head = rows[0];
+            const multi = rows.length > 1;
+            const badge = availabilityBadge(head.availability, rows.some((r) => r.immediate));
+            const optOut = !!head.sms_opt_out_at;
             return (
               <div
-                key={it.candidate_id}
-                className={`flex items-center gap-3 p-3 border rounded-xl ${it.immediate ? "border-[#9AE6B4] bg-[#F0FFF4]" : "border-[#E2E8F0] bg-white"}`}
+                key={head.applicant_id}
+                className={`border rounded-xl ${rows.some((r) => r.immediate) ? "border-[#9AE6B4] bg-[#F0FFF4]" : "border-[#E2E8F0] bg-white"}`}
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[13px] font-bold text-[#1A202C]">{it.name || "이름 미상"}</span>
-                    {it.immediate && (
-                      <span className="flex items-center gap-0.5 text-[10.5px] font-bold text-[#276749]">
-                        <Zap size={11} /> 바로 가능
-                      </span>
-                    )}
-                    <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
-                    {optOut && (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]">수신거부</span>
-                    )}
-                  </div>
-                  <div className="text-[11.5px] text-[#718096] truncate mt-0.5">
-                    <span className="font-semibold text-[#4A5568]">{it.job_title}</span>
-                    <span className="text-[#CBD5E0]"> · </span>
-                    관심 {agoLabel(it.interested_at, nowTick)}
-                    {it.phone && (
-                      <>
-                        <span className="text-[#CBD5E0]"> · </span>
-                        <a
-                          href={`tel:${it.phone}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-0.5 text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
-                        >
-                          <Phone size={11} /> {it.phone}
-                        </a>
-                      </>
-                    )}
-                  </div>
+                {/* 사람 머리글 — 이름·가용성·연락처는 한 번만. 공고가 여러 건이면 그 사실을 눈에 띄게 알린다. */}
+                <div className="flex items-center gap-2 flex-wrap px-3 pt-3 pb-1.5">
+                  <span className="text-[13px] font-bold text-[#1A202C]">{head.name || "이름 미상"}</span>
+                  {rows.some((r) => r.immediate) && (
+                    <span className="flex items-center gap-0.5 text-[10.5px] font-bold text-[#276749]">
+                      <Zap size={11} /> 바로 가능
+                    </span>
+                  )}
+                  <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
+                  {optOut && (
+                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]">수신거부</span>
+                  )}
+                  {multi && (
+                    <span
+                      className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-[#FFF5F5] text-[#C53030]"
+                      title="이 한 분이 여러 공고에 관심을 눌렀어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
+                    >
+                      공고 {rows.length}건
+                    </span>
+                  )}
+                  {head.phone && (
+                    <a
+                      href={`tel:${head.phone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                    >
+                      <Phone size={11} /> {head.phone}
+                    </a>
+                  )}
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => setDetailId(head.applicant_id)}
+                    className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                  >
+                    <ExternalLink size={13} /> 상세
+                  </button>
                 </div>
-
-                <button
-                  onClick={() => setDetailId(it.applicant_id)}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
-                >
-                  <ExternalLink size={13} /> 상세
-                </button>
-                <button
-                  onClick={() => openQuick(it)}
-                  disabled={busy || !it.phone}
-                  title={it.phone ? "공고 맥락 문자를 보내고 컨택 완료로 처리" : "전화번호가 없어 문자 발송 불가"}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
-                >
-                  <Send size={13} /> 빠른 컨택
-                </button>
-                <button
-                  onClick={() => handleAction(it.candidate_id, "contacted")}
-                  disabled={busy}
-                  title="문자 발송 없이 처리 (직접 전화 등으로 이미 연락한 경우)"
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
-                >
-                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} 발송 없이 처리
-                </button>
-                <button
-                  onClick={() => handleAction(it.candidate_id, "dismiss")}
-                  disabled={busy}
-                  title="보류"
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] hover:text-[#E53E3E] px-2.5 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E53E3E]/40"
-                >
-                  <XCircle size={13} /> 보류
-                </button>
+                {multi && (
+                  <p className="px-3 pb-1 text-[11px] font-semibold text-[#C53030] leading-snug">
+                    같은 분이에요 — 문자를 공고마다 보내면 거의 같은 내용을 {rows.length}통 받게 됩니다. 한 건만 보내고 나머지는 [컨택 완료]로 처리하세요.
+                  </p>
+                )}
+                {rows.map((it) => {
+                  const busy = busyId === it.candidate_id;
+                  return (
+                    <div key={it.candidate_id} className="flex items-center gap-2 mx-2 mb-2 px-2.5 py-2 rounded-lg border border-[#EDF2F7] bg-white flex-wrap">
+                      <div className="flex-1 min-w-0 text-[11.5px] text-[#718096] truncate">
+                        <span className="font-semibold text-[#4A5568]">{it.job_title}</span>
+                        <span className="text-[#CBD5E0]"> · </span>
+                        관심 {agoLabel(it.interested_at, nowTick)}
+                      </div>
+                      <button
+                        onClick={() => openQuick(it)}
+                        disabled={busy || !it.phone}
+                        title={it.phone ? "공고 맥락 문자를 보내고 컨택 완료로 처리" : "전화번호가 없어 문자 발송 불가"}
+                        className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                      >
+                        <Send size={13} /> 빠른 컨택
+                      </button>
+                      <button
+                        onClick={() => handleAction(it.candidate_id, "contacted")}
+                        disabled={busy}
+                        title="문자 발송 없이 처리 (직접 전화 등으로 이미 연락한 경우)"
+                        className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                      >
+                        {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} 컨택 완료
+                      </button>
+                      <button
+                        onClick={() => handleAction(it.candidate_id, "dismiss")}
+                        disabled={busy}
+                        title="보류"
+                        className="flex items-center gap-1 text-[11.5px] font-bold text-[#718096] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] hover:text-[#E53E3E] px-2.5 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E53E3E]/40"
+                      >
+                        <XCircle size={13} /> 보류
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}

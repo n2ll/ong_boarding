@@ -562,6 +562,10 @@ export function Pipeline() {
   // Modals state
   const confirm = useConfirm();
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
+  // **발송 실패 명단** — 예전엔 "실패 N명"이 토스트로 4초 뜨고 사라져, 누가·왜 실패했는지 실무자가
+  // 확인할 방법이 없었다(서버 로그를 열어야 했다). 565명 발송이 15~28분 걸리는데 그 정보가
+  // 발송 순간에 사라지므로 나중에 만들 수 없다. 모달에 남기고 '실패한 N명만 다시 보내기'를 준다.
+  const [bulkFailures, setBulkFailures] = useState<{ applicantId: number; name: string; phone: string; error: string }[]>([]);
   const [bulkStageModalOpen, setBulkStageModalOpen] = useState(false);
   const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
   const [bulkSending, setBulkSending] = useState(false);
@@ -1192,6 +1196,7 @@ export function Pipeline() {
     if (column.cards.length === 0) return toast.error("이 단계에 지원자가 없어요.");
     setSelectedRows(new Set(column.cards.map((c) => c.id)));
     setWaitlistJobId(null);
+    setBulkFailures([]);
     setBulkMsgModalOpen(true);
   };
 
@@ -1369,6 +1374,8 @@ export function Pipeline() {
       phone: c.phone as string,
       applicant_id: Number(c.id),
     }));
+    // 실패 명단에 이름을 붙이기 위한 조회표(전화번호 → 이름) — 서버 결과는 phone만 돌려준다.
+    const nameByPhone = new Map<string, string>(selected.map((c) => [String(c.phone), c.name]));
     if (recipients.length === 0) return toast.error("발송 가능한 연락처가 없어요.");
 
     // 대기 안내 프리셋이면 purpose='waitlist'(+ 공고 관심자 선택으로 고른 공고 id)를 실어 발송 이력을 남긴다.
@@ -1388,6 +1395,7 @@ export function Pipeline() {
     try {
       let sent = 0;
       const failErrors: string[] = [];
+      const failedRows: { applicantId: number; name: string; phone: string; error: string }[] = [];
       // 청크 실패 집계 — 실패한 청크 대상 인원 수(chunkFailed)로 부분 발송을 가시화.
       let chunkFailed = 0;
       let chunkErrorMsg: string | null = null;
@@ -1412,17 +1420,42 @@ export function Pipeline() {
         } catch {
           chunkFailed += chunk.length;
           chunkErrorMsg = chunkErrorMsg ?? "네트워크 오류";
+          for (const c of chunk) {
+            failedRows.push({
+              applicantId: c.applicant_id,
+              name: nameByPhone.get(String(c.phone)) || "이름 미상",
+              phone: String(c.phone),
+              error: "미시도 — 네트워크 오류",
+            });
+          }
           continue;
         }
         const json = await res.json().catch(() => null);
         if (!res.ok) {
           chunkFailed += chunk.length;
-          chunkErrorMsg = chunkErrorMsg ?? (json?.error || "발송 실패");
+          const why = json?.error || "발송 실패";
+          chunkErrorMsg = chunkErrorMsg ?? why;
+          for (const c of chunk) {
+            failedRows.push({
+              applicantId: c.applicant_id,
+              name: nameByPhone.get(String(c.phone)) || "이름 미상",
+              phone: String(c.phone),
+              error: `미시도 — ${why}`,
+            });
+          }
           continue;
         }
         sent += json.sent ?? 0;
-        for (const r of (json.results ?? []) as Array<{ success: boolean; error?: string }>) {
-          if (!r.success) failErrors.push(r.error ?? "");
+        for (const r of (json.results ?? []) as Array<{ success: boolean; error?: string; phone?: string; applicant_id?: number }>) {
+          if (r.success) continue;
+          failErrors.push(r.error ?? "");
+          const phone = String(r.phone ?? "");
+          failedRows.push({
+            applicantId: typeof r.applicant_id === "number" ? r.applicant_id : 0,
+            name: nameByPhone.get(phone) || "이름 미상",
+            phone,
+            error: r.error ?? "사유 미기록",
+          });
         }
       }
       // 서버 results[].error 집계 — 수신거부/인력풀 제외/중복/링크토큰 없음은 '실패'가 아니라 의도된 제외로 구분 표기
@@ -1453,9 +1486,11 @@ export function Pipeline() {
           });
         }
       }
-      // 청크 실패가 있으면 모달을 열어두고 선택 유지 — 재시도 판단을 매니저에게 남긴다
-      // (서버 10분 중복 가드가 이미 나간 인원의 재발송을 막음).
-      if (chunkFailed > 0) return;
+      // 실패·미시도가 하나라도 있으면 **명단을 모달에 남기고 창을 닫지 않는다.**
+      // 예전엔 전량 실패 시 창이 닫히며 골라둔 명단까지 초기화됐다(가장 있을 법한 대량 실패가
+      // 문자 잔액 부족인데, 그때 누구에게 안 갔는지 복구할 방법이 없었다).
+      setBulkFailures(failedRows);
+      if (failedRows.length > 0) return;
       setBulkMsgModalOpen(false);
       setSelectedRows(new Set());
       setWaitlistJobId(null);
@@ -2546,6 +2581,36 @@ export function Pipeline() {
               })()}
               <div className="flex gap-2">
                 <button onClick={() => setBulkMsgModalOpen(false)} className="px-5 py-2.5 rounded-xl text-[14px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0]">취소</button>
+                {/* **발송 실패 명단** — 창을 닫기 전까지 남는다. 사유가 사람마다 다르므로 그대로 보여준다. */}
+                {bulkFailures.length > 0 && (
+                  <div className="w-full mb-3 rounded-xl border border-[#FEB2B2] bg-[#FFF5F5] p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="text-[12.5px] font-bold text-[#C53030]">
+                        못 보낸 {bulkFailures.length}명 — 사유를 확인하고 필요하면 다시 보내세요
+                      </div>
+                      <button
+                        onClick={() => {
+                          // 실패한 사람만 선택으로 되돌린다 — 서버 10분 중복 가드가 이미 나간 인원의 재발송을 막는다.
+                          setSelectedRows(new Set(bulkFailures.map((f) => String(f.applicantId)).filter((v) => v !== "0")));
+                          setBulkFailures([]);
+                          toast.info(`실패한 ${bulkFailures.length}명만 선택했어요 — 문구를 확인하고 다시 발송하세요.`);
+                        }}
+                        className="shrink-0 px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-white border border-[#FEB2B2] text-[#C53030] hover:bg-[#FFF5F5]"
+                      >
+                        이 {bulkFailures.length}명만 다시 보내기
+                      </button>
+                    </div>
+                    <div className="max-h-[140px] overflow-y-auto flex flex-col gap-0.5">
+                      {bulkFailures.map((f, i) => (
+                        <div key={`${f.phone}-${i}`} className="text-[11.5px] text-[#742A2A] flex items-center gap-2">
+                          <span className="font-bold shrink-0">{f.name}</span>
+                          <span className="text-[#A0AEC0] shrink-0">{f.phone}</span>
+                          <span className="truncate">{f.error}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <button onClick={handleBulkSend} disabled={bulkSending} className="px-6 py-2.5 rounded-xl text-[14px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
                   {bulkSending ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
                   {bulkSending ? "발송 중..." : "캠페인 발송"}

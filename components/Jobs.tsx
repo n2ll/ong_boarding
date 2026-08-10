@@ -260,6 +260,8 @@ interface AnnounceTargetsRes {
   exposure?: "all" | "targeted";
   /** 노출 명단 때문에 빠진 수 — promised는 그중 '먼저 안내 약속'·선탑 완료자(약속을 어기는 쪽). */
   dropped_by_exposure?: { total: number; promised: number };
+  dropped_by_fatigue?: { total: number; promised: number };
+  fatigue_days?: number;
 }
 
 // 추천순 정렬의 가용성 우선순위 — 즉시가능 > 이번주가능 > 그 외(휴면·미입력).
@@ -1268,6 +1270,17 @@ export function Jobs() {
           const at = await fetchAnnounceTargets(newJobId);
           if (at.targets.length > 0) {
             setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
+          } else if ((at.dropped_by_fatigue?.total ?? 0) > 0) {
+            // **두 번째 공고부터의 침묵을 없앤다** — 대상 0명의 이유가 '이력 없음'이 아니라
+            // '최근 N일 안에 다른 공고 안내를 이미 받음'이다. 그분들 맞춤 링크에는 이 공고도 함께 보인다.
+            const f = at.dropped_by_fatigue!;
+            toast.info("따로 안내 문자를 보낼 대상은 없어요", {
+              description:
+                `최근 ${at.fatigue_days ?? 7}일 안에 다른 공고 안내를 이미 받은 ${f.total}명이 있어 이번엔 빠졌어요` +
+                `${f.promised > 0 ? `(그중 ${f.promised}명은 '먼저 안내드릴게요' 약속)` : ""}. ` +
+                `문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`,
+              duration: 9000,
+            });
           } else if ((at.dropped_by_exposure?.total ?? 0) > 0) {
             // 대상 0명이 '이력이 없어서'가 아니라 '노출 명단이 좁아서'인 경우 — 등록 경로에서도 침묵하지 않는다.
             toast.info("안내할 대기자가 없어요", {
@@ -1666,13 +1679,18 @@ export function Jobs() {
     try {
       const at = await fetchAnnounceTargets(Number(job.id));
       const dropped = at.dropped_by_exposure?.total ?? 0;
+      const fatigued = at.dropped_by_fatigue?.total ?? 0;
       if (at.targets.length === 0) {
         toast.info("안내할 대기자가 없어요", {
           // 0명의 이유가 '이력 없음'이 아니라 '노출 명단이 좁아서'일 수 있다 — 원인을 바꿔 말하지 않는다.
           description:
-            dropped > 0
-              ? `이 공고는 지정 노출이라 노출 명단 밖 ${dropped}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`
-              : "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
+            fatigued > 0
+              ? `최근 ${at.fatigue_days ?? 7}일 안에 다른 공고 안내를 이미 받은 ${fatigued}명이 있어 이번엔 빠졌어요` +
+                `${(at.dropped_by_fatigue?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_fatigue?.promised}명은 '먼저 안내드릴게요' 약속)` : ""}. ` +
+                `문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`
+              : dropped > 0
+                ? `이 공고는 지정 노출이라 노출 명단 밖 ${dropped}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`
+                : "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
         });
         return;
       }
