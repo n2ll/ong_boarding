@@ -18,6 +18,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { slotKeysLabel, jobPayLabel } from "@/lib/jobs";
+import { coarseArea } from "@/lib/geo";
 import { createServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +34,7 @@ export async function GET() {
     .from("job_candidates")
     .select(
       "id, job_id, applicant_id, " +
-        "jobs!inner(id, title), " +
+        "jobs!inner(id, title, slot, slot_keys, pay_info, pay_type, pay_amount, pickup_address, vehicle_required), " +
         "applicants!inner(id, name, phone, availability, sms_opt_out_at, status)"
     )
     .is("agent_stage", null)
@@ -47,7 +49,17 @@ export async function GET() {
     id: number;
     job_id: number;
     applicant_id: number;
-    jobs: { id: number; title: string | null } | null;
+    jobs: {
+      id: number;
+      title: string | null;
+      slot: string | null;
+      slot_keys: string[] | null;
+      pay_info: string | null;
+      pay_type: string | null;
+      pay_amount: number | null;
+      pickup_address: string | null;
+      vehicle_required: boolean | null;
+    } | null;
     applicants: {
       id: number;
       name: string | null;
@@ -107,6 +119,12 @@ export async function GET() {
       sms_opt_out_at: c.applicants?.sms_opt_out_at ?? null,
       job_id: c.job_id,
       job_title: c.jobs?.title ?? "",
+      // 빠른 컨택 문구에 실을 공고 값 — 지원자가 조건을 보고 스스로 판단하게 해서 헛대화를 줄인다.
+      // 근무시간은 사람이 읽는 상세(slot)가 있으면 그것, 없으면 고른 칩 라벨(slot_keys).
+      job_slot: (c.jobs?.slot ?? "").trim() || slotKeysLabel(c.jobs?.slot_keys) || null,
+      job_pay: jobPayLabel(c.jobs ?? {}) || null,
+      job_area: coarseArea(c.jobs?.pickup_address) || null,
+      job_vehicle_required: c.jobs?.vehicle_required ?? null,
       interested_at: click?.created_at ?? null,
       immediate,
     };

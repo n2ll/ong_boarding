@@ -26,6 +26,11 @@ interface QueueItem {
   sms_opt_out_at: string | null;
   job_id: number;
   job_title: string;
+  /** 문구에 실을 공고 값 — 없는 항목은 문구에서 그 줄을 빼고 보낸다(빈칸을 문자로 내보내지 않는다). */
+  job_slot?: string | null;
+  job_pay?: string | null;
+  job_area?: string | null;
+  job_vehicle_required?: boolean | null;
   interested_at: string | null;
   immediate: boolean;
 }
@@ -58,14 +63,45 @@ function availabilityBadge(availability: string | null, immediate: boolean) {
 }
 
 /**
- * 빠른 컨택 프리필 문구. 정보성 안내만 — 근무 확정/배정 뉘앙스 금지(확정은 매니저).
- * 매니저가 발송 전 편집 가능(오발송 방지). 이름/공고명이 없으면 자연스럽게 대체.
+ * 빠른 컨택 프리필 문구 — **조건을 먼저 알려주고 질문은 하나만** 한다(사장님 승인 2026-08-10).
+ *
+ * 예전 문구는 "담당 매니저가 곧 연락드릴게요"로 **전화를 약속**했다. 그러면 지원자는 전화를 기다리고
+ * 매니저가 병목이 된다 — 실제로는 이 제품이 문자로 문답하도록 만들어져 있는데 문구만 전화를 약속했다.
+ * 조건을 먼저 보여주면 안 맞는 분은 답을 하지 않으므로 헛대화가 줄고(실측 1인 평균 4.9턴),
+ * 답장이 오면 AI가 이어받을 자연스러운 진입점이 된다.
+ *
+ * ⚠️ 확정 뉘앙스 금지 — '확정·배정·합격·출근' 금지. "이 조건 괜찮으시면"까지가 한계다.
+ * ⚠️ 값이 없는 항목은 **그 줄을 빼고** 보낸다(공고에 급여·집결지가 비어 있는 채로 문자에 빈칸이 나가면 안 된다).
+ * ⚠️ 매니저가 발송 전 편집할 수 있다(오발송 방지) — 이건 프리필일 뿐이다.
  */
-function prefillContactBody(name: string | null, jobTitle: string): string {
-  const n = (name || "").trim() || "안녕하세요";
-  const job = (jobTitle || "").trim();
-  const jobPart = job ? `'${job}' ` : "";
-  return `[옹고잉] ${n}님, ${jobPart}관심 주셔서 감사합니다. 담당 매니저가 곧 연락드릴게요. 통화 편하신 시간대 있으면 이 번호로 답장 주세요!`;
+function prefillContactBody(it: {
+  name: string | null;
+  job_title: string;
+  job_slot?: string | null;
+  job_pay?: string | null;
+  job_area?: string | null;
+  job_vehicle_required?: boolean | null;
+}): string {
+  const n = (it.name || "").trim();
+  const job = (it.job_title || "").trim();
+  const head = `[옹고잉] ${n ? `${n}님, ` : ""}${job ? `'${job}' ` : ""}관심 주셔서 감사합니다.`;
+
+  const timeAndPay = [it.job_slot?.trim(), it.job_pay?.trim()].filter(Boolean).join(" / ");
+  const placeAndCar = [
+    it.job_area?.trim() ? `${it.job_area.trim()} 출발` : "",
+    it.job_vehicle_required === true ? "본인 차량 필요" : "",
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
+  const facts = [timeAndPay, placeAndCar].filter(Boolean).map((l) => `- ${l}`);
+  return [
+    head,
+    ...(facts.length > 0 ? ["", ...facts] : []),
+    "",
+    "이 조건 괜찮으시면 '네'라고 답장 주세요.",
+    "물어보실 것이 있으면 편하게 답장 주셔도 됩니다.",
+  ].join("\n");
 }
 
 // initialJobId — 대시보드 긴급 건 등에서 특정 공고 소속만 보도록 진입 시 자동 선택(선택).
@@ -125,7 +161,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
 
   const openQuick = (it: QueueItem) => {
     setQuick(it);
-    setQuickBody(prefillContactBody(it.name, it.job_title));
+    setQuickBody(prefillContactBody(it));
   };
 
   // 발송(성공) → 이어서 contacted 스탬프. contacted_at은 발송 성공 후에만 찍는다.
