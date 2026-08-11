@@ -172,14 +172,14 @@ export function ReplyQueueCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.34 }}
-      className="scroll-mt-6 bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col"
+      className="scroll-mt-6 bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col"
     >
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
-            <MessageCircle size={15} className="text-[#3182CE]" /> 내가 답할 차례
+          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
+            <MessageCircle size={15} className="text-info" /> 내가 답할 차례
           </h2>
-          <div className="text-[12px] text-[#718096] mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
+          <div className="text-[12px] text-muted-foreground mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
@@ -187,7 +187,7 @@ export function ReplyQueueCard({
             <select
               value={jobFilter === "all" ? "all" : String(jobFilter)}
               onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-              className="max-w-[180px] text-[12px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1 outline-none focus:border-[#FFCB3C] focus-visible:ring-2 focus-visible:ring-[#FFCB3C]/40"
+              className="max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
               title="진행 중 공고별로 답할 차례인 지원자를 걸러 봅니다"
             >
               <option value="all">전체 공고</option>
@@ -197,24 +197,24 @@ export function ReplyQueueCard({
             </select>
           )}
           {untouchedCount > 0 && (
-            <span className="flex items-center gap-1 text-[12px] font-bold text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] px-2.5 py-1 rounded-full">
+            <span className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-error-soft border border-error/30 px-2.5 py-1 rounded-full">
               미착수 {untouchedCount}건
             </span>
           )}
-          <span className="text-[12px] font-bold text-[#4A5568] bg-[#F7FAFC] border border-[#E2E8F0] px-2.5 py-1 rounded-full">
+          <span className="text-[12px] font-bold text-gray-700 bg-background border border-border-strong px-2.5 py-1 rounded-full">
             총 {count}건
           </span>
         </div>
       </div>
 
       {error ? (
-        <div className="py-4 text-center text-[13px] text-[#E53E3E]">목록을 불러오지 못했어요. 잠시 후 페이지를 새로고침해 주세요.</div>
+        <div className="py-4 text-center text-[13px] text-error">목록을 불러오지 못했어요. 잠시 후 페이지를 새로고침해 주세요.</div>
       ) : !data ? (
-        <div className="py-4 flex items-center justify-center text-[13px] text-[#A0AEC0]">
+        <div className="py-4 flex items-center justify-center text-[13px] text-gray-400">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-[#A0AEC0]">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
+        <div className="py-4 text-center text-[13px] text-gray-400">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {
@@ -224,40 +224,40 @@ export function ReplyQueueCard({
             return (
               <div
                 key={it.id}
-                className={`flex items-center gap-3 p-3 border rounded-xl ${untouched ? "border-[#FEB2B2] bg-[#FFF5F5]" : "border-[#E2E8F0] bg-white"}`}
+                className={`flex items-center gap-3 p-3 border rounded-xl ${untouched ? "border-error/30 bg-error-soft" : "border-border-strong bg-white"}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[13px] font-bold text-[#1A202C]">{it.name || "이름 미상"}</span>
+                    <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
-                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${untouched ? "bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]" : "bg-[#FEFCBF] text-[#B7791F] border-[#F6E05E]"}`}
+                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-yellow-700 border-yellow-300"}`}
                     >
                       {untouched ? "미착수" : "응대중"}
                     </span>
                     {optOut && (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]">수신거부</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-error-soft text-error-strong border-error/30">수신거부</span>
                     )}
                   </div>
-                  <div className="text-[11.5px] text-[#718096] truncate mt-0.5">
+                  <div className="text-[11.5px] text-muted-foreground truncate mt-0.5">
                     {pv?.body ? (
                       <>
-                        <span className="font-semibold text-[#3182CE]">{pv.direction === "inbound" ? "답장" : "발신"}</span>
-                        <span className="text-[#CBD5E0]"> · </span>
+                        <span className="font-semibold text-info">{pv.direction === "inbound" ? "답장" : "발신"}</span>
+                        <span className="text-gray-300"> · </span>
                         {pv.body}
                       </>
                     ) : (
-                      <span className="text-[#A0AEC0]">미리보기 없음</span>
+                      <span className="text-gray-400">미리보기 없음</span>
                     )}
                   </div>
-                  <div className="text-[11px] text-[#A0AEC0] truncate mt-0.5">
+                  <div className="text-[11px] text-gray-400 truncate mt-0.5">
                     수신 {agoLabel(it.last_message_at ?? it.created_at, nowTick)}
                     {it.phone && (
                       <>
-                        <span className="text-[#CBD5E0]"> · </span>
+                        <span className="text-gray-300"> · </span>
                         <a
                           href={`tel:${it.phone}`}
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-0.5 text-[#3182CE] hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                          className="inline-flex items-center gap-0.5 text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
                         >
                           <Phone size={11} /> {it.phone}
                         </a>
@@ -268,7 +268,7 @@ export function ReplyQueueCard({
 
                 <button
                   onClick={() => setDetailId(it.id)}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
                 >
                   <MessageSquare size={13} /> 대화 열기
                 </button>

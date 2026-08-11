@@ -557,30 +557,30 @@ export function ConversationThread({
     : pendingDraft?.reasoning ?? null;
 
   return (
-    <div className={`flex flex-col bg-[#EEF1F5] min-w-0 min-h-0 ${className}`}>
+    <div className={`flex flex-col bg-muted min-w-0 min-h-0 ${className}`}>
       {/* 상태 헤더 + AI 토글 */}
       {showHeader && (
-        <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="shrink-0 bg-white border-b border-border-strong px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             {!hasActiveFlow ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#4A5568] bg-[#EDF2F7] px-3 py-1.5 rounded-lg border border-[#CBD5E0]"><MessageSquare size={14} /> 수동 문자 모드</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#D69E2E] bg-[#FEFCBF] px-3 py-1.5 rounded-lg border border-[#F6E05E]"><User size={14} /> 수동 개입 중</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-yellow-600 bg-yellow-100 px-3 py-1.5 rounded-lg border border-yellow-300"><User size={14} /> 수동 개입 중</span>
             ) : globalKill ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#B7791F] bg-[#FFFBEB] px-3 py-1.5 rounded-lg border border-[#FAF089]"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-yellow-700 bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
             ) : copilotMode ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#553C9A] bg-[#FAF5FF] px-3 py-1.5 rounded-lg border border-[#D6BCFA]"><Wand2 size={14} /> 코파일럿 — AI 초안만, 발송은 매니저 승인</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-copilot-strong bg-copilot-soft px-3 py-1.5 rounded-lg border border-copilot/30"><Wand2 size={14} /> 코파일럿 — AI 초안만, 발송은 매니저 승인</span>
             ) : (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-[#3182CE] bg-[#EBF8FF] px-3 py-1.5 rounded-lg border border-[#BEE3F8]"><Bot size={14} /> 옹봇 자동 응대 중</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-info bg-info-soft px-3 py-1.5 rounded-lg border border-info/25"><Bot size={14} /> 옹봇 자동 응대 중</span>
             )}
             {smsOptOutAt ? (
               <>
-                <span className="flex items-center gap-1.5 text-xs font-bold text-[#C53030] bg-[#FFF5F5] px-3 py-1.5 rounded-lg border border-[#FEB2B2]"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-error-strong bg-error-soft px-3 py-1.5 rounded-lg border border-error/30"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
                 <button
                   onClick={handleToggleOptOut}
                   disabled={optOutBusy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="text-[11.5px] font-bold text-[#4A5568] bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 >
                   해제
                 </button>
@@ -590,19 +590,19 @@ export function ConversationThread({
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="flex items-center gap-1 text-[11.5px] font-bold text-[#C53030] bg-white hover:bg-[#FFF5F5] border border-[#FEB2B2] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
               >
                 <Ban size={12} /> 수신거부 등록
               </button>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-colors ${isAiEnabled ? "bg-[#F0FFF4] border-[#9AE6B4]" : "bg-[#FFF5F5] border-[#FEB2B2]"}`}>
-              <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-[#2F855A]" : "text-[#C53030]"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
-              <Switch checked={isAiEnabled} onCheckedChange={handleToggleAi} disabled={!hasActiveFlow} className="data-[state=checked]:bg-[#38A169] data-[state=unchecked]:bg-[#E53E3E]" />
+            <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
+              <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
+              <Switch checked={isAiEnabled} onCheckedChange={handleToggleAi} disabled={!hasActiveFlow} className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error" />
             </div>
             {isAiEnabled && (
-              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="bg-[#1A202C] text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
+              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
             )}
           </div>
         </div>
@@ -610,8 +610,8 @@ export function ConversationThread({
 
       {/* 메시지 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
-        {loadingMsgs && <div className="text-[13px] text-[#A0AEC0] text-center py-8">대화 내역 불러오는 중…</div>}
-        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-[#A0AEC0] text-center py-8">아직 주고받은 메시지가 없어요</div>}
+        {loadingMsgs && <div className="text-[13px] text-gray-400 text-center py-8">대화 내역 불러오는 중…</div>}
+        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-gray-400 text-center py-8">아직 주고받은 메시지가 없어요</div>}
 
         {timeline.map((item, idx) => {
           const createdAt = item.kind === "msg" ? item.msg.created_at : item.ev.created_at;
@@ -626,10 +626,10 @@ export function ConversationThread({
             return (
               <Fragment key={`ev-${ev.id}`}>
                 {showDateDivider && (
-                  <div className="flex justify-center mb-2"><div className="bg-[#E2E8F0] text-[#718096] text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
+                  <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className="bg-[#E2E8F0] text-[#718096] text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className="bg-gray-200 text-muted-foreground text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, jobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>
@@ -643,21 +643,21 @@ export function ConversationThread({
           return (
             <Fragment key={msg.id}>
             {showDateDivider && (
-              <div className="flex justify-center mb-2"><div className="bg-[#E2E8F0] text-[#718096] text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(msg.created_at)}</div></div>
+              <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(msg.created_at)}</div></div>
             )}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.2) }} data-msg-id={msg.id} className={`flex gap-3 ${sender === "user" ? "justify-end" : "justify-start"}`}>
-              {sender === "ai" && <div className="w-9 h-9 rounded-full bg-[#FFCB3C] flex items-center justify-center shrink-0 border border-[#E0B500]"><Bot size={18} className="text-[#1A202C]" /></div>}
+              {sender === "ai" && <div className="w-9 h-9 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={18} className="text-foreground" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
-                {sender === "ai" && <span className="text-[11.5px] font-bold text-[#718096] ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
+                {sender === "ai" && <span className="text-[11.5px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
                 {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
-                  <span className="text-[10.5px] font-bold text-[#3182CE] bg-[#EBF8FF] border border-[#BEE3F8] px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
+                  <span className="text-[10.5px] font-bold text-info bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
                     {jobChipLabel(jobsMap[msg.job_id]!)}
                   </span>
                 )}
-                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-[#1A202C] text-white rounded-tr-sm" : "bg-white border border-[#E2E8F0] text-[#2D3748] rounded-tl-sm"}`}>
+                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : "bg-white border border-border-strong text-gray-800 rounded-tl-sm"}`}>
                   {msg.body}
                 </div>
-                <span className="text-[11px] text-[#A0AEC0] mx-1">{fmtTime(msg.created_at)}</span>
+                <span className="text-[11px] text-gray-400 mx-1">{fmtTime(msg.created_at)}</span>
               </div>
             </motion.div>
             </Fragment>
@@ -667,19 +667,19 @@ export function ConversationThread({
 
       {/* AI 초안 검수 카드 */}
       {pendingDraft && (
-        <div className="px-5 pt-4 bg-white border-t border-[#E2E8F0]">
-          <div className="border border-[#9F7AEA] bg-[#FAF5FF] rounded-2xl p-4">
+        <div className="px-5 pt-4 bg-white border-t border-border-strong">
+          <div className="border border-copilot bg-copilot-soft rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
-              <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#6B46C1]">
+              <div className="flex items-center gap-2 text-[13px] font-extrabold text-copilot-strong">
                 <Wand2 size={16} /> {isCopilotDraft ? "⚡ 코파일럿 초안" : "옹봇이 제안한 답변 초안"}
                 {pendingDraft.status === "need_info" && (
-                  <span className="text-[11px] font-bold bg-[#FFFAF0] text-[#C05621] border border-[#FBD38D] px-2 py-0.5 rounded-md">정보 부족 · 매니저 확인</span>
+                  <span className="text-[11px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-md">정보 부족 · 매니저 확인</span>
                 )}
               </div>
-              <span className="text-[11px] font-bold text-[#805AD5]">검수 후 발송됩니다</span>
+              <span className="text-[11px] font-bold text-copilot">검수 후 발송됩니다</span>
             </div>
             {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
-              <div className="mb-2.5 text-[12px] text-[#7B341E] bg-white border border-[#FBD38D] rounded-lg px-3 py-2 leading-relaxed">
+              <div className="mb-2.5 text-[12px] text-warning-strong bg-white border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
                 <b>부족한 정보:</b> {pendingDraft.missing_info}
               </div>
             )}
@@ -688,16 +688,16 @@ export function ConversationThread({
               onChange={(e) => setDraftText(e.target.value)}
               placeholder={pendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
               rows={3}
-              className="w-full bg-white border border-[#E2E8F0] rounded-xl p-3 text-[14px] leading-relaxed text-[#2D3748] focus:outline-none focus:border-[#9F7AEA] focus:ring-1 focus:ring-[#9F7AEA] resize-none"
+              className="w-full bg-white border border-border-strong rounded-xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
             />
             {draftReasoningDisplay && (
-              <div className="mt-2 text-[11.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#805AD5]">판단 근거:</b> {draftReasoningDisplay}
+              <div className="mt-2 text-[11.5px] text-muted-foreground leading-relaxed">
+                <b className="text-copilot">판단 근거:</b> {draftReasoningDisplay}
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
-              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-white border border-[#E2E8F0] disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
-              <button onClick={handleSendDraft} disabled={draftBusy} className="px-5 py-2 rounded-xl text-[13px] font-bold text-white bg-[#6B46C1] hover:bg-[#553C9A] disabled:opacity-50 flex items-center gap-1.5">
+              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-white border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
+              <button onClick={handleSendDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-5 py-2 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} 검수 후 발송
               </button>
             </div>
@@ -706,7 +706,7 @@ export function ConversationThread({
       )}
 
       {/* 입력 영역 */}
-      <div className="p-5 bg-white border-t border-[#E2E8F0] shrink-0">
+      <div className="p-5 bg-white border-t border-border-strong shrink-0">
         {canSend ? (
           <>
           <div className="flex gap-1.5 flex-wrap mb-2.5">
@@ -714,7 +714,7 @@ export function ConversationThread({
               <button
                 key={t.label}
                 onClick={() => insertTemplate(t.text)}
-                className="text-[11.5px] font-bold text-[#4A5568] bg-[#F7FAFC] hover:bg-[#EDF2F7] border border-[#E2E8F0] px-2.5 py-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 title={t.text}
               >
                 + {t.label}
@@ -722,7 +722,7 @@ export function ConversationThread({
             ))}
           </div>
           <div className="flex items-end gap-3">
-            <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-[#F7FAFC] focus-within:bg-white ${isLMS ? "border-[#FC8181]" : "border-[#E2E8F0] focus-within:border-[#FFCB3C]"}`}>
+            <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-white ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
@@ -731,21 +731,21 @@ export function ConversationThread({
                 className="w-full bg-transparent outline-none p-3.5 text-[14px] min-h-[56px]"
                 rows={2}
               />
-              <div className={`flex justify-between items-center px-3.5 pb-2.5 pt-1.5 border-t ${isLMS ? "border-[#FEB2B2] bg-[#FFF5F5]" : "border-[#EDF2F7]"}`}>
+              <div className={`flex justify-between items-center px-3.5 pb-2.5 pt-1.5 border-t ${isLMS ? "border-error/30 bg-error-soft" : "border-muted"}`}>
                 <div className="flex gap-2 items-center text-[12px] font-bold">
-                  <span className={isLMS ? "text-[#E53E3E]" : "text-[#3182CE]"}>{isLMS ? "LMS" : "SMS"}</span>
-                  <span className="text-[#718096]">{currentBytes} bytes</span>
+                  <span className={isLMS ? "text-error" : "text-info"}>{isLMS ? "LMS" : "SMS"}</span>
+                  <span className="text-muted-foreground">{currentBytes} bytes</span>
                 </div>
-                <span className="text-[11px] text-[#A0AEC0]">⌘+Enter 발송</span>
+                <span className="text-[11px] text-gray-400">⌘+Enter 발송</span>
               </div>
             </div>
-            <button onClick={handleSendMessage} disabled={sending} className="w-[54px] h-[54px] rounded-[14px] bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-[#1A202C] animate-spin" /> : <Send size={22} className="text-[#1A202C]" />}</button>
+            <button onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-[14px] bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
             {isPaused && (
               <button
                 onClick={handleSendAndResume}
                 disabled={sending}
                 title="발송 성공 후 AI 자동 응대를 즉시 재개합니다"
-                className="h-[54px] px-3 rounded-[14px] text-[12px] font-bold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] hover:bg-[#BEE3F8] disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                className="h-[54px] px-3 rounded-[14px] text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
               >
                 보내고
                 <br />
@@ -755,15 +755,15 @@ export function ConversationThread({
           </div>
           </>
         ) : (
-          <div className="flex items-center justify-between bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between bg-background border border-border-strong rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#EBF8FF] flex items-center justify-center border border-[#BEE3F8]"><Bot size={20} className="text-[#3182CE]" /></div>
+              <div className="w-10 h-10 rounded-full bg-info-soft flex items-center justify-center border border-info/25"><Bot size={20} className="text-info" /></div>
               <div>
-                <div className="text-[14px] font-bold text-[#1A202C]">AI가 대화형 스크리닝을 진행 중입니다.</div>
-                <div className="text-[12px] text-[#718096] mt-0.5">[개입]을 누르면 자동 응대가 중지됩니다.</div>
+                <div className="text-[14px] font-bold text-foreground">AI가 대화형 스크리닝을 진행 중입니다.</div>
+                <div className="text-[12px] text-muted-foreground mt-0.5">[개입]을 누르면 자동 응대가 중지됩니다.</div>
               </div>
             </div>
-            <AlertTriangle size={18} className="text-[#A0AEC0]" />
+            <AlertTriangle size={18} className="text-gray-400" />
           </div>
         )}
       </div>

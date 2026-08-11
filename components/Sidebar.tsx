@@ -4,9 +4,10 @@ import Link from "next/link";
 import useSWR from "swr";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import {
   LayoutDashboard,
-  // 파일럿 기간 숨김 메뉴의 아이콘 — navItems 복원 시 함께 주석 해제
+  // 파일럿 기간 숨김 메뉴의 아이콘 — NAV_ITEMS 복원 시 함께 주석 해제
   // Activity,
   // BarChart2,
   MessageSquare,
@@ -22,15 +23,36 @@ import {
   // LayoutGrid,
   // Shield,
   Settings,
-  LogOut
+  LogOut,
+  type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "./Logo";
 import { getAuthBrowserClient } from "@/lib/supabase";
+
+/**
+ * 앱 도크 — Ongboarding UI System의 셸.
+ *
+ * 종이 배경 위에 떠 있는 어두운 알약. 기본은 아이콘만 보이는 72px이고
+ * 마우스를 올리거나 토글을 누르면 240px로 펼쳐져 라벨이 나온다.
+ * MASTER.md §3 Navigation: 도크가 축소되어도 버튼의 접근 가능한 이름은
+ * 유지한다(aria-label + 접힘 상태 툴팁), 현재 항목은 aria-current="page".
+ */
+
+interface NavItem {
+  label: string;
+  icon: LucideIcon;
+  path: string;
+  /** 이 항목 위에 구분선을 넣는다 (접힌 도크에서는 그룹 제목을 쓸 수 없다) */
+  dividerBefore?: boolean;
+}
 
 export function Sidebar() {
   const pathname = usePathname();
   const [inbox, setInbox] = useState(0);
   const [interventions, setInterventions] = useState(0);
+  const [pinned, setPinned] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const expanded = pinned || hovered;
   // 확정 대기 큐 건수 — useSWR로 Dashboard·LiveConsole과 캐시 공유(중복 폴링 방지). 소스=confirm/pending.
   const { data: cpData } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   const confirmPending = cpData?.total ?? cpData?.pending?.length ?? 0;
@@ -61,117 +83,235 @@ export function Sidebar() {
 
   // 파일럿 기간 숨김: 실사용 5탭(대시보드·인재풀/파이프라인·채용공고·실시간 응대·미분류 인박스)+설정만 노출.
   // 삭제 아님 — 파일럿 종료 후 복원 대비 주석 보존 (아이콘 import·aiDisabled 상태도 함께 복원)
-  const navItems = [
-    { label: "개요", type: "header" },
+  const NAV_ITEMS: NavItem[] = [
     { label: "대시보드", icon: LayoutDashboard, path: "/" },
-    // { label: "자동화 현황", icon: Activity, path: "/automation", badge: aiDisabled ? "dot-red" : "dot-green" }, // 파일럿 기간 숨김
+    // { label: "자동화 현황", icon: Activity, path: "/automation" }, // 파일럿 기간 숨김
     // { label: "리포트 · 분석", icon: BarChart2, path: "/reports" }, // 파일럿 기간 숨김
 
-    { label: "AI 에이전트", type: "header" },
-    { label: "실시간 응대", icon: MessageSquare, path: "/live", badge: interventions > 0 ? "count" : undefined, count: interventions },
+    { label: "실시간 응대", icon: MessageSquare, path: "/live", dividerBefore: true },
     // 확정은 매니저만 하는 핵심 업무인데 '실시간 응대' 안 탭에 숨어 가장 먼 액션이었다 → 전용 진입점으로 승격.
     // 확정 대기 배지는 이 행에만 둔다(예전엔 '실시간 응대' 행에 초록 배지로 붙어, 전용 행을 만들면 같은 숫자가
     // 두 번 보였다). 색은 확정 계열 초록(confirmCount 경로) — 빨강은 이 레포에서 '미처리 경고' 색이다.
     // path에 쿼리가 있어 isActive(pathname 정확일치)에는 걸리지 않는다 — /live에선 위 '실시간 응대'가 활성 표시된다.
-    { label: "확정할 지원자", icon: UserCheck, path: "/live?tab=confirm", confirmCount: confirmPending },
-    { label: "분류 대기 문자함", icon: Inbox, path: "/inbox", badge: inbox > 0 ? "count" : undefined, count: inbox },
+    { label: "확정할 지원자", icon: UserCheck, path: "/live?tab=confirm" },
+    { label: "분류 대기 문자함", icon: Inbox, path: "/inbox" },
     // 자동 응대(auto) 가동으로 재노출 (2026-07-12) — AI 모드 전환·일반 라인 FAQ 편집 진입점
     { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
 
-    { label: "인재 관리", type: "header" },
-    { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline" },
+    { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline", dividerBefore: true },
     { label: "다시 부르기 (외부 인력)", icon: RefreshCw, path: "/reengagement" },
     // { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" }, // 파일럿 기간 숨김
 
-    { label: "채용 운영", type: "header" },
-    { label: "채용공고 관리", icon: Briefcase, path: "/jobs" },
+    { label: "채용공고 관리", icon: Briefcase, path: "/jobs", dividerBefore: true },
     { label: "화주사", icon: Building2, path: "/shippers" },
     // { label: "화주사 관리", icon: Building2, path: "/clients" }, // 파일럿 기간 숨김
     // { label: "지점 관리", icon: MapPin, path: "/branches" }, // 파일럿 기간 숨김
     // { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" }, // 파일럿 기간 숨김
     // { label: "팀 · 권한", icon: Shield, path: "/team" }, // 파일럿 기간 숨김
-    { label: "설정", icon: Settings, path: "/settings" },
   ];
 
+  const badgeFor = (path: string): { count: number; tone: "error" | "success" } | null => {
+    if (path === "/live" && interventions > 0) return { count: interventions, tone: "error" };
+    if (path === "/inbox" && inbox > 0) return { count: inbox, tone: "error" };
+    if (path === "/live?tab=confirm" && confirmPending > 0) return { count: confirmPending, tone: "success" };
+    return null;
+  };
+
+  const signOut = async () => {
+    try {
+      await getAuthBrowserClient().auth.signOut();
+    } catch {
+      /* 세션 정리 실패해도 로그인 페이지로 — 미들웨어가 재검증 */
+    }
+    window.location.href = "/login";
+  };
+
   return (
-    <aside className="w-[248px] shrink-0 bg-[#1A202C] text-white flex flex-col h-full">
-      <div className="pt-[26px] px-[22px] pb-[22px] flex items-center gap-[11px] border-b border-white/5">
-        <div className="w-[38px] h-[38px] rounded-[10px] bg-white flex items-center justify-center">
-          <LogoMark size={30} />
+    <motion.nav
+      aria-label="주요 메뉴"
+      onHoverStart={() => setHovered(true)}
+      onHoverEnd={() => setHovered(false)}
+      animate={{ width: expanded ? 240 : 72 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] border border-white/10 bg-gray-900/95 shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:flex"
+    >
+      <div className="flex h-full w-full flex-col gap-2 p-3 text-white">
+        <button
+          type="button"
+          aria-label={pinned ? "메뉴 접기" : "메뉴 펼치기"}
+          aria-expanded={expanded}
+          onClick={() => setPinned((v) => !v)}
+          className="mb-1 flex min-h-11 shrink-0 items-center gap-3 rounded-2xl px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white">
+            <LogoMark size={26} />
+          </span>
+          {expanded && (
+            <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-w-0">
+              <span className="block whitespace-nowrap text-[17px] font-extrabold leading-none tracking-tight">옹보딩</span>
+              <span className="mt-[3px] block whitespace-nowrap text-[11px] font-medium tracking-wide text-white/50">시니어 채용 운영</span>
+            </motion.span>
+          )}
+        </button>
+
+        <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto pb-2 pr-1">
+          {NAV_ITEMS.map((item) => (
+            <div key={item.path}>
+              {item.dividerBefore && <div aria-hidden="true" className="my-3 h-px w-full bg-white/10" />}
+              <DockItem
+                item={item}
+                expanded={expanded}
+                active={pathname === item.path}
+                badge={badgeFor(item.path)}
+              />
+            </div>
+          ))}
         </div>
-        <div>
-          <div className="font-extrabold text-[20px] tracking-tight leading-none">옹보딩</div>
-          <div className="text-[11px] text-white/50 tracking-wide mt-[3px] font-medium">시니어 채용 운영</div>
+
+        <div className="mt-auto shrink-0 space-y-1.5 border-t border-white/10 pt-2">
+          <DockItem
+            item={{ label: "설정", icon: Settings, path: "/settings" }}
+            expanded={expanded}
+            active={pathname === "/settings"}
+            badge={null}
+          />
+
+          {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 로그아웃(I-2 Supabase Auth) */}
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-dark text-[15px] font-bold text-brand-yellow">
+              옹
+            </span>
+            {expanded && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13.5px] font-semibold leading-tight">옹고잉 채용팀</span>
+                  <span className="block truncate text-[11.5px] text-white/50">관리자 콘솔</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={signOut}
+                  aria-label="로그아웃"
+                  title="로그아웃"
+                  className="after:absolute after:-inset-2 after:content-[''] relative shrink-0 rounded-lg p-2 text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                >
+                  <LogOut size={16} />
+                </button>
+              </motion.div>
+            )}
+          </div>
         </div>
       </div>
+    </motion.nav>
+  );
+}
 
-      <nav className="p-3 flex flex-col gap-0.5 flex-1 overflow-y-auto">
-        {navItems.map((item, idx) => {
-          if (item.type === "header") {
-            return (
-              // Accessibility Improvement (A): Changed text-white/30 to text-white/50 for better contrast
-              <div key={idx} className="text-[10.5px] font-bold text-white/50 tracking-widest px-3 pt-3.5 pb-1.5 first:pt-2">
-                {item.label}
-              </div>
-            );
-          }
+/**
+ * 모바일 하단 내비 — MASTER.md §3: 모바일은 5개 이하.
+ * 도크 전체를 좁은 화면에 밀어 넣지 않고, 실사용 빈도 순 5개만 남긴다.
+ */
+const MOBILE_NAV: { label: string; icon: LucideIcon; path: string }[] = [
+  { label: "대시보드", icon: LayoutDashboard, path: "/" },
+  { label: "응대", icon: MessageSquare, path: "/live" },
+  { label: "인재풀", icon: Users, path: "/pipeline" },
+  { label: "공고", icon: Briefcase, path: "/jobs" },
+  { label: "설정", icon: Settings, path: "/settings" },
+];
 
-          const isActive = pathname === item.path;
-          const Icon = item.icon!;
+export function MobileNav() {
+  const pathname = usePathname();
+  return (
+    <nav
+      aria-label="모바일 주요 메뉴"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-5 rounded-[24px] border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
+    >
+      {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
+        const active = pathname === path;
+        return (
+          <Link
+            key={path}
+            href={path}
+            aria-label={label}
+            aria-current={active ? "page" : undefined}
+            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[10px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+              active ? "bg-white text-gray-900" : "text-white/55 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <Icon aria-hidden="true" size={18} />
+            <span className="w-full truncate text-center">{label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
 
-          return (
-            <Link
-              key={idx}
-              href={item.path!}
-              // Accessibility Improvement (A): Added focus-visible classes for keyboard navigation
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${
-                isActive ? "bg-white/10 text-white font-bold" : "text-white/70 hover:bg-white/5 font-medium hover:text-white"
+function DockItem({
+  item,
+  expanded,
+  active,
+  badge,
+}: {
+  item: NavItem;
+  expanded: boolean;
+  active: boolean;
+  badge: { count: number; tone: "error" | "success" } | null;
+}) {
+  const Icon = item.icon;
+  return (
+    <div className="group relative flex items-center">
+      {/* 행 전체가 링크 하나다. 접힘/펼침에 따라 라벨만 붙고 떨어진다 —
+          링크를 둘로 쪼개면 같은 목적지가 탭 순서에 두 번 걸린다. */}
+      <Link
+        href={item.path}
+        aria-label={item.label}
+        aria-current={active ? "page" : undefined}
+        className={`relative z-10 flex min-h-11 w-full min-w-0 items-center gap-3 rounded-2xl pr-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+          active ? "bg-white text-gray-900 shadow-[var(--shadow-md)]" : "text-white/60 hover:bg-white/10 hover:text-white"
+        }`}
+      >
+        <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+          <Icon aria-hidden="true" size={18} strokeWidth={active ? 2.5 : 2} />
+          {/* 접힌 도크에는 라벨이 없으므로 배지를 아이콘 위에 얹는다.
+              숫자를 글자로 같이 보여 색만으로 전달하지 않는다(MASTER.md §1). */}
+          {badge && !expanded && (
+            <span
+              className={`absolute right-0 top-0 min-w-[17px] rounded-full px-[4px] text-[10px] font-extrabold leading-[17px] text-white ${
+                badge.tone === "error" ? "bg-error" : "bg-success-strong"
               }`}
             >
-              <Icon size={18} className={`shrink-0 ${isActive ? "opacity-100" : "opacity-70"}`} strokeWidth={isActive ? 2.5 : 2} />
-              <span className="flex-1">{item.label}</span>
-              
-              {item.badge === "dot-green" && <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] shrink-0"></span>}
-              {item.badge === "dot-red" && <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E] shrink-0 animate-pulse" title="AI 전역 응답 중지됨"></span>}
-              {item.badge === "count" && (item.count ?? 0) > 0 && (
-                <span className="bg-[#E53E3E] text-white text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight">
-                  {item.count}
-                </span>
-              )}
-              {(item.confirmCount ?? 0) > 0 && (
-                <span title="확정 대기" className="bg-[#2F855A] text-white text-[11px] font-extrabold px-[7px] py-[1px] rounded-full tracking-tight shrink-0">
-                  {item.confirmCount}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+              {badge.count}
+            </span>
+          )}
+        </span>
 
-      {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 로그아웃(I-2 Supabase Auth) */}
-      <div className="m-3.5 p-3 rounded-xl bg-white/5 flex items-center gap-[11px]">
-        <div className="w-[38px] h-[38px] rounded-[10px] bg-[#3C2414] flex items-center justify-center font-bold text-[15px] text-[#FFCB3C] shrink-0">
-          옹
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold text-[14px] leading-tight text-white truncate">옹고잉 채용팀</div>
-          <div className="text-[12px] text-white/50 truncate">관리자 콘솔</div>
-        </div>
-        <button
-          onClick={async () => {
-            try {
-              await getAuthBrowserClient().auth.signOut();
-            } catch {
-              /* 세션 정리 실패해도 로그인 페이지로 — 미들웨어가 재검증 */
-            }
-            window.location.href = "/login";
-          }}
-          title="로그아웃"
-          className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+        {expanded && (
+          <motion.span
+            initial={{ opacity: 0, x: -5 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex min-w-0 flex-1 items-center gap-2"
+          >
+            <span className="min-w-0 flex-1 truncate text-left text-[13.5px] font-bold">{item.label}</span>
+            {badge && (
+              <span
+                className={`shrink-0 rounded-full px-[7px] py-[1px] text-[11px] font-extrabold tracking-tight text-white ${
+                  badge.tone === "error" ? "bg-error" : "bg-success-strong"
+                }`}
+              >
+                {badge.count}
+              </span>
+            )}
+          </motion.span>
+        )}
+      </Link>
+
+      {!expanded && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-[var(--shadow-md)] transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
         >
-          <LogOut size={16} />
-        </button>
-      </div>
-    </aside>
+          {item.label}
+        </span>
+      )}
+    </div>
   );
 }

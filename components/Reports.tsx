@@ -115,16 +115,16 @@ export function Reports() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">리포트 · 분석</h1>
-          <p className="text-[14px] text-[#718096]">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-[#A0AEC0]">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
+          <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">리포트 · 분석</h1>
+          <p className="text-[14px] text-muted-foreground">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-gray-400">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center bg-white border border-[#E2E8F0] rounded-xl px-2 py-1 shadow-sm">
+          <div className="flex items-center bg-white border border-border-strong rounded-xl px-2 py-1 shadow-sm">
             {['이번 주', '이번 달', '올해'].map(range => (
               <button 
                 key={range}
                 onClick={() => setDateRange(range)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${dateRange === range ? 'bg-[#F1F4F8] text-[#1A202C]' : 'text-[#718096] hover:text-[#4A5568]'}`}
+                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${dateRange === range ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-gray-700'}`}
               >
                 {range}
               </button>
@@ -132,7 +132,7 @@ export function Reports() {
           </div>
           <button 
             onClick={handleDownload}
-            className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#FFCB3C]"
+            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-brand-yellow"
           >
             <Download size={16} /> 리포트 다운로드
           </button>
@@ -141,98 +141,99 @@ export function Reports() {
 
       {/* Overview Stats */}
       <div className="grid grid-cols-4 gap-5 mb-8">
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-[#F0FFF4] flex items-center justify-center">
-              <Users size={20} className="text-[#38A169]" />
+            <div className="w-10 h-10 rounded-xl bg-success-soft flex items-center justify-center">
+              <Users size={20} className="text-success" />
             </div>
           </div>
-          <div className="text-[13px] font-bold text-[#718096] mb-1">총 지원자 수</div>
-          <div className="text-2xl font-extrabold text-[#1A202C]">{stats.total.toLocaleString()}<span className="text-sm font-medium text-[#A0AEC0] ml-1">명</span></div>
+          <div className="text-[13px] font-bold text-muted-foreground mb-1">총 지원자 수</div>
+          <div className="text-2xl font-extrabold text-foreground">{stats.total.toLocaleString()}<span className="text-sm font-medium text-gray-400 ml-1">명</span></div>
         </div>
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-[#EBF8FF] flex items-center justify-center">
-              <CheckCircle size={20} className="text-[#3182CE]" />
+            <div className="w-10 h-10 rounded-xl bg-info-soft flex items-center justify-center">
+              <CheckCircle size={20} className="text-info" />
             </div>
           </div>
-          <div className="text-[13px] font-bold text-[#718096] mb-1">확정 인력</div>
-          <div className="text-2xl font-extrabold text-[#1A202C]">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-[#A0AEC0] ml-1">명</span></div>
+          <div className="text-[13px] font-bold text-muted-foreground mb-1">확정 인력</div>
+          <div className="text-2xl font-extrabold text-foreground">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-gray-400 ml-1">명</span></div>
         </div>
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-[#FFFBEB] flex items-center justify-center">
-              <Coins size={20} className="text-[#D69E2E]" />
+            <div className="w-10 h-10 rounded-xl bg-yellow-50 flex items-center justify-center">
+              <Coins size={20} className="text-yellow-600" />
             </div>
           </div>
-          <div className="text-[13px] font-bold text-[#718096] mb-1">최근 30일 누적 비용</div>
-          <div className="text-2xl font-extrabold text-[#1A202C]">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-[#A0AEC0] ml-1">원</span></div>
+          <div className="text-[13px] font-bold text-muted-foreground mb-1">최근 30일 누적 비용</div>
+          <div className="text-2xl font-extrabold text-foreground">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-gray-400 ml-1">원</span></div>
         </div>
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-[#FEFCBF] flex items-center justify-center">
-              <Brain size={20} className="text-[#D69E2E]" />
+            <div className="w-10 h-10 rounded-xl bg-yellow-100 flex items-center justify-center">
+              <Brain size={20} className="text-yellow-600" />
             </div>
           </div>
-          <div className="text-[13px] font-bold text-[#718096] mb-1">스크리닝 진행 중</div>
-          <div className="text-2xl font-extrabold text-[#1A202C]">{stats.screening.toLocaleString()}<span className="text-sm font-medium text-[#A0AEC0] ml-1">명</span></div>
+          <div className="text-[13px] font-bold text-muted-foreground mb-1">스크리닝 진행 중</div>
+          <div className="text-2xl font-extrabold text-foreground">{stats.screening.toLocaleString()}<span className="text-sm font-medium text-gray-400 ml-1">명</span></div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6 mb-6">
         {/* Sourcing Trend Chart */}
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-[#1A202C] mb-1">월별 지원자 및 합격자 추이</h3>
-          <p className="text-[12px] text-[#718096] mb-5">실시간 인입 기준(일괄 임포트 제외)</p>
+        <div className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm">
+          <h3 className="text-[16px] font-bold text-foreground mb-1">월별 지원자 및 합격자 추이</h3>
+          <p className="text-[12px] text-muted-foreground mb-5">실시간 인입 기준(일괄 임포트 제외)</p>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
               <AreaChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs key="defs-reports">
                   <linearGradient key="grad-app" id="colorApplicants" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3182CE" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#3182CE" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0}/>
                   </linearGradient>
                   <linearGradient key="grad-hire" id="colorHires" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#38A169" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#38A169" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis key="xaxis" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#718096' }} dy={10} />
-                <YAxis key="yaxis" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#718096' }} />
-                <RechartsTooltip 
+                <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="var(--border-strong)" />
+                <XAxis key="xaxis" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} dy={10} />
+                <YAxis key="yaxis" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} />
+                <RechartsTooltip
                   key="tooltip"
-                  contentStyle={{ borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                  labelStyle={{ fontWeight: 'bold', color: '#1A202C', marginBottom: '4px' }}
+                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-strong)', background: 'var(--surface-raised)', boxShadow: 'var(--shadow-md)' }}
+                  labelStyle={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '4px' }}
                 />
                 <Legend key="legend" iconType="circle" wrapperStyle={{ fontSize: '13px', paddingTop: '20px' }} />
-                <Area key="area-applicants" type="monotone" dataKey="지원자" stroke="#3182CE" strokeWidth={3} fillOpacity={1} fill="url(#colorApplicants)" />
-                <Area key="area-hires" type="monotone" dataKey="합격자" stroke="#38A169" strokeWidth={3} fillOpacity={1} fill="url(#colorHires)" />
+                <Area key="area-applicants" type="monotone" dataKey="지원자" stroke="var(--chart-1)" strokeWidth={2} fillOpacity={1} fill="url(#colorApplicants)" />
+                <Area key="area-hires" type="monotone" dataKey="합격자" stroke="var(--chart-2)" strokeWidth={2} fillOpacity={1} fill="url(#colorHires)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Funnel Chart */}
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-[#1A202C] mb-6">채용 단계별 전환율</h3>
+        <div className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm">
+          <h3 className="text-[16px] font-bold text-foreground mb-6">채용 단계별 전환율</h3>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
               <BarChart data={funnel} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
-                <CartesianGrid key="grid" strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
+                <CartesianGrid key="grid" strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--border-strong)" />
                 <XAxis key="xaxis" type="number" hide />
-                <YAxis key="yaxis" dataKey="step" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#4A5568', fontWeight: 600 }} width={110} />
-                <RechartsTooltip 
+                <YAxis key="yaxis" dataKey="step" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--foreground)', fontWeight: 600 }} width={110} />
+                <RechartsTooltip
                   key="tooltip"
-                  cursor={{ fill: '#F7FAFC' }}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                  cursor={{ fill: 'var(--muted)' }}
+                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-strong)', background: 'var(--surface-raised)', boxShadow: 'var(--shadow-md)' }}
                 />
-                <Bar key="bar" dataKey="count" fill="#FFCB3C" radius={[0, 6, 6, 0]} barSize={28}>
+                {/* 단계에 순서가 있으므로 categorical이 아니라 단일 hue ordinal 램프를 쓴다 */}
+                <Bar key="bar" dataKey="count" fill="var(--chart-step-4)" radius={[0, 6, 6, 0]} barSize={28}>
                   {funnel.map((entry, index) => (
-                    <Cell key={`reports-cell-${index}`} fill={index === 0 ? '#E2E8F0' : index === funnel.length - 1 ? '#38A169' : '#FFCB3C'} />
+                    <Cell key={`reports-cell-${index}`} fill={`var(--chart-step-${Math.min(index + 1, 4)})`} />
                   ))}
                 </Bar>
               </BarChart>

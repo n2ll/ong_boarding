@@ -72,7 +72,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => settle(true)}
-              className={`rounded-xl ${opts.destructive ? "bg-[#E53E3E] hover:bg-[#C53030]" : ""}`}
+              className={`rounded-xl ${opts.destructive ? "bg-error hover:bg-error-strong" : ""}`}
             >
               {opts.confirmText ?? "확인"}
             </AlertDialogAction>

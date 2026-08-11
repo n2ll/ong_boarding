@@ -136,10 +136,10 @@ export function Dashboard() {
     const screened = stats.screening + stats.interview + stats.passed;
     const passed1 = stats.interview + stats.passed;
     const rows = [
-      { step: "다채널 유입", val: stats.total, color: "#CBD5E0" },
-      { step: "AI 스크리닝", val: screened, color: "#90CDF4" },
-      { step: "1차 요건 통과", val: passed1, color: "#63B3ED" },
-      { step: "확정 인력", val: stats.passed, color: "#3182CE" },
+      { step: "다채널 유입", val: stats.total, color: "var(--chart-step-1)" },
+      { step: "AI 스크리닝", val: screened, color: "var(--chart-step-2)" },
+      { step: "1차 요건 통과", val: passed1, color: "var(--chart-step-3)" },
+      { step: "확정 인력", val: stats.passed, color: "var(--chart-step-4)" },
     ];
     return rows.map((r, i) => {
       const prev = i === 0 ? r.val : rows[i - 1].val;
@@ -267,10 +267,10 @@ export function Dashboard() {
     if (!killRes) return null;
     const mode = killRes.env_forced || killRes.disabled ? "off" : killRes.mode ?? "auto";
     if (mode === "off")
-      return { label: "AI 응답 완전 중지 — 답장은 수동 응대 중", cls: "bg-[#E53E3E]/15 border-[#E53E3E]/40 text-[#FEB2B2]", dot: "bg-[#E53E3E]" };
+      return { label: "AI 응답 완전 중지 — 답장은 수동 응대 중", cls: "bg-error/15 border-error/40 text-error-on-dark", dot: "bg-error" };
     if (mode === "draft")
-      return { label: "AI 코파일럿 — 초안만 작성, 발송은 매니저 승인 후", cls: "bg-[#805AD5]/15 border-[#805AD5]/40 text-[#D6BCFA]", dot: "bg-[#B794F4]" };
-    return { label: "AI 자동 응대 중", cls: "bg-[#48BB78]/10 border-[#48BB78]/30 text-[#9AE6B4]", dot: "bg-[#48BB78]" };
+      return { label: "AI 코파일럿 — 초안만 작성, 발송은 매니저 승인 후", cls: "bg-copilot/15 border-copilot/40 text-copilot-on-dark", dot: "bg-copilot" };
+    return { label: "AI 자동 응대 중", cls: "bg-success/10 border-success/30 text-success-on-dark", dot: "bg-success" };
   }, [killRes]);
 
   // '지표 · 분석' 접이식 섹션 — 기본 접힘. 첫 화면은 '지금 할 일'이 스크롤 없이 보이는 게 목표.
@@ -279,10 +279,10 @@ export function Dashboard() {
   if (showSkeleton) return <DashboardSkeleton />;
 
   return (
-    <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
+    <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
       {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 발송폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#1A202C] rounded-[20px] px-8 py-6 relative overflow-hidden shadow-md text-white">
-        <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-[#3182CE] rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
+      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-[20px] px-8 py-6 relative overflow-hidden shadow-md text-white">
+        <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-info rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
 
         <div className="relative z-10 flex items-center justify-between">
           <div>
@@ -292,7 +292,7 @@ export function Dashboard() {
             <div className="flex items-center gap-2 text-[13px] text-white/70 flex-wrap">
               {/* 상태 dot·문구는 SWR 로딩/에러와 연동 — 하드코딩 '정상 가동' 아님 */}
               <span className="flex items-center gap-1">
-                <span className={`w-2 h-2 rounded-full ${appsError ? "bg-[#E53E3E]" : isLoading ? "bg-[#ECC94B]" : "bg-[#48BB78] animate-pulse"}`}></span>
+                <span className={`w-2 h-2 rounded-full ${appsError ? "bg-error" : isLoading ? "bg-yellow-400" : "bg-success animate-pulse"}`}></span>
                 {appsError ? "불러오기 오류 — 데이터가 최신이 아닐 수 있어요" : isLoading ? "불러오는 중…" : "데이터 최신 상태"}
               </span>
               <span className="text-white/30">|</span>
@@ -316,9 +316,9 @@ export function Dashboard() {
                   {/* 문자 발송폰(법인폰) 하트비트 칩 — 인입이 조용한 게 평화인지 장애인지 구분 */}
                   <span
                     title="문자를 실제로 보내고 받는 법인폰 상태예요. 신호가 10분 이상 없으면 문자 수·발신이 멈췄을 수 있어요."
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[12px] font-semibold ${gateway.bad ? "bg-[#E53E3E]/15 border-[#E53E3E]/40 text-[#FEB2B2]" : "bg-[#48BB78]/10 border-[#48BB78]/30 text-[#9AE6B4]"}`}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[12px] font-semibold ${gateway.bad ? "bg-error/15 border-error/40 text-error-on-dark" : "bg-success/10 border-success/30 text-success-on-dark"}`}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${gateway.bad ? "bg-[#E53E3E] animate-pulse" : "bg-[#48BB78]"}`}></span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${gateway.bad ? "bg-error animate-pulse" : "bg-success"}`}></span>
                     {gateway.label}
                   </span>
                 </>
@@ -332,20 +332,20 @@ export function Dashboard() {
       </motion.div>
 
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-2">
+            <h2 className="text-[15px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
-              {urgent.length > 0 && <span className="bg-[#E53E3E] text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
+              {urgent.length > 0 && <span className="bg-error text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
             </h2>
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
             {urgent.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
-                <CheckCircle2 size={28} className="text-[#38A169] mb-2" />
-                <div className="text-[13px] font-bold text-[#4A5568]">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-[#A0AEC0]">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
+                <CheckCircle2 size={28} className="text-success mb-2" />
+                <div className="text-[13px] font-bold text-gray-700">지금 처리할 긴급 항목이 없어요</div>
+                <div className="text-[12px] mt-0.5 text-gray-400">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
                 <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
                   {[
                     { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },
@@ -354,9 +354,9 @@ export function Dashboard() {
                     <button
                       key={s.path}
                       onClick={() => router.push(s.path)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] hover:bg-[#EDF2F7] text-[12.5px] font-bold text-[#4A5568] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[12.5px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
                     >
-                      {s.label} <ChevronRight size={15} className="text-[#A0AEC0]" />
+                      {s.label} <ChevronRight size={15} className="text-gray-400" />
                     </button>
                   ))}
                 </div>
@@ -371,15 +371,15 @@ export function Dashboard() {
                     ? document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" })
                     : router.push(item.path)
                 }
-                className={`p-4 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-[#FEB2B2] bg-[#FFF5F5] hover:border-[#FC8181]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                className={`p-4 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-error/30 bg-error-soft hover:border-error" : "border-border-strong bg-white hover:border-gray-300"}`}
               >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${item.tone === "red" ? "bg-white text-[#E53E3E] border-[#FEB2B2]" : "bg-[#F7FAFC] text-[#4A5568] border-[#E2E8F0]"}`}>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${item.tone === "red" ? "bg-white text-error border-error/30" : "bg-background text-gray-700 border-border-strong"}`}>
                   {item.tone === "red" ? <Activity size={16} /> : <PhoneCall size={16} />}
                 </div>
                 <div className="flex-1">
-                  <div className={`text-[13px] font-bold ${item.tone === "red" ? "text-[#C53030]" : "text-[#1A202C]"}`}>{item.title}</div>
-                  <div className={`text-[12px] mt-0.5 mb-2.5 ${item.tone === "red" ? "text-[#9B2C2C]" : "text-[#718096]"}`}>{item.desc}</div>
-                  <span className={`text-[11.5px] font-bold px-3 py-1.5 rounded-lg ${item.tone === "red" ? "bg-[#E53E3E] text-white" : "bg-[#F1F4F8] text-[#4A5568]"}`}>
+                  <div className={`text-[13px] font-bold ${item.tone === "red" ? "text-error-strong" : "text-foreground"}`}>{item.title}</div>
+                  <div className={`text-[12px] mt-0.5 mb-2.5 ${item.tone === "red" ? "text-error-strong" : "text-muted-foreground"}`}>{item.desc}</div>
+                  <span className={`text-[11.5px] font-bold px-3 py-1.5 rounded-lg ${item.tone === "red" ? "bg-error text-white" : "bg-muted text-gray-700"}`}>
                     {item.cta}
                   </span>
                 </div>
@@ -406,45 +406,45 @@ export function Dashboard() {
 
       {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
           접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-[#E2E8F0] rounded-[16px] shadow-sm overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-border-strong rounded-[16px] shadow-sm overflow-hidden">
         <button
           onClick={() => setMetricsOpen((v) => !v)}
           aria-expanded={metricsOpen}
-          className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-[#F7FAFC] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+          className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
         >
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><TrendingUp size={15} className="text-[#3182CE]" /> 지표 · 분석</h2>
-            <span className="text-[12.5px] text-[#718096]">
-              총 인재풀 <b className="text-[#1A202C]">{stats.total.toLocaleString()}</b>명
-              <span className="text-[#CBD5E0]"> · </span>확정 <b className="text-[#1A202C]">{stats.passed}</b>명
-              <span className="text-[#CBD5E0]"> · </span>오늘 유입 <b className="text-[#1A202C]">{stats.today}</b>명
+            <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
+            <span className="text-[12.5px] text-muted-foreground">
+              총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
+              <span className="text-gray-300"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
+              <span className="text-gray-300"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명
             </span>
           </div>
-          <span className="flex items-center gap-1 text-[12px] font-bold text-[#718096] shrink-0">
+          <span className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground shrink-0">
             {metricsOpen ? "접기" : "펼치기"}
             <ChevronDown size={15} className={`transition-transform ${metricsOpen ? "rotate-180" : ""}`} />
           </span>
         </button>
 
         {metricsOpen && (
-          <div className="px-6 pb-6 pt-5 border-t border-[#F1F4F8] flex flex-col gap-6">
+          <div className="px-6 pb-6 pt-5 border-t border-muted flex flex-col gap-6">
             {/* 핵심 지표 5칸 — 클릭 시 파이프라인으로 */}
             <div className="grid grid-cols-5 gap-4">
               {[
-                { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-[#3182CE]" },
-                { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-[#0987A0]" },
-                { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-[#D69E2E]" },
-                { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-[#805AD5]" },
-                { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-[#38A169]" },
+                { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-info" },
+                { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-chart-3" },
+                { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-yellow-600" },
+                { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-copilot" },
+                { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-success" },
               ].map((k, i) => (
-                <div key={i} className="bg-[#FCFDFE] border border-[#E2E8F0] rounded-[12px] p-4 hover:bg-[#F7FAFC] transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
+                <div key={i} className="bg-surface-raised border border-border-strong rounded-[12px] p-4 hover:bg-background transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
                   <div className="flex items-center gap-2 mb-2">
                     <k.icon size={16} className={`${k.color}`} />
-                    <span className="text-[12px] text-[#718096] font-medium">{k.label}</span>
+                    <span className="text-[12px] text-muted-foreground font-medium">{k.label}</span>
                   </div>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-[26px] font-extrabold leading-none tracking-tight text-[#1A202C]">{k.value}</span>
-                    <span className="text-[12px] text-[#A0AEC0] font-medium">{k.sub}</span>
+                    <span className="text-[26px] font-extrabold leading-none tracking-tight text-foreground">{k.value}</span>
+                    <span className="text-[12px] text-gray-400 font-medium">{k.sub}</span>
                   </div>
                 </div>
               ))}
@@ -453,15 +453,15 @@ export function Dashboard() {
             {/* 유입 추이(2/3) + 스크리닝·온보딩 현황(1/3) */}
             <div className="grid grid-cols-3 gap-6 items-stretch">
               {/* 최근 14일 신규 유입 추이 */}
-              <div className="col-span-2 border border-[#E2E8F0] rounded-[16px] p-6 flex flex-col">
+              <div className="col-span-2 border border-border-strong rounded-[16px] p-6 flex flex-col">
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <h3 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><TrendingUp size={15} className="text-[#3182CE]" /> 최근 14일 신규 유입 추이</h3>
-                    <div className="text-[12px] text-[#718096] mt-0.5">새로 들어온 지원자의 일별 흐름 · 실시간 인입 기준(일괄 임포트 제외)</div>
+                    <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 최근 14일 신규 유입 추이</h3>
+                    <div className="text-[12px] text-muted-foreground mt-0.5">새로 들어온 지원자의 일별 흐름 · 실시간 인입 기준(일괄 임포트 제외)</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-bold text-[#A0AEC0]">최근 7일 합계</div>
-                    <div className="text-[20px] font-extrabold text-[#1A202C] leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-[#A0AEC0] font-bold ml-0.5">명</span></div>
+                    <div className="text-[11px] font-bold text-gray-400">최근 7일 합계</div>
+                    <div className="text-[20px] font-extrabold text-foreground leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-gray-400 font-bold ml-0.5">명</span></div>
                   </div>
                 </div>
                 <div className="flex-1 min-h-[200px]">
@@ -469,61 +469,61 @@ export function Dashboard() {
                     <AreaChart data={trend} margin={{ top: 10, right: 8, left: -22, bottom: 0 }}>
                       <defs key="defs-dashboard">
                         <linearGradient key="grad-inflow" id="dashInflow" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3182CE" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#3182CE" stopOpacity={0} />
+                          <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="#EDF2F7" />
-                      <XAxis key="xaxis" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#A0AEC0' }} interval={1} dy={8} />
-                      <YAxis key="yaxis" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#A0AEC0' }} width={36} />
+                      <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                      <XAxis key="xaxis" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} interval={1} dy={8} />
+                      <YAxis key="yaxis" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} width={36} />
                       <RechartsTooltip
                         key="tooltip"
-                        contentStyle={{ borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '12px' }}
-                        labelStyle={{ fontWeight: 'bold', color: '#1A202C', marginBottom: '2px' }}
+                        contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-strong)', background: 'var(--surface-raised)', boxShadow: 'var(--shadow-md)', fontSize: '12px' }}
+                        labelStyle={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '2px' }}
                       />
-                      <Area key="area-inflow" type="monotone" dataKey="유입" stroke="#3182CE" strokeWidth={2.5} fillOpacity={1} fill="url(#dashInflow)" />
+                      <Area key="area-inflow" type="monotone" dataKey="유입" stroke="var(--chart-1)" strokeWidth={2} fillOpacity={1} fill="url(#dashInflow)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
               {/* 스크리닝 · 온보딩 현황 (실데이터) */}
-              <div className="border border-[#E2E8F0] rounded-[16px] p-5 flex flex-col">
+              <div className="border border-border-strong rounded-[16px] p-5 flex flex-col">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5"><ClipboardCheck size={15} className="text-[#3182CE]" /> 스크리닝 · 온보딩 현황</h3>
-                  <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-[#3182CE] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40 rounded">응대로</button>
+                  <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
+                  <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40 rounded">응대로</button>
                 </div>
 
                 {/* 단계별 — 라벨은 실무 언어, 뜻은 툴팁으로 */}
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    { label: "초기 대화", value: flow.exploration, color: "text-[#718096]", bg: "bg-[#F7FAFC]", hint: "AI가 조건을 안내하며 첫 대화를 나누는 단계" },
-                    { label: "스크리닝", value: flow.screening, color: "text-[#D69E2E]", bg: "bg-[#FFFBEB]", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
-                    { label: "온보딩", value: flow.onboarding, color: "text-[#805AD5]", bg: "bg-[#FAF5FF]", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
-                    { label: "활동 중", value: flow.active, color: "text-[#38A169]", bg: "bg-[#F0FFF4]", hint: "온보딩을 마치고 실제 근무 중인 단계" },
+                    { label: "초기 대화", value: flow.exploration, color: "text-muted-foreground", bg: "bg-background", hint: "AI가 조건을 안내하며 첫 대화를 나누는 단계" },
+                    { label: "스크리닝", value: flow.screening, color: "text-yellow-600", bg: "bg-yellow-50", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
+                    { label: "온보딩", value: flow.onboarding, color: "text-copilot", bg: "bg-copilot-soft", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
+                    { label: "활동 중", value: flow.active, color: "text-success", bg: "bg-success-soft", hint: "온보딩을 마치고 실제 근무 중인 단계" },
                   ].map((s) => (
                     <div key={s.label} className={`rounded-xl px-3 py-2 ${s.bg}`} title={s.hint}>
-                      <div className="text-[11px] font-bold text-[#718096]">{s.label}</div>
-                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-[#A0AEC0] ml-0.5">건</span></div>
+                      <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
+                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-gray-400 ml-0.5">건</span></div>
                     </div>
                   ))}
                 </div>
 
                 {/* 온보딩 체크 진행도 */}
-                <div className="border-t border-[#F1F4F8] pt-3 space-y-2.5">
-                  <div className="text-[11.5px] font-bold text-[#718096] flex items-center justify-between">온보딩 진행 <span className="text-[#A0AEC0] font-medium">대상 {flow.targets}명</span></div>
+                <div className="border-t border-muted pt-3 space-y-2.5">
+                  <div className="text-[11.5px] font-bold text-muted-foreground flex items-center justify-between">온보딩 진행 <span className="text-gray-400 font-medium">대상 {flow.targets}명</span></div>
                   {[
-                    { label: "가이드 전달", value: flow.guideSent, total: flow.targets, pct: flow.pct(flow.guideSent), icon: ClipboardCheck, color: "#38A169" },
+                    { label: "가이드 전달", value: flow.guideSent, total: flow.targets, pct: flow.pct(flow.guideSent), icon: ClipboardCheck, color: "var(--chart-1)" },
                     // 배민 ID는 배민 라인 전용 — 분모를 배민 대상으로. 배민 대상이 없으면(도시락만) 숨김.
-                    ...(flow.baeminTargets > 0 ? [{ label: "배민 ID 수신", value: flow.baeminId, total: flow.baeminTargets, pct: flow.pctBaemin(flow.baeminId), icon: Smartphone, color: "#3182CE" }] : []),
-                    { label: "온보딩 통화", value: flow.called, total: flow.targets, pct: flow.pct(flow.called), icon: PhoneCall, color: "#805AD5" },
+                    ...(flow.baeminTargets > 0 ? [{ label: "배민 ID 수신", value: flow.baeminId, total: flow.baeminTargets, pct: flow.pctBaemin(flow.baeminId), icon: Smartphone, color: "var(--chart-2)" }] : []),
+                    { label: "온보딩 통화", value: flow.called, total: flow.targets, pct: flow.pct(flow.called), icon: PhoneCall, color: "var(--chart-3)" },
                   ].map((m) => (
                     <div key={m.label}>
                       <div className="flex items-center justify-between text-[11.5px] mb-1">
-                        <span className="flex items-center gap-1.5 font-semibold text-[#4A5568]"><m.icon size={12} style={{ color: m.color }} /> {m.label}</span>
-                        <span className="font-bold text-[#1A202C]">{m.value}/{m.total}</span>
+                        <span className="flex items-center gap-1.5 font-semibold text-gray-700"><m.icon size={12} style={{ color: m.color }} /> {m.label}</span>
+                        <span className="font-bold text-foreground">{m.value}/{m.total}</span>
                       </div>
-                      <div className="h-1.5 bg-[#EDF2F7] rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div className="h-full rounded-full" style={{ width: `${m.pct}%`, backgroundColor: m.color }} />
                       </div>
                     </div>
@@ -533,13 +533,13 @@ export function Dashboard() {
             </div>
 
             {/* 단계별 전환율 (가로형 · 단계 간 전환율 강조) */}
-            <div className="border border-[#E2E8F0] rounded-[16px] p-6 flex flex-col">
+            <div className="border border-border-strong rounded-[16px] p-6 flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-[15px] font-bold text-[#1A202C]">파이프라인 단계별 현황</h3>
-                  <div className="text-[12px] text-[#718096] mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
+                  <h3 className="text-[15px] font-bold text-foreground">파이프라인 단계별 현황</h3>
+                  <div className="text-[12px] text-muted-foreground mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
                 </div>
-                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">
+                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
                   상세 보기
                 </button>
               </div>
@@ -547,19 +547,19 @@ export function Dashboard() {
               <div className="flex flex-col gap-3 flex-1 justify-center">
                 {funnel.map((f, i) => (
                   <div key={i} className="flex items-center gap-3">
-                    <div className="w-[88px] shrink-0 text-[12.5px] font-bold text-[#4A5568] text-right">{f.step}</div>
-                    <div className="flex-1 h-9 bg-[#F7FAFC] rounded-lg overflow-hidden relative">
+                    <div className="w-[88px] shrink-0 text-[12.5px] font-bold text-gray-700 text-right">{f.step}</div>
+                    <div className="flex-1 h-9 bg-background rounded-lg overflow-hidden relative">
                       <div
                         className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
                         style={{ width: `${Math.max(f.pctTotal, 6)}%`, backgroundColor: f.color }}
                       >
-                        <span className={`text-[13px] font-extrabold ${i === funnel.length - 1 ? "text-white" : "text-[#2D3748]"}`}>{f.val.toLocaleString()}</span>
+                        <span className={`text-[13px] font-extrabold ${i === funnel.length - 1 ? "text-white" : "text-gray-800"}`}>{f.val.toLocaleString()}</span>
                       </div>
                     </div>
                     <div className="w-[92px] shrink-0 flex items-center justify-end gap-1.5">
-                      <span className="text-[12px] font-bold text-[#1A202C]">{f.pctTotal}%</span>
+                      <span className="text-[12px] font-bold text-foreground">{f.pctTotal}%</span>
                       {f.conv !== null && (
-                        <span className="text-[10.5px] font-bold text-[#718096] bg-[#EDF2F7] px-1.5 py-0.5 rounded">전환 {f.conv}%</span>
+                        <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">전환 {f.conv}%</span>
                       )}
                     </div>
                   </div>
@@ -568,37 +568,37 @@ export function Dashboard() {
             </div>
 
             {/* 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
-            <div className="border border-[#E2E8F0] rounded-[16px] p-6 flex flex-col">
+            <div className="border border-border-strong rounded-[16px] p-6 flex flex-col">
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5"><MapPin size={15} className="text-[#3182CE]" /> 지역별 인재풀 분포</h3>
-                  <div className="text-[12px] text-[#718096] mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
+                  <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info" /> 지역별 인재풀 분포</h3>
+                  <div className="text-[12px] text-muted-foreground mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
                 </div>
-                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-[#3182CE] bg-[#EBF8FF] hover:bg-[#BEE3F8] px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40">
+                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
                   지도에서 보기
                 </button>
               </div>
 
               {regionDist.top.length === 0 ? (
-                <div className="py-6 text-center text-[13px] text-[#A0AEC0]">아직 집계할 지역 데이터가 없어요. 지원자의 주소가 입력되면 자동으로 채워집니다.</div>
+                <div className="py-6 text-center text-[13px] text-gray-400">아직 집계할 지역 데이터가 없어요. 지원자의 주소가 입력되면 자동으로 채워집니다.</div>
               ) : (
                 <div className="flex flex-col gap-3">
                   {regionDist.top.map((r) => (
                     <div key={r.region} className="flex items-center gap-3">
-                      <div className="w-[120px] shrink-0 text-[12.5px] font-bold text-[#4A5568] text-right truncate" title={r.region}>{r.region}</div>
-                      <div className="flex-1 h-8 bg-[#F7FAFC] rounded-lg overflow-hidden relative">
+                      <div className="w-[120px] shrink-0 text-[12.5px] font-bold text-gray-700 text-right truncate" title={r.region}>{r.region}</div>
+                      <div className="flex-1 h-8 bg-background rounded-lg overflow-hidden relative">
                         <div
-                          className="h-full rounded-lg transition-all duration-500 flex items-center px-3 bg-[#63B3ED]"
+                          className="h-full rounded-lg transition-all duration-500 flex items-center px-3 bg-info"
                           style={{ width: `${Math.max(Math.round((r.count / regionDist.max) * 100), 8)}%` }}
                         >
-                          <span className="text-[12.5px] font-extrabold text-[#2D3748]">{r.count.toLocaleString()}</span>
+                          <span className="text-[12.5px] font-extrabold text-gray-800">{r.count.toLocaleString()}</span>
                         </div>
                       </div>
-                      <div className="w-[40px] shrink-0 text-[12px] font-bold text-[#A0AEC0] text-right">명</div>
+                      <div className="w-[40px] shrink-0 text-[12px] font-bold text-gray-400 text-right">명</div>
                     </div>
                   ))}
                   {regionDist.unknownCount > 0 && (
-                    <div className="text-[11.5px] text-[#A0AEC0] mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
+                    <div className="text-[11.5px] text-gray-400 mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
                   )}
                 </div>
               )}
@@ -613,8 +613,8 @@ export function Dashboard() {
 // 첫 진입(캐시 없음) 로딩 중 0값 깜빡임을 막는 스켈레톤. 실제 레이아웃 골격(헤더→할 일→큐 2칸→접이식 헤더)과 동일.
 function DashboardSkeleton() {
   return (
-    <div className="p-8 pb-12 flex flex-col gap-6 bg-[#F7FAFC] min-h-full">
-      <div className="bg-[#1A202C] rounded-[20px] px-8 py-6 shadow-md">
+    <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
+      <div className="bg-foreground rounded-[20px] px-8 py-6 shadow-md">
         <div className="flex items-center justify-between">
           <div className="space-y-2">
             <Skeleton className="h-5 w-64 bg-white/10" />

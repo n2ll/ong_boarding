@@ -120,9 +120,9 @@ export function FollowupSendModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && onClose()}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0]">
-          <h3 className="text-[15px] font-extrabold text-[#1A202C]">{KIND_LABEL[kind]} 발송</h3>
-          <button onClick={onClose} className="text-[#A0AEC0] hover:text-[#4A5568] p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-strong">
+          <h3 className="text-[15px] font-extrabold text-foreground">{KIND_LABEL[kind]} 발송</h3>
+          <button aria-label="팔로업 발송 창 닫기" onClick={onClose} className="after:absolute after:-inset-2 after:content-[''] relative text-gray-400 hover:text-gray-700 p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
             <X size={18} />
           </button>
         </div>
@@ -131,7 +131,7 @@ export function FollowupSendModal({
           {kind === "venue" && (
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">시작일</span>
+                <span className="text-[11px] font-bold text-gray-400">시작일</span>
                 <input
                   type="date"
                   value={venueDate}
@@ -141,11 +141,11 @@ export function FollowupSendModal({
                     if (v) void fetchPreview({ startDate: v, meetingTime: venueTime });
                     else setPreview(null);
                   }}
-                  className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]"
+                  className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">집합 시각(선택)</span>
+                <span className="text-[11px] font-bold text-gray-400">집합 시각(선택)</span>
                 <input
                   type="time"
                   value={venueTime}
@@ -154,30 +154,30 @@ export function FollowupSendModal({
                     setVenueTime(v);
                     if (venueDate) void fetchPreview({ startDate: venueDate, meetingTime: v });
                   }}
-                  className="border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-[#FFCB3C]"
+                  className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
                 />
               </label>
             </div>
           )}
 
           {loading ? (
-            <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-6 justify-center">
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-6 justify-center">
               <Loader2 size={16} className="animate-spin" /> 미리보기 불러오는 중…
             </div>
           ) : (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[#A0AEC0]">발송 내용 (수정 가능)</span>
+                <span className="text-[11px] font-bold text-gray-400">발송 내용 (수정 가능)</span>
                 <textarea
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
                   rows={7}
                   placeholder={kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
-                  className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] resize-none"
+                  className="border border-border-strong rounded-lg px-3 py-2 text-[13px] leading-relaxed focus:outline-none focus:border-brand-yellow resize-none"
                 />
               </label>
               {preview && (
-                <div className="text-[11px] text-[#718096]">
+                <div className="text-[11px] text-muted-foreground">
                   {preview.sms_type} · 예상 비용 약 {preview.cost_krw}원
                 </div>
               )}
@@ -185,14 +185,14 @@ export function FollowupSendModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#E2E8F0] sticky bottom-0 bg-white">
-          <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50">
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border-strong sticky bottom-0 bg-white">
+          <button onClick={onClose} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">
             취소
           </button>
           <button
             onClick={doSend}
             disabled={saving || loading || !editText.trim()}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A202C]"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
           >
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 발송
           </button>

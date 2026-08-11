@@ -124,15 +124,20 @@ export type Tab =
   | "clients"
   | "team";
 
+/**
+ * 상태 배지 색. styles/theme.css의 상태 토큰과 같은 값이지만,
+ * 여기는 `${color}1A` 처럼 알파를 이어 붙여 쓰는 자리라 var()가 아니라
+ * 구체적인 hex여야 한다. 토큰 값을 바꾸면 여기도 같이 바꾼다.
+ */
 export const STATUS_COLORS: Record<string, string> = {
-  "스크리닝 전": "#9CA3AF",
-  "스크리닝 중": "#6b7280",
-  "스크리닝 완료": "#0EA5E9",
-  기타: "#8B5CF6",
-  확정인력: "#10b981",
-  대기자: "#f59e0b",
-  부적합: "#ef4444",
-  이탈: "#7f1d1d",
+  "스크리닝 전": "#9CA3AF", // gray-400
+  "스크리닝 중": "#6B7280", // gray-500
+  "스크리닝 완료": "#2563EB", // --info
+  기타: "#6D28D9", // --copilot
+  확정인력: "#16845B", // --success
+  대기자: "#B86A00", // --warning
+  부적합: "#D92D20", // --error
+  이탈: "#B42318", // --error-strong
 };
 
 export const ALL_STATUSES = [

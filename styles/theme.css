@@ -1,89 +1,217 @@
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * 옹보딩 디자인 토큰 — Ongboarding UI System 기반
+ * 원본: design-system/ongboarding/MASTER.md (v0.3 Foundation)
+ * 방향: Warm industrial operations UI · Paper 배경 + Signal Yellow + Ink
+ *
+ * 규칙
+ * - Signal Yellow(--brand-yellow)는 넓은 배경 장식이나 본문 텍스트에 쓰지 않는다.
+ *   주요 행동과 "현재 선택"에만 쓴다.
+ * - 상태색(success/info/warning/error)은 예약어다. 차트 시리즈 색으로 재사용하지 않는다.
+ * - 색만으로 상태를 전달하지 않는다. 텍스트나 아이콘을 함께 쓴다.
+ */
+
 :root {
   --font-size: 16px;
-  /* 브랜드 토큰 (브랜드 가이드) */
-  --brand-yellow: #FFC83D;
+
+  /* ── 브랜드 ─────────────────────────────────────────────── */
+  /* 화면 코드 실사용 기준으로 통일한 값(#FFCB3C 357곳 vs #FFC83D 1곳) */
+  --brand-yellow: #FFCB3C;
   --brand-dark: #0F141E;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
-  --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
+  --brand-muted: #FFF5CF;
+
+  /* ── 기본 표면 ──────────────────────────────────────────── */
+  --background: #F4F2EC;          /* Paper */
+  --foreground: #111827;          /* Ink */
+  --card: #FFFFFF;
+  --card-foreground: #111827;
+  --popover: #FFFFFF;
+  --popover-foreground: #111827;
+
+  /* 핵심 실행은 Ink. Signal Yellow는 brand 변형이 담당한다. */
+  --primary: #111827;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EAE7DF;
+  --secondary-foreground: #111827;
+  --muted: #EAE7DF;
+  --muted-foreground: #5D6470;
+  --accent: #E4E0D6;
+  --accent-foreground: #111827;
+  --destructive: #D92D20;
+  --destructive-foreground: #FFFFFF;
+
+  --border: rgba(17, 24, 39, 0.08);
+  --border-strong: rgba(17, 24, 39, 0.14);
   --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
+  --input-background: #FFFFFF;
+  --switch-background: #C9C4B8;
+  --ring: #B77900;                /* focus-visible */
+
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.75rem;              /* 컨트롤 12px */
+
+  /* ── 서피스 · 글래스 ────────────────────────────────────── */
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-raised: #FFFFFF;
+  --glass-1: rgba(255, 255, 255, 0.52);
+  --glass-2: rgba(255, 255, 255, 0.68);
+  --glass-3: rgba(255, 255, 255, 0.9);
+  --glass-dark: rgba(17, 24, 39, 0.85);
+  --border-glass: rgba(255, 255, 255, 0.72);
+
+  /* ── 상태 (예약어) ──────────────────────────────────────── */
+  --success: #16845B;
+  --success-soft: #EAF8F1;
+  --success-strong: #0B6844;
+  --info: #2563EB;
+  --info-soft: #EFF6FF;
+  --info-strong: #1E40AF;
+  --warning: #B86A00;
+  --warning-soft: #FFF7E0;
+  --warning-strong: #92400E;
+  --error: #D92D20;
+  --error-soft: #FEF1F0;
+  --error-strong: #B42318;
+  /* AI 코파일럿 모드 표시용. 상태 4색과 구분되어야 해서 별도 역할로 둔다. */
+  --copilot: #6D28D9;
+  --copilot-soft: #F5F1FE;
+  --copilot-strong: #5B21B6;
+
+  /* 어두운 면(Ink 히어로·glass-dark 패널) 위에 얹는 상태 글자색.
+     --success/--error 같은 본 값은 밝은 배경 기준이라 어두운 면에서 죽는다.
+     여기 값은 #111827 위에서 대비 7:1 이상이다. */
+  --success-on-dark: #86EFAC;
+  --info-on-dark: #93C5FD;
+  --warning-on-dark: #FCD34D;
+  --error-on-dark: #FCA5A5;
+  --copilot-on-dark: #C4B5FD;
+
+  /* ── 차트 ───────────────────────────────────────────────
+   * categorical 5색 — 고정 순서로 배정하고 순환시키지 않는다.
+   * validate_palette.js 통과(light, surface #F4F2EC):
+   *   최악 인접쌍 CVD ΔE 15.0 · 정상시야 ΔE 24.5 · 전 슬롯 대비 3:1 이상.
+   * 산점도·소형 다중처럼 모든 쌍이 동시에 보이는 형태는 상위 3슬롯까지만
+   * 안전하다(all-pairs 통과). 4개째부터는 "기타"로 접거나 facet으로 나눈다.
+   */
+  --chart-1: #1D4ED8;
+  --chart-2: #C2410C;
+  --chart-3: #0891B2;
+  --chart-4: #7C3AED;
+  --chart-5: #BE185D;
+
+  /* 칩·아바타처럼 같은 계열 색 위에 글자를 얹을 때 쓰는 연한 배경.
+     마크가 아니라 배경이므로 categorical 게이트 대상은 아니다.
+     같은 번호의 --chart-N을 글자색으로 얹는 것을 전제로 한다. */
+  --chart-1-soft: #EAEFFC;
+  --chart-2-soft: #FCEDE6;
+  --chart-3-soft: #E6F5F9;
+  --chart-4-soft: #F1EAFD;
+  --chart-5-soft: #FBE9F0;
+
+  /* 퍼널·등급처럼 순서가 있는 이산 단계용 단일 hue 램프 (--ordinal 통과) */
+  --chart-step-1: #83A3EB;
+  --chart-step-2: #5580E4;
+  --chart-step-3: #2E5FD5;
+  --chart-step-4: #1A44BC;
+
+  /* ── 그림자 ─────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(17, 24, 39, 0.06);
+  --shadow-sm: 0 4px 14px rgba(17, 24, 39, 0.07);
+  --shadow-md: 0 12px 28px rgba(17, 24, 39, 0.1);
+  --shadow-xl: 0 28px 70px rgba(17, 24, 39, 0.18);
+  --shadow-action: 0 8px 18px rgba(17, 24, 39, 0.2);
+  --shadow-brand: 0 8px 20px rgba(204, 150, 13, 0.2);
+  --shadow-inset: inset 0 1px 2px rgba(17, 24, 39, 0.06);
+
+  /* ── 사이드바 ───────────────────────────────────────────── */
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #111827;
+  --sidebar-primary: #111827;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #EAE7DF;
+  --sidebar-accent-foreground: #111827;
+  --sidebar-border: rgba(17, 24, 39, 0.08);
+  --sidebar-ring: #B77900;
 }
 
+/*
+ * 다크 모드는 현재 제품에서 활성화되지 않는다(.dark를 붙이는 테마 프로바이더가
+ * 없고, dark: 유틸은 shadcn 프리미티브 안에만 남아 있다). 값이 썩지 않도록
+ * 새 팔레트의 다크 대응만 유지한다. 실제 도입 시 대비를 다시 측정할 것.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --background: #0F1115;
+  --foreground: #F3F4F6;
+  --card: #171A21;
+  --card-foreground: #F3F4F6;
+  --popover: #171A21;
+  --popover-foreground: #F3F4F6;
+  --primary: #F3F4F6;
+  --primary-foreground: #111827;
+  --secondary: #262B34;
+  --secondary-foreground: #F3F4F6;
+  --muted: #262B34;
+  --muted-foreground: #9CA3AF;
+  --accent: #2F3541;
+  --accent-foreground: #F3F4F6;
+  --destructive: #F04438;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(243, 244, 246, 0.12);
+  --border-strong: rgba(243, 244, 246, 0.2);
+  --input: rgba(243, 244, 246, 0.12);
+  --input-background: #171A21;
+  --switch-background: #3A414F;
+  --ring: #E0B500;
+
+  --surface: rgba(23, 26, 33, 0.62);
+  --surface-raised: #171A21;
+  --glass-1: rgba(23, 26, 33, 0.52);
+  --glass-2: rgba(23, 26, 33, 0.68);
+  --glass-3: rgba(23, 26, 33, 0.9);
+  --glass-dark: rgba(8, 12, 20, 0.85);
+  --border-glass: rgba(243, 244, 246, 0.1);
+
+  --sidebar: #171A21;
+  --sidebar-foreground: #F3F4F6;
+  --sidebar-primary: #F3F4F6;
+  --sidebar-primary-foreground: #111827;
+  --sidebar-accent: #262B34;
+  --sidebar-accent-foreground: #F3F4F6;
+  --sidebar-border: rgba(243, 244, 246, 0.12);
+  --sidebar-ring: #E0B500;
 }
 
 @theme inline {
+  /* 중립 램프 — 라이브러리(src/index.css)와 동일한 값.
+     라이브러리 컴포넌트를 그대로 옮겨도 gray-* 유틸이 같은 색을 낸다. */
+  --color-gray-50: #F9FAFB;
+  --color-gray-100: #F3F4F6;
+  --color-gray-200: #E5E7EB;
+  --color-gray-300: #D1D5DB;
+  --color-gray-400: #9CA3AF;
+  --color-gray-500: #6B7280;
+  --color-gray-600: #4B5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1F2937;
+  --color-gray-900: #111827;
+  --color-gray-950: #080C14;
+
+  /* Signal Yellow 램프 */
+  --color-yellow-50: #FFF9E6;
+  --color-yellow-100: #FFF2CC;
+  --color-yellow-200: #FFE699;
+  --color-yellow-300: #FFD966;
+  --color-yellow-400: #FFCB3C;
+  --color-yellow-500: #E6B022;
+  --color-yellow-600: #CC960D;
+  --color-yellow-700: #B37D00;
+
   --color-brand-yellow: var(--brand-yellow);
   --color-brand-dark: var(--brand-dark);
+  --color-brand-muted: var(--brand-muted);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -101,19 +229,61 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
   --color-switch-background: var(--switch-background);
   --color-ring: var(--ring);
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-glass-1: var(--glass-1);
+  --color-glass-2: var(--glass-2);
+  --color-glass-3: var(--glass-3);
+  --color-glass-dark: var(--glass-dark);
+  --color-border-glass: var(--border-glass);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-strong: var(--success-strong);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-strong: var(--info-strong);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-strong: var(--warning-strong);
+  --color-error: var(--error);
+  --color-error-soft: var(--error-soft);
+  --color-error-strong: var(--error-strong);
+  --color-copilot: var(--copilot);
+  --color-copilot-soft: var(--copilot-soft);
+  --color-copilot-strong: var(--copilot-strong);
+  --color-success-on-dark: var(--success-on-dark);
+  --color-info-on-dark: var(--info-on-dark);
+  --color-warning-on-dark: var(--warning-on-dark);
+  --color-error-on-dark: var(--error-on-dark);
+  --color-copilot-on-dark: var(--copilot-on-dark);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-1-soft: var(--chart-1-soft);
+  --color-chart-2-soft: var(--chart-2-soft);
+  --color-chart-3-soft: var(--chart-3-soft);
+  --color-chart-4-soft: var(--chart-4-soft);
+  --color-chart-5-soft: var(--chart-5-soft);
+  --color-chart-step-1: var(--chart-step-1);
+  --color-chart-step-2: var(--chart-step-2);
+  --color-chart-step-3: var(--chart-step-3);
+  --color-chart-step-4: var(--chart-step-4);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -131,6 +301,15 @@
 
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(at 0% 0%, hsla(43, 100%, 70%, 0.18) 0px, transparent 48%),
+      radial-gradient(at 100% 100%, hsla(11, 75%, 68%, 0.08) 0px, transparent 46%),
+      linear-gradient(rgba(255, 255, 255, 0.24) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.24) 1px, transparent 1px);
+    background-size: auto, auto, 32px 32px, 32px 32px;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.015em;
   }
 
   /**
@@ -184,28 +363,106 @@
     line-height: 1.5;
   }
 
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--brand-yellow);
+    color: var(--foreground);
+  }
+
   /* Added for Browser Compatibility (C) */
   html, body, .scrollbar-custom {
     font-family: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
     scrollbar-width: thin;
-    scrollbar-color: #CBD5E0 transparent;
+    scrollbar-color: rgba(17, 24, 39, 0.18) transparent;
   }
-  
+
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #CBD5E0;
+    background: rgba(17, 24, 39, 0.18);
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #A0AEC0;
+    background: rgba(17, 24, 39, 0.3);
     background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: var(--glass-2);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border-glass);
+  }
+
+  .glass-dark {
+    background: var(--glass-dark);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #FFFFFF;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* 스크롤 목록 하단을 부드럽게 페이드 */
+  .mask-bottom {
+    -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  }
+
+  /* KPI·시간처럼 자릿수 비교가 필요한 숫자 */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * 밀도 — 목록에서 "빽빽하게"를 고르면 한 화면에 더 많은 사람이 보인다.
+ * 조건부 JSX를 행 곳곳에 흩뿌리지 않고 컨테이너의 data-density 하나로 제어한다.
+ * 감추는 것은 보조 정보(data-den="secondary")뿐이고, 이름·상태·배지 같은
+ * 판단에 필요한 것은 두 밀도에서 모두 남는다.
+ */
+[data-density="compact"] td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+[data-density="compact"] [data-den="secondary"] {
+  display: none;
+}
+
+[data-density="compact"] [data-den="avatar"] {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

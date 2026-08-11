@@ -122,33 +122,33 @@ export function Automation() {
       label: "AI 자동응답",
       value: stats.loading ? "…" : stats.aiDisabled ? "중단됨" : "작동 중",
       icon: Power,
-      tone: stats.aiDisabled ? "text-[#E53E3E]" : "text-[#38A169]",
+      tone: stats.aiDisabled ? "text-error" : "text-success",
       live: !stats.aiDisabled,
     },
-    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-[#D69E2E]" },
-    { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-[#3182CE]" },
-    { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-[#718096]" },
-    { label: "분류 대기 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-[#E53E3E]" : "text-[#718096]" },
-    { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-[#1A202C]" },
+    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-yellow-600" },
+    { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-info" },
+    { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-muted-foreground" },
+    { label: "분류 대기 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-error" : "text-muted-foreground" },
+    { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-foreground" },
   ];
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[#F7FAFC]">
+    <div className="flex flex-col h-full min-h-0 bg-background">
       {/* 실시간 자동화 현황 (실데이터) */}
-      <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-3.5">
+      <div className="shrink-0 bg-white border-b border-border-strong px-6 py-3.5">
         <div className="flex items-center gap-2 mb-2.5">
-          <span className="text-[12px] font-extrabold tracking-wide text-[#1A202C]">실시간 자동화 현황</span>
-          <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded">실시간 집계</span>
+          <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
+          <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded">실시간 집계</span>
         </div>
         <div className="grid grid-cols-6 gap-3">
           {kpis.map((k, i) => (
-            <div key={i} className="border border-[#E2E8F0] rounded-xl px-3.5 py-2.5 bg-[#FCFDFE]">
-              <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#718096] mb-1">
+            <div key={i} className="border border-border-strong rounded-xl px-3.5 py-2.5 bg-surface-raised">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-muted-foreground mb-1">
                 <k.icon size={13} className={k.tone} /> {k.label}
               </div>
               <div className={`text-[18px] font-extrabold tracking-tight flex items-center gap-1.5 ${k.tone}`}>
                 {k.value}
-                {k.live && <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] animate-pulse" />}
+                {k.live && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
               </div>
             </div>
           ))}
@@ -156,17 +156,17 @@ export function Automation() {
       </div>
 
       {/* 자동 점검 규칙 (실동작) */}
-      <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-3.5">
+      <div className="shrink-0 bg-white border-b border-border-strong px-6 py-3.5">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-extrabold tracking-wide text-[#1A202C]">자동 점검 규칙</span>
-            <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-1.5 py-0.5 rounded" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
-            {ruleRanAt && <span className="text-[11px] text-[#A0AEC0]">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
+            <span className="text-[12px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</span>
+            <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
+            {ruleRanAt && <span className="text-[11px] text-gray-400">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
           <button
             onClick={runEvaluate}
             disabled={ruleRunning}
-            className="flex items-center gap-1.5 bg-[#1A202C] hover:bg-[#2D3748] text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] disabled:opacity-60"
+            className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-60"
           >
             <Play size={13} /> {ruleRunning ? "점검 중…" : "지금 점검 실행"}
           </button>
@@ -176,15 +176,15 @@ export function Automation() {
             const cfg = ruleConfig[rule.id] ?? { enabled: false };
             const result = ruleResults[rule.id];
             return (
-              <div key={rule.id} className={`border rounded-xl px-3.5 py-2.5 ${cfg.enabled ? "border-[#E2E8F0] bg-[#FCFDFE]" : "border-[#EDF2F7] bg-[#F7FAFC] opacity-70"}`}>
+              <div key={rule.id} className={`border rounded-xl px-3.5 py-2.5 ${cfg.enabled ? "border-border-strong bg-surface-raised" : "border-muted bg-background opacity-70"}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-bold text-[#1A202C] truncate">{rule.label}</div>
-                    <div className="text-[11px] text-[#718096] leading-tight mt-0.5 line-clamp-2">{rule.desc}</div>
+                    <div className="text-[12.5px] font-bold text-foreground truncate">{rule.label}</div>
+                    <div className="text-[11px] text-muted-foreground leading-tight mt-0.5 line-clamp-2">{rule.desc}</div>
                   </div>
-                  <button
+                  <button type="button" aria-label={`${rule.label} 규칙 켜기`} aria-checked={cfg.enabled} role="switch"
                     onClick={() => toggleRule(rule.id)}
-                    className={`shrink-0 w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                    className={`after:absolute after:-inset-3 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-success" : "bg-gray-300"}`}
                     title={cfg.enabled ? "켜짐" : "꺼짐"}
                   >
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${cfg.enabled ? "left-[18px]" : "left-0.5"}`} />
@@ -192,7 +192,7 @@ export function Automation() {
                 </div>
                 <div className="flex items-center justify-between mt-2 gap-2">
                   {rule.hasThreshold ? (
-                    <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#718096]">
+                    <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
                       기준
                       <input
                         type="number"
@@ -201,22 +201,22 @@ export function Automation() {
                         onChange={(e) => setThreshold(rule.id, Number(e.target.value))}
                         onBlur={() => persistConfig(ruleConfig)}
                         disabled={!cfg.enabled}
-                        className="w-14 border border-[#E2E8F0] rounded-md px-2 py-1 text-[12px] text-[#1A202C] outline-none focus:border-[#3182CE] disabled:bg-[#EDF2F7]"
+                        className="w-14 border border-border-strong rounded-md px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
                       />
                       {rule.unit}
                     </label>
                   ) : (
-                    <span className="text-[11px] text-[#A0AEC0]" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
+                    <span className="text-[11px] text-gray-400" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
                   )}
                   {result ? (
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]" : "bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5]"}`}>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-error-soft text-error border border-error/30" : "bg-success-soft text-success border border-success/25"}`}>
                       {result.triggered ? "조치 필요" : "정상"}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-[#CBD5E0] font-bold">미점검</span>
+                    <span className="text-[11px] text-gray-300 font-bold">미점검</span>
                   )}
                 </div>
-                {result && <div className="text-[11px] text-[#718096] mt-1.5">{result.detail}</div>}
+                {result && <div className="text-[11px] text-muted-foreground mt-1.5">{result.detail}</div>}
               </div>
             );
           })}
