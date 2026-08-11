@@ -17,6 +17,7 @@
 
 import type { OtherActiveJob, StageResult, StageTransition } from "./types";
 import { coarseArea } from "../geo";
+import { jobPayLabel } from "../jobs";
 
 const STAGE_KO: Record<string, string> = {
   exploration: "탐색",
@@ -26,23 +27,13 @@ const STAGE_KO: Record<string, string> = {
   paused: "매니저 응대",
 };
 
-/** 급여 한 줄 — pay_info 원문이 있으면 그것, 없으면 pay_type/pay_amount 조합. */
-function payLine(j: OtherActiveJob): string | null {
-  const info = (j.pay_info ?? "").trim();
-  if (info) return info;
-  if (typeof j.pay_amount === "number" && j.pay_amount > 0) {
-    return `${j.pay_type ?? "급여"} ${j.pay_amount.toLocaleString("ko-KR")}원`;
-  }
-  return null;
-}
-
 /** 이 공고에서 '지금 답할 수 있는 항목'과 '미기재 항목'을 가른다. */
 export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; missing: string[] } {
   const rows: [string, string | null][] = [
     ["근무시간", (j.slot ?? "").trim() || null],
     ["근무기간", (j.work_period ?? "").trim() || null],
     ["시작일", (j.start_date ?? "").trim() || null],
-    ["급여", payLine(j)],
+    ["급여", jobPayLabel(j) || null],
     // **상세 주소는 싣지 않는다** — 집결지 상세는 확정 후 매니저가 안내하는 값이다.
     // 지원자 카드(/p/[token])와 같은 함수로 '서울 서초구'까지만(lib/geo.coarseArea).
     ["집결지(대략)", coarseArea(j.pickup_address) || null],

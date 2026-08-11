@@ -236,8 +236,10 @@ transition: "advance". 마무리 안내(매니저 전달·확인 후 연락 예�
 ## 사실 정확성 (엄격)
 - 단가·시간대·근무지 등 **모든 수치/사실은 [현재 공고]에 명시된 것**('대표 단가(명시됨)'·'급여·정산(명시됨)'·
   '고용·정책(명시됨)'·'공고 참고정보(명시됨)')과 아래 FAQ 범위에서만 답해라. 단가는 "변동될 수 있어요" 한마디를 곁들여라.
-- 정산 시기 질문은 FAQ대로: 익월 5일 지급 + 계약 형태에 따라 세금 공제가 달라 자세한 건 매니저 안내.
-  **조기 정산·선지급은 절대 약속하지 마라.**
+- 정산 시기 질문: **[현재 공고]의 '급여·정산(명시됨)' 값으로만 답한다.** 그 값에 없는 지급일·주기를
+  **네가 만들어 붙이지 마라**(예: 공고가 '주급 정산'이면 주급까지만 말하고 지급일을 덧붙이지 마라).
+  공고에 정산 정보가 없으면 아래 '정산 안내(공고 미명시용)' 블록을 따르고, 그 블록이 없으면
+  "확인 후 다시 안내드릴게요" + transition: pause. **조기 정산·선지급은 절대 약속하지 마라.**
 - 공고·FAQ에 없는 정보는 **절대 추측·계산하지 마라.** 모르면 "확인 후 다시 안내드릴게요" + transition: pause.
 
 ## 🚨 즉시 pause (매니저 인계) — 다음 신호가 있으면 한 턴이라도 더 응대하지 말고 pause
@@ -281,6 +283,33 @@ const CLOSED_MODE_BLOCK = `
 
 // 배민 비마트 임시중단 모드 — 배민 유입 후보에게 이미 시작 문자로 '중단 + 타업무 인재풀 동의' 안내가 나간 상태.
 // 이 모드에선 비마트 스크리닝(자차·명의·공휴일·배민ID·앱설치 등)을 진행하지 않는다. 목적은 관계 유지 + 인재풀 동의 확보다.
+/**
+ * 정산 안내 FAQ — **공고에 '급여·정산'이 비어 있을 때만** 프롬프트에 넣는다.
+ *
+ * 왜 조건부인가: 예전엔 이 문장('익월 5일 지급')이 본문에 항상 들어 있었다. 그러면 공고에 '주급 정산'이
+ * 적혀 있어도 모델이 두 값을 **섞어서** 답했다 — 스모크 실측: "이 공고는 주급 정산이에요, 실제 지급은
+ * 익월 5일에 이루어져요"(자기모순). "공고 값이 우선"이라는 지시만으로는 막히지 않았다.
+ * 숫자가 컨텍스트에 있으면 쓰이므로, **아예 넣지 않는 것**이 유일하게 작동하는 방법이다.
+ */
+/**
+ * 두뇌 지식(FAQ)에서 **정산·지급 항목만** 빼낸다. 지식은 `[제목]\n본문` 블록이 빈 줄로 이어진 문자열이다
+ * (lib/agent/examples.fetchCategory). 공고에 정산 값이 있을 때만 호출한다.
+ * ⚠️ 제목 기준 배제라 제목에 '정산'·'지급'이 없는 항목은 남는다 — 두뇌 지식의 지급일 문구를 공고별로
+ *    다를 수 있게 고쳐두는 것(설정 › 에이전트 두뇌)이 근본 대책이고, 이건 그 위의 안전판이다.
+ */
+function dropSettlementKnowledge(knowledge: string): string {
+  return knowledge
+    .split(/\n\n(?=\[)/)
+    .filter((block) => !/^\[[^\]]*(정산|지급)[^\]]*\]/.test(block.trim()))
+    .join("\n\n");
+}
+
+const SETTLEMENT_FAQ_BLOCK = `
+## 정산 안내 (공고 미명시용 — 이 공고엔 정산 정보가 입력돼 있지 않다)
+- 정산은 익월 5일 지급이고, 계약 형태에 따라 세금 공제가 달라 자세한 건 매니저가 안내한다.
+- 이 수치는 일반 안내다. 공고별로 다를 수 있으니 단정하지 말고 "보통 ~" 정도로 말하라.
+`;
+
 const SYSTEM_PROMPT_BODY_BAEMIN_SUSPENDED = `너는 옹고잉(내이루리) 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.
 
 ⚠️ 지금 배민 비마트 배송 업무가 배민 측 사정으로 **임시 중단**된 상태다.
@@ -325,13 +354,22 @@ async function buildSystemPrompt(
   const general = isGeneralLineJob(ctx?.job);
   const body = (general ? SYSTEM_PROMPT_BODY_GENERAL : SYSTEM_PROMPT_BODY)
     + (general && ctx?.jobClosed ? CLOSED_MODE_BLOCK : "");
-  const knowledgeBlock = general ? buildLineKnowledgeBlock(await loadLineKnowledge()) : "";
+  // 공고에 정산 정보가 있으면 정산 관련 **숫자를 컨텍스트에 넣지 않는다.**
+  // 스모크 실측: 공고가 '주급 정산'인데 두뇌 지식의 '익월 5일'이 함께 들어 있으면 모델이 둘을 섞어
+  // "주급 정산이에요, 실제 지급은 익월 5일" 같은 자기모순 답을 만든다. "공고 값이 우선"이라는 지시로는
+  // 막히지 않았다 — 숫자가 보이면 쓴다. 그래서 지시가 아니라 **주입 제거**로 막는다.
+  const hasSettlementInJob = Boolean((ctx?.job?.pay_info ?? "").trim());
+  const settlementBlock = hasSettlementInJob ? "" : SETTLEMENT_FAQ_BLOCK;
+  const knowledgeRaw = general ? await loadLineKnowledge() : "";
+  const knowledgeBlock = general
+    ? buildLineKnowledgeBlock(hasSettlementInJob ? dropSettlementKnowledge(knowledgeRaw) : knowledgeRaw)
+    : "";
   // 일반 라인: 공통 운영 정보(facts)는 비마트 기준(정산 주기 등)이라 주입하지 않는다 — FAQ(knowledge)가 대신한다.
   // 지점 ai_facts도 지원자의 비마트 1지망이 아니라 이 공고의 지점 기준으로만.
   const toneBranch = general ? ctx?.job?.branch ?? null : branchName;
   // general 라인은 비마트 대화 예시도 제외 — '비마트 금지' 규칙과 충돌 방지(톤 지침만 유지).
   const tone = await buildToneGuide(toneBranch, { includeCommonFacts: !general, includeConversationExamples: !general });
-  return `${body}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}${knowledgeBlock}\n\n${tone}`;
+  return `${body}${crossJobSystemSuffix(ctx?.otherActiveJobs)}\n${HANDOFF_EMIT_RULE}${settlementBlock}${knowledgeBlock}\n\n${tone}`;
 }
 
 interface ScreeningToolInput {

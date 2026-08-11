@@ -99,3 +99,21 @@ export function slotKeysLabel(keys: string[] | null | undefined): string {
     .map((k) => `${k.slice(0, 2)} ${k.slice(2)}`)
     .join(", ");
 }
+
+/**
+ * 급여 한 줄 — `pay_info` 원문이 있으면 그것, 없으면 `pay_type`+`pay_amount` 조합. 둘 다 없으면 "".
+ * 지원자에게 나가는 문구(관심 컨택 문자)와 에이전트 프롬프트(cross-job 블록)가 **같은 공식**을 써야 한다 —
+ * 두 곳에서 다르게 조립하면 같은 공고의 급여가 문자와 AI 안내에서 다르게 보인다.
+ */
+export function jobPayLabel(j: {
+  pay_info?: string | null;
+  pay_type?: string | null;
+  pay_amount?: number | null;
+}): string {
+  const info = (j.pay_info ?? "").trim();
+  if (info) return info;
+  if (typeof j.pay_amount === "number" && j.pay_amount > 0) {
+    return `${j.pay_type ?? "급여"} ${j.pay_amount.toLocaleString("ko-KR")}원`;
+  }
+  return "";
+}

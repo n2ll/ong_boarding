@@ -226,12 +226,19 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // 그러면 모달은 그냥 작은 숫자를 보여주고, 0명일 때는 "이력이 없다"고 잘못 안내한다.
   // 매니저가 '좁힌 명단 때문에 빠졌다'는 걸 알 수 있게 이유를 숫자로 돌려준다.
   const droppedByExposure = { total: 0, promised: 0 };
+  // **7일 피로도로 빠진 수** — 공고를 며칠에 걸쳐 여러 개 올리면 두 번째 공고부터 이 이유로 대상이 0명이 된다.
+  // 예전엔 이 수를 돌려주지 않아, 화면이 "이력이 없습니다"라는 **사실과 다른 이유**를 말했다.
+  const droppedByFatigue = { total: 0, promised: 0 };
   const eligible = (a: ApplicantRow, group: AnnounceGroup): boolean => {
     if (!a.phone || !a.access_token) return false; // 문구에 맞춤링크가 들어가므로 발송 불가 인원 제외
     if (a.sms_opt_out_at) return false;
     if (EXCLUDED_POOL_STATUS.has(a.status ?? "")) return false;
     if (candSet.has(a.id)) return false;
-    if (fatigueSet.has(a.id)) return false;
+    if (fatigueSet.has(a.id)) {
+      droppedByFatigue.total++;
+      if (group === "suntop" || group === "promised") droppedByFatigue.promised++;
+      return false;
+    }
     if (!exposedForAnnounce(a)) {
       // 지정 노출 공고: 노출 대상만 안내
       droppedByExposure.total++;
@@ -285,5 +292,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     // 지정 노출 여부와 '명단 때문에 빠진 수' — 0명일 때 이유를 이력 부족으로 잘못 안내하지 않기 위해.
     exposure: targetedJob ? "targeted" : "all",
     dropped_by_exposure: droppedByExposure,
+    // 최근 7일 안에 다른 공고 안내를 이미 받아 빠진 수 — 0명의 진짜 이유를 화면이 말할 수 있게.
+    dropped_by_fatigue: droppedByFatigue,
+    fatigue_days: NEW_JOB_FATIGUE_DAYS,
   });
 }
