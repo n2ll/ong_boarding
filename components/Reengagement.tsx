@@ -65,7 +65,7 @@ export function Reengagement() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-6 max-w-4xl mx-auto w-full space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
@@ -142,7 +142,7 @@ export function Reengagement() {
           </div>
 
           {/* 요약 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="rounded-xl border border-success/25 bg-success-soft p-3">
               <div className="text-[11px] font-bold text-success-strong">활동 편입후보</div>
               <div className="text-[20px] font-extrabold text-success-strong">{data.activeCount}</div>

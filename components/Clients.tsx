@@ -221,10 +221,10 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">화주사 관리</h1>}
-          <p className="text-[14px] text-muted-foreground">공고가 참조하는 화주사입니다. 실제 화주사는 옹매니징이 원본이라 <b>‘옹매니징 동기화’</b>로 가져옵니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
+          <p className="text-[14px] text-muted-foreground">공고가 참조하는 화주사입니다. 실제 화주사는 옹매니징이 원본이라 <b className="whitespace-normal break-keep">‘옹매니징 동기화’</b>로 가져옵니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -246,7 +246,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
 
       {integ && (
         <div className="mb-6 bg-white border border-border-strong rounded-2xl shadow-sm p-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-bold text-foreground">데이터 정합성 점검</span>
               {integ.jobs_backfillable + integ.jobs_missing_client + integ.branches_missing_client > 0 ? (
@@ -263,7 +263,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               {integRunning ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 재백필 실행
             </button>
           </div>
-          <div className="grid grid-cols-5 gap-3 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             {[
               { label: "공고 연결됨", value: `${integ.jobs_linked}/${integ.jobs_total}`, warn: false },
               { label: "자동 연결 가능", value: integ.jobs_backfillable, warn: integ.jobs_backfillable > 0 },
@@ -281,8 +281,8 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       )}
 
-      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-hidden flex flex-col">
-        <div className="p-5 border-b border-border-strong flex items-center justify-between">
+      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+        <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -295,7 +295,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </div>
 
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
+        <div className="grid min-w-[880px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>화주사 명</div>
           <div>유형 / 슬롯</div>
           <div>등록 지점 수</div>
@@ -319,7 +319,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             const expanded = expandedId === client.id;
             return (
             <div key={client.id} className={`border-b border-muted ${client.active ? "" : "opacity-60"}`}>
-              <div className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-background transition-colors cursor-pointer ${expanded ? "bg-background" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
+              <div className={`grid min-w-[880px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-background transition-colors cursor-pointer ${expanded ? "bg-background" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
               <div className="flex items-center gap-3">
                 <ChevronRight size={16} className={`text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
                 <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
@@ -387,7 +387,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "신규 화주사 등록" : "화주사 편집"}</h2>
               <button aria-label="화주사 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
-            <div className="p-6 grid grid-cols-2 gap-5">
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="col-span-2">
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">화주사 이름 <span className="text-error">*</span></label>
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: OO도시락 · 우아한형제들(비마트)" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />

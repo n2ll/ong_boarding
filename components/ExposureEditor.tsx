@@ -269,7 +269,7 @@ export function ExposureEditor({
     <div className="space-y-3">
       <div>
         <label className="block text-[13px] font-bold text-gray-700 mb-2">노출 방식</label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {(
             [
               ["all", "전체 노출", "인재풀 전원의 맞춤 공고 링크에 노출(기본)"],

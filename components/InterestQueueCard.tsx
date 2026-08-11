@@ -252,7 +252,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
       transition={{ delay: 0.32 }}
       className="scroll-mt-6 bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col"
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
             <Heart size={15} className="text-error" /> 관심 표시 처리 대기

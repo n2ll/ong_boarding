@@ -76,7 +76,7 @@ export function CampaignStatsCard() {
       transition={{ delay: 0.35 }}
       className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col"
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
             <Megaphone size={15} className="text-info" /> 다시 연락 캠페인 (최근 {data.window_days}일)
@@ -99,7 +99,7 @@ export function CampaignStatsCard() {
       </div>
 
       {/* 단계별 현황 한 줄 — 각 단계 카운트 + 발송 대비 비율. 관심/답장은 처리 큐 카드로 앵커 이동. */}
-      <div className="flex items-stretch gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-stretch">
         {steps.map((s, i) => {
           const inner = (
             <>

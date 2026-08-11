@@ -248,7 +248,7 @@ export function SosLedgerCard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error" /> 긴급 건 기록</h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">결원·증차 발생~해결 로그와 월 운영비 (기록 전용)</div>
@@ -401,7 +401,7 @@ export function SosLedgerCard() {
                   className={inputCls}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">권역</label>
                   <input value={createForm.region} onChange={(e) => setCreateForm({ ...createForm, region: e.target.value })} placeholder="예: 강서" className={inputCls} />
@@ -465,7 +465,7 @@ export function SosLedgerCard() {
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">든 비용 (원)</label>
                   <input

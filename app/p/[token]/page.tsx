@@ -306,7 +306,7 @@ export default function PoolPage() {
 
   return (
     <main className="min-h-screen bg-yellow-50">
-      <div className="max-w-[560px] mx-auto px-5 py-8">
+      <div className="max-w-[560px] mx-auto w-full px-5 py-8">
         <header className="mb-6">
           <div className="text-[14px] font-bold text-yellow-700 mb-1">옹고잉 · 맞춤 일자리</div>
           <h1 className="text-[24px] font-extrabold text-foreground leading-snug">

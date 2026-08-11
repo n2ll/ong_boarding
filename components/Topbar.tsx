@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { Search, ChevronDown, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox } from "lucide-react";
 import { useBranchScope } from "@/lib/branch-scope";
 import { Button } from "@/components/ui/button";
@@ -29,12 +30,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<{ applicants: ApplicantHit[]; jobs: JobHit[] }>({ applicants: [], jobs: [] });
 
-  // 알림
-  const [notices, setNotices] = useState<Notice[]>([]);
-  const [notifLoading, setNotifLoading] = useState(false);
 
-  // 지점
-  const [branches, setBranches] = useState<BranchOpt[]>([]);
 
   const branchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -62,37 +58,17 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     return () => window.removeEventListener("mousedown", onClick);
   }, []);
 
-  // 지점 목록 로드
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/branches");
-        const json = await res.json();
-        setBranches(((json.data ?? []) as BranchOpt[]).filter((b) => b.active));
-      } catch {
-        /* 무시 */
-      }
-    })();
-  }, []);
+  // 지점 목록 — 다른 화면도 같은 키로 부르므로 useSWR로 캐시를 공유한다(중복 호출 제거).
+  const { data: branchRes } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const branches = useMemo(() => (branchRes?.data ?? []).filter((b) => b.active), [branchRes]);
 
-  // 알림 로드 + 60초 폴링
-  const loadNotices = useCallback(async () => {
-    setNotifLoading(true);
-    try {
-      const res = await fetch("/api/admin/notifications");
-      const json = await res.json();
-      setNotices((json.items ?? []) as Notice[]);
-    } catch {
-      /* 무시 */
-    } finally {
-      setNotifLoading(false);
-    }
-  }, []);
-  useEffect(() => {
-    loadNotices();
-    const t = setInterval(loadNotices, 60_000);
-    return () => clearInterval(t);
-  }, [loadNotices]);
+  // 알림 — 사이드바 배지와 같은 키. useSWR로 묶어 같은 요청이 두 번 나가지 않게 한다.
+  const { data: notiRes, isLoading: notifLoading, mutate: mutateNotices } = useSWR<{ items?: Notice[] }>(
+    "/api/admin/notifications",
+    { refreshInterval: 60_000 }
+  );
+  const notices = useMemo(() => notiRes?.items ?? [], [notiRes]);
+  const loadNotices = useCallback(() => { void mutateNotices(); }, [mutateNotices]);
 
   // 검색 디바운스
   useEffect(() => {
@@ -150,7 +126,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         <div className="glass flex min-h-16 items-center gap-[18px] rounded-[24px] px-4 shadow-[var(--shadow-sm)] lg:px-6">
         <div className="min-w-0">
           {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
-          <div className="hidden text-[12px] text-muted-foreground font-semibold tracking-wide whitespace-nowrap sm:block">{crumb}</div>
+          <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
           <div className="truncate text-[17px] font-extrabold tracking-tight text-foreground leading-snug lg:whitespace-nowrap lg:text-[21px]">
             {pageTitle}
           </div>

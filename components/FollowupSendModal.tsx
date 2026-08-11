@@ -129,7 +129,7 @@ export function FollowupSendModal({
 
         <div className="p-5 flex flex-col gap-3">
           {kind === "venue" && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-gray-400">시작일</span>
                 <input

@@ -119,7 +119,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">팀 · 권한</h1>}
           <p className="text-[14px] text-muted-foreground">현장 담당자와 지점 관리자 연락처·권한을 관리합니다. 만남장소 안내·확정 알림에 사용됩니다.</p>
@@ -132,8 +132,8 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
         </button>
       </div>
 
-      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-hidden flex flex-col">
-        <div className="grid grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
+      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+        <div className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>이름 / 연락처</div>
           <div>권한 (Role)</div>
           <div>담당 지점</div>
@@ -150,7 +150,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
 
         <div className="flex flex-col">
           {members.map((member) => (
-            <div key={member.id} className="grid grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
+            <div key={member.id} className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
               <div className="flex flex-col">
                 <div className="font-extrabold text-foreground">{member.name}</div>
                 <div className="text-[12px] text-gray-400 flex items-center gap-1 mt-0.5"><Phone size={10} /> {member.phone || "연락처 없음"}</div>
@@ -188,7 +188,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "담당자 추가" : "담당자 편집"}</h2>
               <button aria-label="팀원 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
-            <div className="p-6 grid grid-cols-2 gap-5">
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">이름 <span className="text-error">*</span></label>
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />

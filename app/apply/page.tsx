@@ -200,7 +200,7 @@ function ApplyForm() {
 
   return (
     <div className="min-h-screen bg-background py-10 px-5">
-      <div className="max-w-[560px] mx-auto">
+      <div className="max-w-[560px] mx-auto w-full">
         {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-3">
@@ -259,7 +259,7 @@ function ApplyForm() {
           {/* 자차 보유 */}
           <div>
             <label className={labelCls}>자차(본인 차량) 보유{requiredMark}</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {["있음", "없음"].map((opt) => (
                 <button
                   key={opt}
@@ -355,7 +355,7 @@ function ApplyForm() {
           {/* 본인 명의 */}
           <div>
             <label className={labelCls}>배달앱·정산계좌 본인 명의 가능 여부{requiredMark}</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {["문제 없음", "문제 있음"].map((opt) => (
                 <button
                   key={opt}

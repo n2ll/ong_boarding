@@ -42,7 +42,7 @@ export function Shippers() {
   const totalWorkers = clients.reduce((s, c) => s + c.workerCount, 0);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-6 max-w-4xl mx-auto w-full space-y-5">
       <div>
         <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
           <Building2 size={20} /> 화주사

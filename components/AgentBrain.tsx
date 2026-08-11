@@ -456,7 +456,7 @@ export function AgentBrain() {
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-brand-yellow rounded-2xl flex items-center justify-center shadow-sm">
             <Brain size={24} className="text-foreground" />
@@ -557,7 +557,7 @@ export function AgentBrain() {
               <p className="text-sm text-muted-foreground mb-6">옹봇은 응대할 때 <b>① 공통 운영정보 · ② 지점별 정보 · ③ 공고별 단가·정책</b> 세 곳의 사실만 인용합니다. 비어 있는 곳은 인용할 수 없어 매니저가 직접 답해야 하는 일이 늘어납니다. 빈칸을 채우면 그만큼 줄어요.</p>
 
               {/* 3계층 커버리지 카드 */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 <button onClick={() => setActiveTab("knowledge")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-info transition-colors">
                   <div className="flex items-center gap-2 text-info mb-2"><Database size={16} /><span className="text-[12px] font-bold">① 공통 운영정보</span></div>
                   <div className="text-[22px] font-extrabold text-foreground">{factsCount}<span className="text-[13px] font-bold text-gray-400">개 항목</span></div>
@@ -656,7 +656,7 @@ export function AgentBrain() {
                   <p className="text-[12px] text-gray-400 mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-6 pt-4 border-t border-border-strong">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-border-strong">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-3">어조 (Tone & Manner)</label>
                     <div className="flex flex-col gap-3">
@@ -699,7 +699,7 @@ export function AgentBrain() {
 
           {activeTab === 'knowledge' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Database size={20} className="text-info" /> 사내 지식 베이스
                 </h2>
@@ -757,7 +757,7 @@ export function AgentBrain() {
                     className="overflow-hidden mb-4"
                   >
                     <div className="border-2 border-foreground rounded-2xl p-5 bg-white">
-                      <div className="flex items-center justify-between mb-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div className="text-[14px] font-extrabold text-foreground flex items-center gap-2">
                           {kbForm.id === null ? <Plus size={16} /> : <Pencil size={16} />}
                           {kbForm.id === null ? "새 지식 항목" : "지식 항목 수정"}
@@ -977,7 +977,7 @@ export function AgentBrain() {
 
           {activeTab === 'simulator' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <FlaskConical size={20} className="text-copilot" /> 응대 미리보기
                 </h2>
@@ -985,7 +985,7 @@ export function AgentBrain() {
               </div>
               <p className="text-sm text-muted-foreground mb-6">지원자가 보낼 법한 문자를 입력하면, 지금 설정된 말투·성격과 지식 베이스로 옹봇이 어떤 답변 초안을 만드는지 미리 확인할 수 있어요. <b>실제 발송은 되지 않습니다.</b></p>
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {/* Input */}
                 <div className="flex flex-col gap-4">
                   <div>
@@ -1085,7 +1085,7 @@ export function AgentBrain() {
                 {usageLoading ? (
                   <div className="flex items-center gap-2 text-[13px] text-gray-400 py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
                       <div className="text-[11.5px] font-bold text-gray-400 mb-0.5">Claude 호출</div>
                       <div className="text-[20px] font-extrabold text-foreground">{monthStats.calls.toLocaleString()}<span className="text-[12px] font-bold text-gray-400">회</span></div>

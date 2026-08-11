@@ -390,7 +390,7 @@ export function Dashboard() {
 
       {/* 다시 연락 응답 큐 — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치.
           '오늘의 할 일' 바로 아래, 긴급 건 기록 위. */}
-      <div className="grid grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
         <InterestQueueCard />
         <ReplyQueueCard onCountsChange={handleReplyCounts} />
       </div>
@@ -429,7 +429,7 @@ export function Dashboard() {
         {metricsOpen && (
           <div className="px-6 pb-6 pt-5 border-t border-muted flex flex-col gap-6">
             {/* 핵심 지표 5칸 — 클릭 시 파이프라인으로 */}
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               {[
                 { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-info" },
                 { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-chart-3" },
@@ -451,7 +451,7 @@ export function Dashboard() {
             </div>
 
             {/* 유입 추이(2/3) + 스크리닝·온보딩 현황(1/3) */}
-            <div className="grid grid-cols-3 gap-6 items-stretch">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
               {/* 최근 14일 신규 유입 추이 */}
               <div className="col-span-2 border border-border-strong rounded-[16px] p-6 flex flex-col">
                 <div className="flex items-start justify-between mb-4">
@@ -489,13 +489,13 @@ export function Dashboard() {
 
               {/* 스크리닝 · 온보딩 현황 (실데이터) */}
               <div className="border border-border-strong rounded-[16px] p-5 flex flex-col">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
                   <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40 rounded">응대로</button>
                 </div>
 
                 {/* 단계별 — 라벨은 실무 언어, 뜻은 툴팁으로 */}
-                <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                   {[
                     { label: "초기 대화", value: flow.exploration, color: "text-muted-foreground", bg: "bg-background", hint: "AI가 조건을 안내하며 첫 대화를 나누는 단계" },
                     { label: "스크리닝", value: flow.screening, color: "text-yellow-600", bg: "bg-yellow-50", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
@@ -534,7 +534,7 @@ export function Dashboard() {
 
             {/* 단계별 전환율 (가로형 · 단계 간 전환율 강조) */}
             <div className="border border-border-strong rounded-[16px] p-6 flex flex-col">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <div>
                   <h3 className="text-[15px] font-bold text-foreground">파이프라인 단계별 현황</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
@@ -624,7 +624,7 @@ function DashboardSkeleton() {
         </div>
       </div>
       <Skeleton className="h-[220px] rounded-[16px]" />
-      <div className="grid grid-cols-2 gap-6 items-stretch">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
         <Skeleton className="h-[260px] rounded-[16px]" />
         <Skeleton className="h-[260px] rounded-[16px]" />
       </div>

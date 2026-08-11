@@ -148,7 +148,7 @@ export function Inbox() {
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-brand-yellow rounded-2xl flex items-center justify-center shadow-sm">
             <InboxIcon size={24} className="text-foreground" />

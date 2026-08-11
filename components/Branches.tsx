@@ -254,7 +254,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
       {/* Header & Tools */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">지점 관리</h1>}
           <p className="text-[14px] text-muted-foreground">운영 중 {activeRows.length}개 · 전체 {rows.length}개 지점의 인력 현황과 정원을 관리합니다.</p>
@@ -280,8 +280,8 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {/* Stats Summary */}
-      <div className="flex gap-4 mb-8">
-        <div className="flex-1 bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+      <div className="flex flex-wrap gap-4 mb-8">
+        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-info-soft flex items-center justify-center shrink-0">
             <Building2 size={24} className="text-info" />
           </div>
@@ -290,7 +290,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-foreground">{activeRows.length}<span className="text-sm font-medium text-muted-foreground ml-1">개</span></div>
           </div>
         </div>
-        <div className="flex-1 bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-error-soft flex items-center justify-center shrink-0">
             <AlertTriangle size={24} className="text-error" />
           </div>
@@ -299,7 +299,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-error">{criticalCount}<span className="text-sm font-medium text-muted-foreground ml-1">개 지점</span></div>
           </div>
         </div>
-        <div className="flex-1 bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center shrink-0">
             <Briefcase size={24} className="text-yellow-600" />
           </div>
@@ -334,7 +334,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 아직 등록된 지점이 없어요.
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {group.branches.map((branch) => {
           const fillRatio = branch.fillRatio;
           return (
@@ -379,7 +379,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
 
               <div className="flex items-center justify-between border-t border-muted pt-4">
-                <div className="flex gap-4">
+                <div className="flex flex-wrap gap-4">
                   <div className="flex flex-col">
                     <span className="text-[11px] font-bold text-gray-400">진행 공고</span>
                     <span className="text-[14px] font-extrabold text-foreground">{branch.activeJobs}건</span>
@@ -458,7 +458,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   {formClientUsesSlots && (
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">슬롯별 정원</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {SLOTS.map((s: SlotKey) => (
                         <div key={s} className="flex items-center justify-between bg-white border border-border-strong rounded-xl px-3.5 py-2.5">
                           <span className="text-[13px] font-bold text-gray-700">{s}</span>

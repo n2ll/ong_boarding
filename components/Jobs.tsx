@@ -465,7 +465,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
           </button>
         </div>
       ) : (
-        <div role="radiogroup" aria-label="모집 방식" className={`grid gap-2 ${modeOptions.length > 2 ? "grid-cols-3" : "grid-cols-2"}`}>
+        <div role="radiogroup" aria-label="모집 방식" className={`grid gap-2 ${modeOptions.length > 2 ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
           {modeOptions.map((m) => {
             const sel = value === m;
             return (
@@ -1788,7 +1788,7 @@ export function Jobs() {
   return (
     <div className="p-8 pb-12">
       {/* Stats Summary */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         {[
           { label: "전체 공고", value: jobs.length, unit: "건" },
           { label: "진행 중인 공고", value: jobs.filter(j => !j.effectivelyClosed).length, unit: "건", highlight: true },
@@ -1807,9 +1807,9 @@ export function Jobs() {
         ))}
       </div>
 
-      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-[600px]">
+      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col min-h-[600px]">
         {/* Toolbar */}
-        <div className="p-5 border-b border-border-strong flex items-center justify-between gap-4">
+        <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-4">
           <div className="flex gap-1.5">
             <button aria-selected={activeTab === 'all'} role="tab"
               onClick={() => setActiveTab('all')}
@@ -1886,7 +1886,7 @@ export function Jobs() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
+        <div className="grid min-w-[1040px] grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>공고 정보</div>
           <div>지점 / 직무</div>
           <div>모집 기간</div>
@@ -1915,7 +1915,7 @@ export function Jobs() {
             </div>
           ) : filteredJobs.length > 0 ? (
             filteredJobs.map(job => (
-              <div key={job.id} className="grid grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
+              <div key={job.id} className="grid min-w-[1040px] grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {/* 제목 클릭 = 지원자 보드 열기. 예전엔 div+onClick이라 키보드로는 들어갈 수 없었다. */}
@@ -2287,7 +2287,7 @@ export function Jobs() {
                 />
 
                 {/* 화주사 → 지점 2단 선택 — 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 방어. 화주사·지점은 초안 생성에 반영(D2). */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">화주사</label>
                     <select
@@ -2343,7 +2343,7 @@ export function Jobs() {
                 </div>
 
                 {/* 정원 · 기간 · 마감시각 */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">모집 인원</label>
                     <input
@@ -2403,7 +2403,7 @@ export function Jobs() {
                 {/* E18 · 급여 (선택) — 예전엔 단가형태·금액(푸터)과 정산정보(접이식)로 분산. 한 그룹으로 일원화. 채우면 AI가 단가·정산 문의에 직접 답한다. */}
                 <div className="p-4 bg-background border border-border-strong rounded-xl flex flex-col gap-4">
                   <div className="text-[12px] font-bold text-gray-700">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">대표 단가 형태</label>
                       <select
@@ -2456,7 +2456,7 @@ export function Jobs() {
                   </button>
                   {newJobExtraOpen && (
                     <div className="px-5 pb-5 flex flex-col gap-4 border-t border-muted pt-4">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <SlotKeysField
                           keys={newJobSlotKeys}
                           onToggleKey={(key) =>
@@ -2555,7 +2555,7 @@ export function Jobs() {
                   </label>
                   <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="예: 성수동 새벽 배송 기사 모집" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 기간</label>
                     <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
@@ -2628,7 +2628,7 @@ export function Jobs() {
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </div>
-                      <div className={editShowBranch ? "grid grid-cols-3 gap-4" : ""}>
+                      <div className={editShowBranch ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" : ""}>
                         {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
                         {editShowBranch && (
                         <div className="col-span-2">
@@ -2676,7 +2676,7 @@ export function Jobs() {
                           예전엔 '공고 본문·급여·AI 근거' 접이식 안 2단 깊이라, 등록 때는 0클릭이던 급여가 수정 때는 펼쳐야 보였다. */}
                       <div className="p-4 bg-background border border-border-strong rounded-xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-gray-700">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 단가 형태</label>
                             <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
@@ -2729,7 +2729,7 @@ export function Jobs() {
                   onToggle={() => setEditOpenSections((s) => ({ ...s, work: !s.work }))}
                 >
                     <>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <SlotKeysField
                           keys={editForm.slotKeys}
                           onToggleKey={(key) =>
@@ -2765,7 +2765,7 @@ export function Jobs() {
                           (실측: 용산·한남 라인은 15km 대상이 190명 ↔ 296명). */}
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">거리를 어디에서 재나요</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {(Object.keys(DISTANCE_BASIS_LABEL) as DistanceBasis[]).map((b) => {
                             const sel = editForm.distanceBasis === b;
                             return (
@@ -3011,7 +3011,7 @@ export function Jobs() {
                     {hasConfirmedSlot && candPanel?.recruitMode !== "internal" && (
                       <div>
                         <div className="text-[11px] font-bold text-gray-400 mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
-                        <div className="grid grid-cols-4 gap-1.5">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
                           {slotFill.map((s) => (
                             <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-success-soft border border-success/25" : "bg-white border border-border-strong"}`}>
                               <div className="text-[10px] font-bold text-muted-foreground">{s.label}</div>

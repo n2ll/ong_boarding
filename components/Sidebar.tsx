@@ -48,8 +48,6 @@ interface NavItem {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [inbox, setInbox] = useState(0);
-  const [interventions, setInterventions] = useState(0);
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
   const expanded = pinned || hovered;
@@ -58,28 +56,14 @@ export function Sidebar() {
   const confirmPending = cpData?.total ?? cpData?.pending?.length ?? 0;
   // const [aiDisabled, setAiDisabled] = useState(false); // 파일럿 기간 숨김('자동화 현황' 배지 전용) — 복원 시 주석 해제
 
-  // 헤더 알림과 동일 소스(/notifications)에서 실시간 카운트를 가져와 배지에 반영한다.
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const res = await fetch("/api/admin/notifications");
-        const json = await res.json();
-        if (!alive) return;
-        setInbox(json.counts?.inbox ?? 0);
-        setInterventions(json.counts?.interventions ?? 0);
-        // setAiDisabled(Boolean(json.counts?.aiDisabled)); // 파일럿 기간 숨김 — 복원 시 주석 해제
-      } catch {
-        /* 배지 표시용이라 실패 시 0 유지 */
-      }
-    };
-    load();
-    const t = setInterval(load, 60_000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
+  // 헤더 알림과 동일 소스(/notifications). raw fetch로 따로 폴링하면 SWR dedup을 못 타서
+  // 대시보드에서 같은 요청이 3번 나갔다 — 같은 키의 useSWR로 캐시를 공유한다.
+  const { data: notiRes } = useSWR<{ counts?: { inbox?: number; interventions?: number; aiDisabled?: boolean } }>(
+    "/api/admin/notifications",
+    { refreshInterval: 60_000 }
+  );
+  const inbox = notiRes?.counts?.inbox ?? 0;
+  const interventions = notiRes?.counts?.interventions ?? 0;
 
   // 파일럿 기간 숨김: 실사용 5탭(대시보드·인재풀/파이프라인·채용공고·실시간 응대·미분류 인박스)+설정만 노출.
   // 삭제 아님 — 파일럿 종료 후 복원 대비 주석 보존 (아이콘 import·aiDisabled 상태도 함께 복원)
@@ -222,7 +206,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="모바일 주요 메뉴"
-      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-5 rounded-[24px] border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-[24px] border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
     >
       {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
         const active = pathname === path;

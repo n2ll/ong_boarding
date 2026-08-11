@@ -113,7 +113,7 @@ export function Reports() {
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">리포트 · 분석</h1>
           <p className="text-[14px] text-muted-foreground">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-gray-400">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
@@ -140,7 +140,7 @@ export function Reports() {
       </div>
 
       {/* Overview Stats */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <div className="w-10 h-10 rounded-xl bg-success-soft flex items-center justify-center">
@@ -182,7 +182,7 @@ export function Reports() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         {/* Sourcing Trend Chart */}
         <div className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm">
           <h3 className="text-[16px] font-bold text-foreground mb-1">월별 지원자 및 합격자 추이</h3>

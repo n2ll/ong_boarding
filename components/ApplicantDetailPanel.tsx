@@ -961,7 +961,7 @@ export function ApplicantDetailContent({
             <h3 className="text-[12.5px] font-extrabold text-info-strong flex items-center gap-1.5">
               <Zap size={14} /> 다시 연락 반응
             </h3>
-            <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-3 gap-y-2">
               <div className="flex flex-col gap-0.5">
                 <span className="text-[11px] font-bold text-gray-400">마지막 발송</span>
                 <span className="text-[12.5px] font-semibold text-foreground" title={recontact.last_ping_at ?? undefined}>
@@ -1003,7 +1003,7 @@ export function ApplicantDetailContent({
         )}
 
         {/* ③ 핵심 판단 정보 — 자차·가용성·원지원일·희망 시간 (좁은 우측 패널에선 2칸, 드로어에선 4칸) */}
-        <div className="rounded-xl border border-border-strong bg-background p-3 grid grid-cols-2 @md:grid-cols-4 gap-x-3 gap-y-2">
+        <div className="rounded-xl border border-border-strong bg-background p-3 grid grid-cols-1 sm:grid-cols-2 @md:grid-cols-4 gap-x-3 gap-y-2">
           <KeyCell label="자차" value={[a.own_vehicle, a.vehicle_type].filter(Boolean).join(" · ") || null} title="이동수단 · 차종" />
           <KeyCell
             label="가용성"
@@ -1233,7 +1233,7 @@ export function ApplicantDetailContent({
             )}
           </div>
           {filledProfile.length > 0 && (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
               {filledProfile.map((f) => <InfoCell key={f.label} label={f.label} value={f.value} />)}
             </div>
           )}
@@ -1302,7 +1302,7 @@ export function ApplicantDetailContent({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* 확정 지점 — 등록 지점 드롭다운. 지점 개념 라인·등록 지점 있을 때만(internal·미보유 숨김). */}
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
@@ -1386,7 +1386,7 @@ export function ApplicantDetailContent({
               {suntopFormOpen && (
                 <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-background border border-border-strong">
                   <div className="text-[11px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
                     <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
                   </div>
@@ -1485,7 +1485,7 @@ export function ApplicantDetailContent({
             )}
           </div>
 
-          <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-2 gap-3" : ""}>
+          <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-gray-400">근무 시작일</span>
               <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />

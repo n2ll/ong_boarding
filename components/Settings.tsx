@@ -126,9 +126,9 @@ export function Settings() {
         <p className="text-[14px] text-muted-foreground">지점·팀과 외부 연동을 관리합니다. 화주사는 ‘화주사’ 화면에서 관리해요. (프로필·알림·보안은 준비 중)</p>
       </div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {/* Sidebar Nav */}
-        <div role="tablist" aria-orientation="vertical" aria-label="설정 영역" className="w-[240px] shrink-0 flex flex-col gap-2">
+        <div role="tablist" aria-orientation="vertical" aria-label="설정 영역" className="flex w-full shrink-0 flex-col gap-2 lg:w-[240px]">
           {([
             { key: "profile", icon: User, label: "프로필 설정", badge: "준비중" },
             { key: "notifications", icon: Bell, label: "알림 설정", badge: "준비중" },
@@ -281,7 +281,7 @@ export function Settings() {
               {intLoading ? (
                 <div className="flex items-center gap-2 text-gray-400 py-8"><Loader2 size={18} className="animate-spin" /> 연동 상태 확인 중…</div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {integrations.map((it) => {
                     const meta = INTEGRATION_META[it.key] ?? { name: it.key, desc: "", badge: "?", badgeColor: "bg-muted text-gray-700" };
                     return (

@@ -130,7 +130,7 @@ export function SlotBoard() {
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1 flex items-center gap-2">
             <LayoutGrid size={22} className="text-yellow-600" /> 확정/희망 슬롯 보드
@@ -155,7 +155,7 @@ export function SlotBoard() {
       </div>
 
       {/* 요약 */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           { label: "표시 지점", value: visibleBranches.length, unit: "곳", icon: LayoutGrid, color: "text-foreground" },
           { label: "확정 인원", value: totals.confirmed, unit: "명", icon: Users, color: "text-success" },
@@ -181,8 +181,8 @@ export function SlotBoard() {
           표시할 지점이 없어요. 슬롯 보드는 확정슬롯을 사용하는 화주사(비마트식 슬롯 구인) 전용이에요 — 화주사 설정에서 &lsquo;확정슬롯 사용&rsquo;을 켠 뒤 지점을 등록해 주세요.
         </div>
       ) : (
-        <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-hidden">
-          <div className="grid grid-cols-[1.4fr_repeat(4,1fr)] bg-background border-b border-border-strong text-[13px] font-bold text-muted-foreground">
+        <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto">
+          <div className="grid min-w-[700px] grid-cols-[1.4fr_repeat(4,1fr)] bg-background border-b border-border-strong text-[13px] font-bold text-muted-foreground">
             <div className="px-5 py-3.5">지점 / 화주사</div>
             {SLOTS.map((s) => (
               <div key={s} className="px-3 py-3.5 text-center border-l border-muted">{SLOT_LABEL[s]}</div>
@@ -191,7 +191,7 @@ export function SlotBoard() {
           {visibleBranches.map((b) => {
             const branch: Branch = { id: b.id, name: b.name, sort_order: 0, active: b.active, slot_capacity: b.slot_capacity ?? undefined };
             return (
-              <div key={b.id} className="grid grid-cols-[1.4fr_repeat(4,1fr)] border-b border-muted hover:bg-surface-raised">
+              <div key={b.id} className="grid min-w-[700px] grid-cols-[1.4fr_repeat(4,1fr)] border-b border-muted hover:bg-surface-raised">
                 <div className="px-5 py-4 flex flex-col justify-center">
                   <div className="font-extrabold text-foreground">{b.name}</div>
                   <div className="text-[12px] text-gray-400 mt-0.5">{clientName(b.client_id)}</div>

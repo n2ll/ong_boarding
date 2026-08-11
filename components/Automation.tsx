@@ -140,7 +140,7 @@ export function Automation() {
           <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
           <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded">실시간 집계</span>
         </div>
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {kpis.map((k, i) => (
             <div key={i} className="border border-border-strong rounded-xl px-3.5 py-2.5 bg-surface-raised">
               <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-muted-foreground mb-1">
@@ -171,7 +171,7 @@ export function Automation() {
             <Play size={13} /> {ruleRunning ? "점검 중…" : "지금 점검 실행"}
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {ruleDefs.map((rule) => {
             const cfg = ruleConfig[rule.id] ?? { enabled: false };
             const result = ruleResults[rule.id];

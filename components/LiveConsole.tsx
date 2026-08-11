@@ -612,9 +612,9 @@ export function LiveConsole() {
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   return (
-    <div className="flex h-full overflow-hidden bg-white">
+    <div className="flex h-full flex-col overflow-hidden bg-white lg:flex-row">
       {/* Left Sidebar */}
-      <div className="w-[320px] flex-shrink-0 border-r border-border-strong flex flex-col bg-background">
+      <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[320px] lg:border-b-0 lg:border-r">
         {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
         {globalKill && (
           <div className="shrink-0 bg-yellow-50 border-b border-yellow-300 px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-yellow-700 leading-snug">
@@ -939,7 +939,7 @@ export function LiveConsole() {
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-muted text-gray-400 text-sm">좌측에서 대화를 선택하세요</div>
+        <div className="flex-1 flex min-w-0 items-center justify-center bg-muted p-6 text-center text-sm text-gray-400">좌측에서 대화를 선택하세요</div>
       )}
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}

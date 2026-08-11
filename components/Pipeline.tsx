@@ -2477,7 +2477,7 @@ export function Pipeline() {
               </div>
               <button aria-label="일괄 상태 변경 창 닫기" onClick={() => setBulkStageModalOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700"><X size={20} /></button>
             </div>
-            <div className="p-6 grid grid-cols-2 gap-3">
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { id: "applied", label: "지원 접수 / 대기", desc: "스크리닝 전" },
                 { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },

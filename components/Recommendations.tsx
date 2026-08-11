@@ -148,7 +148,7 @@ export function Recommendations() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[300px_1fr] gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
         {/* Left Pane - Active Jobs */}
         <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
           <h2 className="text-sm font-bold text-muted-foreground mb-4">분석할 공고 선택</h2>
