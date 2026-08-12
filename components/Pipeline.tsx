@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR from "swr";
 import { useSearchParams } from "next/navigation";
 import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, Layers, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye, ChevronDown } from "lucide-react";
@@ -407,6 +407,14 @@ export function Pipeline() {
       /* 저장이 막힌 환경 — 기억만 못 하고 동작은 정상 */
     }
   };
+  // 표시 행 수 — 568명을 한 번에 다 그리면 DOM 노드의 93%가 표가 되고, 선택·필터마다
+  // 그 전부가 다시 그려진다. 매니저는 목록을 끝까지 훑지 않고 조건으로 좁힌 뒤 고르므로,
+  // 처음엔 한 화면 분량만 그리고 아래로 내려가면 이어서 붙인다.
+  // 선택·발송·CSV는 그려진 행이 아니라 filteredCards(조건에 맞는 전원)를 대상으로 하므로
+  // 여기서 자르는 것은 '보이는 양'뿐이고 동선은 그대로다.
+  const ROWS_PER_CHUNK = 100;
+  const [visibleCount, setVisibleCount] = useState(ROWS_PER_CHUNK);
+  const moreRef = useRef<HTMLTableRowElement | null>(null);
   const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
   // 스플릿 패널이 실제로 옆에 붙어 있는 상태 — 리스트 뷰에서 상세가 열려 있을 때만.
   const splitPanelActive = splitView && view === "list" && selectedApplicantId != null;
@@ -1127,6 +1135,27 @@ export function Pipeline() {
   });
 
   // 조건 바 '표시 N명' — 뷰에 실제로 보이는 수. 칸반은 부적합·이탈 컬럼이 없어 컬럼 합계로 센다.
+  const visibleCards = filteredCards.slice(0, visibleCount);
+  const hiddenCount = filteredCards.length - visibleCards.length;
+  // 조건·검색·정렬이 바뀌면 처음 분량으로 되돌린다(좁혀 놓고 아래를 계속 붙이는 건 의미가 없다).
+  const filterSignature = `${filteredCards.length}:${filteredCards[0]?.id ?? ""}:${sortMode}`;
+  useEffect(() => {
+    setVisibleCount(ROWS_PER_CHUNK);
+  }, [filterSignature]);
+  // 목록 끝이 화면에 들어오면 다음 분량을 붙인다.
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el || hiddenCount <= 0) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setVisibleCount((v) => v + ROWS_PER_CHUNK);
+      },
+      { rootMargin: "400px" } // 끝에 닿기 전에 미리 붙여 끊김을 없앤다
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hiddenCount, visibleCount]);
+
   const shownCount = view === "kanban" ? kanbanColumns.reduce((n, c) => n + c.count, 0) : filteredCards.length;
 
   // 발송 가능 인원 수 — 조건 바 카운트("발송가능 N / 표시 M")
@@ -1777,7 +1806,12 @@ export function Pipeline() {
             {/* 지금 보이는 인원 — 한 곳에만 둔다(예전엔 필터 패널·리스트 머리에 같은 숫자가 두 번 있었다) */}
             <span className="text-[13px] font-bold text-gray-700">
               {view === "list" && <>발송가능 <span className="text-success">{sendableCount}</span> / </>}
-              표시 {shownCount}명
+              조건 {shownCount}명
+              {view === "list" && hiddenCount > 0 && (
+                <span className="ml-1 font-medium text-gray-400" title="화면에 그리는 양만 나눠서 보여줍니다. 선택·발송·CSV는 조건에 맞는 전원이 대상이에요.">
+                  (화면에 {visibleCards.length}명)
+                </span>
+              )}
             </span>
           </div>
         ) : (
@@ -2036,7 +2070,7 @@ export function Pipeline() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredCards.map(c => {
+                    {visibleCards.map(c => {
                       const isSelected = selectedRows.has(c.id);
                       const send = sendableOf(c);
                       const appliedLabel = appliedMonth(c.appliedAtIso);
@@ -2216,6 +2250,24 @@ export function Pipeline() {
                         </tr>
                       );
                     })}
+                    {hiddenCount > 0 && (
+                      // 관찰용 행 — 화면에 들어오면 다음 분량이 붙는다.
+                      // 스크립트가 막힌 환경에서도 직접 누를 수 있게 버튼을 둔다.
+                      <tr ref={moreRef}>
+                        <td colSpan={7} className="px-4 py-5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setVisibleCount((v) => v + ROWS_PER_CHUNK)}
+                            className="min-h-11 rounded-xl border border-border-strong bg-white px-4 text-[13px] font-bold text-gray-700 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                          >
+                            {hiddenCount}명 더 보기
+                          </button>
+                          <div className="mt-2 text-[11.5px] text-gray-400">
+                            아래로 내리면 저절로 이어집니다 · 선택·발송·CSV는 조건에 맞는 {filteredCards.length}명 전체에 적용돼요
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {!loading && filteredCards.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-4 py-12 text-center text-[13px] text-gray-400">
