@@ -308,7 +308,7 @@ export default function PoolPage() {
     <main className="min-h-screen bg-yellow-50">
       <div className="max-w-[560px] mx-auto w-full px-5 py-8">
         <header className="mb-6">
-          <div className="text-[14px] font-bold text-yellow-700 mb-1">옹고잉 · 맞춤 일자리</div>
+          <div className="text-[14px] font-bold text-warning-strong mb-1">옹고잉 · 맞춤 일자리</div>
           <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
             {name ? `${name}님,` : "안녕하세요,"}
             <br />지금 모집 중인 일자리예요
@@ -339,15 +339,15 @@ export default function PoolPage() {
                   </span>
                   <h2 className="mt-2 text-[17px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
                   {job.interested && (
-                    <p className="mt-2 text-[14px] font-bold text-success">
+                    <p className="mt-2 text-[14px] font-bold text-success-strong">
                       ✓ 관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.
                     </p>
                   )}
-                  <p className="mt-2 text-[14px] text-gray-400 leading-relaxed">
+                  <p className="mt-2 text-[14px] text-muted-foreground leading-relaxed">
                     이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
                   </p>
                   {notified ? (
-                    <p className="mt-3 py-3 text-[15px] font-bold text-success text-center">
+                    <p className="mt-3 py-3 text-[15px] font-bold text-success-strong text-center">
                       ✓ 네, 새 일자리가 나오면 먼저 안내드릴게요
                     </p>
                   ) : (
@@ -387,7 +387,7 @@ export default function PoolPage() {
                       className={`inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold ${
                         job.work_period === "정기"
                           ? "bg-success-soft text-success-strong border border-success/25"
-                          : "bg-yellow-50 text-yellow-700 border border-yellow-200"
+                          : "bg-yellow-50 text-warning-strong border border-yellow-200"
                       }`}
                     >
                       {PERIOD_LABEL[job.work_period] ?? job.work_period}
@@ -407,13 +407,13 @@ export default function PoolPage() {
                 <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-gray-700">
                   {pay && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">급여</dt>
-                      <dd className="font-bold text-foreground">{pay} <span className="font-medium text-[13px] text-gray-400">(변동될 수 있어요)</span></dd>
+                      <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">급여</dt>
+                      <dd className="font-bold text-foreground">{pay} <span className="font-medium text-[13px] text-muted-foreground">(변동될 수 있어요)</span></dd>
                     </div>
                   )}
                   {(job.branch || job.pickup_address) && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">{job.branch ? "지점" : "출발지"}</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">{job.branch ? "지점" : "출발지"}</dt>
                       {/* 지점명이 없으면 집결지 주소로 대신 보여주되 **권역까지만** — 상세주소(동/번지 뒤)는
                           확정 후 만남장소 안내에서 알려준다. 링크만 있으면 누구나 보는 화면이다. */}
                       <dd className="break-words">{job.branch || coarseArea(job.pickup_address)}</dd>
@@ -421,34 +421,34 @@ export default function PoolPage() {
                   )}
                   {job.distance_km !== null && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">거리</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">거리</dt>
                       <dd className="font-bold text-success">집에서 약 {job.distance_km}km</dd>
                     </div>
                   )}
                   {job.slot && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">근무시간</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">근무시간</dt>
                       <dd>{job.slot}</dd>
                     </div>
                   )}
                   {job.start_date && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">시작일</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">시작일</dt>
                       <dd>{startDateLabel(job.start_date)}</dd>
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <dt className="w-[72px] shrink-0 font-bold text-gray-400">차량</dt>
+                    <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">차량</dt>
                     <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
                   </div>
                   {/* 요건이 어긋난 이유 — 서버 fit 판정(lib/pool-fit)의 문장을 그대로 보여준다(판정 한 곳).
                       카드를 감추지는 않는다 — 차량이 새로 생겼을 수 있고, 판단은 지원자 몫. */}
                   {job.fit_reasons.length > 0 && (
-                    <div className="mt-1 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-[14px] font-bold text-yellow-700 leading-snug">
+                    <div className="mt-1 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-[14px] font-bold text-warning-strong leading-snug">
                       {job.fit_reasons.map((r, i) => (
                         <p key={i}>{r}</p>
                       ))}
-                      <p className="mt-1 font-semibold text-yellow-700">
+                      <p className="mt-1 font-semibold text-warning-strong">
                         {done ? "매니저가 연락드릴 때 함께 확인할게요." : "그래도 괜찮으시면 관심을 눌러 주세요."}
                       </p>
                     </div>
@@ -474,7 +474,7 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[15px] font-bold text-yellow-700"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[15px] font-bold text-warning-strong"
                     >
                       {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
                     </button>
@@ -492,9 +492,9 @@ export default function PoolPage() {
                     disabled={done || sendingId !== null}
                     className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
                       done
-                        ? "bg-success-soft text-success border border-success-soft"
+                        ? "bg-success-soft text-success-strong border border-success-soft"
                         : sendingId !== null
-                          ? "bg-muted text-gray-400"
+                          ? "bg-muted text-muted-foreground"
                           : "bg-brand-yellow text-foreground hover:bg-yellow-500 active:bg-yellow-500"
                     } disabled:cursor-default`}
                   >
@@ -514,7 +514,7 @@ export default function PoolPage() {
                   // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
                   <div className="mt-5 rounded-xl border-2 border-brand-yellow bg-yellow-50 p-3">
                     <p className="text-[16px] font-bold text-foreground text-center leading-snug">
-                      <span className="text-yellow-700">{job.title}</span>
+                      <span className="text-warning-strong">{job.title}</span>
                       <br />이 일자리에 관심 있다고 보낼까요?
                     </p>
                     {job.vehicle_required && ownVehicle === "없음" && (
@@ -567,7 +567,7 @@ export default function PoolPage() {
                 )}
 
                 {job.closes_at && (
-                  <p className="mt-3 text-[13px] text-gray-400 text-center leading-relaxed">
+                  <p className="mt-3 text-[13px] text-muted-foreground text-center leading-relaxed">
                     마감시각이 지나면 새 지원은 받을 수 없어요.
                     <br />먼저 관심 주신 분부터 매니저가 연락드립니다.
                   </p>
@@ -625,7 +625,7 @@ export default function PoolPage() {
           );
         })()}
 
-        <footer className="mt-8 text-center text-[13px] text-gray-400 leading-relaxed">
+        <footer className="mt-8 text-center text-[13px] text-muted-foreground leading-relaxed">
           이 페이지는 본인 전용 링크예요. 다른 분과 공유하지 말아주세요.
           <br />관심 표시는 지원 의사 확인이며, 근무 확정은 매니저 안내 후 진행됩니다.
         </footer>

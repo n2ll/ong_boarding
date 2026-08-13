@@ -20,9 +20,9 @@ interface Integration {
 const INTEGRATION_META: Record<string, { name: string; desc: string; badge: string; badgeColor: string }> = {
   claude: { name: "Claude (AI 에이전트)", desc: "응대·스크리닝·공고 생성용 LLM", badge: "AI", badgeColor: "bg-foreground text-white" },
   solapi: { name: "SOLAPI (문자·알림톡)", desc: "지원자 SMS / 카카오 알림톡 발송", badge: "SMS", badgeColor: "bg-[#FAE100] text-[#371D1E]" },
-  supabase: { name: "Supabase (DB·실시간)", desc: "지원자·메시지 데이터베이스", badge: "DB", badgeColor: "bg-[#3ECF8E] text-white" },
+  supabase: { name: "Supabase (DB·실시간)", desc: "지원자·메시지 데이터베이스", badge: "DB", badgeColor: "bg-[#3ECF8E] text-[#0B2E20]" },
   slack: { name: "Slack 알림", desc: "운영 이벤트 사내 알림", badge: "#", badgeColor: "bg-[#4A154B] text-white" },
-  naver_geocode: { name: "네이버 클라우드 (지오코딩)", desc: "주소 → 좌표 변환(거리 매칭)", badge: "N", badgeColor: "bg-[#00C471] text-white" },
+  naver_geocode: { name: "네이버 클라우드 (지오코딩)", desc: "주소 → 좌표 변환(거리 매칭)", badge: "N", badgeColor: "bg-[#00C471] text-[#04301F]" },
 };
 
 /**
@@ -55,7 +55,7 @@ function SettingsTab({
     >
       <Icon size={18} /> {label}
       {badge && (
-        <span className="ml-auto text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded-full shrink-0">
+        <span className="ml-auto text-[10px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
           {badge}
         </span>
       )}
@@ -162,15 +162,15 @@ export function Settings() {
               <h2 className="text-lg font-bold text-foreground mb-6 border-b border-border-strong pb-4">기본 정보</h2>
               
               <div className="space-y-6 max-w-md">
-                <Input label="이름" type="text" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-gray-400 cursor-not-allowed" />
-                <Input label="이메일 (로그인 ID)" type="email" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-gray-400 cursor-not-allowed" />
-                <Input label="연락처" type="tel" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-gray-400 cursor-not-allowed" />
+                <Input label="이름" type="text" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
+                <Input label="이메일 (로그인 ID)" type="email" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
+                <Input label="연락처" type="tel" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
 
                 <div className="pt-6">
                   <Button variant="primary" disabled>
                     <Save size={16} /> 변경사항 저장
                   </Button>
-                  <p className="text-[12px] text-gray-400 mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
+                  <p className="text-[12px] text-muted-foreground mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
                 </div>
               </div>
             </div>
@@ -181,7 +181,7 @@ export function Settings() {
               <h2 className="text-lg font-bold text-foreground mb-2 border-b border-border-strong pb-4">알림 설정</h2>
               {/* 토글이 눈으로는 켜지는데 저장되지 않는 '거짓 어포던스'였다 — 켜둔 줄 알고 알림을 기다리게 된다.
                   저장 경로가 생길 때까지 비활성 + 사유 명시. 실제 운영 알림은 Slack 웹훅으로 나간다. */}
-              <p className="text-[12.5px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-6">
+              <p className="text-[12.5px] text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-6">
                 아직 저장되지 않는 화면이에요(계정 알림 설정 준비 중). 지금 운영 알림은 Slack으로 받고 있어요.
               </p>
               <div className="space-y-6 max-w-2xl opacity-60">
@@ -213,12 +213,12 @@ export function Settings() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-foreground mb-6 border-b border-border-strong pb-4">보안 및 인증</h2>
               <div className="space-y-6 max-w-md">
-                <Input label="현재 비밀번호" type="password" disabled placeholder="••••••••" className="bg-background text-gray-400 cursor-not-allowed" />
-                <Input label="새 비밀번호" type="password" disabled placeholder="영문, 숫자, 특수문자 조합 8자 이상" className="bg-background text-gray-400 cursor-not-allowed" />
-                <Input label="새 비밀번호 확인" type="password" disabled placeholder="비밀번호 다시 입력" className="bg-background text-gray-400 cursor-not-allowed" />
+                <Input label="현재 비밀번호" type="password" disabled placeholder="••••••••" className="bg-background text-muted-foreground cursor-not-allowed" />
+                <Input label="새 비밀번호" type="password" disabled placeholder="영문, 숫자, 특수문자 조합 8자 이상" className="bg-background text-muted-foreground cursor-not-allowed" />
+                <Input label="새 비밀번호 확인" type="password" disabled placeholder="비밀번호 다시 입력" className="bg-background text-muted-foreground cursor-not-allowed" />
                 <div className="pt-4">
                   <Button variant="secondary" disabled>비밀번호 변경</Button>
-                  <p className="text-[12px] text-gray-400 mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
+                  <p className="text-[12px] text-muted-foreground mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
                 </div>
               </div>
             </div>
@@ -236,10 +236,10 @@ export function Settings() {
                       옹고잉·옹매니징 배송원 중 옹보딩 미지원자(지금 일하고 있는 분 포함)를 인력풀로 불러오는 기능이에요. 꺼져 있으면 <b>미리보기만</b> 되고 아무 것도 편입되지 않아요.
                       켜도 문자가 저절로 나가지는 않아요 — 실제 발송은 인재풀에서 매니저가 보낼 때만 됩니다.
                     </p>
-                    <p className="text-[12px] text-gray-400 mt-2">법적 검토·승인이 끝난 뒤에 켜 주세요.</p>
+                    <p className="text-[12px] text-muted-foreground mt-2">법적 검토·승인이 끝난 뒤에 켜 주세요.</p>
                   </div>
                   {switchLoading ? (
-                    <Loader2 size={18} className="animate-spin text-gray-400 shrink-0 mt-1" />
+                    <Loader2 size={18} className="animate-spin text-muted-foreground shrink-0 mt-1" />
                   ) : switchError ? (
                     // 상태를 모르는데 OFF로 렌더하면 실제 ON인 기능을 꺼진 줄 알고, 토글은 '켜기'만 시도해 끌 수도 없다.
                     <AlertCircle size={18} className="text-error shrink-0 mt-1" />
@@ -279,7 +279,7 @@ export function Settings() {
               <h2 className="text-lg font-bold text-foreground mb-1 border-b-0 pb-0">외부 서비스 연동</h2>
               <p className="text-[13px] text-muted-foreground mb-6">서버에 연결 정보가 들어가 있는지로 판단한 실제 연결 상태입니다. (비밀 키는 표시되지 않아요)</p>
               {intLoading ? (
-                <div className="flex items-center gap-2 text-gray-400 py-8"><Loader2 size={18} className="animate-spin" /> 연동 상태 확인 중…</div>
+                <div className="flex items-center gap-2 text-muted-foreground py-8"><Loader2 size={18} className="animate-spin" /> 연동 상태 확인 중…</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {integrations.map((it) => {
@@ -292,14 +292,14 @@ export function Settings() {
                             <div className="text-[14px] font-bold text-foreground truncate">{meta.name}</div>
                             <div className="text-[12px] text-muted-foreground mt-0.5 truncate">{meta.desc}</div>
                             {it.key === "solapi" && it.configured && (
-                              <div className={`text-[11px] mt-1 font-bold ${it.kakao_ready ? "text-success" : "text-yellow-600"}`}>
+                              <div className={`text-[11px] mt-1 font-bold ${it.kakao_ready ? "text-success" : "text-warning-strong"}`}>
                                 {it.kakao_ready ? "알림톡(PFID) 준비됨" : "알림톡 PFID 미설정 — SMS만 가능"}
                               </div>
                             )}
                             {!it.configured && (
                               // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
                               // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
-                              <div className="text-[11px] text-gray-400 mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
+                              <div className="text-[11px] text-muted-foreground mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
                                 아직 연결 정보가 없어요 — 개발팀에 연결 요청이 필요해요
                               </div>
                             )}

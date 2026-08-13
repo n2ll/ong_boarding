@@ -141,9 +141,9 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="text-right">관리</div>
         </div>
 
-        {loading && <div className="px-6 py-8 text-[13px] text-gray-400">담당자 목록 불러오는 중…</div>}
+        {loading && <div className="px-6 py-8 text-[13px] text-muted-foreground">담당자 목록 불러오는 중…</div>}
         {!loading && members.length === 0 && (
-          <div className="px-6 py-10 text-center text-[13px] text-gray-400">
+          <div className="px-6 py-10 text-center text-[13px] text-muted-foreground">
             등록된 담당자가 없어요. <button onClick={openCreate} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info font-bold hover:underline">담당자 추가</button>를 눌러 시작하세요.
           </div>
         )}
@@ -153,11 +153,11 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
             <div key={member.id} className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
               <div className="flex flex-col">
                 <div className="font-extrabold text-foreground">{member.name}</div>
-                <div className="text-[12px] text-gray-400 flex items-center gap-1 mt-0.5"><Phone size={10} /> {member.phone || "연락처 없음"}</div>
+                <div className="text-[12px] text-muted-foreground flex items-center gap-1 mt-0.5"><Phone size={10} /> {member.phone || "연락처 없음"}</div>
               </div>
 
               <div>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-info-soft text-info' : 'bg-muted text-gray-700'}`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-info-soft text-info-strong' : 'bg-muted text-gray-700'}`}>
                   <Shield size={12} /> {member.role || "현장"}
                 </span>
               </div>
@@ -165,7 +165,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="text-[13px] font-bold text-gray-700">{member.branch || "전체"}</div>
 
               <div>
-                <span className={`inline-flex px-2.5 py-1 rounded-full text-[12px] font-bold ${member.active ? 'bg-success-soft text-success' : 'bg-error-soft text-error'}`}>
+                <span className={`inline-flex px-2.5 py-1 rounded-full text-[12px] font-bold ${member.active ? 'bg-success-soft text-success-strong' : 'bg-error-soft text-error-strong'}`}>
                   {member.active ? '활성' : '비활성'}
                 </span>
               </div>
@@ -186,7 +186,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
               <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "담당자 추가" : "담당자 편집"}</h2>
-              <button aria-label="팀원 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+              <button aria-label="팀원 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
@@ -227,7 +227,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
               <div>
                 {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error hover:bg-error-soft border border-error/30 disabled:opacity-50">
+                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error-strong hover:bg-error-soft border border-error/30 disabled:opacity-50">
                     <Trash2 size={15} /> 삭제
                   </button>
                 )}

@@ -125,7 +125,7 @@ export function Automation() {
       tone: stats.aiDisabled ? "text-error" : "text-success",
       live: !stats.aiDisabled,
     },
-    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-yellow-600" },
+    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-warning-strong" },
     { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-info" },
     { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-muted-foreground" },
     { label: "분류 대기 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-error" : "text-muted-foreground" },
@@ -135,10 +135,10 @@ export function Automation() {
   return (
     <div className="flex flex-col h-full min-h-0 bg-background">
       {/* 실시간 자동화 현황 (실데이터) */}
-      <div className="shrink-0 bg-white border-b border-border-strong px-6 py-3.5">
+      <div className="shrink-0 bg-white border-b border-border-strong px-8 py-4">
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
-          <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full">실시간 집계</span>
+          <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full">실시간 집계</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {kpis.map((k, i) => (
@@ -156,12 +156,12 @@ export function Automation() {
       </div>
 
       {/* 자동 점검 규칙 (실동작) */}
-      <div className="shrink-0 bg-white border-b border-border-strong px-6 py-3.5">
+      <div className="shrink-0 bg-white border-b border-border-strong px-8 py-4">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</span>
-            <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
-            {ruleRanAt && <span className="text-[11px] text-gray-400">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
+            <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
+            {ruleRanAt && <span className="text-[11px] text-muted-foreground">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
           <button
             onClick={runEvaluate}
@@ -206,14 +206,14 @@ export function Automation() {
                       {rule.unit}
                     </label>
                   ) : (
-                    <span className="text-[11px] text-gray-400" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
+                    <span className="text-[11px] text-muted-foreground" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
                   )}
                   {result ? (
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-error-soft text-error border border-error/30" : "bg-success-soft text-success border border-success/25"}`}>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-error-soft text-error-strong border border-error/30" : "bg-success-soft text-success-strong border border-success/25"}`}>
                       {result.triggered ? "조치 필요" : "정상"}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-gray-300 font-bold">미점검</span>
+                    <span className="text-[11px] text-muted-foreground font-bold">미점검</span>
                   )}
                 </div>
                 {result && <div className="text-[11px] text-muted-foreground mt-1.5">{result.detail}</div>}

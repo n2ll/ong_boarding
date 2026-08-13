@@ -167,18 +167,18 @@ export function Inbox() {
       </div>
 
       <div className="flex items-center gap-2 mb-5 text-[13px] text-muted-foreground">
-        <MessageSquareWarning size={16} className="text-yellow-600" />
+        <MessageSquareWarning size={16} className="text-warning-strong" />
         처리 대기 <b className="text-foreground">{messages.length}</b>건
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 text-[13px] text-gray-400 py-10">
+        <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-10">
           <Loader2 size={16} className="animate-spin" /> 불러오는 중…
         </div>
       )}
 
       {!loading && messages.length === 0 && (
-        <div className="flex flex-col items-center justify-center text-center py-20 text-gray-400">
+        <div className="flex flex-col items-center justify-center text-center py-20 text-muted-foreground">
           <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mb-4">
             <Check size={30} className="text-success" />
           </div>
@@ -194,9 +194,9 @@ export function Inbox() {
             <div key={msg.id} className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[13px] font-bold text-gray-700">
-                  <Phone size={13} className="text-gray-400" /> {msg.applicant_phone}
+                  <Phone size={13} className="text-muted-foreground" /> {msg.applicant_phone}
                 </div>
-                <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
+                <span className="text-[12px] text-muted-foreground">{formatTime(msg.created_at)}</span>
               </div>
               <div className="text-[14px] leading-relaxed text-gray-800 bg-background border border-muted rounded-xl px-4 py-3 whitespace-pre-wrap">
                 {msg.body}
@@ -218,7 +218,7 @@ export function Inbox() {
                 </button>
                 {/* 지원자로 등록 — 어느 라인/공고로 보낼지 선택(도시락 등 실공고 or 배민 커넥트 자동). */}
                 <div className="relative flex items-center">
-                  {busy && <Loader2 size={15} className="animate-spin text-gray-400 mr-2" />}
+                  {busy && <Loader2 size={15} className="animate-spin text-muted-foreground mr-2" />}
                   <select
                     disabled={busy}
                     value=""

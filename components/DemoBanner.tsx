@@ -16,7 +16,7 @@ export function DemoBanner({ variant = "demo", note }: DemoBannerProps) {
   return (
     <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-300 rounded-xl px-4 py-3 mb-6">
       <div className="w-7 h-7 rounded-lg bg-yellow-100 flex items-center justify-center shrink-0 mt-0.5">
-        <FlaskConical size={15} className="text-yellow-700" />
+        <FlaskConical size={15} className="text-warning-strong" />
       </div>
       <div className="min-w-0">
         <div className="text-[13px] font-extrabold text-warning-strong flex items-center gap-2">

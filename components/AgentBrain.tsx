@@ -81,7 +81,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // 인계 tone별 배지 색
 const TONE_BADGE: Record<string, string> = {
   urgent: "bg-error-soft text-error-strong border-error/30",
-  answerable: "bg-yellow-50 text-yellow-700 border-yellow-200",
+  answerable: "bg-yellow-50 text-warning-strong border-yellow-200",
   human: "bg-info-soft text-info-strong border-info/25",
   neutral: "bg-background text-muted-foreground border-border-strong",
 };
@@ -502,7 +502,7 @@ export function AgentBrain() {
             onClick={() => setActiveTab("overview")}
             className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
           >
-            <Layers size={18} className={activeTab === 'overview' ? 'text-warning' : ''} /> AI 지식 현황
+            <Layers size={18} className={activeTab === 'overview' ? 'text-warning-strong' : ''} /> AI 지식 현황
           </button>
           <button aria-selected={activeTab === "persona"} role="tab"
             onClick={() => setActiveTab("persona")}
@@ -526,7 +526,7 @@ export function AgentBrain() {
             onClick={() => setActiveTab("advanced")}
             className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'advanced' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
           >
-            <Settings2 size={18} className={activeTab === 'advanced' ? 'text-error' : ''} /> 고급 설정
+            <Settings2 size={18} className={activeTab === 'advanced' ? 'text-error-strong' : ''} /> 고급 설정
           </button>
           <button aria-selected={activeTab === "simulator"} role="tab"
             onClick={() => setActiveTab("simulator")}
@@ -538,7 +538,7 @@ export function AgentBrain() {
             onClick={() => setActiveTab("improve")}
             className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'improve' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
           >
-            <Lightbulb size={18} className={activeTab === 'improve' ? 'text-yellow-600' : ''} /> 🔁 개선 제안
+            <Lightbulb size={18} className={activeTab === 'improve' ? 'text-warning-strong' : ''} /> 🔁 개선 제안
           </button>
         </div>
 
@@ -548,7 +548,7 @@ export function AgentBrain() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                  <Layers size={20} className="text-warning" /> AI가 참고하는 사실 — 한눈에
+                  <Layers size={20} className="text-warning-strong" /> AI가 참고하는 사실 — 한눈에
                 </h2>
                 <Button variant="ghost" size="chip" onClick={loadOverview} isLoading={ovLoading} className="text-[12.5px]">
                 {!ovLoading && <RefreshCw size={14} />} 새로고침
@@ -560,17 +560,17 @@ export function AgentBrain() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 <button onClick={() => setActiveTab("knowledge")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-info transition-colors">
                   <div className="flex items-center gap-2 text-info mb-2"><Database size={16} /><span className="text-[12px] font-bold">① 공통 운영정보</span></div>
-                  <div className="text-[22px] font-extrabold text-foreground">{factsCount}<span className="text-[13px] font-bold text-gray-400">개 항목</span></div>
+                  <div className="text-[22px] font-extrabold text-foreground">{factsCount}<span className="text-[13px] font-bold text-muted-foreground">개 항목</span></div>
                   <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-1">두뇌 &gt; 사내 지식 베이스 <ExternalLink size={11} /></div>
                 </button>
                 <button onClick={() => router.push("/branches")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-success transition-colors">
                   <div className="flex items-center gap-2 text-success mb-2"><Building2 size={16} /><span className="text-[12px] font-bold">② 지점별 정보</span></div>
-                  <div className="text-[22px] font-extrabold text-foreground">{branchesFilled}<span className="text-[13px] font-bold text-gray-400">/{ovBranches.length} 지점 작성</span></div>
+                  <div className="text-[22px] font-extrabold text-foreground">{branchesFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovBranches.length} 지점 작성</span></div>
                   <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-1">지점관리에서 편집 <ExternalLink size={11} /></div>
                 </button>
                 <button onClick={() => router.push("/jobs")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-warning transition-colors">
-                  <div className="flex items-center gap-2 text-warning mb-2"><Briefcase size={16} /><span className="text-[12px] font-bold">③ 공고별 단가·정책</span></div>
-                  <div className="text-[22px] font-extrabold text-foreground">{jobsPayFilled}<span className="text-[13px] font-bold text-gray-400">/{ovJobs.length} 공고 단가입력</span></div>
+                  <div className="flex items-center gap-2 text-warning-strong mb-2"><Briefcase size={16} /><span className="text-[12px] font-bold">③ 공고별 단가·정책</span></div>
+                  <div className="text-[22px] font-extrabold text-foreground">{jobsPayFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovJobs.length} 공고 단가입력</span></div>
                   <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-1">공고 편집에서 입력 <ExternalLink size={11} /></div>
                 </button>
               </div>
@@ -584,12 +584,12 @@ export function AgentBrain() {
                       <div key={j.id} className="flex items-center justify-between gap-2 bg-white border border-warning-soft rounded-lg px-3 py-2">
                         <div className="min-w-0">
                           <span className="text-[13px] font-bold text-foreground">{j.title}</span>
-                          {j.branch && <span className="ml-2 text-[11px] font-bold text-gray-400">{j.branch}</span>}
+                          {j.branch && <span className="ml-2 text-[11px] font-bold text-muted-foreground">{j.branch}</span>}
                         </div>
                         <Button variant="primary" size="chip" className="shrink-0 px-2.5 bg-warning hover:bg-warning-strong text-white shadow-none focus-visible:ring-warning" onClick={() => router.push(`/jobs?edit=${j.id}`)}>단가 채우기</Button>
                       </div>
                     ))}
-                    {payGapJobs.length > 6 && <div className="text-[11.5px] text-gray-400 px-1">외 {payGapJobs.length - 6}개</div>}
+                    {payGapJobs.length > 6 && <div className="text-[11.5px] text-muted-foreground px-1">외 {payGapJobs.length - 6}개</div>}
                   </div>
                 </div>
               )}
@@ -602,9 +602,9 @@ export function AgentBrain() {
                 </div>
                 <p className="text-[12px] text-muted-foreground mb-4">사람 확인이 자주 필요한 분류는 위 ①②③ 사실을 채우면 건수가 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
                 {ovLoading ? (
-                  <div className="flex items-center gap-2 text-[13px] text-gray-400 py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
                 ) : Object.keys(ovByCategory).length === 0 ? (
-                  <div className="text-[13px] text-gray-400 py-2">사람 확인이 필요한 건이 없어요.</div>
+                  <div className="text-[13px] text-muted-foreground py-2">사람 확인이 필요한 건이 없어요.</div>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {Object.entries(ovByCategory).sort((a, b) => b[1] - a[1]).map(([cid, count]) => {
@@ -653,7 +653,7 @@ export function AgentBrain() {
                     disabled={!personaLoaded}
                     className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow disabled:bg-background"
                   />
-                  <p className="text-[12px] text-gray-400 mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
+                  <p className="text-[12px] text-muted-foreground mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-border-strong">
@@ -685,7 +685,7 @@ export function AgentBrain() {
                         disabled={!personaLoaded}
                         className="w-full accent-brand-yellow"
                       />
-                      <div className="flex justify-between text-[11px] font-bold text-gray-400 mt-2">
+                      <div className="flex justify-between text-[11px] font-bold text-muted-foreground mt-2">
                         <span>사용 안 함</span>
                         <span>적당히</span>
                         <span>자주 사용</span>
@@ -703,7 +703,7 @@ export function AgentBrain() {
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Database size={20} className="text-info" /> 사내 지식 베이스
                 </h2>
-                <span className="text-[12px] font-bold bg-success-soft text-success px-3 py-1 rounded-full">prompt_examples 연동됨</span>
+                <span className="text-[12px] font-bold bg-success-soft text-success-strong px-3 py-1 rounded-full">prompt_examples 연동됨</span>
               </div>
               <p className="text-sm text-muted-foreground mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다.</p>
 
@@ -711,9 +711,9 @@ export function AgentBrain() {
                   데모임을 알리는 화면이었다 — 매니저의 시간을 쓰게 하고 그 사이 학습된다고 믿게 만든다.
                   실제 경로(아래 지식 목록 직접 추가)만 남긴다. */}
               <div className="border border-border-strong bg-background rounded-2xl px-5 py-4 mb-8 flex items-start gap-3">
-                <UploadCloud size={20} className="text-gray-400 shrink-0 mt-0.5" />
+                <UploadCloud size={20} className="text-muted-foreground shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-[13.5px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded-full align-middle">준비중</span></div>
+                  <div className="text-[13.5px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full align-middle">준비중</span></div>
                   <div className="text-[12.5px] text-muted-foreground mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 1분 안에 응대에 반영돼요.</div>
                 </div>
               </div>
@@ -730,7 +730,7 @@ export function AgentBrain() {
                         onClick={() => { setKbCategory(c.key); setKbForm(null); }}
                         className={`px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${on ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
-                        {c.label} <span className={on ? "text-gray-400" : "text-gray-300"}>{count}</span>
+                        {c.label} <span className={on ? "text-muted-foreground" : "text-muted-foreground"}>{count}</span>
                       </button>
                     );
                   })}
@@ -761,9 +761,9 @@ export function AgentBrain() {
                         <div className="text-[14px] font-extrabold text-foreground flex items-center gap-2">
                           {kbForm.id === null ? <Plus size={16} /> : <Pencil size={16} />}
                           {kbForm.id === null ? "새 지식 항목" : "지식 항목 수정"}
-                          <span className="text-[10px] font-bold bg-info-soft text-info px-1.5 py-0.5 rounded-full">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
+                          <span className="text-[10px] font-bold bg-info-soft text-info-strong px-1.5 py-0.5 rounded-full">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
                         </div>
-                        <button aria-label="편집 창 닫기" onClick={() => setKbForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={18} /></button>
+                        <button aria-label="편집 창 닫기" onClick={() => setKbForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={18} /></button>
                       </div>
                       <div className="flex flex-col gap-3">
                         <div>
@@ -802,11 +802,11 @@ export function AgentBrain() {
               {/* 항목 목록 */}
               <div className="space-y-3">
                 {kbLoading && (
-                  <div className="flex items-center gap-2 text-[13px] text-gray-400 p-4"><Loader2 size={15} className="animate-spin" /> 불러오는 중...</div>
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground p-4"><Loader2 size={15} className="animate-spin" /> 불러오는 중...</div>
                 )}
                 {!kbLoading && kbItems.length === 0 && (
-                  <div className="text-center text-[13px] text-gray-400 border border-dashed border-border-strong rounded-xl p-8">
-                    이 분류에 등록된 항목이 없어요. <button onClick={openKbAdd} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info font-bold hover:underline">새 항목 추가</button> 또는 기본값 채우기를 눌러보세요.
+                  <div className="text-center text-[13px] text-muted-foreground border border-dashed border-border-strong rounded-xl p-8">
+                    이 분류에 등록된 항목이 없어요. <button onClick={openKbAdd} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info-strong font-bold hover:underline">새 항목 추가</button> 또는 기본값 채우기를 눌러보세요.
                   </div>
                 )}
                 {kbItems.map((ex) => (
@@ -822,7 +822,7 @@ export function AgentBrain() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-3">
                       <button aria-label={`${ex.title} 수정`} onClick={() => openKbEdit(ex)} title="수정" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"><Pencil size={15} /></button>
-                      <button aria-label={`${ex.title} 삭제`} onClick={() => handleKbDelete(ex)} title="삭제" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-error-soft hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"><Trash2 size={15} /></button>
+                      <button aria-label={`${ex.title} 삭제`} onClick={() => handleKbDelete(ex)} title="삭제" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-error-soft hover:text-error-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"><Trash2 size={15} /></button>
                     </div>
                   </div>
                 ))}
@@ -851,8 +851,8 @@ export function AgentBrain() {
                         <div className="text-[12.5px] text-muted-foreground">↳ {cat.action}</div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <div className={`text-[18px] font-extrabold ${count > 0 ? "text-copilot" : "text-gray-300"}`}>{count}</div>
-                        <div className="text-[10.5px] font-bold text-gray-400">대기</div>
+                        <div className={`text-[18px] font-extrabold ${count > 0 ? "text-copilot" : "text-muted-foreground"}`}>{count}</div>
+                        <div className="text-[10.5px] font-bold text-muted-foreground">대기</div>
                       </div>
                     </div>
                   );
@@ -874,7 +874,7 @@ export function AgentBrain() {
                     {killMode === 'draft' && !killEnvForced ? (
                       <Zap size={20} className="text-copilot-strong" />
                     ) : (
-                      <Power size={20} className={killDisabled || killEnvForced ? 'text-error' : 'text-success'} />
+                      <Power size={20} className={killDisabled || killEnvForced ? 'text-error-strong' : 'text-success'} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -922,7 +922,7 @@ export function AgentBrain() {
                     </div>
 
                     {!killLoading && killUpdatedAt && (
-                      <p className="text-[12px] text-gray-400 mt-3">
+                      <p className="text-[12px] text-muted-foreground mt-3">
                         마지막 변경: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
                       </p>
                     )}
@@ -943,7 +943,7 @@ export function AgentBrain() {
               <div className="bg-white border border-border-strong rounded-2xl p-7 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl bg-copilot-soft flex items-center justify-center">
-                    <Database size={20} className="text-copilot" />
+                    <Database size={20} className="text-copilot-strong" />
                   </div>
                   <div>
                     <h2 className="text-[18px] font-extrabold text-foreground flex items-center gap-2">
@@ -979,9 +979,9 @@ export function AgentBrain() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                  <FlaskConical size={20} className="text-copilot" /> 응대 미리보기
+                  <FlaskConical size={20} className="text-copilot-strong" /> 응대 미리보기
                 </h2>
-                <span className="text-[12px] font-bold bg-copilot-soft text-copilot px-3 py-1 rounded-full">실제 Claude 호출</span>
+                <span className="text-[12px] font-bold bg-copilot-soft text-copilot-strong px-3 py-1 rounded-full">실제 Claude 호출</span>
               </div>
               <p className="text-sm text-muted-foreground mb-6">지원자가 보낼 법한 문자를 입력하면, 지금 설정된 말투·성격과 지식 베이스로 옹봇이 어떤 답변 초안을 만드는지 미리 확인할 수 있어요. <b>실제 발송은 되지 않습니다.</b></p>
 
@@ -989,7 +989,7 @@ export function AgentBrain() {
                 {/* Input */}
                 <div className="flex flex-col gap-4">
                   <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-2">지원자가 보낸 문자 <span className="text-error">*</span></label>
+                    <label className="block text-[13px] font-bold text-gray-700 mb-2">지원자가 보낸 문자 <span className="text-error-strong">*</span></label>
                     <textarea
                       value={simInbound}
                       onChange={(e) => setSimInbound(e.target.value)}
@@ -999,7 +999,7 @@ export function AgentBrain() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-2">참고 공고 내용 <span className="text-gray-400 font-medium">(선택)</span></label>
+                    <label className="block text-[13px] font-bold text-gray-700 mb-2">참고 공고 내용 <span className="text-muted-foreground font-medium">(선택)</span></label>
                     <textarea
                       value={simPosting}
                       onChange={(e) => setSimPosting(e.target.value)}
@@ -1017,13 +1017,13 @@ export function AgentBrain() {
                 <div className="bg-background border border-border-strong rounded-2xl p-5 min-h-[300px] flex flex-col">
                   <div className="text-[13px] font-bold text-muted-foreground mb-3 flex items-center gap-1.5"><Bot size={15} /> 옹봇 응답 결과</div>
                   {!simResult && !simRunning && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center text-gray-400">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center text-muted-foreground">
                       <FlaskConical size={32} className="mb-3 opacity-40" />
                       <div className="text-[13px] font-medium">왼쪽에 문자를 입력하고 실행하면<br />여기에 AI 답변 초안이 표시됩니다.</div>
                     </div>
                   )}
                   {simRunning && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center text-copilot">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center text-copilot-strong">
                       <Loader2 size={28} className="animate-spin mb-3" />
                       <div className="text-[13px] font-bold">실제 Claude 모델을 호출하는 중...</div>
                     </div>
@@ -1037,7 +1037,7 @@ export function AgentBrain() {
                         </div>
                       </div>
                       <div className="bg-white border border-border-strong rounded-xl p-3.5">
-                        <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot" /> 판단 근거 (reasoning)</div>
+                        <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot-strong" /> 판단 근거 (reasoning)</div>
                         <div className="text-[12.5px] text-gray-700 leading-relaxed whitespace-pre-wrap">{simResult.reasoning}</div>
                       </div>
                     </div>
@@ -1055,7 +1055,7 @@ export function AgentBrain() {
                         </div>
                       )}
                       <div className="bg-white border border-border-strong rounded-xl p-3.5">
-                        <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot" /> 판단 근거 (reasoning)</div>
+                        <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot-strong" /> 판단 근거 (reasoning)</div>
                         <div className="text-[12.5px] text-gray-700 leading-relaxed whitespace-pre-wrap">{simResult.reasoning}</div>
                       </div>
                     </div>
@@ -1071,7 +1071,7 @@ export function AgentBrain() {
               <div className="p-5 border border-border-strong rounded-2xl bg-white mb-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2 text-[14px] font-bold text-foreground">
-                    <Coins size={16} className="text-yellow-600" /> 이번 달 AI 사용량
+                    <Coins size={16} className="text-warning-strong" /> 이번 달 AI 사용량
                   </div>
                   <a
                     href="https://console.anthropic.com"
@@ -1083,19 +1083,19 @@ export function AgentBrain() {
                   </a>
                 </div>
                 {usageLoading ? (
-                  <div className="flex items-center gap-2 text-[13px] text-gray-400 py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
-                      <div className="text-[11.5px] font-bold text-gray-400 mb-0.5">Claude 호출</div>
-                      <div className="text-[20px] font-extrabold text-foreground">{monthStats.calls.toLocaleString()}<span className="text-[12px] font-bold text-gray-400">회</span></div>
+                      <div className="text-[11.5px] font-bold text-muted-foreground mb-0.5">Claude 호출</div>
+                      <div className="text-[20px] font-extrabold text-foreground">{monthStats.calls.toLocaleString()}<span className="text-[12px] font-bold text-muted-foreground">회</span></div>
                     </div>
                     <div>
-                      <div className="text-[11.5px] font-bold text-gray-400 mb-0.5">토큰 (입력 / 출력)</div>
-                      <div className="text-[20px] font-extrabold text-foreground">{fmtTokens(monthStats.tokensIn)}<span className="text-[13px] font-bold text-gray-400"> / {fmtTokens(monthStats.tokensOut)}</span></div>
+                      <div className="text-[11.5px] font-bold text-muted-foreground mb-0.5">토큰 (입력 / 출력)</div>
+                      <div className="text-[20px] font-extrabold text-foreground">{fmtTokens(monthStats.tokensIn)}<span className="text-[13px] font-bold text-muted-foreground"> / {fmtTokens(monthStats.tokensOut)}</span></div>
                     </div>
                     <div>
-                      <div className="text-[11.5px] font-bold text-gray-400 mb-0.5">추정 비용</div>
+                      <div className="text-[11.5px] font-bold text-muted-foreground mb-0.5">추정 비용</div>
                       <div className="text-[20px] font-extrabold text-foreground">${monthStats.cost.toFixed(2)}</div>
                     </div>
                   </div>
@@ -1114,8 +1114,8 @@ export function AgentBrain() {
                         {proj && (
                           <div className="text-[12px] text-muted-foreground">
                             이번 달 <b className="text-foreground">₩{proj.mtd_krw.toLocaleString()}</b>
-                            {" · "}월말 예상 <b className="text-yellow-600">₩{proj.projected_krw.toLocaleString()}</b>
-                            <span className="text-gray-400"> ({proj.elapsed_days}/{proj.days_in_month}일)</span>
+                            {" · "}월말 예상 <b className="text-warning-strong">₩{proj.projected_krw.toLocaleString()}</b>
+                            <span className="text-muted-foreground"> ({proj.elapsed_days}/{proj.days_in_month}일)</span>
                           </div>
                         )}
                       </div>
@@ -1134,14 +1134,14 @@ export function AgentBrain() {
                   );
                 })()}
 
-                <p className="text-[11px] text-gray-400 mt-3 leading-relaxed">
+                <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
                   * 추정 비용 = 토큰 × 모델 단가 (Sonnet 4.6 입력 $3 · 출력 $15 / Haiku 4.5 입력 $1 · 출력 $5 per 1M tokens, 캐시 읽기는 입력 단가의 10%로 계산). 월별 원화는 환율 1,500원 가정. 실제 청구액과 다를 수 있어요.
                 </p>
               </div>
 
               {/* R4-2 개선 제안 — 반영은 매니저 승인으로만 (자동 반영 금지) */}
               <h2 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
-                <Lightbulb size={20} className="text-yellow-600" /> 🔁 개선 제안
+                <Lightbulb size={20} className="text-warning-strong" /> 🔁 개선 제안
               </h2>
               <p className="text-sm text-muted-foreground mb-5">
                 최근 7일간 <b>매니저가 고쳐 보낸 AI 초안 · AI가 매니저에게 넘긴 사유 · 정보 부족 사례</b>에서 AI가 배울 거리를 찾아 제안합니다.
@@ -1151,10 +1151,10 @@ export function AgentBrain() {
               <Button variant="primary" onClick={handleRunImprove} isLoading={improveLoading}>
               {!improveLoading && <Sparkles size={16} className="text-brand-yellow" />} {improveLoading ? "분석 중…" : "개선 제안 받기"}
             </Button>
-              <p className="text-[11.5px] text-gray-400 mt-1.5">실행하면 Claude 호출 1회 비용이 발생해요.</p>
+              <p className="text-[11.5px] text-muted-foreground mt-1.5">실행하면 Claude 호출 1회 비용이 발생해요.</p>
 
               {improveRan && !improveLoading && proposals.length === 0 && (
-                <div className="mt-5 text-center text-[13px] text-gray-400 border border-dashed border-border-strong rounded-xl p-8">
+                <div className="mt-5 text-center text-[13px] text-muted-foreground border border-dashed border-border-strong rounded-xl p-8">
                   아직 배울 재료가 없어요 — 코파일럿 초안 수정·매니저에게 넘어간 사례가 쌓이면 제안을 만들어요.
                 </div>
               )}
@@ -1171,7 +1171,7 @@ export function AgentBrain() {
                       </div>
                       <div className="text-[14px] font-bold text-foreground">{p.title}</div>
                       <div className="text-[13px] text-gray-700 mt-1 leading-relaxed whitespace-pre-wrap">{p.body}</div>
-                      {p.evidence && <div className="text-[12px] text-gray-400 mt-2">근거: {p.evidence}</div>}
+                      {p.evidence && <div className="text-[12px] text-muted-foreground mt-2">근거: {p.evidence}</div>}
                       <div className="flex items-center gap-2 mt-3 flex-wrap">
                         {p.kind === "system_message_tweak" ? (
                           <span className="text-[12px] font-bold text-warning-strong bg-yellow-50 border border-warning/35 rounded-lg px-3 py-1.5">

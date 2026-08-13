@@ -65,7 +65,7 @@ export function Reengagement() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto w-full space-y-5">
+    <div className="p-8 pb-12 max-w-4xl w-full space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
@@ -122,7 +122,7 @@ export function Reengagement() {
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12.5px] font-bold border ${
               data.enabled
                 ? "bg-success-soft border-success/25 text-success-strong"
-                : "bg-yellow-50 border-yellow-300 text-yellow-700"
+                : "bg-yellow-50 border-yellow-300 text-warning-strong"
             }`}
           >
             <Lock size={14} />
@@ -151,17 +151,17 @@ export function Reengagement() {
             <div className="rounded-xl border border-border-strong bg-background p-3">
               <div className="text-[11px] font-bold text-muted-foreground">비활동 · 사전 동의 필요</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.inactiveCount}</div>
-              <div className="text-[10.5px] text-gray-400">집계만 (동의 후 반입)</div>
+              <div className="text-[10.5px] text-muted-foreground">집계만 (동의 후 반입)</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">이미 지원자</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedApplicants}</div>
-              <div className="text-[10.5px] text-gray-400">중복 제외</div>
+              <div className="text-[10.5px] text-muted-foreground">중복 제외</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">블랙리스트</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedBlacklist}</div>
-              <div className="text-[10.5px] text-gray-400">재채용 불가 제외</div>
+              <div className="text-[10.5px] text-muted-foreground">재채용 불가 제외</div>
             </div>
           </div>
 
@@ -184,7 +184,7 @@ export function Reengagement() {
               {importing ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
               활동 편입후보 {data.activeCount}명 편입
             </button>
-            <span className="text-[11.5px] text-gray-400">
+            <span className="text-[11.5px] text-muted-foreground">
               편입 후 발송은 발송 플로에서 매니저가 진행(블랙리스트·수신거부 하드 가드 적용).
             </span>
           </div>
@@ -207,7 +207,7 @@ export function Reengagement() {
               <Users size={14} /> 활동 편입후보 {data.activeCandidates.length}명
             </div>
             {data.activeCandidates.length === 0 ? (
-              <div className="text-[13px] text-gray-400 py-4 text-center">편입 가능한 활동 후보가 없어요.</div>
+              <div className="text-[13px] text-muted-foreground py-4 text-center">편입 가능한 활동 후보가 없어요.</div>
             ) : (
               <div className="rounded-xl border border-border-strong divide-y divide-muted overflow-hidden">
                 {data.activeCandidates.map((c, i) => (

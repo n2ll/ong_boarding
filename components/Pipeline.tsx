@@ -1581,7 +1581,7 @@ export function Pipeline() {
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={exportCsv} title={`지금 조건에 맞는 ${filteredCards.length}명이 파일로 나갑니다 (전체 인재풀이 아니라 화면에 적용된 조건 기준)`}>
-                  <FileDown size={16} /> CSV로 내보내기 <span className="font-semibold text-gray-400">({filteredCards.length}명)</span>
+                  <FileDown size={16} /> CSV로 내보내기 <span className="font-semibold text-muted-foreground">({filteredCards.length}명)</span>
                 </Button>
             </div>
           </div>
@@ -1655,14 +1655,14 @@ export function Pipeline() {
                 예전엔 정렬이 위층에 혼자, 거리 기준 공고가 위층 오른쪽 끝에 떨어져 있어
                 "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
             <div className="relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white border border-border-strong rounded-xl text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
             </div>
             {view === "list" && (
               <select
                 value={distanceJobId === null ? "" : String(distanceJobId)}
                 onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
-                className={`pr-8 px-3 py-2 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-white border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
               >
                 <option value="">거리 기준 공고 선택…</option>
@@ -1677,7 +1677,7 @@ export function Pipeline() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-                className={`pr-8 px-3 py-2 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-white border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
               >
                 <option value="recent">최근 등록순</option>
@@ -1698,16 +1698,16 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-yellow-700" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="채용 진행 단계로 목록 좁히기"
                 >
                   진행 단계
                   {statusFilter.size > 0 && <span className="bg-brand-yellow text-foreground text-[11px] font-extrabold px-1.5 py-0.5 rounded-full leading-none">{statusFilter.size}</span>}
-                  <ChevronDown size={14} className="text-gray-400" />
+                  <ChevronDown size={14} className="text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-[200px] rounded-xl border-border-strong">
-                <DropdownMenuLabel className="text-[11px] font-bold text-gray-400">여러 개 고를 수 있어요</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">여러 개 고를 수 있어요</DropdownMenuLabel>
                 {[...STATUS_TOKENS, ...(showExcluded ? EXCLUDED_STATUS_TOKENS : [])].map((s) => (
                   <DropdownMenuCheckboxItem
                     key={s}
@@ -1728,7 +1728,7 @@ export function Pipeline() {
               onChange={(e) => setRegionFilter(e.target.value as typeof regionFilter)}
               aria-label="사는 지역으로 목록 좁히기"
               title="사는 지역으로 목록 좁히기"
-              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${regionFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${regionFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">지역 전체</option>
               <option value="capital">수도권(서울·경기·인천)</option>
@@ -1739,7 +1739,7 @@ export function Pipeline() {
               onChange={(e) => setVehicleFilter(e.target.value as typeof vehicleFilter)}
               aria-label="차량 보유 여부로 목록 좁히기"
               title="차량 보유 여부로 목록 좁히기 — 공고가 차량을 요구할 때 씁니다"
-              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${vehicleFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${vehicleFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">차량 전체</option>
               <option value="vehicle">차량 보유</option>
@@ -1753,16 +1753,16 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="다시 연락할 대상을 좁히는 조건 — 이미 일하는 분·최근에 연락한 분을 빼고 보냅니다"
                 >
                   발송 준비
                   {sendPrepCount > 0 && <span className="bg-warning text-white text-[11px] font-extrabold px-1.5 py-0.5 rounded-full leading-none">{sendPrepCount}</span>}
-                  <ChevronDown size={14} className="text-gray-400" />
+                  <ChevronDown size={14} className="text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-[290px] rounded-xl border-border-strong">
-                <DropdownMenuLabel className="text-[11px] font-bold text-gray-400">문자 보내기 전에 대상을 좁혀요</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">문자 보내기 전에 대상을 좁혀요</DropdownMenuLabel>
                 <DropdownMenuCheckboxItem checked={excludeActive} onSelect={(e) => e.preventDefault()}
                     onCheckedChange={() => setExcludeActive((v) => !v)} title="옹매니징 계약·정산 또는 옹고잉 실배차가 있는 분을 뺍니다. 연동이 안 되어 있으면 아무 것도 빼지 않아요." className="text-[12.5px] font-semibold text-gray-700">
                   이미 일하는 분 제외
@@ -1781,7 +1781,7 @@ export function Pipeline() {
                 </DropdownMenuCheckboxItem>
                 {/* 앞 500명만 조회하는 상한 — '이미 일하는 분'·'캠페인 문자' 판정이 그 뒤 인원에는 걸리지 않는다는 사실을 밝힌다. */}
                 {baseFilteredCards.length > 500 && (
-                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-yellow-700 bg-yellow-50">
+                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-warning-strong bg-yellow-50">
                     지금 조건에 {baseFilteredCards.length}명이라 <b>앞 500명만 확인</b>해요. 뒤쪽 인원에는 위 두 조건이 걸리지 않으니, 진행 단계·지역으로 먼저 좁혀 주세요.
                   </div>
                 )}
@@ -1791,12 +1791,12 @@ export function Pipeline() {
             {/* 조건 더보기 — 실제로 자주 쓰이지 않는 조건(지원 채널·희망 근무·가용성·반응·수신거부)은 여기 안으로 */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-yellow-700" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
               aria-expanded={showFilters}
             >
               <Filter size={15} /> 조건 더보기
               {moreFilterCount > 0 && <span className="bg-brand-yellow text-foreground text-[11px] font-extrabold px-1.5 py-0.5 rounded-full leading-none">{moreFilterCount}</span>}
-              <ChevronDown size={14} className={`text-gray-400 transition-transform ${showFilters ? "rotate-180" : ""}`} />
+              <ChevronDown size={14} className={`text-muted-foreground transition-transform ${showFilters ? "rotate-180" : ""}`} />
             </button>
 
             {activeFilterCount > 0 && (
@@ -1812,7 +1812,7 @@ export function Pipeline() {
               {view === "list" && <>발송가능 <span className="text-success">{sendableCount}</span> / </>}
               조건 {shownCount}명
               {view === "list" && hiddenCount > 0 && (
-                <span className="ml-1 font-medium text-gray-400" title="화면에 그리는 양만 나눠서 보여줍니다. 선택·발송·CSV는 조건에 맞는 전원이 대상이에요.">
+                <span className="ml-1 font-medium text-muted-foreground" title="화면에 그리는 양만 나눠서 보여줍니다. 선택·발송·CSV는 조건에 맞는 전원이 대상이에요.">
                   (화면에 {visibleCards.length}명)
                 </span>
               )}
@@ -1834,7 +1834,7 @@ export function Pipeline() {
                   <div>
                     <label className="block text-[12px] font-bold text-gray-700 mb-2">지원 채널</label>
                     <div className="flex flex-wrap gap-1.5">
-                      {availableChannels.length === 0 && <span className="text-[12px] text-gray-400">채널 없음</span>}
+                      {availableChannels.length === 0 && <span className="text-[12px] text-muted-foreground">채널 없음</span>}
                       {availableChannels.map((ch) => {
                         const on = channelFilter.has(ch);
                         return (
@@ -1920,11 +1920,11 @@ export function Pipeline() {
                 <div className="border-t border-border-strong pt-3 flex flex-col gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[12px] font-bold text-gray-700">저장된 대상 묶음</span>
-                    {segments.length === 0 && <span className="text-[11.5px] text-gray-400">자주 쓰는 조건 조합을 저장해 1클릭으로 재적용하세요.</span>}
+                    {segments.length === 0 && <span className="text-[11.5px] text-muted-foreground">자주 쓰는 조건 조합을 저장해 1클릭으로 재적용하세요.</span>}
                     {segments.map((seg) => (
                       <span key={seg.id} className="group inline-flex items-center gap-1 bg-white border border-border-strong rounded-lg pl-2.5 pr-1 py-1 text-[12px] font-bold text-gray-700 hover:border-brand-yellow">
                         <button onClick={() => applySegment(seg)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:text-foreground">{seg.name}</button>
-                        <button aria-label={`저장한 조건 ${seg.name} 삭제`} onClick={() => deleteSegment(seg.id)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-300 hover:text-error p-0.5 rounded" title="삭제"><X size={12} /></button>
+                        <button aria-label={`저장한 조건 ${seg.name} 삭제`} onClick={() => deleteSegment(seg.id)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-error p-0.5 rounded" title="삭제"><X size={12} /></button>
                       </span>
                     ))}
                   </div>
@@ -2043,7 +2043,7 @@ export function Pipeline() {
               </div>
 
               {topN > 50 && (
-                <p className="-mt-2 mb-4 text-[11.5px] text-gray-400">발송은 1회 최대 50명 — 50명 초과 시 자동으로 50명씩 나눠 발송됩니다.</p>
+                <p className="-mt-2 mb-4 text-[11.5px] text-muted-foreground">발송은 1회 최대 50명 — 50명 초과 시 자동으로 50명씩 나눠 발송됩니다.</p>
               )}
 
               {sortMode === "distance" && distanceJobId === null && (
@@ -2056,7 +2056,7 @@ export function Pipeline() {
                   "부천/시 원/미구"처럼 글자 단위로 쪼개졌다.
                   MASTER.md §4: 표처럼 본질적으로 넓은 것은 페이지가 아니라
                   자기 컨테이너 안에서 가로 스크롤한다. */}
-              <div className="border border-border-strong rounded-[16px] overflow-x-auto shadow-sm">
+              <div className="border border-border-strong rounded-lg overflow-x-auto shadow-sm">
                 <table data-density={density} className="w-full min-w-[1060px] text-left border-collapse">
                   <thead>
                     <tr className="bg-background border-b border-border-strong">
@@ -2086,7 +2086,7 @@ export function Pipeline() {
                         const jobTitle = it.job_id !== null ? activeJobs.find((j) => j.id === it.job_id)?.title : undefined;
                         reactionBadge = {
                           label: `${it.immediate ? "⚡ " : ""}관심 표시`,
-                          cls: "bg-success-soft text-success",
+                          cls: "bg-success-soft text-success-strong",
                           title: `공고${it.job_id !== null ? ` #${it.job_id}` : ""}${jobTitle ? ` ${jobTitle}` : ""} 관심 표시 ${relTime(it.at)}${it.immediate ? " · 즉시 가능 응답" : ""}`,
                         };
                       } else if (summary?.last_reply_at) {
@@ -2128,7 +2128,7 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex items-center gap-3">
-                              <div data-den="avatar" className="w-10 h-10 rounded-[12px] bg-muted text-gray-700 flex items-center justify-center font-bold text-[15px] shrink-0">
+                              <div data-den="avatar" className="w-10 h-10 rounded-md bg-muted text-gray-700 flex items-center justify-center font-bold text-[15px] shrink-0">
                                 {c.name.charAt(0)}
                               </div>
                               <div>
@@ -2150,10 +2150,10 @@ export function Pipeline() {
                                             title={`${l.title} — ${interestOnly ? "관심만 누른 자리" : STAGE_KO[l.agent_stage ?? ""] ?? l.agent_stage}. 클릭하면 이 공고 기준으로 상세를 엽니다.`}
                                             className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
                                               interestOnly
-                                                ? "bg-yellow-50 text-yellow-700"
+                                                ? "bg-yellow-50 text-warning-strong"
                                                 : paused
                                                   ? "bg-muted text-gray-700"
-                                                  : "bg-info-soft text-info"
+                                                  : "bg-info-soft text-info-strong"
                                             }`}
                                           >
                                             {(l.branch && l.branch.trim()) || l.title}
@@ -2172,7 +2172,7 @@ export function Pipeline() {
                                       {(() => {
                                         const s = summarizeLinks(c.jobLinks);
                                         return s.interest > 0 && s.talking + s.paused === 0 ? (
-                                          <span className="text-[10.5px] font-bold text-yellow-700">관심 {s.interest}건</span>
+                                          <span className="text-[10.5px] font-bold text-warning-strong">관심 {s.interest}건</span>
                                         ) : null;
                                       })()}
                                     </>
@@ -2189,7 +2189,7 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1 items-start">
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-border-strong text-gray-700' : c.stageId === 'screening' ? 'border-yellow-300 text-yellow-600 bg-yellow-100' : c.stageId === 'interview' ? 'border-success-soft text-success bg-success-soft' : c.stageId === 'excluded' ? 'border-gray-300 text-muted-foreground bg-background' : 'border-info/60 text-info bg-info-soft'}`}>
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-border-strong text-gray-700' : c.stageId === 'screening' ? 'border-yellow-300 text-warning-strong bg-yellow-100' : c.stageId === 'interview' ? 'border-success-soft text-success-strong bg-success-soft' : c.stageId === 'excluded' ? 'border-gray-300 text-muted-foreground bg-background' : 'border-info/60 text-info-strong bg-info-soft'}`}>
                                 <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
                                 {c.stage}
                               </span>
@@ -2204,7 +2204,7 @@ export function Pipeline() {
                                     </span>
                                   )}
                                   {c.smsOptOutAt ? (
-                                    <span title={`수신거부 ${relTime(c.smsOptOutAt)} — 문자를 보낼 수 없어요`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error">
+                                    <span title={`수신거부 ${relTime(c.smsOptOutAt)} — 문자를 보낼 수 없어요`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong">
                                       수신거부
                                     </span>
                                   ) : (
@@ -2235,7 +2235,7 @@ export function Pipeline() {
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[13px] font-medium text-gray-700">{c.region}</span>
                                 {distLabel && (
-                                  <span title="선택 공고 상차지·마지막경유지까지 직선 거리(가까운 쪽 기준 정렬)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-info-soft text-info">
+                                  <span title="선택 공고 상차지·마지막경유지까지 직선 거리(가까운 쪽 기준 정렬)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-info-soft text-info-strong">
                                     {distLabel}
                                   </span>
                                 )}
@@ -2245,9 +2245,9 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-0.5">
-                              <span className="text-[12.5px] text-gray-400">{c.lastActive}</span>
+                              <span className="text-[12.5px] text-muted-foreground">{c.lastActive}</span>
                               {appliedLabel && (
-                                <span data-den="secondary" className="text-[11px] text-gray-400">지원 {appliedLabel}</span>
+                                <span data-den="secondary" className="text-[11px] text-muted-foreground">지원 {appliedLabel}</span>
                               )}
                             </div>
                           </td>
@@ -2266,7 +2266,7 @@ export function Pipeline() {
                           >
                             {hiddenCount}명 더 보기
                           </button>
-                          <div className="mt-2 text-[11.5px] text-gray-400">
+                          <div className="mt-2 text-[11.5px] text-muted-foreground">
                             아래로 내리면 저절로 이어집니다 · 선택·발송·CSV는 조건에 맞는 {filteredCards.length}명 전체에 적용돼요
                           </div>
                         </td>
@@ -2274,7 +2274,7 @@ export function Pipeline() {
                     )}
                     {!loading && filteredCards.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-12 text-center text-[13px] text-gray-400">
+                        <td colSpan={7} className="px-4 py-12 text-center text-[13px] text-muted-foreground">
                           {query
                             ? `'${query}' 검색 결과가 없어요. 이름·전화번호를 다시 확인해 보세요.`
                             : activeFilterCount > 0
@@ -2300,10 +2300,10 @@ export function Pipeline() {
                 <h2 className="text-[16px] font-bold text-foreground">공고 후보로 추가</h2>
                 <div className="text-[12.5px] text-muted-foreground mt-0.5">선택된 {selectedRows.size}명을 추가할 공고를 선택하세요.</div>
               </div>
-              <button aria-label="공고 선택 창 닫기" onClick={() => setJobPickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-gray-400"><X size={18} /></button>
+              <button aria-label="공고 선택 창 닫기" onClick={() => setJobPickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-muted-foreground"><X size={18} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-              {activeJobs.length === 0 && <div className="text-[13px] text-gray-400 text-center py-8">진행 중인 공고가 없어요</div>}
+              {activeJobs.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">진행 중인 공고가 없어요</div>}
               {activeJobs.map((j) => (
                 <button
                   key={j.id}
@@ -2315,11 +2315,11 @@ export function Pipeline() {
                     <div className="text-[14px] font-bold text-foreground truncate">{j.title}</div>
                     {j.branch && <div className="text-[12px] text-muted-foreground">{j.branch}</div>}
                   </div>
-                  {addingJobId === j.id ? <Loader2 size={16} className="animate-spin text-gray-400 shrink-0" /> : <ArrowRight size={16} className="text-gray-400 shrink-0" />}
+                  {addingJobId === j.id ? <Loader2 size={16} className="animate-spin text-muted-foreground shrink-0" /> : <ArrowRight size={16} className="text-muted-foreground shrink-0" />}
                 </button>
               ))}
             </div>
-            <div className="px-5 py-3 border-t border-border-strong text-[11.5px] text-gray-400">
+            <div className="px-5 py-3 border-t border-border-strong text-[11.5px] text-muted-foreground">
               추가 후 공고 상세에서 일괄 스크리닝 문자를 발송할 수 있어요.
             </div>
           </div>
@@ -2339,11 +2339,11 @@ export function Pipeline() {
                 <div className="mt-2 text-[11.5px] leading-snug text-gray-700 bg-background border border-border-strong rounded-lg px-2.5 py-1.5">
                   <b className="text-muted-foreground">지금 조건</b> {conditionLabels.length > 0 ? conditionLabels.join(" · ") : "조건 없음(인재풀 전체에서 고름)"}
                   {selectedOutsideCondition > 0 && (
-                    <div className="text-yellow-700 mt-0.5">선택한 {selectedRows.size}명 중 {selectedOutsideCondition}명은 지금 조건 밖이에요(직접 고르신 분도 그대로 적용됩니다).</div>
+                    <div className="text-warning-strong mt-0.5">선택한 {selectedRows.size}명 중 {selectedOutsideCondition}명은 지금 조건 밖이에요(직접 고르신 분도 그대로 적용됩니다).</div>
                   )}
                 </div>
               </div>
-              <button aria-label="노출 지정 창 닫기" onClick={() => setExposurePickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-gray-400 shrink-0"><X size={18} /></button>
+              <button aria-label="노출 지정 창 닫기" onClick={() => setExposurePickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-muted-foreground shrink-0"><X size={18} /></button>
             </div>
             <div className="px-6 py-3 border-b border-muted flex items-center gap-2">
               {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
@@ -2359,7 +2359,7 @@ export function Pipeline() {
                   {label}
                 </button>
               ))}
-              <span className="text-[11.5px] text-gray-400">제외는 규칙보다 우선해요</span>
+              <span className="text-[11.5px] text-muted-foreground">제외는 규칙보다 우선해요</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
               {/* 현황 조회 실패를 '규칙 없음'으로 위장하지 않는다 — 규칙이 있는데 못 읽으면 서버가 400으로 막고,
@@ -2373,13 +2373,13 @@ export function Pipeline() {
               {/* 응답은 왔지만 이 공고만 빠진 경우 — 버튼이 이유 없이 비활성으로 보이지 않게 그 공고를 이름으로 지목한다.
                   (조회 상한을 넘겼거나 그새 삭제·시스템 공고로 걸러진 공고) */}
               {!exposureImpactError && exposureImpact && exposureUnknownJobs.length > 0 && (
-                <div className="text-[12px] leading-snug text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+                <div className="text-[12px] leading-snug text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
                   이 공고의 노출 현황을 못 읽었어요 — <b>{exposureUnknownJobs.map((j) => j.title).join(", ")}</b>. 규칙이 있는지 알 수 없어 적용할 수 없습니다.
                   <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">다시 시도</button>
                   {" "}또는 선택을 해제하고 진행하세요.
                 </div>
               )}
-              {activeJobs.length === 0 && <div className="text-[13px] text-gray-400 text-center py-8">진행 중인 공고가 없어요</div>}
+              {activeJobs.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">진행 중인 공고가 없어요</div>}
               {activeJobs.map((j) => {
                 const on = exposureJobIds.has(j.id);
                 const im = impactById.get(j.id);
@@ -2402,7 +2402,7 @@ export function Pipeline() {
                         {im ? (
                           <>
                             {im.rule_conditions > 0 ? (
-                              <span className="font-bold text-yellow-700">자동 규칙 {im.rule_conditions}개 · 해당 {im.rule_matched}명</span>
+                              <span className="font-bold text-warning-strong">자동 규칙 {im.rule_conditions}개 · 해당 {im.rule_matched}명</span>
                             ) : (
                               <span>자동 규칙 없음</span>
                             )}
@@ -2411,7 +2411,7 @@ export function Pipeline() {
                             {im.linked > 0 && <> · 이 공고로 연결됨 {im.linked}명</>}
                           </>
                         ) : (
-                          <span className="text-gray-300">현황 불러오는 중…</span>
+                          <span className="text-muted-foreground">현황 불러오는 중…</span>
                         )}
                       </div>
                     </div>
@@ -2422,7 +2422,7 @@ export function Pipeline() {
                     ) : ex === "targeted" ? (
                       <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-info-soft text-info-strong border border-info/25 shrink-0">지정 노출</span>
                     ) : (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-400 shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
                     )}
                   </button>
                 );
@@ -2450,7 +2450,7 @@ export function Pipeline() {
                 )}
                 {exposureRuleJobs.length > 0 && (
                   <div role="radiogroup" aria-label="저장된 자동 노출 규칙 처리">
-                    <div className="text-[12px] font-bold text-yellow-700 mb-1.5">
+                    <div className="text-[12px] font-bold text-warning-strong mb-1.5">
                       {exposureRuleJobs.length === 1 ? "이 공고엔" : `고른 공고 ${exposureRuleJobs.length}개엔`} 자동 노출 규칙이 저장돼 있어요 — 어떻게 할까요?
                     </div>
                     {([
@@ -2480,7 +2480,7 @@ export function Pipeline() {
             )}
 
             <div className="px-5 py-3.5 border-t border-border-strong flex items-center justify-between gap-3">
-              <span className="text-[11.5px] text-gray-400 leading-snug">
+              <span className="text-[11.5px] text-muted-foreground leading-snug">
                 노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.
                 <br />명단 확인·개별 제외는 공고 수정 → &lsquo;노출 대상 명단&rsquo;에서 할 수 있어요.
               </span>
@@ -2531,7 +2531,7 @@ export function Pipeline() {
                 <h2 className="text-[16px] font-bold text-foreground">일괄 상태(파이프라인) 변경</h2>
                 <div className="text-[12.5px] text-muted-foreground mt-0.5">선택된 {selectedRows.size}명의 지원자를 어떤 단계로 이동시킬까요?</div>
               </div>
-              <button aria-label="일괄 상태 변경 창 닫기" onClick={() => setBulkStageModalOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700"><X size={20} /></button>
+              <button aria-label="일괄 상태 변경 창 닫기" onClick={() => setBulkStageModalOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700"><X size={20} /></button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
@@ -2561,7 +2561,7 @@ export function Pipeline() {
                 <h2 className="text-[16px] font-bold text-foreground">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
                 <div className="text-[12.5px] text-muted-foreground mt-0.5">실제 발송 대상 {modalRecipientCount}명에게 일괄 발송됩니다.</div>
               </div>
-              <button aria-label="문자 보내기 창 닫기" onClick={() => setBulkMsgModalOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700"><X size={20} /></button>
+              <button aria-label="문자 보내기 창 닫기" onClick={() => setBulkMsgModalOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-5">
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
@@ -2578,14 +2578,14 @@ export function Pipeline() {
               {/* 확정인력 포함 — 막지 않는다. 운행이 멈춰 대기 중인 확정자에게 다른 라인을 안내하는 건 정당한 발송이다.
                   다만 '지금 근무 중인 분에게 다른 일 권유'가 되는 경우도 있어 수를 밝혀 의식적으로 고르게 한다. */}
               {selectedConfirmedCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12.5px] font-bold text-yellow-700">
+                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12.5px] font-bold text-warning-strong">
                   이미 확정된 분 {selectedConfirmedCount}명이 포함돼 있어요 — 운행이 멈춰 대기 중인 분이라면 보내도 되고, 지금 근무 중인 분이면 진행 단계 조건에서 <b>확정인력</b>을 빼고 보내세요.
                 </div>
               )}
 
               {/* 템플릿↔대상 경고 — B안(최근 6개월용)에 원지원 6개월 초과자가 섞임(발송은 막지 않음, 인지용) */}
               {bCohortMismatchCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12.5px] font-bold text-yellow-700">
+                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12.5px] font-bold text-warning-strong">
                   ⚠️ B안은 최근 6개월 안에 지원한 분들에게 맞는 문구예요 — 현재 대상 중 {bCohortMismatchCount}명이 6개월 초과(원지원일 미상 포함)예요. A안 사용을 검토하세요.
                 </div>
               )}
@@ -2604,7 +2604,7 @@ export function Pipeline() {
               {!activeCheckLoading && activeCheck && activeCheck.configured && activeCheck.active.length > 0 && (
                 <div className="rounded-xl bg-yellow-50 border border-yellow-300 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="text-[13px] font-extrabold text-yellow-700">
+                    <div className="text-[13px] font-extrabold text-warning-strong">
                       현재 활동 중인 인원 {activeCheck.active.length}명이 포함되어 있어요
                     </div>
                     <Button variant="primary" size="chip" className="shrink-0 px-3 py-1.5 text-[12px] rounded-lg bg-warning hover:bg-warning-strong text-white shadow-none focus-visible:ring-warning" onClick={excludeActiveFromSelection}><UserX size={14} /> 활동 중 전원 제외</Button>
@@ -2632,7 +2632,7 @@ export function Pipeline() {
                       );
                     })}
                   </div>
-                  <p className="text-[11.5px] leading-relaxed text-yellow-700">
+                  <p className="text-[11.5px] leading-relaxed text-warning-strong">
                     다시 연락(구직 안내) 목적이라면 제외하세요. 현재 라인과 시간대가 겹치지 않는 병행 가능 건이라면 유지해도 됩니다 — 발송 목적에 따라 판단하세요.
                   </p>
                 </div>
@@ -2656,7 +2656,7 @@ export function Pipeline() {
               {/* 야간 안내 — 이 화면 벌크 발송에만 야간 게이트가 없었다(공고탭 안내·cron은 KST 21~08 차단).
                   막지는 않는다(긴급 결원 대응). 작성 중에 보이게 여기, 마지막 확인 모달에 한 번 더. */}
               {isNightKstNow() && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12px] font-semibold text-yellow-700 leading-relaxed">
+                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12px] font-semibold text-warning-strong leading-relaxed">
                   지금은 심야(21~08시)예요. 시니어 대상 심야 문자는 민원이 되기 쉬워요 — 급하지 않으면 아침 9시 이후 발송을 권합니다.
                 </div>
               )}
@@ -2681,7 +2681,7 @@ export function Pipeline() {
                   onChange={(e) => setBulkMsgBody(e.target.value)}
                   className="w-full h-[150px] border border-border-strong rounded-xl p-4 text-[14px] outline-none focus:border-brand-yellow resize-none leading-relaxed text-gray-800 bg-background"
                 />
-                <p className="mt-1.5 text-[11.5px] text-gray-400">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
+                <p className="mt-1.5 text-[11.5px] text-muted-foreground">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
             </div>
             <div className="p-5 border-t border-border-strong bg-white flex justify-between items-center">
@@ -2692,7 +2692,7 @@ export function Pipeline() {
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[13px] font-bold text-muted-foreground">예상 비용: {est.sms_type} · 약 {(est.cost_krw * modalRecipientCount).toLocaleString()}원 (1인 {est.cost_krw}원 × {modalRecipientCount}명)</span>
                     {Math.abs(est.bytes - 90) <= 10 && (
-                      <span className="text-[11.5px] font-semibold text-warning">문자 길이가 단문 한도(90바이트)에 걸쳐 있어요 — 수신자 이름 길이에 따라 장문(LMS) 요금으로 나갈 수 있어요.</span>
+                      <span className="text-[11.5px] font-semibold text-warning-strong">문자 길이가 단문 한도(90바이트)에 걸쳐 있어요 — 수신자 이름 길이에 따라 장문(LMS) 요금으로 나갈 수 있어요.</span>
                     )}
                   </div>
                 );
@@ -2724,7 +2724,7 @@ export function Pipeline() {
                       {bulkFailures.map((f, i) => (
                         <div key={`${f.phone}-${i}`} className="text-[11.5px] text-error-strong flex items-center gap-2">
                           <span className="font-bold shrink-0">{f.name}</span>
-                          <span className="text-gray-400 shrink-0">{f.phone}</span>
+                          <span className="text-muted-foreground shrink-0">{f.phone}</span>
                           <span className="truncate">{f.error}</span>
                         </div>
                       ))}
@@ -2760,10 +2760,10 @@ function funnelAvailabilityBadge(availability: string | null): { label: string; 
   if (availability === "즉시가능")
     return { label: "즉시가능", cls: "bg-success-soft text-success-strong border-success-soft" };
   if (availability === "이번주가능")
-    return { label: "이번주가능", cls: "bg-success-soft text-success border-success/25" };
+    return { label: "이번주가능", cls: "bg-success-soft text-success-strong border-success/25" };
   if (availability === "휴면")
-    return { label: "휴면", cls: "bg-background text-gray-400 border-border-strong" };
-  return { label: availability ?? "미확인", cls: "bg-background text-gray-400 border-border-strong" };
+    return { label: "휴면", cls: "bg-background text-muted-foreground border-border-strong" };
+  return { label: availability ?? "미확인", cls: "bg-background text-muted-foreground border-border-strong" };
 }
 
 interface FunnelBoardProps {
@@ -2795,7 +2795,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       <div className="px-8 pt-6 pb-3 flex items-center gap-3 shrink-0 flex-wrap">
         <span className="text-[13px] font-bold text-gray-700" title="발송 묶음 — 이 기간 안에 다시 연락 문자를 받은 인원">
           최근 {data?.window_days ?? days}일 발송 묶음 <span className="text-info">{members.length}명</span>
-          {query && <span className="text-gray-400 font-semibold"> · 검색 일치 {visible.length}명</span>}
+          {query && <span className="text-muted-foreground font-semibold"> · 검색 일치 {visible.length}명</span>}
         </span>
         <div className="flex-1" />
         <select
@@ -2814,13 +2814,13 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
       {error ? (
         <div className="flex-1 flex items-center justify-center text-[13px] text-error">캠페인 단계별 현황을 불러오지 못했어요. 오른쪽 위 &lsquo;새로고침&rsquo;을 눌러 다시 시도해 주세요.</div>
       ) : !data ? (
-        <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400">
+        <div className="flex-1 flex items-center justify-center text-[13px] text-muted-foreground">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : members.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
           <div className="text-[14px] font-bold text-gray-700">최근 {data.window_days}일 캠페인 발송이 없어요</div>
-          <div className="text-[12.5px] text-gray-400">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 단계별로 반응이 쌓여요.</div>
+          <div className="text-[12.5px] text-muted-foreground">리스트 뷰에서 대상을 골라 다시 연락 문자를 보내면 여기에 단계별로 반응이 쌓여요.</div>
         </div>
       ) : (
         <div className="flex gap-6 flex-1 overflow-x-auto px-8 pb-8">
@@ -2833,7 +2833,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: idx * 0.05 }}
-                className="flex flex-col w-[300px] shrink-0 bg-muted rounded-[16px] p-4 border border-border-strong shadow-sm"
+                className="flex flex-col w-[300px] shrink-0 bg-muted rounded-lg p-4 border border-border-strong shadow-sm"
               >
                 <div className="flex items-center justify-between mb-4 px-1">
                   <div className="flex items-center gap-2">
@@ -2864,7 +2864,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-[13.5px] font-bold text-foreground truncate">{m.name || "이름 미상"}</span>
                           </div>
-                          <span className="text-[11px] text-gray-400 shrink-0" title="이 단계 마지막 이벤트 시각">{relTime(m.last_event_at)}</span>
+                          <span className="text-[11px] text-muted-foreground shrink-0" title="이 단계 마지막 이벤트 시각">{relTime(m.last_event_at)}</span>
                         </div>
                         <div className="flex flex-wrap items-center gap-1 mt-1.5">
                           {m.sigungu && (
@@ -2889,7 +2889,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                     );
                   })}
                   {cards.length === 0 && (
-                    <div className="h-[100px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-[12.5px] font-bold text-gray-400">
+                    <div className="h-[100px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-[12.5px] font-bold text-muted-foreground">
                       해당 단계 인원 없음
                     </div>
                   )}
@@ -2946,7 +2946,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
   }));
 
   return (
-    <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: columnIndex * 0.05 }} ref={drop as any} className={`flex flex-col w-[320px] shrink-0 bg-muted rounded-[16px] p-4 transition-colors duration-200 border border-border-strong shadow-sm ${isOver ? 'ring-2 ring-brand-yellow bg-yellow-50/50' : ''}`}>
+    <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: columnIndex * 0.05 }} ref={drop as any} className={`flex flex-col w-[320px] shrink-0 bg-muted rounded-lg p-4 transition-colors duration-200 border border-border-strong shadow-sm ${isOver ? 'ring-2 ring-brand-yellow bg-yellow-50/50' : ''}`}>
       <div className="flex items-center justify-between mb-4 px-1">
         <div className="flex items-center gap-2">
           <div className={`w-2.5 h-2.5 rounded-full ${column.color}`} />
@@ -2954,7 +2954,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
           <span className="text-[12px] font-bold text-muted-foreground bg-gray-200 px-2.5 py-0.5 rounded-full">{column.count}</span>
         </div>
         <div className="relative">
-          <button aria-label="이 단계 메뉴 열기" onClick={() => setMenuOpen((v) => !v)} className="text-gray-400 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded-md"><MoreHorizontal size={18} /></button>
+          <button aria-label="이 단계 메뉴 열기" onClick={() => setMenuOpen((v) => !v)} className="text-muted-foreground hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded-md"><MoreHorizontal size={18} /></button>
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
@@ -2983,7 +2983,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
           <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card.id)} cardIndex={idx} />
         ))}
         {column.cards.length === 0 && (
-          <div className="h-[120px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-2">
+          <div className="h-[120px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-muted-foreground gap-2">
             <div className="text-[13px] font-bold text-muted-foreground">대기 중인 지원자 없음</div>
           </div>
         )}
@@ -3014,12 +3014,12 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
         <div className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>
       </div>
       <div className="flex flex-col gap-1.5 mb-3">
-        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-gray-400">근무지:</span> <b>{card.branch}</b></div>
-        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-gray-400">수단:</span> {card.tag}</div>
-        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-gray-400">희망:</span> {card.slot}</div>
+        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-muted-foreground">근무지:</span> <b>{card.branch}</b></div>
+        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-muted-foreground">수단:</span> {card.tag}</div>
+        <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-muted-foreground">희망:</span> {card.slot}</div>
       </div>
       <div className="border-t border-muted pt-3 flex justify-between items-center">
-        <span className="text-[11px] text-gray-400">{card.exp}</span>
+        <span className="text-[11px] text-muted-foreground">{card.exp}</span>
         <span className="text-[11px] font-medium text-muted-foreground bg-background px-2 py-1 rounded-full">{card.lastActive}</span>
       </div>
     </motion.div>

@@ -247,10 +247,10 @@ export function SosLedgerCard() {
     "w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow";
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col">
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error" /> 긴급 건 기록</h2>
+          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error-strong" /> 긴급 건 기록</h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">결원·증차 발생~해결 로그와 월 운영비 (기록 전용)</div>
         </div>
         <button
@@ -268,7 +268,7 @@ export function SosLedgerCard() {
 
       {/* 진행 중 건 */}
       {openRows.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-gray-400">진행 중인 긴급 건이 없어요. 결원·증차가 생기면 오른쪽 위 &lsquo;긴급 건 기록&rsquo;으로 남겨주세요.</div>
+        <div className="py-4 text-center text-[13px] text-muted-foreground">진행 중인 긴급 건이 없어요. 결원·증차가 생기면 오른쪽 위 &lsquo;긴급 건 기록&rsquo;으로 남겨주세요.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {openRows.map((r) => (
@@ -306,7 +306,7 @@ export function SosLedgerCard() {
             {recentRows.map((r) => (
               <div key={r.id} className="flex items-center gap-2 text-[12px] text-gray-700">
                 <span className="font-semibold truncate">{r.line_label}</span>
-                <span className="text-gray-400 shrink-0">
+                <span className="text-muted-foreground shrink-0">
                   {r.status === "cancelled" ? "취소 종결" : r.resolution ? SOS_RESOLUTIONS[r.resolution] : "해결"}
                   {typeof r.cost_krw === "number" && r.cost_krw > 0 ? ` · ${won(r.cost_krw)}` : ""}
                 </span>
@@ -323,23 +323,23 @@ export function SosLedgerCard() {
           className="w-full flex items-center justify-between text-[12.5px] font-bold text-gray-700 hover:text-foreground rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
         >
           <span className="flex items-center gap-1.5"><Wallet size={14} className="text-info" /> {ledgerRes?.month ?? kstMonth()} 운영비 {won(ledgerTotal)}</span>
-          {ledgerOpen ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+          {ledgerOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
         </button>
 
         {ledgerOpen && (
           <div className="mt-3 flex flex-col gap-2">
             {ledgerRows.length === 0 && (
-              <div className="text-[12px] text-gray-400">이번 달 입력된 운영비가 없어요.</div>
+              <div className="text-[12px] text-muted-foreground">이번 달 입력된 운영비가 없어요.</div>
             )}
             {ledgerRows.map((row) => (
               <div key={row.id} className="flex items-center gap-3 px-3 py-2 bg-background rounded-lg">
                 <span className="text-[12px] font-bold text-gray-700 w-[110px] shrink-0">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
                 <span className="text-[12.5px] font-extrabold text-foreground shrink-0">{won(row.amount_krw)}</span>
-                <span className="flex-1 text-[11.5px] text-gray-400 truncate">{row.memo}</span>
+                <span className="flex-1 text-[11.5px] text-muted-foreground truncate">{row.memo}</span>
                 <button
                   onClick={() => handleDeleteLedger(row)}
                   title="삭제"
-                  className="after:absolute after:-inset-2 after:content-[''] relative text-gray-400 hover:text-error p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
+                  className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-error p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -389,7 +389,7 @@ export function SosLedgerCard() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
               <h2 className="text-[18px] font-extrabold text-foreground">긴급 건 기록</h2>
-              <button aria-label="긴급 건 등록 창 닫기" onClick={() => setCreateForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+              <button aria-label="긴급 건 등록 창 닫기" onClick={() => setCreateForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
             <div className="p-6 flex flex-col gap-5">
               <div>
@@ -449,7 +449,7 @@ export function SosLedgerCard() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
               <h2 className="text-[18px] font-extrabold text-foreground">해결 기록 — {resolveForm.line_label}</h2>
-              <button aria-label="긴급 건 처리 창 닫기" onClick={() => setResolveForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+              <button aria-label="긴급 건 처리 창 닫기" onClick={() => setResolveForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
             <div className="p-6 flex flex-col gap-5">
               <div>

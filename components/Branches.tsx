@@ -261,7 +261,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               placeholder="지점명, 담당자 검색"
@@ -283,7 +283,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
       <div className="flex flex-wrap gap-4 mb-8">
         <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-info-soft flex items-center justify-center shrink-0">
-            <Building2 size={24} className="text-info" />
+            <Building2 size={24} className="text-info-strong" />
           </div>
           <div>
             <div className="text-[13px] font-bold text-muted-foreground mb-0.5">운영 중인 지점</div>
@@ -292,16 +292,16 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
         <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-error-soft flex items-center justify-center shrink-0">
-            <AlertTriangle size={24} className="text-error" />
+            <AlertTriangle size={24} className="text-error-strong" />
           </div>
           <div>
             <div className="text-[13px] font-bold text-muted-foreground mb-0.5">인력 충원 시급 (충원율 70% 미만)</div>
-            <div className="text-2xl font-extrabold text-error">{criticalCount}<span className="text-sm font-medium text-muted-foreground ml-1">개 지점</span></div>
+            <div className="text-2xl font-extrabold text-error-strong">{criticalCount}<span className="text-sm font-medium text-muted-foreground ml-1">개 지점</span></div>
           </div>
         </div>
         <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center shrink-0">
-            <Briefcase size={24} className="text-yellow-600" />
+            <Briefcase size={24} className="text-warning-strong" />
           </div>
           <div>
             <div className="text-[13px] font-bold text-muted-foreground mb-0.5">진행 중인 공고</div>
@@ -310,8 +310,8 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </div>
 
-      {loading && <div className="text-[13px] text-gray-400 py-8">지점 현황 불러오는 중…</div>}
-      {!loading && rows.length === 0 && <div className="text-[13px] text-gray-400 py-8">등록된 지점이 없어요</div>}
+      {loading && <div className="text-[13px] text-muted-foreground py-8">지점 현황 불러오는 중…</div>}
+      {!loading && rows.length === 0 && <div className="text-[13px] text-muted-foreground py-8">등록된 지점이 없어요</div>}
 
       {/* 화주사별 지점 그룹 */}
       <div className="flex flex-col gap-8">
@@ -319,18 +319,18 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
           <section key={group.clientId ?? "none"}>
             <div className="flex items-center justify-between mb-3.5">
               <div className="flex items-center gap-2.5">
-                <Building2 size={18} className={group.clientId == null ? "text-gray-400" : "text-info"} />
+                <Building2 size={18} className={group.clientId == null ? "text-muted-foreground" : "text-info-strong"} />
                 <h2 className="text-[16px] font-extrabold text-foreground">{group.name}</h2>
                 <span className="text-[12px] font-bold text-muted-foreground bg-muted px-2.5 py-0.5 rounded-full">{group.branches.length}개 지점</span>
               </div>
               {group.clientId != null && (
-                <button onClick={() => openCreateForClient(group.clientId)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12.5px] font-bold text-info hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
+                <button onClick={() => openCreateForClient(group.clientId)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12.5px] font-bold text-info-strong hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
                   <Plus size={15} /> 이 화주사에 지점 추가
                 </button>
               )}
             </div>
             {group.branches.length === 0 ? (
-              <div className="bg-background border border-dashed border-border-strong rounded-2xl py-8 text-center text-[13px] text-gray-400">
+              <div className="bg-background border border-dashed border-border-strong rounded-2xl py-8 text-center text-[13px] text-muted-foreground">
                 아직 등록된 지점이 없어요.
               </div>
             ) : (
@@ -342,28 +342,28 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold text-gray-400">#{branch.id}</span>
+                    <span className="text-xs font-bold text-muted-foreground">#{branch.id}</span>
                     {!branch.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-gray-300">비활성</span>}
-                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-error-soft text-error px-2 py-0.5 rounded-full border border-error/30">충원 시급</span>}
-                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full border border-yellow-300">충원 필요</span>}
+                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-error-soft text-error-strong px-2 py-0.5 rounded-full border border-error/30">충원 시급</span>}
+                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-yellow-100 text-warning-strong px-2 py-0.5 rounded-full border border-yellow-300">충원 필요</span>}
                   </div>
                   <h3 className="text-[18px] font-extrabold text-foreground tracking-tight group-hover:text-info transition-colors">{branch.name}</h3>
                 </div>
-                <button onClick={() => openEdit(branch)} title="지점 편집" className="after:absolute after:-inset-2 after:content-[''] relative text-gray-400 hover:text-foreground p-1.5 rounded-lg hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+                <button onClick={() => openEdit(branch)} title="지점 편집" className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
                   <Pencil size={17} />
                 </button>
               </div>
 
               <div className="flex flex-col gap-2 mb-6">
                 <div className="flex items-center gap-2 text-[13px] text-gray-700">
-                  <Users size={14} className="text-gray-400" /> {branch.manager}
+                  <Users size={14} className="text-muted-foreground" /> {branch.manager}
                 </div>
               </div>
 
               <div className="bg-background rounded-xl p-4 mb-4">
                 <div className="flex justify-between items-end mb-2">
                   <span className="text-[12px] font-bold text-muted-foreground">인력 충원율</span>
-                  <span className={`text-[15px] font-extrabold ${fillRatio < 70 ? 'text-error' : fillRatio < 90 ? 'text-yellow-600' : 'text-success'}`}>
+                  <span className={`text-[15px] font-extrabold ${fillRatio < 70 ? 'text-error-strong' : fillRatio < 90 ? 'text-warning-strong' : 'text-success'}`}>
                     {branch.targetStaff > 0 ? `${fillRatio}%` : "정원 미설정"}
                   </span>
                 </div>
@@ -373,7 +373,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                     style={{ width: `${Math.min(fillRatio, 100)}%` }}
                   ></div>
                 </div>
-                <div className="text-[11.5px] text-gray-400 text-right">
+                <div className="text-[11.5px] text-muted-foreground text-right">
                   확정 <b className="text-gray-700">{branch.currentStaff}명</b> / 정원 {branch.targetStaff}명
                 </div>
               </div>
@@ -381,11 +381,11 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="flex items-center justify-between border-t border-muted pt-4">
                 <div className="flex flex-wrap gap-4">
                   <div className="flex flex-col">
-                    <span className="text-[11px] font-bold text-gray-400">진행 공고</span>
+                    <span className="text-[11px] font-bold text-muted-foreground">진행 공고</span>
                     <span className="text-[14px] font-extrabold text-foreground">{branch.activeJobs}건</span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[11px] font-bold text-gray-400">스크리닝 중</span>
+                    <span className="text-[11px] font-bold text-muted-foreground">스크리닝 중</span>
                     <span className="text-[14px] font-extrabold text-info">{branch.applications}명</span>
                   </div>
                 </div>
@@ -411,11 +411,11 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
               <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "신규 지점 등록" : "지점 편집"}</h2>
-              <button aria-label="지점 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+              <button aria-label="지점 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
             <div className="p-6 flex flex-col gap-5">
               <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">지점 이름 <span className="text-error">*</span></label>
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">지점 이름 <span className="text-error-strong">*</span></label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -435,7 +435,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {clients.length === 0 && (
-                  <p className="text-[11.5px] text-gray-400 mt-1.5">먼저 ‘화주사’ 화면에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
+                  <p className="text-[11.5px] text-muted-foreground mt-1.5">먼저 ‘화주사’ 화면에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
                 )}
               </div>
 
@@ -478,7 +478,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                         </div>
                       ))}
                     </div>
-                    <p className="text-[11.5px] text-gray-400 mt-2">확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다.</p>
+                    <p className="text-[11.5px] text-muted-foreground mt-2">확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다.</p>
                   </div>
                   )}
 
@@ -498,7 +498,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
               <div>
                 {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error hover:bg-error-soft border border-error/30 disabled:opacity-50">
+                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error-strong hover:bg-error-soft border border-error/30 disabled:opacity-50">
                     <Trash2 size={15} /> 삭제
                   </button>
                 )}

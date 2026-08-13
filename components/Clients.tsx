@@ -252,7 +252,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               {integ.jobs_backfillable + integ.jobs_missing_client + integ.branches_missing_client > 0 ? (
                 <span className="text-[11px] font-bold text-warning bg-yellow-50 border border-warning/35 px-2 py-0.5 rounded-full">자동 연결 가능 항목 있음</span>
               ) : (
-                <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-2 py-0.5 rounded-full">정합 상태</span>
+                <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-2 py-0.5 rounded-full">정합 상태</span>
               )}
             </div>
             <button
@@ -277,14 +277,14 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             ))}
           </div>
-          <p className="text-[11.5px] text-gray-400 mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
+          <p className="text-[11.5px] text-muted-foreground mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
         </div>
       )}
 
       <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
         <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-3">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               value={search}
@@ -304,9 +304,9 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="text-right">관리</div>
         </div>
 
-        {loading && <div className="px-6 py-10 text-[13px] text-gray-400">불러오는 중…</div>}
+        {loading && <div className="px-6 py-10 text-[13px] text-muted-foreground">불러오는 중…</div>}
         {!loading && filtered.length === 0 && (
-          <div className="px-6 py-10 text-center text-[13px] text-gray-400">
+          <div className="px-6 py-10 text-center text-[13px] text-muted-foreground">
             {search ? `'${search}' 검색 결과가 없어요.` : (
               <>등록된 화주사가 없어요. <button onClick={openCreate} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info font-bold hover:underline">신규 등록</button>으로 시작하세요.</>
             )}
@@ -321,27 +321,27 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             <div key={client.id} className={`border-b border-muted ${client.active ? "" : "opacity-60"}`}>
               <div className={`grid min-w-[880px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-background transition-colors cursor-pointer ${expanded ? "bg-background" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
               <div className="flex items-center gap-3">
-                <ChevronRight size={16} className={`text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                <ChevronRight size={16} className={`text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`} />
                 <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
-                  <Building2 size={18} className="text-gray-400" />
+                  <Building2 size={18} className="text-muted-foreground" />
                 </div>
                 <div>
                   <div className="font-extrabold text-foreground flex items-center gap-2">
                     {client.name}
                     {!client.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-gray-300">비활성</span>}
                   </div>
-                  {client.memo && <div className="text-[12px] text-gray-400 mt-0.5 line-clamp-1">{client.memo}</div>}
+                  {client.memo && <div className="text-[12px] text-muted-foreground mt-0.5 line-clamp-1">{client.memo}</div>}
                 </div>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{CLIENT_TYPE_LABEL[client.client_type]}</span>
-                {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-yellow-700"><Clock4 size={11} /> 확정슬롯</span>}
+                {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-warning-strong"><Clock4 size={11} /> 확정슬롯</span>}
               </div>
               <div className="text-[14px] font-bold text-foreground">{client.branches_count}개</div>
-              <div className="text-[14px] font-bold text-info">{client.active_jobs}건</div>
+              <div className="text-[14px] font-bold text-info-strong">{client.active_jobs}건</div>
               <div className="text-[13px] text-gray-700">
                 {client.contact_name || "-"}
-                {client.contact_phone && <div className="text-[11px] text-gray-400">{client.contact_phone}</div>}
+                {client.contact_phone && <div className="text-[11px] text-muted-foreground">{client.contact_phone}</div>}
               </div>
               <div className="flex justify-end">
                 <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
@@ -355,18 +355,18 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                 <div className="px-6 pb-5 pt-1 bg-surface-raised">
                   <div className="flex items-center justify-between mb-2.5">
                     <span className="text-[12px] font-bold text-muted-foreground">소속 지점 {myBranches.length}개</span>
-                    <button onClick={() => addBranchForClient(client.id)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12px] font-bold text-info hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
+                    <button onClick={() => addBranchForClient(client.id)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12px] font-bold text-info-strong hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
                       <Plus size={14} /> 이 화주사에 지점 추가
                     </button>
                   </div>
                   {myBranches.length === 0 ? (
-                    <div className="text-[12.5px] text-gray-400 bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                    <div className="text-[12.5px] text-muted-foreground bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {myBranches.map((b) => (
-                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-gray-400"}`}>
-                          <MapPin size={12} className="text-gray-400" /> {b.name}
-                          {!b.active && <span className="text-[10px] text-gray-400">(비활성)</span>}
+                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-muted-foreground"}`}>
+                          <MapPin size={12} className="text-muted-foreground" /> {b.name}
+                          {!b.active && <span className="text-[10px] text-muted-foreground">(비활성)</span>}
                         </span>
                       ))}
                     </div>
@@ -385,7 +385,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
               <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "신규 화주사 등록" : "화주사 편집"}</h2>
-              <button aria-label="화주사 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+              <button aria-label="화주사 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="col-span-2">
@@ -435,7 +435,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
               <div>
                 {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error hover:bg-error-soft border border-error/30 disabled:opacity-50">
+                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error-strong hover:bg-error-soft border border-error/30 disabled:opacity-50">
                     <Trash2 size={15} /> 삭제
                   </button>
                 )}

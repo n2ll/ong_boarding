@@ -186,7 +186,7 @@ function ApplyForm() {
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="bg-white border border-border-strong rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
           <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mx-auto mb-5">
-            <CheckCircle2 size={36} className="text-success" />
+            <CheckCircle2 size={36} className="text-success-strong" />
           </div>
           <h1 className="text-[24px] font-extrabold text-foreground mb-2">지원이 접수되었어요</h1>
           <p className="text-[15px] text-gray-700 leading-relaxed">
@@ -207,12 +207,12 @@ function ApplyForm() {
             <LogoMark size={36} />
             <span className="text-[18px] font-extrabold text-foreground">옹고잉 배송원 지원</span>
           </div>
-          <p className="text-[15px] text-muted-foreground">아래 항목을 작성해주세요. <span className="text-error">*</span> 표시는 필수입니다.</p>
+          <p className="text-[15px] text-muted-foreground">아래 항목을 작성해주세요. <span className="text-error-strong">*</span> 표시는 필수입니다.</p>
         </div>
 
         {job && (
           <div className="mb-6 bg-white border border-border-strong rounded-2xl px-5 py-4 shadow-sm">
-            <div className="text-[12px] font-bold text-yellow-700 bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded-full mb-2">지원 공고</div>
+            <div className="text-[12px] font-bold text-warning-strong bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded-full mb-2">지원 공고</div>
             <div className="text-[17px] font-extrabold text-foreground leading-tight">{job.title}</div>
             <div className="text-[13px] text-muted-foreground mt-1">
               {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹고잉 배송원"}

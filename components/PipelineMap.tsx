@@ -246,11 +246,11 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
           </h3>
           <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
             <span>총 {applicants.length.toLocaleString()}명</span>
-            <span className="text-gray-300">·</span>
+            <span className="text-muted-foreground">·</span>
             <span>좌표 {withCoords.length.toLocaleString()}명</span>
             {jobsWithCoords.length > 0 && (
               <>
-                <span className="text-gray-300">·</span>
+                <span className="text-muted-foreground">·</span>
                 <span className="flex items-center gap-1"><Briefcase size={11} /> 공고 {jobsWithCoords.length}</span>
               </>
             )}
@@ -258,7 +258,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-custom p-2">
           {regions.length === 0 && unknownCount === 0 ? (
-            <div className="text-center text-[12.5px] text-gray-400 py-8">표시할 지원자가 없어요.</div>
+            <div className="text-center text-[12.5px] text-muted-foreground py-8">표시할 지원자가 없어요.</div>
           ) : (
             <>
               {regions.map((d) => (
@@ -273,7 +273,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
                 </div>
               ))}
               {unknownCount > 0 && (
-                <div className="mt-1.5 mx-1 px-2.5 py-2 rounded-lg bg-background flex items-center justify-between text-[12px] text-gray-400">
+                <div className="mt-1.5 mx-1 px-2.5 py-2 rounded-lg bg-background flex items-center justify-between text-[12px] text-muted-foreground">
                   <span className="font-semibold">주소 미입력</span>
                   <span className="font-bold tabular-nums">{unknownCount.toLocaleString()}</span>
                 </div>

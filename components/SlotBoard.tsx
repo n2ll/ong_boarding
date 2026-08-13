@@ -133,13 +133,13 @@ export function SlotBoard() {
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1 flex items-center gap-2">
-            <LayoutGrid size={22} className="text-yellow-600" /> 확정/희망 슬롯 보드
+            <LayoutGrid size={22} className="text-warning-strong" /> 확정/희망 슬롯 보드
           </h1>
           <p className="text-[14px] text-muted-foreground">지점 × 타임(평일/주말 · 오전/오후) 단위로 확정 인원과 정원, 대기(희망) 인원을 한눈에 봅니다.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-xl px-2 py-1">
-            <Filter size={15} className="text-gray-400 ml-1" />
+            <Filter size={15} className="text-muted-foreground ml-1" />
             <select
               value={clientFilter}
               onChange={(e) => setClientFilter(e.target.value === "" ? "" : Number(e.target.value))}
@@ -160,7 +160,7 @@ export function SlotBoard() {
           { label: "표시 지점", value: visibleBranches.length, unit: "곳", icon: LayoutGrid, color: "text-foreground" },
           { label: "확정 인원", value: totals.confirmed, unit: "명", icon: Users, color: "text-success" },
           { label: "총 정원", value: totals.cap, unit: "명", icon: Clock4, color: "text-foreground" },
-          { label: "대기(희망)", value: totals.waiting, unit: "명", icon: AlertTriangle, color: "text-yellow-600" },
+          { label: "대기(희망)", value: totals.waiting, unit: "명", icon: AlertTriangle, color: "text-warning-strong" },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
             <div className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground mb-2">
@@ -168,14 +168,14 @@ export function SlotBoard() {
             </div>
             <div className="flex items-baseline gap-1">
               <span className={`text-[26px] font-extrabold tracking-tight leading-none ${s.color}`}>{s.value}</span>
-              <span className="text-sm font-semibold text-gray-400">{s.unit}</span>
+              <span className="text-sm font-semibold text-muted-foreground">{s.unit}</span>
             </div>
           </div>
         ))}
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20 text-gray-400"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
+        <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
       ) : visibleBranches.length === 0 ? (
         <div className="bg-white border border-border-strong rounded-2xl p-12 text-center text-[14px] text-muted-foreground">
           표시할 지점이 없어요. 슬롯 보드는 확정슬롯을 사용하는 화주사(비마트식 슬롯 구인) 전용이에요 — 화주사 설정에서 &lsquo;확정슬롯 사용&rsquo;을 켠 뒤 지점을 등록해 주세요.
@@ -194,7 +194,7 @@ export function SlotBoard() {
               <div key={b.id} className="grid min-w-[700px] grid-cols-[1.4fr_repeat(4,1fr)] border-b border-muted hover:bg-surface-raised">
                 <div className="px-5 py-4 flex flex-col justify-center">
                   <div className="font-extrabold text-foreground">{b.name}</div>
-                  <div className="text-[12px] text-gray-400 mt-0.5">{clientName(b.client_id)}</div>
+                  <div className="text-[12px] text-muted-foreground mt-0.5">{clientName(b.client_id)}</div>
                 </div>
                 {SLOTS.map((s) => {
                   const cap = getSlotCapacity(branch, s);
@@ -205,14 +205,14 @@ export function SlotBoard() {
                   return (
                     <div key={s} className="px-3 py-4 border-l border-muted flex flex-col items-center justify-center gap-1.5">
                       <div className="flex items-baseline gap-0.5">
-                        <span className={`text-[17px] font-extrabold ${full ? "text-success" : confirmed > 0 ? "text-foreground" : "text-gray-300"}`}>{confirmed}</span>
-                        <span className="text-[12px] font-bold text-gray-400">/ {cap}</span>
+                        <span className={`text-[17px] font-extrabold ${full ? "text-success" : confirmed > 0 ? "text-foreground" : "text-muted-foreground"}`}>{confirmed}</span>
+                        <span className="text-[12px] font-bold text-muted-foreground">/ {cap}</span>
                       </div>
                       <div className="w-full max-w-[88px] h-1.5 bg-muted rounded-full overflow-hidden">
                         <div className={`h-full rounded-full ${barColor}`} style={{ width: `${ratio * 100}%` }} />
                       </div>
                       {waiting > 0 && (
-                        <div className="text-[11px] font-bold text-yellow-600 flex items-center gap-0.5">
+                        <div className="text-[11px] font-bold text-warning-strong flex items-center gap-0.5">
                           <Users size={10} /> 대기 {waiting}
                         </div>
                       )}
@@ -225,7 +225,7 @@ export function SlotBoard() {
         </div>
       )}
 
-      <p className="mt-4 text-[12px] text-gray-400 leading-relaxed">
+      <p className="mt-4 text-[12px] text-muted-foreground leading-relaxed">
         · 확정 = 상태 ‘확정인력’ + 확정 슬롯(confirmed_slot) 매칭 인원 (확정 슬롯이 비어 있으면 희망 시간대로 대체) · 대기 = 상태 ‘대기자’ + 희망 시간대(work_hours) 매칭 인원.<br />
         · 정원은 지점 관리에서 슬롯별로 설정합니다. 슬롯을 쓰지 않는 화주사는 ‘전체 지점 보기’로만 표시됩니다.<br />
         · 상단 요약의 확정/대기 인원은 <b>실제 머릿수</b> 기준입니다(한 명이 여러 슬롯에 걸쳐도 1명). 표 안 각 칸 숫자는 해당 슬롯을 커버하는 인원이라 합과 다를 수 있습니다.

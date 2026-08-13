@@ -122,7 +122,7 @@ export function FollowupSendModal({
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-strong">
           <h3 className="text-[15px] font-extrabold text-foreground">{KIND_LABEL[kind]} 발송</h3>
-          <button aria-label="팔로업 발송 창 닫기" onClick={onClose} className="after:absolute after:-inset-2 after:content-[''] relative text-gray-400 hover:text-gray-700 p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+          <button aria-label="팔로업 발송 창 닫기" onClick={onClose} className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-gray-700 p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
             <X size={18} />
           </button>
         </div>
@@ -131,7 +131,7 @@ export function FollowupSendModal({
           {kind === "venue" && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-gray-400">시작일</span>
+                <span className="text-[11px] font-bold text-muted-foreground">시작일</span>
                 <input
                   type="date"
                   value={venueDate}
@@ -145,7 +145,7 @@ export function FollowupSendModal({
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-gray-400">집합 시각(선택)</span>
+                <span className="text-[11px] font-bold text-muted-foreground">집합 시각(선택)</span>
                 <input
                   type="time"
                   value={venueTime}
@@ -161,13 +161,13 @@ export function FollowupSendModal({
           )}
 
           {loading ? (
-            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-6 justify-center">
+            <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-6 justify-center">
               <Loader2 size={16} className="animate-spin" /> 미리보기 불러오는 중…
             </div>
           ) : (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-gray-400">발송 내용 (수정 가능)</span>
+                <span className="text-[11px] font-bold text-muted-foreground">발송 내용 (수정 가능)</span>
                 <textarea
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}

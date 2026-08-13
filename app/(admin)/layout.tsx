@@ -66,7 +66,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <main
               id="app-content"
               tabIndex={-1}
-              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden rounded-[24px] scrollbar-custom"
+              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden rounded-xl scrollbar-custom"
             >
               {children}
             </main>

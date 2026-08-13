@@ -98,7 +98,7 @@ function LoginForm() {
         로그인
       </button>
 
-      <p className="text-[11.5px] text-gray-400 leading-relaxed">
+      <p className="text-[11.5px] text-muted-foreground leading-relaxed">
         계정은 관리자가 발급합니다. 로그인 문제는 팀 채널로 문의해주세요.
       </p>
     </form>
@@ -108,7 +108,7 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Suspense fallback={<Loader2 size={22} className="animate-spin text-gray-400" />}>
+      <Suspense fallback={<Loader2 size={22} className="animate-spin text-muted-foreground" />}>
         <LoginForm />
       </Suspense>
     </div>

@@ -206,7 +206,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="모바일 주요 메뉴"
-      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-[24px] border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-xl border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
     >
       {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
         const active = pathname === path;

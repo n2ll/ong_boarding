@@ -172,7 +172,7 @@ export function ReplyQueueCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.34 }}
-      className="scroll-mt-6 bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col"
+      className="scroll-mt-6 bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col"
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
@@ -208,13 +208,13 @@ export function ReplyQueueCard({
       </div>
 
       {error ? (
-        <div className="py-4 text-center text-[13px] text-error">목록을 불러오지 못했어요. 잠시 후 페이지를 새로고침해 주세요.</div>
+        <div className="py-4 text-center text-[13px] text-error-strong">목록을 불러오지 못했어요. 잠시 후 페이지를 새로고침해 주세요.</div>
       ) : !data ? (
-        <div className="py-4 flex items-center justify-center text-[13px] text-gray-400">
+        <div className="py-4 flex items-center justify-center text-[13px] text-muted-foreground">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-gray-400">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
+        <div className="py-4 text-center text-[13px] text-muted-foreground">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {
@@ -230,7 +230,7 @@ export function ReplyQueueCard({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
-                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-yellow-700 border-yellow-300"}`}
+                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-warning-strong border-yellow-300"}`}
                     >
                       {untouched ? "미착수" : "응대중"}
                     </span>
@@ -242,18 +242,18 @@ export function ReplyQueueCard({
                     {pv?.body ? (
                       <>
                         <span className="font-semibold text-info">{pv.direction === "inbound" ? "답장" : "발신"}</span>
-                        <span className="text-gray-300"> · </span>
+                        <span className="text-muted-foreground"> · </span>
                         {pv.body}
                       </>
                     ) : (
-                      <span className="text-gray-400">미리보기 없음</span>
+                      <span className="text-muted-foreground">미리보기 없음</span>
                     )}
                   </div>
-                  <div className="text-[11px] text-gray-400 truncate mt-0.5">
+                  <div className="text-[11px] text-muted-foreground truncate mt-0.5">
                     수신 {agoLabel(it.last_message_at ?? it.created_at, nowTick)}
                     {it.phone && (
                       <>
-                        <span className="text-gray-300"> · </span>
+                        <span className="text-muted-foreground"> · </span>
                         <a
                           href={`tel:${it.phone}`}
                           onClick={(e) => e.stopPropagation()}

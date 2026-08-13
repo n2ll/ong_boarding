@@ -154,7 +154,7 @@ export function Recommendations() {
           <h2 className="text-sm font-bold text-muted-foreground mb-4">분석할 공고 선택</h2>
           <div className="flex flex-col gap-2">
             {jobs.length === 0 && (
-              <div className="text-[13px] text-gray-400 py-6 text-center">진행 중인 공고가 없어요</div>
+              <div className="text-[13px] text-muted-foreground py-6 text-center">진행 중인 공고가 없어요</div>
             )}
             {jobs.map((job) => {
               const total = Object.values(job.counts || {}).reduce((a, b) => a + b, 0);
@@ -165,7 +165,7 @@ export function Recommendations() {
                   className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
                 >
                   <div className="text-[13px] font-bold text-foreground mb-1 leading-tight">{job.title}</div>
-                  <div className="text-[11px] text-gray-400 flex items-center gap-1">
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1">
                     <Briefcase size={12} /> 후보 {total}명 {job.branch ? `· ${job.branch}` : ""}
                   </div>
                 </button>
@@ -194,7 +194,7 @@ export function Recommendations() {
           </div>
 
           {!generated && !loading && (
-            <div className="bg-white border border-dashed border-border-strong rounded-2xl p-12 text-center text-gray-400 text-[14px]">
+            <div className="bg-white border border-dashed border-border-strong rounded-2xl p-12 text-center text-muted-foreground text-[14px]">
               공고를 선택하고 [AI 추천 생성]을 눌러주세요.
             </div>
           )}
@@ -204,7 +204,7 @@ export function Recommendations() {
             return (
               <div key={`${rec.source}-${rec.id}`} className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
                 <div className="shrink-0 flex flex-col items-center gap-2 w-[100px]">
-                  <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info relative">
+                  <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info-strong relative">
                     <User size={28} />
                     <div className="absolute -bottom-2 -right-2 bg-info text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
                       {rec.score.total}점
@@ -216,7 +216,7 @@ export function Recommendations() {
                 <div className="flex-1 flex flex-col justify-center">
                   <div className="flex flex-wrap gap-2 mb-3">
                     {tags.map((tag, i) => (
-                      <span key={i} className="bg-success-soft text-success border border-success/25 px-2.5 py-1 rounded-full text-[12px] font-bold flex items-center gap-1">
+                      <span key={i} className="bg-success-soft text-success-strong border border-success/25 px-2.5 py-1 rounded-full text-[12px] font-bold flex items-center gap-1">
                         <Check size={12} /> {tag}
                       </span>
                     ))}
@@ -246,7 +246,7 @@ export function Recommendations() {
                       </button>
                     </>
                   ) : (
-                    <div className="w-[160px] text-center text-[11.5px] text-gray-400 bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
+                    <div className="w-[160px] text-center text-[11.5px] text-muted-foreground bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
                       레거시 인재풀 후보예요.<br />연락처로 직접 컨택하세요.
                     </div>
                   )}

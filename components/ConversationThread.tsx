@@ -565,13 +565,13 @@ export function ConversationThread({
             {!hasActiveFlow ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-yellow-600 bg-yellow-100 px-3 py-1.5 rounded-lg border border-yellow-300"><User size={14} /> 수동 개입 중</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-100 px-3 py-1.5 rounded-lg border border-yellow-300"><User size={14} /> 수동 개입 중</span>
             ) : globalKill ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-yellow-700 bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
             ) : copilotMode ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-copilot-strong bg-copilot-soft px-3 py-1.5 rounded-lg border border-copilot/30"><Wand2 size={14} /> 코파일럿 — AI 초안만, 발송은 매니저 승인</span>
             ) : (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-info bg-info-soft px-3 py-1.5 rounded-lg border border-info/25"><Bot size={14} /> 옹봇 자동 응대 중</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-info-strong bg-info-soft px-3 py-1.5 rounded-lg border border-info/25"><Bot size={14} /> 옹봇 자동 응대 중</span>
             )}
             {smsOptOutAt ? (
               <>
@@ -610,8 +610,8 @@ export function ConversationThread({
 
       {/* 메시지 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
-        {loadingMsgs && <div className="text-[13px] text-gray-400 text-center py-8">대화 내역 불러오는 중…</div>}
-        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-gray-400 text-center py-8">아직 주고받은 메시지가 없어요</div>}
+        {loadingMsgs && <div className="text-[13px] text-muted-foreground text-center py-8">대화 내역 불러오는 중…</div>}
+        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">아직 주고받은 메시지가 없어요</div>}
 
         {timeline.map((item, idx) => {
           const createdAt = item.kind === "msg" ? item.msg.created_at : item.ev.created_at;
@@ -650,14 +650,14 @@ export function ConversationThread({
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
                 {sender === "ai" && <span className="text-[11.5px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
                 {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
-                  <span className="text-[10.5px] font-bold text-info bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
+                  <span className="text-[10.5px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
                     {jobChipLabel(jobsMap[msg.job_id]!)}
                   </span>
                 )}
                 <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : "bg-white border border-border-strong text-gray-800 rounded-tl-sm"}`}>
                   {msg.body}
                 </div>
-                <span className="text-[11px] text-gray-400 mx-1">{fmtTime(msg.created_at)}</span>
+                <span className="text-[11px] text-muted-foreground mx-1">{fmtTime(msg.created_at)}</span>
               </div>
             </motion.div>
             </Fragment>
@@ -676,7 +676,7 @@ export function ConversationThread({
                   <span className="text-[11px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-full">정보 부족 · 매니저 확인</span>
                 )}
               </div>
-              <span className="text-[11px] font-bold text-copilot">검수 후 발송됩니다</span>
+              <span className="text-[11px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
             </div>
             {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
               <div className="mb-2.5 text-[12px] text-warning-strong bg-white border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
@@ -692,7 +692,7 @@ export function ConversationThread({
             />
             {draftReasoningDisplay && (
               <div className="mt-2 text-[11.5px] text-muted-foreground leading-relaxed">
-                <b className="text-copilot">판단 근거:</b> {draftReasoningDisplay}
+                <b className="text-copilot-strong">판단 근거:</b> {draftReasoningDisplay}
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
@@ -736,16 +736,16 @@ export function ConversationThread({
                   <span className={isLMS ? "text-error" : "text-info"}>{isLMS ? "LMS" : "SMS"}</span>
                   <span className="text-muted-foreground">{currentBytes} bytes</span>
                 </div>
-                <span className="text-[11px] text-gray-400">⌘+Enter 발송</span>
+                <span className="text-[11px] text-muted-foreground">⌘+Enter 발송</span>
               </div>
             </div>
-            <button onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-[14px] bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
+            <button onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-lg bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
             {isPaused && (
               <button
                 onClick={handleSendAndResume}
                 disabled={sending}
                 title="발송 성공 후 AI 자동 응대를 즉시 재개합니다"
-                className="h-[54px] px-3 rounded-[14px] text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="h-[54px] px-3 rounded-lg text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
               >
                 보내고
                 <br />
@@ -763,7 +763,7 @@ export function ConversationThread({
                 <div className="text-[12px] text-muted-foreground mt-0.5">[개입]을 누르면 자동 응대가 중지됩니다.</div>
               </div>
             </div>
-            <AlertTriangle size={18} className="text-gray-400" />
+            <AlertTriangle size={18} className="text-muted-foreground" />
           </div>
         )}
       </div>

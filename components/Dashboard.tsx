@@ -281,7 +281,7 @@ export function Dashboard() {
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
       {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 발송폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-[20px] px-8 py-6 relative overflow-hidden shadow-md text-white">
+      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-xl px-8 py-6 relative overflow-hidden shadow-md text-white">
         <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-info rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
 
         <div className="relative z-10 flex items-center justify-between">
@@ -332,7 +332,7 @@ export function Dashboard() {
       </motion.div>
 
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-[15px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
@@ -345,7 +345,7 @@ export function Dashboard() {
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-success mb-2" />
                 <div className="text-[13px] font-bold text-gray-700">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-gray-400">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-muted-foreground">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
                 <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
                   {[
                     { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },
@@ -356,7 +356,7 @@ export function Dashboard() {
                       onClick={() => router.push(s.path)}
                       className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[12.5px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
                     >
-                      {s.label} <ChevronRight size={15} className="text-gray-400" />
+                      {s.label} <ChevronRight size={15} className="text-muted-foreground" />
                     </button>
                   ))}
                 </div>
@@ -406,7 +406,7 @@ export function Dashboard() {
 
       {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
           접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-border-strong rounded-[16px] shadow-sm overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-border-strong rounded-lg shadow-sm overflow-hidden">
         <button
           onClick={() => setMetricsOpen((v) => !v)}
           aria-expanded={metricsOpen}
@@ -416,8 +416,8 @@ export function Dashboard() {
             <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
             <span className="text-[12.5px] text-muted-foreground">
               총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
-              <span className="text-gray-300"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
-              <span className="text-gray-300"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명
+              <span className="text-muted-foreground"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
+              <span className="text-muted-foreground"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명
             </span>
           </div>
           <span className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground shrink-0">
@@ -433,18 +433,18 @@ export function Dashboard() {
               {[
                 { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-info" },
                 { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-chart-3" },
-                { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-yellow-600" },
+                { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-warning-strong" },
                 { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-copilot" },
                 { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-success" },
               ].map((k, i) => (
-                <div key={i} className="bg-surface-raised border border-border-strong rounded-[12px] p-4 hover:bg-background transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
+                <div key={i} className="bg-surface-raised border border-border-strong rounded-md p-4 hover:bg-background transition-colors cursor-pointer" onClick={() => router.push('/pipeline')}>
                   <div className="flex items-center gap-2 mb-2">
                     <k.icon size={16} className={`${k.color}`} />
                     <span className="text-[12px] text-muted-foreground font-medium">{k.label}</span>
                   </div>
                   <div className="flex items-baseline gap-1">
                     <span className="text-[26px] font-extrabold leading-none tracking-tight text-foreground">{k.value}</span>
-                    <span className="text-[12px] text-gray-400 font-medium">{k.sub}</span>
+                    <span className="text-[12px] text-muted-foreground font-medium">{k.sub}</span>
                   </div>
                 </div>
               ))}
@@ -453,15 +453,15 @@ export function Dashboard() {
             {/* 유입 추이(2/3) + 스크리닝·온보딩 현황(1/3) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
               {/* 최근 14일 신규 유입 추이 */}
-              <div className="col-span-2 border border-border-strong rounded-[16px] p-6 flex flex-col">
+              <div className="col-span-2 border border-border-strong rounded-lg p-6 flex flex-col">
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 최근 14일 신규 유입 추이</h3>
                     <div className="text-[12px] text-muted-foreground mt-0.5">새로 들어온 지원자의 일별 흐름 · 실시간 인입 기준(일괄 임포트 제외)</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-bold text-gray-400">최근 7일 합계</div>
-                    <div className="text-[20px] font-extrabold text-foreground leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-gray-400 font-bold ml-0.5">명</span></div>
+                    <div className="text-[11px] font-bold text-muted-foreground">최근 7일 합계</div>
+                    <div className="text-[20px] font-extrabold text-foreground leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-muted-foreground font-bold ml-0.5">명</span></div>
                   </div>
                 </div>
                 <div className="flex-1 min-h-[200px]">
@@ -488,7 +488,7 @@ export function Dashboard() {
               </div>
 
               {/* 스크리닝 · 온보딩 현황 (실데이터) */}
-              <div className="border border-border-strong rounded-[16px] p-5 flex flex-col">
+              <div className="border border-border-strong rounded-lg p-5 flex flex-col">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
                   <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40 rounded">응대로</button>
@@ -498,20 +498,20 @@ export function Dashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                   {[
                     { label: "초기 대화", value: flow.exploration, color: "text-muted-foreground", bg: "bg-background", hint: "AI가 조건을 안내하며 첫 대화를 나누는 단계" },
-                    { label: "스크리닝", value: flow.screening, color: "text-yellow-600", bg: "bg-yellow-50", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
-                    { label: "온보딩", value: flow.onboarding, color: "text-copilot", bg: "bg-copilot-soft", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
-                    { label: "활동 중", value: flow.active, color: "text-success", bg: "bg-success-soft", hint: "온보딩을 마치고 실제 근무 중인 단계" },
+                    { label: "스크리닝", value: flow.screening, color: "text-warning-strong", bg: "bg-yellow-50", hint: "지역·차량·가능 시간 등 요건을 확인하는 단계" },
+                    { label: "온보딩", value: flow.onboarding, color: "text-copilot-strong", bg: "bg-copilot-soft", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
+                    { label: "활동 중", value: flow.active, color: "text-success-strong", bg: "bg-success-soft", hint: "온보딩을 마치고 실제 근무 중인 단계" },
                   ].map((s) => (
                     <div key={s.label} className={`rounded-xl px-3 py-2 ${s.bg}`} title={s.hint}>
                       <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
-                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-gray-400 ml-0.5">건</span></div>
+                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-muted-foreground ml-0.5">건</span></div>
                     </div>
                   ))}
                 </div>
 
                 {/* 온보딩 체크 진행도 */}
                 <div className="border-t border-muted pt-3 space-y-2.5">
-                  <div className="text-[11.5px] font-bold text-muted-foreground flex items-center justify-between">온보딩 진행 <span className="text-gray-400 font-medium">대상 {flow.targets}명</span></div>
+                  <div className="text-[11.5px] font-bold text-muted-foreground flex items-center justify-between">온보딩 진행 <span className="text-muted-foreground font-medium">대상 {flow.targets}명</span></div>
                   {[
                     { label: "가이드 전달", value: flow.guideSent, total: flow.targets, pct: flow.pct(flow.guideSent), icon: ClipboardCheck, color: "var(--chart-1)" },
                     // 배민 ID는 배민 라인 전용 — 분모를 배민 대상으로. 배민 대상이 없으면(도시락만) 숨김.
@@ -533,13 +533,13 @@ export function Dashboard() {
             </div>
 
             {/* 단계별 전환율 (가로형 · 단계 간 전환율 강조) */}
-            <div className="border border-border-strong rounded-[16px] p-6 flex flex-col">
+            <div className="border border-border-strong rounded-lg p-6 flex flex-col">
               <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <div>
                   <h3 className="text-[15px] font-bold text-foreground">파이프라인 단계별 현황</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
                 </div>
-                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
+                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
                   상세 보기
                 </button>
               </div>
@@ -568,19 +568,19 @@ export function Dashboard() {
             </div>
 
             {/* 지역별 인재풀 분포 Top 5 (지도 SDK 없는 경량 요약 · 클릭 시 파이프라인 지도로) */}
-            <div className="border border-border-strong rounded-[16px] p-6 flex flex-col">
+            <div className="border border-border-strong rounded-lg p-6 flex flex-col">
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info" /> 지역별 인재풀 분포</h3>
+                  <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info-strong" /> 지역별 인재풀 분포</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
                 </div>
-                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
+                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
                   지도에서 보기
                 </button>
               </div>
 
               {regionDist.top.length === 0 ? (
-                <div className="py-6 text-center text-[13px] text-gray-400">아직 집계할 지역 데이터가 없어요. 지원자의 주소가 입력되면 자동으로 채워집니다.</div>
+                <div className="py-6 text-center text-[13px] text-muted-foreground">아직 집계할 지역 데이터가 없어요. 지원자의 주소가 입력되면 자동으로 채워집니다.</div>
               ) : (
                 <div className="flex flex-col gap-3">
                   {regionDist.top.map((r) => (
@@ -594,11 +594,11 @@ export function Dashboard() {
                           <span className="text-[12.5px] font-extrabold text-gray-800">{r.count.toLocaleString()}</span>
                         </div>
                       </div>
-                      <div className="w-[40px] shrink-0 text-[12px] font-bold text-gray-400 text-right">명</div>
+                      <div className="w-[40px] shrink-0 text-[12px] font-bold text-muted-foreground text-right">명</div>
                     </div>
                   ))}
                   {regionDist.unknownCount > 0 && (
-                    <div className="text-[11.5px] text-gray-400 mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
+                    <div className="text-[11.5px] text-muted-foreground mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
                   )}
                 </div>
               )}
@@ -614,7 +614,7 @@ export function Dashboard() {
 function DashboardSkeleton() {
   return (
     <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
-      <div className="bg-foreground rounded-[20px] px-8 py-6 shadow-md">
+      <div className="bg-foreground rounded-xl px-8 py-6 shadow-md">
         <div className="flex items-center justify-between">
           <div className="space-y-2">
             <Skeleton className="h-5 w-64 bg-white/10" />
@@ -623,13 +623,13 @@ function DashboardSkeleton() {
           <Skeleton className="h-9 w-36 rounded-xl bg-white/10" />
         </div>
       </div>
-      <Skeleton className="h-[220px] rounded-[16px]" />
+      <Skeleton className="h-[220px] rounded-lg" />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
-        <Skeleton className="h-[260px] rounded-[16px]" />
-        <Skeleton className="h-[260px] rounded-[16px]" />
+        <Skeleton className="h-[260px] rounded-lg" />
+        <Skeleton className="h-[260px] rounded-lg" />
       </div>
-      <Skeleton className="h-[180px] rounded-[16px]" />
-      <Skeleton className="h-[56px] rounded-[16px]" />
+      <Skeleton className="h-[180px] rounded-lg" />
+      <Skeleton className="h-[56px] rounded-lg" />
     </div>
   );
 }

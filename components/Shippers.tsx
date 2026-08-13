@@ -42,7 +42,7 @@ export function Shippers() {
   const totalWorkers = clients.reduce((s, c) => s + c.workerCount, 0);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto w-full space-y-5">
+    <div className="p-8 pb-12 max-w-4xl w-full space-y-5">
       <div>
         <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
           <Building2 size={20} /> 화주사
@@ -96,13 +96,13 @@ export function Shippers() {
       {data?.configured && (
         <>
           <div className="flex flex-wrap gap-2 text-[12.5px] font-bold text-gray-700">
-            <span className="px-3 py-1.5 rounded-lg bg-info-soft text-info">화주사 {clients.length}</span>
+            <span className="px-3 py-1.5 rounded-lg bg-info-soft text-info-strong">화주사 {clients.length}</span>
             <span className="px-3 py-1.5 rounded-lg bg-success-soft text-success-strong">배송라인 {totalLines}</span>
-            <span className="px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-700">운행 인원 {totalWorkers}</span>
+            <span className="px-3 py-1.5 rounded-lg bg-yellow-50 text-warning-strong">운행 인원 {totalWorkers}</span>
           </div>
 
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -113,7 +113,7 @@ export function Shippers() {
 
           <div className="space-y-2">
             {filtered.length === 0 && (
-              <div className="text-[13px] text-gray-400 py-6 text-center">화주사가 없어요.</div>
+              <div className="text-[13px] text-muted-foreground py-6 text-center">화주사가 없어요.</div>
             )}
             {filtered.map((c) => {
               const open = openId === c.id;
@@ -124,15 +124,15 @@ export function Shippers() {
                     className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                   >
                     {open ? (
-                      <ChevronDown size={16} className="text-gray-400 shrink-0" />
+                      <ChevronDown size={16} className="text-muted-foreground shrink-0" />
                     ) : (
-                      <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                      <ChevronRight size={16} className="text-muted-foreground shrink-0" />
                     )}
                     <span className="flex-1 font-bold text-[14px] text-foreground">{c.name}</span>
                     <span className="flex items-center gap-1 text-[12px] font-bold text-success-strong">
                       <Truck size={13} /> {c.lineCount}
                     </span>
-                    <span className="flex items-center gap-1 text-[12px] font-bold text-yellow-700">
+                    <span className="flex items-center gap-1 text-[12px] font-bold text-warning-strong">
                       <Users size={13} /> {c.workerCount}
                     </span>
                   </button>
@@ -140,7 +140,7 @@ export function Shippers() {
                   {open && (
                     <div className="border-t border-muted px-4 py-3 bg-surface-raised">
                       {c.lines.length === 0 ? (
-                        <div className="text-[12.5px] text-gray-400">등록된 배송라인이 없어요.</div>
+                        <div className="text-[12.5px] text-muted-foreground">등록된 배송라인이 없어요.</div>
                       ) : (
                         <div className="space-y-1.5">
                           {c.lines.map((l, i) => (
@@ -154,7 +154,7 @@ export function Shippers() {
                                 <span className="text-muted-foreground">보장 {l.guaranteedDeliveries}건</span>
                               )}
                               {l.startDate && (
-                                <span className="text-gray-400">
+                                <span className="text-muted-foreground">
                                   {l.startDate}
                                   {l.endDate ? ` ~ ${l.endDate}` : " ~"}
                                 </span>
