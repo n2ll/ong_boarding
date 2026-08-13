@@ -713,7 +713,7 @@ export function AgentBrain() {
               <div className="border border-border-strong bg-background rounded-2xl px-5 py-4 mb-8 flex items-start gap-3">
                 <UploadCloud size={20} className="text-gray-400 shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-[13.5px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded align-middle">준비중</span></div>
+                  <div className="text-[13.5px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded-full align-middle">준비중</span></div>
                   <div className="text-[12.5px] text-muted-foreground mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 1분 안에 응대에 반영돼요.</div>
                 </div>
               </div>
@@ -761,7 +761,7 @@ export function AgentBrain() {
                         <div className="text-[14px] font-extrabold text-foreground flex items-center gap-2">
                           {kbForm.id === null ? <Plus size={16} /> : <Pencil size={16} />}
                           {kbForm.id === null ? "새 지식 항목" : "지식 항목 수정"}
-                          <span className="text-[10px] font-bold bg-info-soft text-info px-1.5 py-0.5 rounded">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
+                          <span className="text-[10px] font-bold bg-info-soft text-info px-1.5 py-0.5 rounded-full">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
                         </div>
                         <button aria-label="편집 창 닫기" onClick={() => setKbForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={18} /></button>
                       </div>
@@ -846,7 +846,7 @@ export function AgentBrain() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[14px] font-bold text-foreground">{cat.label}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${TONE_BADGE[cat.tone]}`}>{TONE_LABEL[cat.tone]}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border ${TONE_BADGE[cat.tone]}`}>{TONE_LABEL[cat.tone]}</span>
                         </div>
                         <div className="text-[12.5px] text-muted-foreground">↳ {cat.action}</div>
                       </div>
@@ -948,7 +948,7 @@ export function AgentBrain() {
                   <div>
                     <h2 className="text-[18px] font-extrabold text-foreground flex items-center gap-2">
                       고급 설정
-                      <span className="text-[10px] font-bold text-warning-strong bg-yellow-100 px-1.5 py-0.5 rounded">준비중</span>
+                      <span className="text-[10px] font-bold text-warning-strong bg-yellow-100 px-1.5 py-0.5 rounded-full">준비중</span>
                     </h2>
                     <p className="text-[13px] text-muted-foreground">지금 쓰는 AI 모델과 개인정보 처리 상태를 확인합니다.</p>
                   </div>
@@ -1164,8 +1164,8 @@ export function AgentBrain() {
                   {proposals.map((p, idx) => (
                     <div key={`${p.kind}-${p.title}-${idx}`} className="border border-border-strong rounded-xl p-4 bg-white hover:border-gray-300 transition-colors">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${p.confidence === 'high' ? 'bg-success-soft text-success-strong border-success/25' : 'bg-background text-muted-foreground border-border-strong'}`}>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border ${p.confidence === 'high' ? 'bg-success-soft text-success-strong border-success/25' : 'bg-background text-muted-foreground border-border-strong'}`}>
                           {p.confidence === 'high' ? '확신 높음' : '확신 중간'}
                         </span>
                       </div>

@@ -368,6 +368,40 @@
     cursor: pointer;
   }
 
+  /*
+   * 드롭다운 — 네이티브 <select>를 유지하되(모바일 휠·키보드 탐색이 더 좋다)
+   * OS 기본 화살표만 우리 아이콘으로 바꾼다. 예전엔 한 줄에 OS 화살표와
+   * lucide 아이콘이 나란히 있어 컨트롤이 두 종류로 보였다.
+   * 목록형(multiple·size)은 화살표가 없어야 하므로 제외한다.
+   */
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235D6470' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    background-size: 1rem 1rem;
+    padding-right: 2.1rem;
+    /* 같은 줄의 드롭다운 버튼(38px)과 높이를 맞춘다 */
+    min-height: 2.375rem;
+  }
+
+  select:not([multiple]):not([size]):disabled {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  }
+
+  /* 입력·선택·여러줄입력의 포커스 표시를 버튼과 같은 규칙으로 통일 */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    outline: none;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+  }
+
   ::selection {
     background: var(--brand-yellow);
     color: var(--foreground);

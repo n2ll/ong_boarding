@@ -1644,45 +1644,6 @@ export function Pipeline() {
             </div>
           )}
 
-          <div className="flex-1" />
-
-          {view === "list" && (
-            <select
-              value={distanceJobId === null ? "" : String(distanceJobId)}
-              onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
-              className={`px-3 py-2.5 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
-              title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
-            >
-              <option value="">거리 기준 공고 선택…</option>
-              {distanceJobs.map((j) => (
-                <option key={j.id} value={String(j.id)}>{j.title}</option>
-              ))}
-              {distanceJobs.length === 0 && <option value="" disabled>상차지·마지막경유지 좌표가 있는 공고가 없어요</option>}
-            </select>
-          )}
-
-          {view === "list" && (
-            <select
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-              className={`px-3 py-2.5 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
-              title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
-            >
-              <option value="recent">최근 등록순</option>
-              <option value="oldest">오래된 등록순</option>
-              <option value="active">최근 활동순</option>
-              <option value="neglected">방치 오래된 순</option>
-              <option value="applied_recent">원지원 최신순</option>
-              <option value="applied_old">원지원 오래된순</option>
-              <option value="reaction_recent">반응 최신순(열람·관심·답장)</option>
-              <option value="distance">공고 근거리순(상차지·종료지점)</option>
-            </select>
-          )}
-
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2.5 w-[280px] bg-white border border-border-strong rounded-lg text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
-          </div>
         </div>
 
         {/* 조건 바 — 자주 쓰는 조건(진행 단계·지역·차량)은 여기서 바로, 발송 전 좁히기는 한 묶음, 나머지는 '조건 더보기'.
@@ -1690,6 +1651,49 @@ export function Pipeline() {
             리스트·칸반·지도에 같은 조건이 적용된다(예전엔 리스트에만 적용돼 칸반에서 검색·필터가 무반응이었다). */}
         {view !== "funnel" ? (
           <div className="px-8 py-3 flex items-center gap-2 border-b border-border-strong bg-white shrink-0 flex-wrap z-10 shadow-sm">
+            {/* 대상 좁히기 — 검색·정렬·거리기준을 조건과 같은 줄에 모았다.
+                예전엔 정렬이 위층에 혼자, 거리 기준 공고가 위층 오른쪽 끝에 떨어져 있어
+                "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white border border-border-strong rounded-lg text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
+            </div>
+            {view === "list" && (
+              <select
+                value={distanceJobId === null ? "" : String(distanceJobId)}
+                onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
+                className={`pr-8 px-3 py-2 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
+              >
+                <option value="">거리 기준 공고 선택…</option>
+                {distanceJobs.map((j) => (
+                  <option key={j.id} value={String(j.id)}>{j.title}</option>
+                ))}
+                {distanceJobs.length === 0 && <option value="" disabled>상차지·마지막경유지 좌표가 있는 공고가 없어요</option>}
+              </select>
+            )}
+
+            {view === "list" && (
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+                className={`pr-8 px-3 py-2 bg-white border rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
+              >
+                <option value="recent">최근 등록순</option>
+                <option value="oldest">오래된 등록순</option>
+                <option value="active">최근 활동순</option>
+                <option value="neglected">방치 오래된 순</option>
+                <option value="applied_recent">원지원 최신순</option>
+                <option value="applied_old">원지원 오래된순</option>
+                <option value="reaction_recent">반응 최신순(열람·관심·답장)</option>
+                <option value="distance">공고 근거리순(상차지·종료지점)</option>
+              </select>
+            )}
+
+
+            <span aria-hidden="true" className="mx-1 hidden h-6 w-px shrink-0 bg-border-strong sm:block" />
+
             {/* 진행 단계 — 적체 트리아지의 핵심 동선(예: '스크리닝 전'만 골라 처리). 여러 개 선택 가능해 드롭다운. */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1724,7 +1728,7 @@ export function Pipeline() {
               onChange={(e) => setRegionFilter(e.target.value as typeof regionFilter)}
               aria-label="사는 지역으로 목록 좁히기"
               title="사는 지역으로 목록 좁히기"
-              className={`px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${regionFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${regionFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">지역 전체</option>
               <option value="capital">수도권(서울·경기·인천)</option>
@@ -1735,7 +1739,7 @@ export function Pipeline() {
               onChange={(e) => setVehicleFilter(e.target.value as typeof vehicleFilter)}
               aria-label="차량 보유 여부로 목록 좁히기"
               title="차량 보유 여부로 목록 좁히기 — 공고가 차량을 요구할 때 씁니다"
-              className={`px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${vehicleFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${vehicleFilter !== "all" ? "border-brand-yellow text-yellow-700 bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">차량 전체</option>
               <option value="vehicle">차량 보유</option>
@@ -2017,7 +2021,7 @@ export function Pipeline() {
                   value=""
                   onChange={(e) => { if (e.target.value) void selectJobInterested(Number(e.target.value)); }}
                   disabled={interestPickLoading || activeJobs.length === 0}
-                  className="px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="공고를 고르면 그 공고에 '관심 있음'을 누른 인원(확정인력 제외)이 선택됩니다"
                 >
                   <option value="">{interestPickLoading ? "관심자 조회 중…" : "공고 관심자 선택…"}</option>
@@ -2144,7 +2148,7 @@ export function Pipeline() {
                                             key={l.job_id}
                                             onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id), l.job_id); }}
                                             title={`${l.title} — ${interestOnly ? "관심만 누른 자리" : STAGE_KO[l.agent_stage ?? ""] ?? l.agent_stage}. 클릭하면 이 공고 기준으로 상세를 엽니다.`}
-                                            className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+                                            className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
                                               interestOnly
                                                 ? "bg-yellow-50 text-yellow-700"
                                                 : paused
@@ -2160,7 +2164,7 @@ export function Pipeline() {
                                         <button
                                           onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id)); }}
                                           title={c.jobLinks.map((l) => l.title).join("\n")}
-                                          className="cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                                          className="cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                                         >
                                           +{c.jobLinks.length - 2}
                                         </button>
@@ -2175,9 +2179,9 @@ export function Pipeline() {
                                   ) : c.agentStage ? (
                                     /* 살아있는 결속이 0건인데 단계가 남아 있다 = 종료·마감된 공고 이력뿐이다.
                                        예전 '공고지원 · 스크리닝' 표기는 지금 진행 중인 것처럼 읽혀 오해를 낳았다. */
-                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground" title="지금 붙어 있는 공고는 없어요 — 지난 공고 이력이에요">지난 공고 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground" title="지금 붙어 있는 공고는 없어요 — 지난 공고 이력이에요">지난 공고 · {STAGE_KO[c.agentStage] ?? c.agentStage}</span>
                                   ) : (
-                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">순수 인재풀</span>
+                                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">순수 인재풀</span>
                                   )}
                                 </div>
                               </div>
@@ -2195,17 +2199,17 @@ export function Pipeline() {
                               {(reactionBadge || c.smsOptOutAt || (!send.sendable && send.reason)) && (
                                 <div className="flex flex-wrap items-center gap-1">
                                   {reactionBadge && (
-                                    <span title={reactionBadge.title} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded ${reactionBadge.cls}`}>
+                                    <span title={reactionBadge.title} className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full ${reactionBadge.cls}`}>
                                       {reactionBadge.label}
                                     </span>
                                   )}
                                   {c.smsOptOutAt ? (
-                                    <span title={`수신거부 ${relTime(c.smsOptOutAt)} — 문자를 보낼 수 없어요`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-error-soft text-error">
+                                    <span title={`수신거부 ${relTime(c.smsOptOutAt)} — 문자를 보낼 수 없어요`} className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error">
                                       수신거부
                                     </span>
                                   ) : (
                                     !send.sendable && send.reason && (
-                                      <span title="문자 발송 불가" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                      <span title="문자 발송 불가" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
                                         {send.reason}
                                       </span>
                                     )
@@ -2216,7 +2220,7 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
-                              <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-md bg-muted text-gray-700">{c.channel}</span>
+                              <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{c.channel}</span>
                               <span data-den="secondary" className="text-[12px] font-medium text-muted-foreground">{c.branch}</span>
                             </div>
                           </td>
@@ -2231,7 +2235,7 @@ export function Pipeline() {
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[13px] font-medium text-gray-700">{c.region}</span>
                                 {distLabel && (
-                                  <span title="선택 공고 상차지·마지막경유지까지 직선 거리(가까운 쪽 기준 정렬)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-info-soft text-info">
+                                  <span title="선택 공고 상차지·마지막경유지까지 직선 거리(가까운 쪽 기준 정렬)" className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-info-soft text-info">
                                     {distLabel}
                                   </span>
                                 )}
@@ -2414,11 +2418,11 @@ export function Pipeline() {
                     {im && !im.pull_exposed ? (
                       // external(새로 모집) — 맞춤 공고 링크에 애초에 안 뜬다. '전체 노출 = 전원에게 보임'은 거짓이고
                       // 노출 명단도 효력이 없다(전환도 서버가 막는다).
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0" title="이 공고는 공개 게시 링크로만 유통돼요. 맞춤 공고 링크에는 뜨지 않아 노출 명단이 효력을 갖지 않습니다.">새로 모집 — 링크 미노출</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0" title="이 공고는 공개 게시 링크로만 유통돼요. 맞춤 공고 링크에는 뜨지 않아 노출 명단이 효력을 갖지 않습니다.">새로 모집 — 링크 미노출</span>
                     ) : ex === "targeted" ? (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-info-soft text-info-strong border border-info/25 shrink-0">지정 노출</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-info-soft text-info-strong border border-info/25 shrink-0">지정 노출</span>
                     ) : (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-gray-400 shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-400 shrink-0" title="지금은 인재풀 전원에게 보이는 공고예요. 아래 '지정 노출로 전환'을 켜면 이 명단에게만 보이게 바뀝니다.">전체 노출</span>
                     )}
                   </button>
                 );
@@ -2616,13 +2620,13 @@ export function Pipeline() {
                         >
                           {p.name}
                           {p.reasons.includes("active_contract") && (
-                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-warning-soft text-warning-strong">활성 계약</span>
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-warning-soft text-warning-strong">활성 계약</span>
                           )}
                           {p.reasons.includes("recent_settlement") && (
-                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">지난달 정산</span>
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">지난달 정산</span>
                           )}
                           {p.reasons.includes("tms_active") && (
-                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-warning-soft text-warning-strong">실배차(옹고잉)</span>
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-warning-soft text-warning-strong">실배차(옹고잉)</span>
                           )}
                         </span>
                       );
@@ -2660,7 +2664,7 @@ export function Pipeline() {
                 <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 템플릿</label>
                 <select
                   onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
-                  className="w-full border border-border-strong rounded-xl px-4 py-3 text-[14px] outline-none focus:border-brand-yellow bg-white"
+                  className="pr-8 w-full border border-border-strong rounded-xl px-4 py-3 text-[14px] outline-none focus:border-brand-yellow bg-white"
                 >
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
@@ -2797,7 +2801,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
         <select
           value={String(days)}
           onChange={(e) => onDaysChange(Number(e.target.value))}
-          className="px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40 shadow-sm cursor-pointer"
+          className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40 shadow-sm cursor-pointer"
           title="발송 묶음 기간 — 이 기간 안에 다시 연락 문자를 받은 인원"
         >
           <option value="7">최근 7일</option>
@@ -2864,11 +2868,11 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                         </div>
                         <div className="flex flex-wrap items-center gap-1 mt-1.5">
                           {m.sigungu && (
-                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{m.sigungu}</span>
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{m.sigungu}</span>
                           )}
-                          <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
+                          <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
                           {m.opted_out && (
-                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-error-soft text-error-strong border-error/30">수신거부</span>
+                            <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
                           )}
                         </div>
                         {m.stage === "interested" && m.interest_job_title && (
@@ -3007,7 +3011,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-foreground">{card.name} <span className="text-[12px] text-muted-foreground font-medium ml-1">{card.age}세</span></div>
-        <div className="text-[11px] font-bold px-2 py-0.5 rounded bg-muted text-gray-700">{card.channel}</div>
+        <div className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>
       </div>
       <div className="flex flex-col gap-1.5 mb-3">
         <div className="text-[12.5px] text-gray-700 flex items-center gap-1.5"><span className="text-gray-400">근무지:</span> <b>{card.branch}</b></div>
@@ -3016,7 +3020,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
       </div>
       <div className="border-t border-muted pt-3 flex justify-between items-center">
         <span className="text-[11px] text-gray-400">{card.exp}</span>
-        <span className="text-[11px] font-medium text-muted-foreground bg-background px-2 py-1 rounded-md">{card.lastActive}</span>
+        <span className="text-[11px] font-medium text-muted-foreground bg-background px-2 py-1 rounded-full">{card.lastActive}</span>
       </div>
     </motion.div>
   );

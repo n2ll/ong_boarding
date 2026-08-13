@@ -55,7 +55,7 @@ function SettingsTab({
     >
       <Icon size={18} /> {label}
       {badge && (
-        <span className="ml-auto text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded shrink-0">
+        <span className="ml-auto text-[10px] font-bold text-gray-400 bg-muted px-1.5 py-0.5 rounded-full shrink-0">
           {badge}
         </span>
       )}

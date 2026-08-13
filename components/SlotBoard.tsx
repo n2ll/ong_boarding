@@ -143,7 +143,7 @@ export function SlotBoard() {
             <select
               value={clientFilter}
               onChange={(e) => setClientFilter(e.target.value === "" ? "" : Number(e.target.value))}
-              className="bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
+              className="pr-8 bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
             >
               <option value="">전체 화주사</option>
               {clients.filter((c) => c.uses_slots).map((c) => (

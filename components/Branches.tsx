@@ -343,9 +343,9 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-bold text-gray-400">#{branch.id}</span>
-                    {!branch.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded border border-gray-300">비활성</span>}
-                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-error-soft text-error px-2 py-0.5 rounded border border-error/30">충원 시급</span>}
-                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded border border-yellow-300">충원 필요</span>}
+                    {!branch.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-gray-300">비활성</span>}
+                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-error-soft text-error px-2 py-0.5 rounded-full border border-error/30">충원 시급</span>}
+                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded-full border border-yellow-300">충원 필요</span>}
                   </div>
                   <h3 className="text-[18px] font-extrabold text-foreground tracking-tight group-hover:text-info transition-colors">{branch.name}</h3>
                 </div>
@@ -429,7 +429,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 <select
                   value={form.clientId ?? ""}
                   onChange={(e) => setForm({ ...form, clientId: e.target.value ? Number(e.target.value) : null })}
-                  className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                  className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                 >
                   <option value="">미지정</option>
                   {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

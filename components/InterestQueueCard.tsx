@@ -265,7 +265,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
             <select
               value={jobFilter === "all" ? "all" : String(jobFilter)}
               onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-              className="max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
+              className="pr-8 max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
               title="공고별로 관심 표시를 필터링합니다"
             >
               <option value="all">전체 공고</option>
@@ -313,13 +313,13 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                       <Zap size={11} /> 바로 가능
                     </span>
                   )}
-                  <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
+                  <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
                   {optOut && (
-                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-error-soft text-error-strong border-error/30">수신거부</span>
+                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
                   )}
                   {multi && (
                     <span
-                      className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-error-soft text-error-strong"
+                      className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong"
                       title="이 한 분이 여러 공고에 관심을 눌렀어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                     >
                       공고 {rows.length}건

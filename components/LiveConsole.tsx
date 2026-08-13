@@ -674,11 +674,11 @@ export function LiveConsole() {
                   {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
                 </span>
               )}
-              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
+              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
                 const sample = handoffs.find((h) => h.category === cid)!;
                 return (
-                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
+                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
                 );
               })}
             </div>
@@ -709,7 +709,7 @@ export function LiveConsole() {
                       <span className="truncate">{head.applicant_name}</span>
                       {multi && (
                         <span
-                          className="shrink-0 px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-error-soft text-error-strong"
+                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-error-soft text-error-strong"
                           title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
                           공고 {items.length}건
@@ -727,7 +727,7 @@ export function LiveConsole() {
                       >
                         <button onClick={() => selectHandoff(h)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className={`shrink-0 px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
                             {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
                             {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
                                 공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
@@ -767,12 +767,12 @@ export function LiveConsole() {
                 <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}>
                   <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
                       {p.baemin_id && <span className="text-[11px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
                     </div>
                     <div className="text-[14px] font-bold text-foreground mb-0.5 flex items-center gap-1.5">
                       {p.name}
-                      {p.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
+                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
                     </div>
                     <div className="text-[12px] text-gray-700 leading-snug line-clamp-2">
                       {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
@@ -850,7 +850,7 @@ export function LiveConsole() {
                 )}
                 {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-md text-[11px] font-bold shrink-0 ${turn.cls}`}>
+                  <span className={`px-2 py-1 rounded-full text-[11px] font-bold shrink-0 ${turn.cls}`}>
                     {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
                   </span>
                   {metaLine && <span className="text-[11px] text-gray-400 truncate">{metaLine}</span>}
@@ -868,10 +868,10 @@ export function LiveConsole() {
           <div className="min-h-[60px] shrink-0 bg-white border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[15px] text-muted-foreground">지원자</span></div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {activeChat.source && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
-              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
-              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
-              <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">{activeChat.status}</span>
+              {activeChat.source && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
+              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
+              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-full text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
+              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">{activeChat.status}</span>
             </div>
           </div>
 

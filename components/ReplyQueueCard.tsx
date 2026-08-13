@@ -187,7 +187,7 @@ export function ReplyQueueCard({
             <select
               value={jobFilter === "all" ? "all" : String(jobFilter)}
               onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-              className="max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
+              className="pr-8 max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
               title="진행 중 공고별로 답할 차례인 지원자를 걸러 봅니다"
             >
               <option value="all">전체 공고</option>
@@ -230,12 +230,12 @@ export function ReplyQueueCard({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
-                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-yellow-700 border-yellow-300"}`}
+                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-yellow-700 border-yellow-300"}`}
                     >
                       {untouched ? "미착수" : "응대중"}
                     </span>
                     {optOut && (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded border bg-error-soft text-error-strong border-error/30">수신거부</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
                     )}
                   </div>
                   <div className="text-[11.5px] text-muted-foreground truncate mt-0.5">

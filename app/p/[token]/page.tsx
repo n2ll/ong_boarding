@@ -334,7 +334,7 @@ export default function PoolPage() {
               const notified = notifyIds.has(job.id);
               return (
                 <section key={job.id} className="bg-background border border-border-strong rounded-2xl p-5">
-                  <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-muted text-muted-foreground border border-border-strong">
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-muted text-muted-foreground border border-border-strong">
                     마감됨
                   </span>
                   <h2 className="mt-2 text-[17px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
@@ -373,18 +373,18 @@ export default function PoolPage() {
                 <div className="flex flex-wrap items-center gap-1.5">
                   {/* 상황 배지 — '나 이 자리 어디까지 했더라'를 카드가 먼저 답한다(문구 규칙은 lib/pool-status). */}
                   {job.status === "talking" && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
                       💬 이야기 중
                     </span>
                   )}
                   {job.status === "paused" && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-info-soft text-info-strong border border-info/25">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-info-soft text-info-strong border border-info/25">
                       매니저 확인 중
                     </span>
                   )}
                   {job.work_period && (
                     <span
-                      className={`inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold ${
+                      className={`inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold ${
                         job.work_period === "정기"
                           ? "bg-success-soft text-success-strong border border-success/25"
                           : "bg-yellow-50 text-yellow-700 border border-yellow-200"
@@ -394,7 +394,7 @@ export default function PoolPage() {
                     </span>
                   )}
                   {job.closes_at && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-error-soft text-error-strong border border-error-soft">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-error-soft text-error-strong border border-error-soft">
                       ⏰ {closesLabel(job.closes_at)}
                     </span>
                   )}

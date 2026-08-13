@@ -138,7 +138,7 @@ export function Automation() {
       <div className="shrink-0 bg-white border-b border-border-strong px-6 py-3.5">
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
-          <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded">실시간 집계</span>
+          <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full">실시간 집계</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {kpis.map((k, i) => (
@@ -160,7 +160,7 @@ export function Automation() {
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</span>
-            <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
+            <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
             {ruleRanAt && <span className="text-[11px] text-gray-400">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
           <button

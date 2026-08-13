@@ -1841,7 +1841,7 @@ export function Jobs() {
                   setClientFilter(v);
                   setBranchFilter("");
                 }}
-                className="bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
+                className="pr-8 bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
                 aria-label="화주사로 목록 좁히기"
                 title="화주사로 목록 좁히기"
               >
@@ -1852,7 +1852,7 @@ export function Jobs() {
               <select
                 value={branchFilter}
                 onChange={(e) => setBranchFilter(e.target.value === "" ? "" : Number(e.target.value))}
-                className="bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
+                className="pr-8 bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
                 aria-label="지점으로 목록 좁히기"
                 title="지점으로 목록 좁히기"
               >
@@ -1928,14 +1928,14 @@ export function Jobs() {
                       {job.title}
                     </button>
                     {job.workPeriod && PERIOD_BADGE[job.workPeriod] && (
-                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[12px] text-gray-400 font-mono">{job.id}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
                     {job.targetedExposure && (
-                      <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold border bg-yellow-50 text-warning border-warning-soft" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[10.5px] font-bold border bg-yellow-50 text-warning border-warning-soft" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
                   {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
@@ -1971,7 +1971,7 @@ export function Jobs() {
                   {!job.closesAt ? (
                     <div className="font-bold text-gray-800">상시</div>
                   ) : new Date(job.closesAt).getTime() <= Date.now() ? (
-                    <span className="w-fit px-1.5 py-0.5 rounded text-[11px] font-bold bg-muted text-muted-foreground border border-border-strong">마감됨</span>
+                    <span className="w-fit px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-muted text-muted-foreground border border-border-strong">마감됨</span>
                   ) : (
                     <div className={`font-bold ${new Date(job.closesAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000 ? "text-warning" : "text-gray-800"}`}>{fmtCloses(job.closesAt)}</div>
                   )}
@@ -1990,7 +1990,7 @@ export function Jobs() {
                     {/* 관심 표시 인원 — 맞춤 공고 링크에서 '관심 있음'을 누른 사람. 클릭하면 후보 보드가 열린다. */}
                     {job.interestCount > 0 && (
                       <div className="flex items-center gap-1 mt-1">
-                        <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-success-soft text-success-strong border border-success/25" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-success-soft text-success-strong border border-success/25" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
                       </div>
                     )}
                   </button>
@@ -1998,15 +1998,15 @@ export function Jobs() {
                   <div className="flex flex-col gap-1">
                     <div className="text-[12px] font-bold text-muted-foreground">AI 자동 스크리닝</div>
                     {!aiGlobalOn ? (
-                      <Link href="/brain" title="에이전트 두뇌에서 전역 AI 상태를 관리하세요" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-error-soft text-error border border-error-soft w-fit">
+                      <Link href="/brain" title="에이전트 두뇌에서 전역 AI 상태를 관리하세요" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-error-soft text-error border border-error-soft w-fit">
                         <span className="w-1.5 h-1.5 rounded-full bg-error"></span> 전역 중지됨
                       </Link>
                     ) : !job.effectivelyClosed ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-info-soft text-info border border-info/25 w-fit">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-info-soft text-info border border-info/25 w-fit">
                         <span className="w-1.5 h-1.5 rounded-full bg-info"></span> 자동 응대 중
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong w-fit">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong w-fit">
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span> 중지
                       </span>
                     )}
@@ -2222,7 +2222,7 @@ export function Jobs() {
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-[13px] font-bold text-yellow-600 flex items-center gap-1.5">
                       <Sparkles size={14} /> {draftBody ? "채널별 공고 초안" : "채널별 공고 본문 — 직접 작성"}
-                      {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded">오프라인 템플릿</span>}
+                      {aiSource === "mock" && <span className="text-[10.5px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">오프라인 템플릿</span>}
                     </label>
                     <span className="text-[11px] text-gray-400">탭별로 수정·복사할 수 있어요</span>
                   </div>
@@ -2300,7 +2300,7 @@ export function Jobs() {
                           setNewJobBranchId("");
                         }
                       }}
-                      className="w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                     >
                       <option value="">화주사 선택</option>
                       {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2321,7 +2321,7 @@ export function Jobs() {
                             if (typeof cid === "number") setNewJobClientId(cid);
                           }
                         }}
-                        className="w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                       >
                         <option value="">지점 선택</option>
                         {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2334,7 +2334,7 @@ export function Jobs() {
                     <select
                       value={newJobSiteManagerId}
                       onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                     >
                       <option value="">미지정</option>
                       {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2359,7 +2359,7 @@ export function Jobs() {
                     <select
                       value={newJobPeriod}
                       onChange={(e) => setNewJobPeriod(e.target.value)}
-                      className="w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                     >
                       <option value="">기간 미지정</option>
                       <option value="하루">하루(당일 단기)</option>
@@ -2409,7 +2409,7 @@ export function Jobs() {
                       <select
                         value={newJobPayType}
                         onChange={(e) => setNewJobPayType(e.target.value)}
-                        className="w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                       >
                         <option value="">미지정</option>
                         {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -2558,7 +2558,7 @@ export function Jobs() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 기간</label>
-                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                       <option value="">미지정</option>
                       <option value="하루">하루(당일 단기)</option>
                       <option value="단기">단기(며칠~몇 주)</option>
@@ -2622,7 +2622,7 @@ export function Jobs() {
                             if (cur && !keepBranch) setEditDroppedBranch({ id: cur.id, name: cur.name });
                             setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
                           }}
-                          className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                         >
                           <option value="">미지정</option>
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2646,7 +2646,7 @@ export function Jobs() {
                               }
                               setEditForm({ ...editForm, branchId: v });
                             }}
-                            className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                            className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                           >
                             <option value="">미지정</option>
                             {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2661,7 +2661,7 @@ export function Jobs() {
                       {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">현장매니저 <span className="text-gray-400 font-semibold">(선택)</span></label>
-                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                           <option value="">미지정</option>
                           {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>
@@ -2679,7 +2679,7 @@ export function Jobs() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 단가 형태</label>
-                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                               <option value="">미지정</option>
                               {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                             </select>
@@ -2913,7 +2913,7 @@ export function Jobs() {
                 {(Object.keys(ANNOUNCE_GROUP_LABEL) as AnnounceGroup[])
                   .filter((g) => announceModal.groups[g] > 0)
                   .map((g) => (
-                    <span key={g} className="px-2 py-0.5 rounded-md text-[11.5px] font-bold bg-success-soft text-success-strong border border-success/25">
+                    <span key={g} className="px-2 py-0.5 rounded-full text-[11.5px] font-bold bg-success-soft text-success-strong border border-success/25">
                       {ANNOUNCE_GROUP_LABEL[g]} {announceModal.groups[g]}
                     </span>
                   ))}
@@ -2994,7 +2994,7 @@ export function Jobs() {
                       <div className="text-[11px] font-bold text-gray-400 mb-1.5">진행 단계</div>
                       <div className="flex flex-wrap gap-1.5">
                         {STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => (
-                          <span key={s} className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${STAGE_COLOR[s] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
+                          <span key={s} className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[s] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
                         ))}
                       </div>
                     </div>
@@ -3003,7 +3003,7 @@ export function Jobs() {
                       <div className="text-[11px] font-bold text-gray-400 mb-1.5">유입 채널</div>
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(channelCounts).sort((a, b) => b[1] - a[1]).map(([src, n]) => (
-                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white border border-border-strong text-gray-700">{sourceLabel(src)} {n}</span>
+                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-border-strong text-gray-700">{sourceLabel(src)} {n}</span>
                         ))}
                       </div>
                     </div>
@@ -3031,14 +3031,14 @@ export function Jobs() {
                     <button aria-pressed={candSort === "recommended"}
                       onClick={() => setCandSort("recommended")}
                       title="즉시가능 → 공고와 가까운 순 → 지원일 최신순"
-                      className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${candSort === "recommended" ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}
+                      className={`px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${candSort === "recommended" ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}
                     >
                       추천순
                     </button>
                     <button aria-pressed={candSort === "recent"}
                       onClick={() => setCandSort("recent")}
                       title="후보 추가 최신순"
-                      className={`px-2.5 py-1 rounded-lg text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${candSort === "recent" ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}
+                      className={`px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${candSort === "recent" ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}
                     >
                       최신순
                     </button>
@@ -3048,7 +3048,7 @@ export function Jobs() {
                 {stageGroups.map((group) => (
                   <div key={group.stage} className="space-y-2">
                     <div className="flex items-center gap-2 px-0.5">
-                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${STAGE_COLOR[group.stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[group.stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
                       <span className="text-[11px] text-gray-400 font-bold">{group.items.length}명</span>
                       <div className="flex-1 h-px bg-muted" />
                     </div>
@@ -3086,7 +3086,7 @@ export function Jobs() {
                                     {a?.name ?? `#${c.applicant_id}`}
                                     {alreadyConfirmed && (
                                       <span
-                                        className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-success-soft text-success-strong border border-success/25"
+                                        className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-success-soft text-success-strong border border-success/25"
                                         title="인력풀 상태가 '확정인력'이에요(다른 라인 확정도 포함). 이 공고 확정 여부는 카드를 눌러 상세에서 확인하세요."
                                       >
                                         확정인력
@@ -3100,9 +3100,9 @@ export function Jobs() {
                               {/* 종료 카드는 결과(보류/공고부적합/중단)를 closed_reason으로 구분해 배지로 보여준다. */}
                               {stage && (
                                 isClosed ? (
-                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
                                 ) : (
-                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${STAGE_COLOR[stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[stage] ?? stage}</span>
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${STAGE_COLOR[stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[stage] ?? stage}</span>
                                 )
                               )}
                             </div>
@@ -3204,7 +3204,7 @@ export function Jobs() {
                     <div className="min-w-0 flex-1">
                       <div className="text-[14px] font-bold text-foreground flex items-center gap-1.5">
                         {p.name ?? `#${p.id}`}
-                        {conflict && <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-yellow-50 text-warning border border-warning-soft">다른 공고 진행 중</span>}
+                        {conflict && <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning border border-warning-soft">다른 공고 진행 중</span>}
                       </div>
                       <div className="text-[11.5px] text-muted-foreground truncate">{(p.source ? sourceLabel(p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
                     </div>

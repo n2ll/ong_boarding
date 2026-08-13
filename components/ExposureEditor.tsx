@@ -106,7 +106,7 @@ function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () 
     <button
       type="button"
       onClick={onClick}
-      className={`px-2.5 py-1 rounded-lg text-[12px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+      className={`px-2.5 py-1 rounded-full text-[12px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
         on
           ? "bg-foreground text-white border-foreground"
           : "bg-white text-gray-700 border-border-strong hover:border-gray-300"
@@ -576,10 +576,10 @@ export function ExposureEditor({
                   {roster.effective.map((p) => (
                     <div key={p.id} className="flex items-center gap-2 py-1.5 text-[12.5px]">
                       <span className="font-bold text-foreground">{p.name ?? `#${p.id}`}</span>
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
+                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
                       {/* 이야기 중인 분을 '수동 추가'와 같게 보여주면, 클릭 한 번에 보호가 사라진다 */}
                       {p.linked && (
-                        <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-yellow-50 text-warning-strong border border-warning/35" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
+                        <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning-strong border border-warning/35" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
                           이 공고로 이야기 중
                         </span>
                       )}
@@ -607,7 +607,7 @@ export function ExposureEditor({
                         <span className="font-semibold line-through">{p.name ?? `#${p.id}`}</span>
                         {/* 제외됐는데 이야기 중인 분 — AI만 그 공고를 말하는 상태다. 여기서 발견·복원할 수 있어야 한다. */}
                         {p.linked && (
-                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-error-soft text-error-strong border border-error/30" title="이 분은 이 공고로 이야기 중인데 노출에서 제외돼 있어요 — 본인 화면에서는 이 공고를 볼 수 없습니다.">
+                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong border border-error/30" title="이 분은 이 공고로 이야기 중인데 노출에서 제외돼 있어요 — 본인 화면에서는 이 공고를 볼 수 없습니다.">
                             이야기 중인데 제외됨
                           </span>
                         )}

@@ -212,7 +212,7 @@ function ApplyForm() {
 
         {job && (
           <div className="mb-6 bg-white border border-border-strong rounded-2xl px-5 py-4 shadow-sm">
-            <div className="text-[12px] font-bold text-yellow-700 bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded mb-2">지원 공고</div>
+            <div className="text-[12px] font-bold text-yellow-700 bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded-full mb-2">지원 공고</div>
             <div className="text-[17px] font-extrabold text-foreground leading-tight">{job.title}</div>
             <div className="text-[13px] text-muted-foreground mt-1">
               {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹고잉 배송원"}

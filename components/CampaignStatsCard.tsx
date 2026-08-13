@@ -108,7 +108,7 @@ export function CampaignStatsCard() {
                 <span className="text-[20px] font-extrabold text-foreground leading-none tracking-tight">{s.value}</span>
                 <span className="text-[11px] text-gray-400 font-bold">명</span>
                 {s.pct !== null && (
-                  <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{s.pct}%</span>
+                  <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">{s.pct}%</span>
                 )}
               </div>
             </>

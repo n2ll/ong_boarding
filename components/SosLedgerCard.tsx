@@ -351,7 +351,7 @@ export function SosLedgerCard() {
               <select
                 value={ledgerForm.category}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
-                className="px-3 py-2 border border-border-strong rounded-lg text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
               >
                 {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
                   <option key={k} value={k}>{label}</option>
@@ -457,7 +457,7 @@ export function SosLedgerCard() {
                 <select
                   value={resolveForm.resolution}
                   onChange={(e) => setResolveForm({ ...resolveForm, resolution: e.target.value as SosResolution | "" })}
-                  className={`${inputCls} bg-white`}
+                  className={`pr-8 ${inputCls} bg-white`}
                 >
                   <option value="">선택해주세요</option>
                   {(Object.entries(SOS_RESOLUTIONS) as [SosResolution, string][]).map(([k, label]) => (

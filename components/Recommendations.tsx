@@ -216,7 +216,7 @@ export function Recommendations() {
                 <div className="flex-1 flex flex-col justify-center">
                   <div className="flex flex-wrap gap-2 mb-3">
                     {tags.map((tag, i) => (
-                      <span key={i} className="bg-success-soft text-success border border-success/25 px-2.5 py-1 rounded-lg text-[12px] font-bold flex items-center gap-1">
+                      <span key={i} className="bg-success-soft text-success border border-success/25 px-2.5 py-1 rounded-full text-[12px] font-bold flex items-center gap-1">
                         <Check size={12} /> {tag}
                       </span>
                     ))}

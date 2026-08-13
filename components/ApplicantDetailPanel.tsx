@@ -878,7 +878,7 @@ export function ApplicantDetailContent({
           <h2 className="text-[15px] font-extrabold text-foreground flex items-center gap-2">
             <Sparkles size={16} className="text-brand-yellow" /> 지원자 상세
           </h2>
-          <span className="text-[11.5px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#9CA3AF"}1A`, color: STATUS_COLORS[a.status] ?? "#374151" }}>{a.status}</span>
+          <span className="text-[11.5px] font-bold px-2 py-1 rounded-full" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#9CA3AF"}1A`, color: STATUS_COLORS[a.status] ?? "#374151" }}>{a.status}</span>
         </div>
       )}
 
@@ -901,33 +901,33 @@ export function ApplicantDetailContent({
         {/* 구분·유입·단계 배지 */}
         <div className="flex items-center gap-2 flex-wrap">
           {isPurePool ? (
-            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-muted text-gray-700">순수 인재풀</span>
+            <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-muted text-gray-700">순수 인재풀</span>
           ) : (
-            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-info-soft text-info">공고 지원자 · {cands.length}건</span>
+            <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-info-soft text-info">공고 지원자 · {cands.length}건</span>
           )}
-          {a.source && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-background text-muted-foreground border border-border-strong" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</span>}
-          {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-copilot-soft text-copilot">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
+          {a.source && <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-background text-muted-foreground border border-border-strong" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</span>}
+          {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-copilot-soft text-copilot">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
           {detail.suntop?.done && (
-            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-success-soft text-success-strong border border-success/25" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
+            <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-success-soft text-success-strong border border-success/25" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
           )}
           {a.tms_active_signal === true && (
             <span
-              className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300"
+              className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300"
               title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 상태로 다시 연락하기 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
             >
               활동 중(옹고잉)
             </span>
           )}
           {a.sms_opt_out_at && (
-            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
+            <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
           )}
           {detail.blacklisted && (
-            <span className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-foreground text-white" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</span>
+            <span className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-foreground text-white" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</span>
           )}
           <button
             onClick={toggleBlacklist}
             disabled={busy}
-            className="px-2 py-1 rounded-md text-[11px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-50"
+            className="px-2 py-1 rounded-full text-[11px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-50"
           >
             {detail.blacklisted ? "블랙리스트 해제" : "블랙리스트 등록"}
           </button>
@@ -946,7 +946,7 @@ export function ApplicantDetailContent({
             {detail.ongmanaging.lines.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {detail.ongmanaging.lines.map((l, i) => (
-                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded bg-white border border-success/25 text-success-strong">
+                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-success/25 text-success-strong">
                     {l.lineName}{l.clientName ? ` · ${l.clientName}` : ""}
                   </span>
                 ))}
@@ -990,7 +990,7 @@ export function ApplicantDetailContent({
                       key={ij.job_id}
                       onClick={() => copyInterestReply(ij)}
                       title={`${ij.title ?? `공고 #${ij.job_id}`} — 관심 클릭 ${relTime(ij.clicked_at)} · 대기 안내 문구를 클립보드에 복사`}
-                      className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-white border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                      className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-white border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                     >
                       ⭐ {shortJobTitle(ij.title, ij.job_id)}
                       {ij.immediate && <span className="ml-1 text-success-strong">· 바로가능</span>}
@@ -1145,9 +1145,9 @@ export function ApplicantDetailContent({
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {selectable && isFocus && (
-                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-foreground text-white">표시 중</span>
+                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-foreground text-white">표시 중</span>
                         )}
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-copilot-soft text-copilot">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-copilot-soft text-copilot">
                           {/* 단계가 비어 있으면 '관심만 누른 상태' — '-'로 두면 매니저가 이유를 알 수 없다. */}
                           {STAGE_LABEL[c.agent_stage ?? ""] ?? c.agent_stage ?? "관심"}
                         </span>
@@ -1211,12 +1211,12 @@ export function ApplicantDetailContent({
             <span className="text-[11px] font-bold text-gray-400">문자 수신</span>
             {a.sms_opt_out_at ? (
               <div className="flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
                 <button
                   onClick={toggleOptOut}
                   disabled={busy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="px-2 py-0.5 rounded-md text-[11px] font-bold text-gray-700 bg-white hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-white hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 >
                   해제
                 </button>
@@ -1226,7 +1226,7 @@ export function ApplicantDetailContent({
                 onClick={toggleOptOut}
                 disabled={busy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="px-2 py-0.5 rounded-md text-[11px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
               >
                 수신거부 등록
               </button>
@@ -1255,9 +1255,9 @@ export function ApplicantDetailContent({
               <div className="rounded-xl border border-success/25 bg-success-soft p-3">
                 <div className="text-[12px] font-bold text-success-strong mb-2">확정 후속 안내 발송</div>
                 <div className="flex gap-1.5 flex-wrap">
-                  <button onClick={() => setFollowup("venue")} disabled={!!venueHardBlock} title={venueHardBlock ?? venueWarn ?? "만남장소 안내 발송 (내용 확인·수정)"} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-40 disabled:cursor-not-allowed">만남장소</button>
-                  <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">첫날규칙</button>
-                  <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-muted text-gray-700 border border-border-strong hover:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">앱안내</button>
+                  <button onClick={() => setFollowup("venue")} disabled={!!venueHardBlock} title={venueHardBlock ?? venueWarn ?? "만남장소 안내 발송 (내용 확인·수정)"} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-40 disabled:cursor-not-allowed">만남장소</button>
+                  <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">첫날규칙</button>
+                  <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-muted text-gray-700 border border-border-strong hover:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">앱안내</button>
                 </div>
                 {/* **발송 대상 공고를 이름으로 밝힌다** — 이 발송은 '표시 중' 공고가 아니라 확정 결속
                     (current_job_id)을 따른다. 공고 6~7개가 동시에 열리면 매니저는 표시 중 공고를 보고
@@ -1295,7 +1295,7 @@ export function ApplicantDetailContent({
                   {SLOTS.map((s) => {
                     const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
                     return (
-                      <button key={s} onClick={() => toggleSlot(s)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}>{s}</button>
+                      <button key={s} onClick={() => toggleSlot(s)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}>{s}</button>
                     );
                   })}
                 </div>
@@ -1307,7 +1307,7 @@ export function ApplicantDetailContent({
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-gray-400">확정 지점</span>
-                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
                     <option value="">미지정</option>
                     {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                     {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
@@ -1327,7 +1327,7 @@ export function ApplicantDetailContent({
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-gray-400">온보딩 통화</span>
-                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
+                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
                   <option value="">미지정</option>
                   {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                   {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1338,7 +1338,7 @@ export function ApplicantDetailContent({
                   가용성
                   {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
                 </span>
-                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
+                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
                   <option value="">미확인</option>
                   {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -1363,7 +1363,7 @@ export function ApplicantDetailContent({
                 {([["예정", !!detail.suntop?.scheduled], ["완료", !!detail.suntop?.done], ["투입", a.status === "확정인력"]] as [string, boolean][]).map(([label, on], i) => (
                   <span key={label} className="flex items-center gap-1">
                     {i > 0 && <span className="text-gray-300">→</span>}
-                    <span className={`px-2 py-0.5 rounded-md border ${on ? "bg-success-soft text-success-strong border-success/25" : "bg-background text-gray-400 border-border-strong"}`}>
+                    <span className={`px-2 py-0.5 rounded-full border ${on ? "bg-success-soft text-success-strong border-success/25" : "bg-background text-gray-400 border-border-strong"}`}>
                       {on ? "✓ " : ""}{label}
                     </span>
                   </span>
@@ -1375,7 +1375,7 @@ export function ApplicantDetailContent({
                     const isSched = ev.stage === "scheduled";
                     const when = isSched && ev.meta?.scheduled_at ? ev.meta.scheduled_at : new Date(ev.created_at).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
                     return (
-                      <span key={ev.id} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-bold border ${isSched ? "bg-yellow-50 text-yellow-700 border-yellow-200" : "bg-success-soft text-success-strong border-success/25"}`}>
+                      <span key={ev.id} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11.5px] font-bold border ${isSched ? "bg-yellow-50 text-yellow-700 border-yellow-200" : "bg-success-soft text-success-strong border-success/25"}`}>
                         {isSched ? "예정" : "완료"} · {[ev.meta?.client, ev.meta?.line].filter(Boolean).join(" ") || "선탑"} · {when}
                         <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"><X size={11} /></button>
                       </span>
@@ -1494,7 +1494,7 @@ export function ApplicantDetailContent({
             {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-gray-400">확정 지점(선택)</span>
-                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
+                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
                   <option value="">미지정</option>
                   {confirmBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                   {confirmBranch.trim() !== "" && !confirmBranchNames.includes(confirmBranch) && <option value={confirmBranch}>{confirmBranch} (미등록)</option>}
@@ -1671,8 +1671,8 @@ export function ApplicantDetailPanel({
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <h2 className="text-[19px] font-extrabold text-foreground">{a?.name ?? "지원자"}</h2>
-                  {age && <span className="text-[12px] font-medium text-muted-foreground bg-white px-2 py-0.5 rounded-md border border-border-strong">{age}세</span>}
-                  {a && <span className="text-[12px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#9CA3AF"}1A`, color: STATUS_COLORS[a.status] ?? "#374151" }}>{a.status}</span>}
+                  {age && <span className="text-[12px] font-medium text-muted-foreground bg-white px-2 py-0.5 rounded-full border border-border-strong">{age}세</span>}
+                  {a && <span className="text-[12px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#9CA3AF"}1A`, color: STATUS_COLORS[a.status] ?? "#374151" }}>{a.status}</span>}
                 </div>
                 <div className="text-[12px] text-gray-400 font-mono">
                   #{applicantId} ·{" "}

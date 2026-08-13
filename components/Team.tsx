@@ -157,7 +157,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
 
               <div>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-info-soft text-info' : 'bg-muted text-gray-700'}`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-info-soft text-info' : 'bg-muted text-gray-700'}`}>
                   <Shield size={12} /> {member.role || "현장"}
                 </span>
               </div>
@@ -165,7 +165,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="text-[13px] font-bold text-gray-700">{member.branch || "전체"}</div>
 
               <div>
-                <span className={`inline-flex px-2.5 py-1 rounded-md text-[12px] font-bold ${member.active ? 'bg-success-soft text-success' : 'bg-error-soft text-error'}`}>
+                <span className={`inline-flex px-2.5 py-1 rounded-full text-[12px] font-bold ${member.active ? 'bg-success-soft text-success' : 'bg-error-soft text-error'}`}>
                   {member.active ? '활성' : '비활성'}
                 </span>
               </div>
@@ -199,13 +199,13 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">권한</label>
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">담당 지점</label>
-                <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   <option value="">전체 / 미지정</option>
                   {branches.map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>

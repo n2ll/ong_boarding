@@ -218,7 +218,7 @@ export function Reengagement() {
                       {c.sources.map((s) => (
                         <span
                           key={s}
-                          className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-muted text-gray-700"
+                          className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700"
                         >
                           {SRC_LABEL[s] ?? s}
                         </span>

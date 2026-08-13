@@ -559,7 +559,7 @@ export function Dashboard() {
                     <div className="w-[92px] shrink-0 flex items-center justify-end gap-1.5">
                       <span className="text-[12px] font-bold text-foreground">{f.pctTotal}%</span>
                       {f.conv !== null && (
-                        <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">전환 {f.conv}%</span>
+                        <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">전환 {f.conv}%</span>
                       )}
                     </div>
                   </div>

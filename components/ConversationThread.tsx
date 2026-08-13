@@ -580,7 +580,7 @@ export function ConversationThread({
                   onClick={handleToggleOptOut}
                   disabled={optOutBusy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 >
                   해제
                 </button>
@@ -590,7 +590,7 @@ export function ConversationThread({
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
               >
                 <Ban size={12} /> 수신거부 등록
               </button>
@@ -673,7 +673,7 @@ export function ConversationThread({
               <div className="flex items-center gap-2 text-[13px] font-extrabold text-copilot-strong">
                 <Wand2 size={16} /> {isCopilotDraft ? "⚡ 코파일럿 초안" : "옹봇이 제안한 답변 초안"}
                 {pendingDraft.status === "need_info" && (
-                  <span className="text-[11px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-md">정보 부족 · 매니저 확인</span>
+                  <span className="text-[11px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-full">정보 부족 · 매니저 확인</span>
                 )}
               </div>
               <span className="text-[11px] font-bold text-copilot">검수 후 발송됩니다</span>
@@ -714,7 +714,7 @@ export function ConversationThread({
               <button
                 key={t.label}
                 onClick={() => insertTemplate(t.text)}
-                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 title={t.text}
               >
                 + {t.label}

@@ -328,13 +328,13 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                 <div>
                   <div className="font-extrabold text-foreground flex items-center gap-2">
                     {client.name}
-                    {!client.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded border border-gray-300">비활성</span>}
+                    {!client.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-gray-300">비활성</span>}
                   </div>
                   {client.memo && <div className="text-[12px] text-gray-400 mt-0.5 line-clamp-1">{client.memo}</div>}
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-md bg-muted text-gray-700">{CLIENT_TYPE_LABEL[client.client_type]}</span>
+                <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{CLIENT_TYPE_LABEL[client.client_type]}</span>
                 {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-yellow-700"><Clock4 size={11} /> 확정슬롯</span>}
               </div>
               <div className="text-[14px] font-bold text-foreground">{client.branches_count}개</div>
@@ -394,7 +394,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">유형</label>
-                <select value={form.client_type} onChange={(e) => setForm({ ...form, client_type: e.target.value as ClientType })} className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
+                <select value={form.client_type} onChange={(e) => setForm({ ...form, client_type: e.target.value as ClientType })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CLIENT_TYPE_LABEL[t]}</option>)}
                 </select>
               </div>
