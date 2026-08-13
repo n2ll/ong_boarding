@@ -963,7 +963,7 @@ export function LiveConsole() {
       {/* 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영 */}
       {promote && (
         <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !promoteSaving && setPromote(null)}>
-          <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground">공고에 반영</h2>
               <Button variant="ghost" size="icon" aria-label="공고 반영 창 닫기" onClick={() => setPromote(null)}><X size={20} /></Button>
@@ -982,7 +982,7 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
+                className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-gray-400">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
@@ -997,7 +997,7 @@ export function LiveConsole() {
       {/* 인계 → 지식 자산화(③-2): 매니저 답변을 공통/지점 지식으로 승인 등록 */}
       {kb && (
         <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !kbSaving && setKb(null)}>
-          <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground">지식 등록</h2>
               <Button variant="ghost" size="icon" aria-label="지식 등록 창 닫기" onClick={() => setKb(null)}><X size={20} /></Button>
@@ -1016,7 +1016,7 @@ export function LiveConsole() {
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                  className="min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                 />
               </div>
               <div>
@@ -1027,7 +1027,7 @@ export function LiveConsole() {
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
+                  className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
                 />
               </div>
               <div className="text-[11px] text-gray-400">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>

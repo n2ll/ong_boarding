@@ -267,7 +267,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               placeholder="지점명, 담당자 검색"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+              className="min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
             />
           </div>
           <button
@@ -420,7 +420,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="예: 강북미아"
-                  className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                  className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                 />
               </div>
 
@@ -473,7 +473,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                               })
                             }
                             onFocus={(e) => e.target.select()}
-                            className="w-16 px-2 py-1 border border-border-strong rounded-lg text-sm text-right focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                            className="w-16 px-2 py-1 border border-border-strong rounded-xl text-sm text-right focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                           />
                         </div>
                       ))}
@@ -489,7 +489,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                       onChange={(e) => setForm({ ...form, aiFacts: e.target.value })}
                       rows={3}
                       placeholder="이 지점 지원자 응대 시 AI가 참고할 정보. 예: 픽업 위치, 시급, 특이사항. 비우면 공통 운영 정보만 사용합니다."
-                      className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
+                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
                     />
                   </div>
                 </>

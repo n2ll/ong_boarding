@@ -434,17 +434,18 @@
 }
 
 @layer utilities {
+  /*
+   * 글래스 표면. 블러는 여기 두지 않고 쓰는 곳에서 Tailwind의 backdrop-blur-*로 준다 —
+   * 이 파일에 backdrop-filter를 쓰면 빌드(Lightning CSS)가 떨어뜨려 헤더 글래스가
+   * 배경색만 남고 블러가 안 걸렸다(계산값 backdropFilter: none으로 실측 확인).
+   */
   .glass {
     background: var(--glass-2);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--border-glass);
   }
 
   .glass-dark {
     background: var(--glass-dark);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #FFFFFF;
   }

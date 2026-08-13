@@ -107,7 +107,7 @@ export function Shippers() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="화주사 검색"
-              className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus:border-brand-yellow bg-white"
+              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus:border-brand-yellow bg-white"
             />
           </div>
 

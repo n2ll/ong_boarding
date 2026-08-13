@@ -1316,13 +1316,13 @@ export function ApplicantDetailContent({
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-gray-400">근무 시작일</span>
-                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
               </label>
               {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
               {!detailInternal && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-gray-400">배민 커넥트 ID</span>
-                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
                 </label>
               )}
               <label className="flex flex-col gap-1">
@@ -1387,11 +1387,11 @@ export function ApplicantDetailContent({
                 <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-background border border-border-strong">
                   <div className="text-[11px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
-                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
                   </div>
                   {suntopStage === "scheduled" && (
-                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
                   )}
                   <button onClick={recordSuntop} disabled={busy} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-1.5 rounded-lg text-[12px] font-bold text-white disabled:opacity-50 flex justify-center items-center gap-1.5 ${suntopStage === "scheduled" ? "bg-yellow-700 hover:bg-warning-strong" : "bg-success-strong hover:bg-success-strong"}`}>
                     {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {suntopStage === "scheduled" ? "선탑 예정으로 기록" : "선탑 완료로 기록"}
@@ -1488,7 +1488,7 @@ export function ApplicantDetailContent({
           <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-gray-400">근무 시작일</span>
-              <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+              <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
             </label>
             {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). 지점 개념 라인·등록 지점 있을 때만. */}
             {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
@@ -1660,8 +1660,8 @@ export function ApplicantDetailPanel({
           className={
             docked
               ? // 셸과 같은 언어로 떠 있는 패널. 위치·크기는 부르는 화면이 정한다.
-                `fixed ${dockedClassName} max-w-[94vw] bg-white shadow-[var(--shadow-xl)] flex flex-col rounded-[24px] border border-border-strong overflow-hidden`
-              : "fixed top-0 right-0 w-[560px] max-w-[94vw] h-full bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-50 flex flex-col border-l border-border-strong"
+                `fixed ${dockedClassName} max-w-[94vw] bg-glass-3 backdrop-blur-xl shadow-[var(--shadow-xl)] flex flex-col rounded-[24px] border border-white overflow-hidden`
+              : "fixed top-0 right-0 w-[560px] max-w-[94vw] h-full bg-glass-3 backdrop-blur-xl shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-50 flex flex-col border-l border-white"
           }
         >
           {/* Header */}

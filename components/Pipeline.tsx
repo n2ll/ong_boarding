@@ -1656,7 +1656,7 @@ export function Pipeline() {
                 "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white border border-border-strong rounded-lg text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white border border-border-strong rounded-xl text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
             </div>
             {view === "list" && (
               <select
@@ -1934,7 +1934,7 @@ export function Pipeline() {
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
                       placeholder="지금 조건을 이름 붙여 저장 (예: 강남·자차·즉시가능)"
-                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-lg text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white"
+                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white"
                     />
                     <Button variant="brand" size="chip" className="px-3 py-1.5 text-[12.5px] rounded-lg shadow-none" onClick={saveCurrentSegment} disabled={!segNameDraft.trim()}>지금 조건 저장</Button>
                   </div>
@@ -1988,7 +1988,7 @@ export function Pipeline() {
               {/* Floating Bulk Actions Toolbar */}
               <AnimatePresence>
                 {selectedRows.size > 0 && (
-                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 bg-gradient-to-r from-foreground to-gray-800 rounded-2xl px-6 py-4 mb-6 shadow-2xl border border-gray-700">
+                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 glass-dark backdrop-blur-xl rounded-2xl px-6 py-4 mb-6 shadow-[var(--shadow-xl)]">
                     <span className="text-[15px] font-extrabold text-white">
                       <span className="text-brand-yellow text-[18px]">{selectedRows.size}명</span> 선택됨
                     </span>
@@ -2035,7 +2035,7 @@ export function Pipeline() {
                     min={1}
                     value={topN}
                     onChange={(e) => setTopN(Number(e.target.value))}
-                    className="w-[64px] px-2 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm"
+                    className="w-[64px] px-2 py-1.5 bg-white border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm"
                     title="선택할 상위 인원 수"
                   />
                   <Button variant="secondary" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg" onClick={selectTopN}><Check size={15} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명 선택</Button>

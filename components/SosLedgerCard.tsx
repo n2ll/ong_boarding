@@ -363,13 +363,13 @@ export function SosLedgerCard() {
                 placeholder="금액(원)"
                 value={ledgerForm.amount_krw}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] px-3 py-2 border border-border-strong rounded-lg text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
               />
               <input
                 placeholder="메모 (선택)"
                 value={ledgerForm.memo}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="flex-1 px-3 py-2 border border-border-strong rounded-lg text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
               />
               <button
                 onClick={handleAddLedger}

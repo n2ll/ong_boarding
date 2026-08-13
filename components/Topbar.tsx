@@ -123,7 +123,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         안에 있는 지점 필터·알림 드롭다운(absolute)이 잘린다.
       */}
       <header className="relative z-40 mb-3 mt-3 shrink-0 lg:mb-4 lg:mt-4">
-        <div className="glass flex min-h-16 items-center gap-[18px] rounded-[24px] px-4 shadow-[var(--shadow-sm)] lg:px-6">
+        <div className="glass backdrop-blur-lg flex min-h-16 items-center gap-[18px] rounded-[24px] px-4 shadow-[var(--shadow-sm)] lg:px-6">
         <div className="min-w-0">
           {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
           <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
@@ -261,7 +261,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
       {searchOpen && (
         <div className="fixed inset-0 bg-foreground/50 z-50 flex items-start justify-center pt-[10vh] px-4 backdrop-blur-sm" onClick={closeSearch}>
           <div
-            className="bg-white w-full max-w-[640px] rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[640px] rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 px-5 py-4 border-b border-border-strong">

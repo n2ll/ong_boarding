@@ -191,11 +191,11 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">이름 <span className="text-error">*</span></label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">전화번호 <span className="text-error">*</span></label>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01012345678" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">권한</label>
@@ -212,7 +212,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
               <div className="col-span-2">
                 <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
-                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} placeholder="만남장소, 특이사항 등" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none" />
+                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} placeholder="만남장소, 특이사항 등" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none" />
               </div>
               <div className="col-span-2 flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
                 <div className="text-[14px] font-bold text-foreground">활성 상태</div>

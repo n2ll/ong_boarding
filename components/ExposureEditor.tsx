@@ -509,7 +509,7 @@ export function ExposureEditor({
                   setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
                 }}
                 placeholder="없음"
-                className="w-16 bg-white border border-border-strong rounded-lg px-2 py-1 text-[12.5px] focus:outline-none focus:border-brand-yellow"
+                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[12.5px] focus:outline-none focus:border-brand-yellow"
               />
               개월 이내
             </label>

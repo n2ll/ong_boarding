@@ -201,7 +201,7 @@ export function Automation() {
                         onChange={(e) => setThreshold(rule.id, Number(e.target.value))}
                         onBlur={() => persistConfig(ruleConfig)}
                         disabled={!cfg.enabled}
-                        className="w-14 border border-border-strong rounded-md px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
+                        className="w-14 border border-border-strong rounded-xl px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
                       />
                       {rule.unit}
                     </label>

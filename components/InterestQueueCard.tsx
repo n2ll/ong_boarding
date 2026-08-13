@@ -395,7 +395,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
           className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={() => !quickSending && setQuick(null)}
         >
-          <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground flex items-center gap-2"><Send size={16} className="text-info" /> 빠른 컨택</h2>
               <button aria-label="빠른 처리 창 닫기" onClick={() => setQuick(null)} disabled={quickSending} className="text-gray-400 hover:text-gray-700 disabled:opacity-50 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"><X size={20} /></button>
@@ -415,7 +415,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 onChange={(e) => setQuickBody(e.target.value)}
                 rows={5}
                 disabled={quickSending}
-                className="w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
+                className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-gray-400 leading-relaxed">
                 발송에 성공하면 자동으로 <b>컨택 완료</b>로 처리돼 큐에서 빠집니다. 근무 확정·배정을 약속하는 문구는 넣지 마세요.

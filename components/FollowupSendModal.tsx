@@ -141,7 +141,7 @@ export function FollowupSendModal({
                     if (v) void fetchPreview({ startDate: v, meetingTime: venueTime });
                     else setPreview(null);
                   }}
-                  className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
+                  className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -154,7 +154,7 @@ export function FollowupSendModal({
                     setVenueTime(v);
                     if (venueDate) void fetchPreview({ startDate: venueDate, meetingTime: v });
                   }}
-                  className="border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
+                  className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
                 />
               </label>
             </div>
@@ -173,7 +173,7 @@ export function FollowupSendModal({
                   onChange={(e) => setEditText(e.target.value)}
                   rows={7}
                   placeholder={kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
-                  className="border border-border-strong rounded-lg px-3 py-2 text-[13px] leading-relaxed focus:outline-none focus:border-brand-yellow resize-none"
+                  className="border border-border-strong rounded-xl px-3 py-2 text-[13px] leading-relaxed focus:outline-none focus:border-brand-yellow resize-none"
                 />
               </label>
               {preview && (
