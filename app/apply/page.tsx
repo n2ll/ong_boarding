@@ -61,10 +61,10 @@ function digits(raw: string, max: number): string {
   return raw.replace(/\D/g, "").slice(0, max);
 }
 
-const labelCls = "block text-[15px] font-bold text-[#1A202C] mb-2";
+const labelCls = "block text-[15px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-[#E2E8F0] rounded-xl text-[16px] focus:outline-none focus:border-[#FFCB3C] focus:ring-2 focus:ring-[#FFCB3C]/40 bg-white";
-const requiredMark = <span className="text-[#E53E3E] ml-0.5">*</span>;
+  "w-full px-4 py-3.5 border border-border-strong rounded-xl text-[16px] focus:outline-none focus:border-brand-yellow focus:ring-2 focus:ring-brand-yellow/40 bg-white";
+const requiredMark = <span className="text-error ml-0.5">*</span>;
 
 interface JobContext {
   id: number;
@@ -183,13 +183,13 @@ function ApplyForm() {
 
   if (done) {
     return (
-      <div className="min-h-screen bg-[#F7FAFC] flex items-center justify-center p-6">
-        <div className="bg-white border border-[#E2E8F0] rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
-          <div className="w-16 h-16 rounded-full bg-[#F0FFF4] flex items-center justify-center mx-auto mb-5">
-            <CheckCircle2 size={36} className="text-[#38A169]" />
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="bg-white border border-border-strong rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
+          <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mx-auto mb-5">
+            <CheckCircle2 size={36} className="text-success" />
           </div>
-          <h1 className="text-[24px] font-extrabold text-[#1A202C] mb-2">지원이 접수되었어요</h1>
-          <p className="text-[15px] text-[#4A5568] leading-relaxed">
+          <h1 className="text-[24px] font-extrabold text-foreground mb-2">지원이 접수되었어요</h1>
+          <p className="text-[15px] text-gray-700 leading-relaxed">
             {form.name}님, 지원서가 정상적으로 접수되었습니다.<br />
             검토 후 문자(SMS)로 안내드릴게요.
           </p>
@@ -199,26 +199,26 @@ function ApplyForm() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7FAFC] py-10 px-5">
-      <div className="max-w-[560px] mx-auto">
+    <div className="min-h-screen bg-background py-10 px-5">
+      <div className="max-w-[560px] mx-auto w-full">
         {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 mb-3">
             <LogoMark size={36} />
-            <span className="text-[18px] font-extrabold text-[#1A202C]">옹고잉 배송원 지원</span>
+            <span className="text-[18px] font-extrabold text-foreground">옹고잉 배송원 지원</span>
           </div>
-          <p className="text-[15px] text-[#718096]">아래 항목을 작성해주세요. <span className="text-[#E53E3E]">*</span> 표시는 필수입니다.</p>
+          <p className="text-[15px] text-muted-foreground">아래 항목을 작성해주세요. <span className="text-error">*</span> 표시는 필수입니다.</p>
         </div>
 
         {job && (
-          <div className="mb-6 bg-white border border-[#E2E8F0] rounded-2xl px-5 py-4 shadow-sm">
-            <div className="text-[12px] font-bold text-[#B7791F] bg-[#FFFBEB] inline-flex items-center px-2 py-0.5 rounded mb-2">지원 공고</div>
-            <div className="text-[17px] font-extrabold text-[#1A202C] leading-tight">{job.title}</div>
-            <div className="text-[13px] text-[#718096] mt-1">
+          <div className="mb-6 bg-white border border-border-strong rounded-2xl px-5 py-4 shadow-sm">
+            <div className="text-[12px] font-bold text-yellow-700 bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded-full mb-2">지원 공고</div>
+            <div className="text-[17px] font-extrabold text-foreground leading-tight">{job.title}</div>
+            <div className="text-[13px] text-muted-foreground mt-1">
               {[job.client_name, job.branch].filter(Boolean).join(" · ") || "옹고잉 배송원"}
             </div>
             {!job.recruiting && (
-              <div className="mt-2 text-[13px] font-bold text-[#C53030] bg-[#FFF5F5] border border-[#FEB2B2] rounded-lg px-3 py-2">
+              <div className="mt-2 text-[13px] font-bold text-error-strong bg-error-soft border border-error/30 rounded-lg px-3 py-2">
                 현재 마감된 공고예요. 지원서는 접수되며, 다른 공고로 안내드릴 수 있어요.
               </div>
             )}
@@ -226,12 +226,12 @@ function ApplyForm() {
         )}
 
         {error && (
-          <div className="mb-6 flex items-start gap-2 bg-[#FFF5F5] border border-[#FEB2B2] text-[#C53030] rounded-xl px-4 py-3 text-[14px] font-bold">
+          <div className="mb-6 flex items-start gap-2 bg-error-soft border border-error/30 text-error-strong rounded-xl px-4 py-3 text-[14px] font-bold">
             <AlertCircle size={18} className="shrink-0 mt-0.5" /> {error}
           </div>
         )}
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col gap-7">
+        <div className="bg-white border border-border-strong rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col gap-7">
           {/* 이름 */}
           <div>
             <label className={labelCls}>이름{requiredMark}</label>
@@ -259,13 +259,13 @@ function ApplyForm() {
           {/* 자차 보유 */}
           <div>
             <label className={labelCls}>자차(본인 차량) 보유{requiredMark}</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {["있음", "없음"].map((opt) => (
                 <button
                   key={opt}
                   type="button"
                   onClick={() => set("ownVehicle", opt)}
-                  className={`py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-[#1A202C] bg-[#1A202C] text-white" : "border-[#E2E8F0] bg-white text-[#4A5568] hover:border-[#CBD5E0]"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -331,14 +331,14 @@ function ApplyForm() {
                     key={slot.value}
                     type="button"
                     onClick={() => toggleWorkHour(slot.value)}
-                    className={`flex items-center justify-between px-4 py-3.5 rounded-xl border-2 text-left transition-all ${checked ? "border-[#FFCB3C] bg-[#FFFBEB]" : "border-[#E2E8F0] bg-white hover:border-[#CBD5E0]"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white hover:border-gray-300"}`}
                   >
                     <div>
-                      <div className="text-[16px] font-bold text-[#1A202C]">{slot.label}</div>
-                      <div className="text-[13px] text-[#718096]">{slot.sub}</div>
+                      <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
+                      <div className="text-[13px] text-muted-foreground">{slot.sub}</div>
                     </div>
-                    <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-[#FFCB3C] bg-[#FFCB3C]" : "border-[#CBD5E0]"}`}>
-                      {checked && <CheckCircle2 size={16} className="text-[#1A202C]" />}
+                    <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-gray-300"}`}>
+                      {checked && <CheckCircle2 size={16} className="text-foreground" />}
                     </div>
                   </button>
                 );
@@ -355,13 +355,13 @@ function ApplyForm() {
           {/* 본인 명의 */}
           <div>
             <label className={labelCls}>배달앱·정산계좌 본인 명의 가능 여부{requiredMark}</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {["문제 없음", "문제 있음"].map((opt) => (
                 <button
                   key={opt}
                   type="button"
                   onClick={() => set("selfOwnership", opt)}
-                  className={`py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-[#1A202C] bg-[#1A202C] text-white" : "border-[#E2E8F0] bg-white text-[#4A5568] hover:border-[#CBD5E0]"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -383,15 +383,15 @@ function ApplyForm() {
 
           {/* 마케팅 동의 */}
           <label className="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="mt-1 w-5 h-5 accent-[#FFCB3C]" />
-            <span className="text-[14px] text-[#4A5568] leading-relaxed">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
+            <input type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="mt-1 w-5 h-5 accent-brand-yellow" />
+            <span className="text-[14px] text-gray-700 leading-relaxed">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
           </label>
         </div>
 
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="w-full mt-7 bg-[#FFCB3C] hover:bg-[#E0B500] disabled:opacity-60 text-[#1A202C] py-4 rounded-xl text-[17px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-sm"
+          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-xl text-[17px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-sm"
         >
           {submitting ? <Loader2 size={20} className="animate-spin" /> : null}
           {submitting ? "제출 중…" : "지원서 제출하기"}
@@ -404,7 +404,7 @@ function ApplyForm() {
 
 export default function ApplyPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#F7FAFC]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
       <ApplyForm />
     </Suspense>
   );

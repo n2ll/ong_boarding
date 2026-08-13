@@ -10,6 +10,7 @@ import { ConversationThread } from "./ConversationThread";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
 import { getBrowserClient } from "@/lib/supabase";
 import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
+import { Button } from "@/components/ui/button";
 
 interface Applicant {
   id: number;
@@ -76,17 +77,17 @@ interface ConfirmPending {
 
 // 인계 카테고리 배지 색(tone 기반). urgent=빨강, answerable=호박, human=파랑, neutral=회색
 const TONE_STYLE: Record<Handoff["tone"], string> = {
-  urgent: "bg-[#FFF5F5] text-[#C53030] border-[#FEB2B2]",
-  answerable: "bg-[#FFFBEB] text-[#B7791F] border-[#FAF089]",
-  human: "bg-[#EBF8FF] text-[#2B6CB0] border-[#BEE3F8]",
-  neutral: "bg-[#F7FAFC] text-[#4A5568] border-[#E2E8F0]",
+  urgent: "bg-error-soft text-error-strong border-error/30",
+  answerable: "bg-yellow-50 text-yellow-700 border-yellow-200",
+  human: "bg-info-soft text-info-strong border-info/25",
+  neutral: "bg-background text-gray-700 border-border-strong",
 };
 
 /** 방치 경과일 색 — 오래될수록 빨강(SLA 환기). */
 function ageStyle(days: number): string {
-  if (days >= 7) return "text-[#C53030]";
-  if (days >= 3) return "text-[#DD6B20]";
-  return "text-[#718096]";
+  if (days >= 7) return "text-error-strong";
+  if (days >= 3) return "text-warning";
+  return "text-muted-foreground";
 }
 
 // 표시 라벨만 실무 언어로 통일(ApplicantDetailPanel·Jobs·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
@@ -99,12 +100,13 @@ const STAGE_KO: Record<string, string> = {
   abort: "중단",
 };
 
+// 이름 해시로 고르는 정체성 색이라 상태색이 아니라 categorical 슬롯을 쓴다.
 const AVATAR_PALETTE = [
-  { bg: "#EBF8FF", fg: "#3182CE" },
-  { bg: "#FEFCBF", fg: "#D69E2E" },
-  { bg: "#F0FFF4", fg: "#38A169" },
-  { bg: "#FAF5FF", fg: "#805AD5" },
-  { bg: "#FFF5F5", fg: "#E53E3E" },
+  { bg: "var(--chart-1-soft)", fg: "var(--chart-1)" },
+  { bg: "var(--chart-2-soft)", fg: "var(--chart-2)" },
+  { bg: "var(--chart-3-soft)", fg: "var(--chart-3)" },
+  { bg: "var(--chart-4-soft)", fg: "var(--chart-4)" },
+  { bg: "var(--chart-5-soft)", fg: "var(--chart-5)" },
 ];
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -158,17 +160,17 @@ function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
 interface TurnBadge { label: string; cls: string; sub?: string }
 function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBadge {
   const unanswered = pv?.direction === "inbound";
-  if (chat.sms_opt_out_at) return { label: "수신거부", cls: "bg-[#FFF5F5] text-[#C53030] border border-[#FEB2B2]" };
-  if (pv?.pending_draft) return { label: "초안 검토", cls: "bg-[#FAF5FF] text-[#553C9A] border border-[#D6BCFA]" };
+  if (chat.sms_opt_out_at) return { label: "수신거부", cls: "bg-error-soft text-error-strong border border-error/30" };
+  if (pv?.pending_draft) return { label: "초안 검토", cls: "bg-copilot-soft text-copilot-strong border border-copilot/30" };
   if (unanswered) {
     // 활성 대화 없이 답장 온 재컨택 응답자 = 스크리닝 스코프 밖 답장. 서브라벨로만 구분(별도 색 배지 X).
     const isPool = (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
-    return { label: "내가 답할 차례", cls: "bg-[#FFF5F5] text-[#E53E3E] border border-[#FEB2B2]", sub: isPool ? "풀 밖 답장" : undefined };
+    return { label: "내가 답할 차례", cls: "bg-error-soft text-error border border-error/30", sub: isPool ? "풀 밖 답장" : undefined };
   }
-  if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-[#EDF2F7] text-[#4A5568]" };
-  if (isAwaitingPreview(pv)) return { label: "상대 답 기다림", cls: "bg-[#EDF2F7] text-[#718096]" };
-  if (chat.agent_stage && chat.agent_stage !== "abort") return { label: "AI 응대 중", cls: "bg-[#EBF8FF] text-[#3182CE] border border-[#BEE3F8]" };
-  return { label: chat.status, cls: "bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]" };
+  if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-muted text-gray-700" };
+  if (isAwaitingPreview(pv)) return { label: "상대 답 기다림", cls: "bg-muted text-muted-foreground" };
+  if (chat.agent_stage && chat.agent_stage !== "abort") return { label: "AI 응대 중", cls: "bg-info-soft text-info border border-info/25" };
+  return { label: chat.status, cls: "bg-background text-muted-foreground border border-border-strong" };
 }
 
 export function LiveConsole() {
@@ -610,12 +612,12 @@ export function LiveConsole() {
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   return (
-    <div className="flex h-full overflow-hidden bg-white">
+    <div className="flex h-full flex-col overflow-hidden bg-white lg:flex-row">
       {/* Left Sidebar */}
-      <div className="w-[320px] flex-shrink-0 border-r border-[#E2E8F0] flex flex-col bg-[#F7FAFC]">
+      <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[320px] lg:border-b-0 lg:border-r">
         {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
         {globalKill && (
-          <div className="shrink-0 bg-[#FFFBEB] border-b border-[#F6E05E] px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-[#B7791F] leading-snug">
+          <div className="shrink-0 bg-yellow-50 border-b border-yellow-300 px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-yellow-700 leading-snug">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
               AI 전역 응답이 꺼져 있습니다 — 수동 응대만 발송됩니다 (
@@ -625,7 +627,7 @@ export function LiveConsole() {
           </div>
         )}
         {copilotMode && (
-          <div className="shrink-0 bg-[#FAF5FF] border-b border-[#D6BCFA] px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-[#553C9A] leading-snug">
+          <div className="shrink-0 bg-copilot-soft border-b border-copilot/30 px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-copilot-strong leading-snug">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
               코파일럿 모드 — AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다 (
@@ -634,55 +636,55 @@ export function LiveConsole() {
             </span>
           </div>
         )}
-        <div className="p-5 border-b border-[#E2E8F0] bg-white flex flex-col gap-3">
+        <div className="p-5 border-b border-border-strong bg-white flex flex-col gap-3">
           {/* 배경 갱신 표시 — 데이터가 있는데 새로 불러오는 중이면 '갱신 중'(전체 스켈레톤 대신 비침투적 힌트). */}
           {appsValidating && !loadingList && chats.length > 0 && (
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#A0AEC0]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#38A169] animate-pulse" /> 최신 데이터로 갱신 중…
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> 최신 데이터로 갱신 중…
             </div>
           )}
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] bg-[#F1F4F8]" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow bg-muted" />
           </div>
           {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
           <div className="flex gap-1.5 flex-wrap">
-            <button onClick={() => setActiveTab("all")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
-            <button onClick={() => setActiveTab("intervention")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-[#E53E3E] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
-            <button onClick={() => setActiveTab("confirm")} className={`px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-[#2F855A] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
+            <button aria-selected={activeTab === "all"} role="tab" onClick={() => setActiveTab("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
+            <button aria-selected={activeTab === "intervention"} role="tab" onClick={() => setActiveTab("intervention")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-error text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
+            <button aria-selected={activeTab === "confirm"} role="tab" onClick={() => setActiveTab("confirm")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-success-strong text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
           {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(내가 답할 차례→AI→상대 답 기다림)로 대체(간소화).
               '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
               사람 확인 필요 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
           {activeTab === "all" ? (
             unansweredCount > 0 ? (
-              <div className="text-[12px] font-bold text-[#E53E3E] flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#E53E3E]" />
+              <div className="text-[12px] font-bold text-error flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-error" />
                 지금 답할 대화 {unansweredCount}건 — 목록 맨 위에 있어요
               </div>
             ) : (
-              <div className="text-[12px] font-semibold text-[#38A169]">답할 대화 없음 — 모두 응대했어요 👍</div>
+              <div className="text-[12px] font-semibold text-success">답할 대화 없음 — 모두 응대했어요 👍</div>
             )
           ) : activeTab === "intervention" ? (
             <div className="flex gap-1 flex-wrap">
               {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
                   한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
               {visibleHandoffs.length !== handoffGroups.length && (
-                <span className="w-full text-[11.5px] font-bold text-[#718096]">
+                <span className="w-full text-[11.5px] font-bold text-muted-foreground">
                   {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
                 </span>
               )}
-              <button onClick={() => setHandoffCat("all")} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>전체 {handoffs.length}</button>
+              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
                 const sample = handoffs.find((h) => h.category === cid)!;
                 return (
-                  <button key={cid} onClick={() => setHandoffCat(cid)} className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-[#FFCB3C] text-[#1A202C]" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{sample.category_label} {catCounts[cid]}</button>
+                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
                 );
               })}
             </div>
           ) : null}
           {/* 대량 발송 진입점 — 큰 버튼 대신 작은 링크로(개별 응대 화면에서 실사용 빈도 낮음) */}
-          <Link href="/pipeline" className="self-start flex items-center gap-1 text-[12px] font-bold text-[#718096] hover:text-[#1A202C] transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+          <Link href="/pipeline" className="self-start flex items-center gap-1 text-[12px] font-bold text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
             대량 발송은 파이프라인에서 <ArrowRight size={13} />
           </Link>
         </div>
@@ -690,7 +692,7 @@ export function LiveConsole() {
         {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {handoffGroups.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
+            {handoffGroups.length === 0 && <div className="text-[13px] text-gray-400 p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
             {handoffGroups.map((items) => {
               const head = items[0];
               const multi = items.length > 1;
@@ -700,14 +702,14 @@ export function LiveConsole() {
               return (
                 <div
                   key={head.applicant_id}
-                  className={`rounded-xl transition-all ${groupSelected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
+                  className={`rounded-xl transition-all ${groupSelected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
                 >
                   <div className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-1.5">
-                    <div className="text-[14px] font-bold text-[#1A202C] flex items-center gap-1.5 min-w-0">
+                    <div className="text-[14px] font-bold text-foreground flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{head.applicant_name}</span>
                       {multi && (
                         <span
-                          className="shrink-0 px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#FFF5F5] text-[#C53030]"
+                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-error-soft text-error-strong"
                           title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
                           공고 {items.length}건
@@ -721,50 +723,32 @@ export function LiveConsole() {
                     return (
                       <div
                         key={h.candidate_id}
-                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-[#FFCB3C] bg-[#FFFBEC]" : "border-[#EDF2F7] bg-white hover:border-[#CBD5E0]"}`}
+                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-brand-yellow bg-yellow-50" : "border-muted bg-white hover:border-gray-300"}`}
                       >
-                        <button onClick={() => selectHandoff(h)} className="w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
+                        <button onClick={() => selectHandoff(h)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className={`shrink-0 px-2 py-0.5 rounded-md text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
                             {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
                             {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
                                 공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
-                            <span className="text-[11px] font-bold text-[#4A5568] truncate" title={h.job_title}>
+                            <span className="text-[11px] font-bold text-gray-700 truncate" title={h.job_title}>
                               {h.is_system_job ? h.job_title : (h.branch && h.branch.trim()) || h.job_title}
                             </span>
                             {multi && <span className={`shrink-0 text-[11px] font-bold ${ageStyle(h.age_days)}`}>{h.age_days === 0 ? "오늘" : `${h.age_days}일`}</span>}
                           </div>
-                          {h.reason && <div className="text-[12px] text-[#4A5568] line-clamp-2 leading-snug">{h.reason}</div>}
+                          {h.reason && <div className="text-[12px] text-gray-700 line-clamp-2 leading-snug">{h.reason}</div>}
                         </button>
                         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
-                          <span className="text-[11px] font-bold text-[#A0AEC0] truncate">→ {h.suggested_action}</span>
+                          <span className="text-[11px] font-bold text-gray-400 truncate">→ {h.suggested_action}</span>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
                             {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
-                              <button
-                                onClick={() => openPromote(h)}
-                                className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#FFFBEC] text-[#B7791F] border border-[#FAF089] hover:bg-[#FEFCBF] transition-colors active:scale-95"
-                                title="매니저 답변을 공고 단가·정책 필드에 저장 → 다음부터 AI가 직접 응대"
-                              >
-                                공고에 반영
-                              </button>
+                              <Button size="chip" variant="ghost" onClick={() => openPromote(h)} className="px-2.5 bg-yellow-50 text-yellow-700 border border-brand-yellow hover:bg-yellow-100 hover:text-yellow-700">공고에 반영</Button>
                             )}
                             {!["manual", "auto"].includes(h.category) && (
-                              <button
-                                onClick={() => openKb(h)}
-                                className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5] hover:bg-[#E6FFFA] transition-colors active:scale-95"
-                                title="매니저 답변을 공통/지점 지식에 등록 → 다음부터 AI가 직접 응대"
-                              >
-                                지식 등록
-                              </button>
+                              <Button size="chip" variant="ghost" onClick={() => openKb(h)} className="px-2.5 bg-success-soft text-success-strong border border-success/25 hover:bg-success-soft hover:text-success-strong">지식 등록</Button>
                             )}
-                            <button
-                              onClick={() => resumeHandoff(h)}
-                              className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#EBF8FF] text-[#2B6CB0] hover:bg-[#BEE3F8] transition-colors active:scale-95"
-                              title="처리 완료 — AI 응대를 다시 켜고 큐에서 제거"
-                            >
-                              AI 재개
-                            </button>
+                            <Button size="chip" variant="ghost" onClick={() => resumeHandoff(h)} className="px-2.5 bg-info-soft text-info-strong border border-info/25 hover:bg-info-soft hover:text-info-strong">AI 재개</Button>
                           </div>
                         </div>
                       </div>
@@ -776,21 +760,21 @@ export function LiveConsole() {
           </div>
         ) : activeTab === "confirm" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {confirmPending.length === 0 && <div className="text-[13px] text-[#A0AEC0] p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
+            {confirmPending.length === 0 && <div className="text-[13px] text-gray-400 p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
             {confirmPending.map((p) => {
               const selected = selectedChatId === p.applicant_id;
               return (
-                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}>
-                  <button onClick={() => setSelectedChatId(p.applicant_id)} className="w-full text-left p-3.5 pb-2 cursor-pointer">
+                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}>
+                  <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold border bg-[#F0FFF4] text-[#2F855A] border-[#C6F6D5]">온보딩 완료</span>
-                      {p.baemin_id && <span className="text-[11px] font-bold text-[#718096]">ID {p.baemin_id}</span>}
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
+                      {p.baemin_id && <span className="text-[11px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
                     </div>
-                    <div className="text-[14px] font-bold text-[#1A202C] mb-0.5 flex items-center gap-1.5">
+                    <div className="text-[14px] font-bold text-foreground mb-0.5 flex items-center gap-1.5">
                       {p.name}
-                      {p.branch && <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-[#F0FFF4] text-[#2F855A]">{p.branch}</span>}
+                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
                     </div>
-                    <div className="text-[12px] text-[#4A5568] leading-snug line-clamp-2">
+                    <div className="text-[12px] text-gray-700 leading-snug line-clamp-2">
                       {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
                     </div>
                   </button>
@@ -798,8 +782,8 @@ export function LiveConsole() {
                       확정 후 콘텐츠라 여기서 보내면 지원자에게 확정 통보로 읽힌다. 그래서 발송 버튼을 두지 않고
                       '확정'만 남긴다. 확정하면 이 큐에서 빠지고, 후속 안내는 지원자 상세의 '확정 후속 안내'에서 보낸다. */}
                   <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
-                    <span className="mr-auto text-[11px] text-[#A0AEC0]">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
-                    <button onClick={() => openConfirmFor(p)} title="확정 — 대상 공고·시작일·지점을 확인하고 확정합니다" className="cursor-pointer px-2.5 py-1 rounded-md text-[11.5px] font-bold bg-[#2F855A] text-white hover:bg-[#276749] transition-colors active:scale-95">확정</button>
+                    <span className="mr-auto text-[11px] text-gray-400">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
+                    <Button size="chip" variant="primary" onClick={() => openConfirmFor(p)} title="확정 — 대상 공고·시작일·지점을 확인하고 확정합니다" className="px-2.5 bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong">확정</Button>
                   </div>
                 </div>
               );
@@ -812,20 +796,20 @@ export function LiveConsole() {
           {loadingList && (
             <>
               {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="p-3.5 rounded-xl border border-[#EDF2F7] bg-white animate-pulse">
+                <div key={i} className="p-3.5 rounded-xl border border-muted bg-white animate-pulse">
                   <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-[#EDF2F7]" />
-                    <div className="h-3.5 w-24 rounded bg-[#EDF2F7]" />
-                    <div className="ml-auto h-3 w-10 rounded bg-[#F1F4F8]" />
+                    <div className="w-8 h-8 rounded-lg bg-muted" />
+                    <div className="h-3.5 w-24 rounded bg-muted" />
+                    <div className="ml-auto h-3 w-10 rounded bg-muted" />
                   </div>
-                  <div className="h-3 w-3/4 rounded bg-[#F1F4F8] mb-2" />
-                  <div className="h-5 w-20 rounded-md bg-[#EDF2F7]" />
+                  <div className="h-3 w-3/4 rounded bg-muted mb-2" />
+                  <div className="h-5 w-20 rounded-md bg-muted" />
                 </div>
               ))}
             </>
           )}
           {!loadingList && visibleChats.length === 0 && (
-            <div className="text-[13px] text-[#A0AEC0] p-4 text-center">
+            <div className="text-[13px] text-gray-400 p-4 text-center">
               {search.trim()
                 ? "검색 결과가 없어요 — 이름·전화번호를 확인해주세요"
                 : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
@@ -845,31 +829,31 @@ export function LiveConsole() {
               <button
                 key={chat.id}
                 onClick={() => setSelectedChatId(chat.id)}
-                className={`w-full text-left p-3.5 rounded-xl transition-all ${selectedChatId === chat.id ? "bg-white border border-[#FFCB3C] shadow-sm ring-1 ring-[#FFCB3C]" : "bg-white border border-transparent hover:border-[#E2E8F0]"}`}
+                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 rounded-xl transition-all ${selectedChatId === chat.id ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm" style={{ backgroundColor: pal.bg, color: pal.fg }}>{chat.name.charAt(0)}</div>
                     <div>
-                      <div className="text-[14px] font-bold text-[#1A202C]">{chat.name}</div>
+                      <div className="text-[14px] font-bold text-foreground">{chat.name}</div>
                     </div>
                   </div>
-                  <div className={`text-[11px] font-semibold ${intervention ? "text-[#E53E3E]" : "text-[#A0AEC0]"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
+                  <div className={`text-[11px] font-semibold ${intervention ? "text-error" : "text-gray-400"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
                 </div>
                 {pv?.body ? (
                   <div className="text-[13px] line-clamp-1 mb-2">
-                    <span className={`font-bold ${pv.direction === "inbound" ? "text-[#3182CE]" : "text-[#A0AEC0]"}`}>{pv.direction === "inbound" ? "지원자" : pv.manual_outbound ? "매니저" : "발신"}</span>
-                    <span className="text-[#4A5568]"> · {pv.body}</span>
+                    <span className={`font-bold ${pv.direction === "inbound" ? "text-info" : "text-gray-400"}`}>{pv.direction === "inbound" ? "지원자" : pv.manual_outbound ? "매니저" : "발신"}</span>
+                    <span className="text-gray-700"> · {pv.body}</span>
                   </div>
                 ) : (
-                  <div className="text-[13px] text-[#4A5568] line-clamp-1 mb-2">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
+                  <div className="text-[13px] text-gray-700 line-clamp-1 mb-2">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
                 )}
                 {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-md text-[11px] font-bold shrink-0 ${turn.cls}`}>
+                  <span className={`px-2 py-1 rounded-full text-[11px] font-bold shrink-0 ${turn.cls}`}>
                     {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
                   </span>
-                  {metaLine && <span className="text-[11px] text-[#A0AEC0] truncate">{metaLine}</span>}
+                  {metaLine && <span className="text-[11px] text-gray-400 truncate">{metaLine}</span>}
                 </div>
               </button>
             );
@@ -880,22 +864,22 @@ export function LiveConsole() {
 
       {/* Middle Chat Window */}
       {activeChat ? (
-        <div className="flex-1 flex flex-col bg-[#EEF1F5] min-w-0">
-          <div className="min-h-[60px] shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-lg font-bold text-[#1A202C]">{activeChat.name} <span className="text-[15px] text-[#718096]">지원자</span></div>
+        <div className="flex-1 flex flex-col bg-muted min-w-0">
+          <div className="min-h-[60px] shrink-0 bg-white border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[15px] text-muted-foreground">지원자</span></div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {activeChat.source && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F7FAFC] text-[#718096] border border-[#E2E8F0]">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
-              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#F0FFF4] text-[#2F855A]">{activeChat.branch || activeChat.branch1}</span>}
-              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-md text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-[#EDF2F7] text-[#4A5568]" : "bg-[#EBF8FF] text-[#3182CE]"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
-              <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-[#FFFBEB] text-[#B7791F] border border-[#FAF089]">{activeChat.status}</span>
+              {activeChat.source && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
+              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
+              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-full text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
+              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">{activeChat.status}</span>
             </div>
           </div>
 
           {/* 멀티-잡 공고 선택 탭 — 동시에 2개 이상 공고를 진행 중일 때만 노출.
               공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
           {activeJobs.length > 1 && (
-            <div className="shrink-0 bg-white border-b border-[#E2E8F0] px-6 py-2 flex items-center gap-2 overflow-x-auto">
-              <span className="text-[11px] font-bold text-[#A0AEC0] shrink-0">
+            <div className="shrink-0 bg-white border-b border-border-strong px-6 py-2 flex items-center gap-2 overflow-x-auto">
+              <span className="text-[11px] font-bold text-gray-400 shrink-0">
                 붙어 있는 공고 {activeJobs.length}건 · 탭 전환
                 {activeJobs.some((j) => j.agent_stage == null) && (
                   <span className="ml-1 font-medium">(관심만 누른 자리 포함)</span>
@@ -912,10 +896,10 @@ export function LiveConsole() {
                     key={j.job_id}
                     onClick={() => setSelectedJobId(j.job_id)}
                     aria-pressed={selected}
-                    className={`shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
                       selected
-                        ? "bg-[#1A202C] text-white shadow-sm"
-                        : "bg-[#F7FAFC] border border-[#E2E8F0] text-[#4A5568] hover:bg-[#EDF2F7] hover:border-[#CBD5E0]"
+                        ? "bg-foreground text-white shadow-sm"
+                        : "bg-background border border-border-strong text-gray-700 hover:bg-muted hover:border-gray-300"
                     }`}
                     title={
                       interestOnly
@@ -927,10 +911,10 @@ export function LiveConsole() {
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                         interestOnly
-                          ? selected ? "bg-[#B7791F] text-white" : "bg-[#FFFBEC] text-[#B7791F]"
+                          ? selected ? "bg-yellow-700 text-white" : "bg-yellow-50 text-yellow-700"
                           : paused
-                            ? selected ? "bg-[#4A5568] text-white" : "bg-[#EDF2F7] text-[#4A5568]"
-                            : selected ? "bg-[#3182CE] text-white" : "bg-[#EBF8FF] text-[#3182CE]"
+                            ? selected ? "bg-gray-700 text-white" : "bg-muted text-gray-700"
+                            : selected ? "bg-info text-white" : "bg-info-soft text-info"
                       }`}
                     >
                       {interestOnly ? "관심" : paused ? "수동 응대" : STAGE_KO[j.agent_stage ?? ""] ?? "AI"}
@@ -955,12 +939,12 @@ export function LiveConsole() {
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-[#EEF1F5] text-[#A0AEC0] text-sm">좌측에서 대화를 선택하세요</div>
+        <div className="flex-1 flex min-w-0 items-center justify-center bg-muted p-6 text-center text-sm text-gray-400">좌측에서 대화를 선택하세요</div>
       )}
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
       {activeChat && (
-        <div className="w-[340px] shrink-0 bg-white border-l border-[#E2E8F0] flex flex-col">
+        <div className="w-[340px] shrink-0 bg-white border-l border-border-strong flex flex-col">
           {/* key에 selectedJobId를 넣지 않는다 — 그 값은 /active-jobs 응답이 온 뒤 비동기로 채워져
               패널을 한 번 더 리마운트시킨다. 큐에서 확정 모달을 열었을 때 그 리마운트가 모달 state를
               날려 '버튼이 씹힌 것처럼' 보이던 경합의 원인이었다. jobId는 prop으로 반응적으로 읽힌다. */}
@@ -978,19 +962,19 @@ export function LiveConsole() {
 
       {/* 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영 */}
       {promote && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !promoteSaving && setPromote(null)}>
+        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !promoteSaving && setPromote(null)}>
           <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
-              <h2 className="text-[16px] font-extrabold text-[#1A202C]">공고에 반영</h2>
-              <button onClick={() => setPromote(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
+              <h2 className="text-[16px] font-extrabold text-foreground">공고에 반영</h2>
+              <Button variant="ghost" size="icon" aria-label="공고 반영 창 닫기" onClick={() => setPromote(null)}><X size={20} /></Button>
             </div>
             <div className="p-6 flex flex-col gap-4">
-              <div className="text-[12.5px] text-[#718096] leading-relaxed">
-                <b className="text-[#4A5568]">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
+              <div className="text-[12.5px] text-muted-foreground leading-relaxed">
+                <b className="text-gray-700">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button onClick={() => setPromoteField("pay_info")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "pay_info" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>급여·정산</button>
-                <button onClick={() => setPromoteField("policy_notes")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>고용·정책</button>
+                <button aria-pressed={promoteField === "pay_info"} onClick={() => setPromoteField("pay_info")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "pay_info" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>급여·정산</button>
+                <button aria-pressed={promoteField === "policy_notes"} onClick={() => setPromoteField("policy_notes")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>고용·정책</button>
               </div>
               <textarea
                 value={promoteText}
@@ -998,13 +982,13 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
+                className="w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
               />
-              <div className="text-[11px] text-[#A0AEC0]">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
+              <div className="text-[11px] text-gray-400">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
-              <button onClick={() => setPromote(null)} disabled={promoteSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
-              <button onClick={savePromote} disabled={promoteSaving || promoteLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#B7791F] hover:bg-[#975A16] disabled:opacity-60">{promoteSaving ? "저장 중…" : "공고에 반영"}</button>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
+              <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setPromote(null)} disabled={promoteSaving}>취소</Button>
+              <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-yellow-700 hover:bg-yellow-700 text-white shadow-none focus-visible:ring-yellow-700" onClick={savePromote} disabled={promoteLoading} isLoading={promoteSaving}>{promoteSaving ? "저장 중…" : "공고에 반영"}</Button>
             </div>
           </div>
         </div>
@@ -1012,45 +996,45 @@ export function LiveConsole() {
 
       {/* 인계 → 지식 자산화(③-2): 매니저 답변을 공통/지점 지식으로 승인 등록 */}
       {kb && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !kbSaving && setKb(null)}>
+        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !kbSaving && setKb(null)}>
           <div className="bg-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0]">
-              <h2 className="text-[16px] font-extrabold text-[#1A202C]">지식 등록</h2>
-              <button onClick={() => setKb(null)} className="text-[#A0AEC0] hover:text-[#4A5568]"><X size={20} /></button>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
+              <h2 className="text-[16px] font-extrabold text-foreground">지식 등록</h2>
+              <Button variant="ghost" size="icon" aria-label="지식 등록 창 닫기" onClick={() => setKb(null)}><X size={20} /></Button>
             </div>
             <div className="p-6 flex flex-col gap-4">
-              <div className="text-[12.5px] text-[#718096] leading-relaxed">
+              <div className="text-[12.5px] text-muted-foreground leading-relaxed">
                 매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button onClick={() => setKbTarget("common")} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${kbTarget === "common" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>공통(전 지점)</button>
-                <button onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-[#1A202C] text-white" : "bg-white border border-[#E2E8F0] text-[#718096]"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
+                <button aria-pressed={kbTarget === "common"} onClick={() => setKbTarget("common")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${kbTarget === "common" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>공통(전 지점)</button>
+                <button aria-pressed={kbTarget === "branch"} onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
               </div>
               <div>
-                <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">제목(무슨 질문인가)</label>
+                <label className="block text-[12px] font-bold text-gray-700 mb-1.5">제목(무슨 질문인가)</label>
                 <input
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="w-full px-4 py-2.5 border border-[#E2E8F0] rounded-xl text-[13.5px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+                  className="w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-bold text-[#4A5568] mb-1.5">내용(AI가 답할 사실)</label>
+                <label className="block text-[12px] font-bold text-gray-700 mb-1.5">내용(AI가 답할 사실)</label>
                 <textarea
                   value={kbBody}
                   onChange={(e) => setKbBody(e.target.value)}
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none disabled:bg-[#F7FAFC]"
+                  className="w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
                 />
               </div>
-              <div className="text-[11px] text-[#A0AEC0]">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
+              <div className="text-[11px] text-gray-400">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#E2E8F0]">
-              <button onClick={() => setKb(null)} disabled={kbSaving} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-[#4A5568] hover:bg-[#F1F4F8] disabled:opacity-50">취소</button>
-              <button onClick={saveKb} disabled={kbSaving || kbLoading} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-[#2F855A] hover:bg-[#276749] disabled:opacity-60">{kbSaving ? "등록 중…" : "지식 등록"}</button>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
+              <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setKb(null)} disabled={kbSaving}>취소</Button>
+              <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong" onClick={saveKb} disabled={kbLoading} isLoading={kbSaving}>{kbSaving ? "등록 중…" : "지식 등록"}</Button>
             </div>
           </div>
         </div>

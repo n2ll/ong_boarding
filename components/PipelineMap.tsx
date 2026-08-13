@@ -173,8 +173,9 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         map: mapRef.current,
         title: a.name ?? "",
         icon: {
+          // 지도 마커는 React 트리 밖 DOM이라 토큰과 같은 값을 hex로 직접 쓴다(--warning / --warning 35%).
           content: `<div style="width:11px;height:11px;border-radius:50%;background:${
-            approx ? "#FBD38D" : "#DD6B20"
+            approx ? "#E2B473" : "#B86A00"
           };border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15);opacity:${approx ? 0.7 : 1}"></div>`,
           anchor: new naver.maps.Point(7, 7),
         },
@@ -191,7 +192,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         map: mapRef.current,
         title: j.title,
         icon: {
-          content: `<div style="display:flex;align-items:center;gap:4px;background:#1A202C;color:#FFCB3C;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;border:1px solid #FFCB3C;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)">📍 ${j.title}</div>`,
+          content: `<div style="display:flex;align-items:center;gap:4px;background:#111827;color:#FFCB3C;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;border:1px solid #FFCB3C;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)">📍 ${j.title}</div>`,
           anchor: new naver.maps.Point(10, 12),
         },
       });
@@ -204,33 +205,33 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
   }, [status, withCoords, jobsWithCoords]);
 
   return (
-    <div className="h-full flex gap-4 p-4 bg-[#F7FAFC]">
+    <div className="h-full flex gap-4 p-4 bg-background">
       {/* 지도 영역 */}
-      <div className="flex-1 rounded-2xl border border-[#E2E8F0] bg-white overflow-hidden relative min-w-0">
+      <div className="flex-1 rounded-2xl border border-border-strong bg-white overflow-hidden relative min-w-0">
         {clientId ? (
           <>
             <div ref={mapEl} className="w-full h-full" />
             {status !== "ready" && (
-              <div className="absolute inset-0 flex items-center justify-center text-[13px] text-[#718096] bg-white/70">
+              <div className="absolute inset-0 flex items-center justify-center text-[13px] text-muted-foreground bg-white/70">
                 {status === "error" ? "지도를 불러오지 못했어요 (클라이언트 ID·도메인 등록 확인)" : "지도 불러오는 중…"}
               </div>
             )}
             {/* 범례 */}
-            <div className="absolute bottom-3 left-3 bg-white/95 border border-[#E2E8F0] rounded-lg px-3 py-2 text-[11px] text-[#4A5568] shadow-sm flex flex-col gap-1.5">
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#DD6B20] inline-block" /> 정확 좌표</div>
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#FBD38D] inline-block" /> 시군구 근사</div>
-              <div className="flex items-center gap-1.5"><span className="text-[#FFCB3C]">📍</span> 공고 위치</div>
+            <div className="absolute bottom-3 left-3 bg-white/95 border border-border-strong rounded-lg px-3 py-2 text-[11px] text-gray-700 shadow-sm flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-warning inline-block" /> 정확 좌표</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-warning/35 inline-block" /> 시군구 근사</div>
+              <div className="flex items-center gap-1.5"><span className="text-brand-yellow">📍</span> 공고 위치</div>
             </div>
           </>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#FFFAF0] border border-[#FBD38D] flex items-center justify-center text-[#DD6B20]">
+            <div className="w-12 h-12 rounded-2xl bg-yellow-50 border border-warning/35 flex items-center justify-center text-warning">
               <MapPin size={22} />
             </div>
-            <div className="text-[15px] font-bold text-[#1A202C]">지도 키 설정이 필요해요</div>
-            <p className="text-[12.5px] text-[#718096] leading-relaxed max-w-[420px]">
+            <div className="text-[15px] font-bold text-foreground">지도 키 설정이 필요해요</div>
+            <p className="text-[12.5px] text-muted-foreground leading-relaxed max-w-[420px]">
               네이버 클라우드 <b>Maps · Web Dynamic Map</b> 클라이언트 ID를{" "}
-              <code className="px-1 py-0.5 rounded bg-[#EDF2F7] text-[#4A5568]">NEXT_PUBLIC_NAVER_MAPS_CLIENT_ID</code>{" "}
+              <code className="px-1 py-0.5 rounded bg-muted text-gray-700">NEXT_PUBLIC_NAVER_MAPS_CLIENT_ID</code>{" "}
               에 넣고 서비스 도메인을 등록하면 지도가 표시됩니다. 그동안은 우측 분포 요약으로 지역 현황을 확인하세요.
             </p>
           </div>
@@ -238,18 +239,18 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
       </div>
 
       {/* 시군구 분포 요약 */}
-      <div className="w-[320px] shrink-0 rounded-2xl border border-[#E2E8F0] bg-white flex flex-col overflow-hidden">
-        <div className="px-4 py-3.5 border-b border-[#E2E8F0] bg-[#FFFDF8]">
-          <h3 className="text-[14px] font-extrabold text-[#1A202C] flex items-center gap-1.5">
-            <MapPin size={15} className="text-[#DD6B20]" /> 지역별 인력 분포
+      <div className="w-[320px] shrink-0 rounded-2xl border border-border-strong bg-white flex flex-col overflow-hidden">
+        <div className="px-4 py-3.5 border-b border-border-strong bg-surface-raised">
+          <h3 className="text-[14px] font-extrabold text-foreground flex items-center gap-1.5">
+            <MapPin size={15} className="text-warning" /> 지역별 인력 분포
           </h3>
-          <div className="text-[11.5px] text-[#718096] mt-1 flex items-center gap-2 flex-wrap">
+          <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
             <span>총 {applicants.length.toLocaleString()}명</span>
-            <span className="text-[#CBD5E0]">·</span>
+            <span className="text-gray-300">·</span>
             <span>좌표 {withCoords.length.toLocaleString()}명</span>
             {jobsWithCoords.length > 0 && (
               <>
-                <span className="text-[#CBD5E0]">·</span>
+                <span className="text-gray-300">·</span>
                 <span className="flex items-center gap-1"><Briefcase size={11} /> 공고 {jobsWithCoords.length}</span>
               </>
             )}
@@ -257,22 +258,22 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-custom p-2">
           {regions.length === 0 && unknownCount === 0 ? (
-            <div className="text-center text-[12.5px] text-[#A0AEC0] py-8">표시할 지원자가 없어요.</div>
+            <div className="text-center text-[12.5px] text-gray-400 py-8">표시할 지원자가 없어요.</div>
           ) : (
             <>
               {regions.map((d) => (
-                <div key={d.region} className="px-2.5 py-2 rounded-lg hover:bg-[#F7FAFC]">
+                <div key={d.region} className="px-2.5 py-2 rounded-lg hover:bg-background">
                   <div className="flex items-center justify-between text-[12.5px] mb-1">
-                    <span className="font-bold text-[#2D3748] truncate">{d.region}</span>
-                    <span className="font-extrabold text-[#1A202C] tabular-nums ml-2">{d.count}</span>
+                    <span className="font-bold text-gray-800 truncate">{d.region}</span>
+                    <span className="font-extrabold text-foreground tabular-nums ml-2">{d.count}</span>
                   </div>
-                  <div className="h-1.5 w-full bg-[#F1F4F8] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#DD6B20] rounded-full" style={{ width: `${(d.count / maxCount) * 100}%` }} />
+                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-warning rounded-full" style={{ width: `${(d.count / maxCount) * 100}%` }} />
                   </div>
                 </div>
               ))}
               {unknownCount > 0 && (
-                <div className="mt-1.5 mx-1 px-2.5 py-2 rounded-lg bg-[#F7FAFC] flex items-center justify-between text-[12px] text-[#A0AEC0]">
+                <div className="mt-1.5 mx-1 px-2.5 py-2 rounded-lg bg-background flex items-center justify-between text-[12px] text-gray-400">
                   <span className="font-semibold">주소 미입력</span>
                   <span className="font-bold tabular-nums">{unknownCount.toLocaleString()}</span>
                 </div>
@@ -281,7 +282,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
           )}
         </div>
         {jobsWithCoords.length === 0 && jobs.length > 0 && (
-          <div className="px-3 py-2.5 border-t border-[#E2E8F0] bg-[#F7FAFC] text-[11px] text-[#718096] flex items-start gap-1.5">
+          <div className="px-3 py-2.5 border-t border-border-strong bg-background text-[11px] text-muted-foreground flex items-start gap-1.5">
             <Info size={13} className="mt-0.5 shrink-0" />
             공고에 픽업 주소가 입력되면 지도에 위치가 함께 표시됩니다.
           </div>

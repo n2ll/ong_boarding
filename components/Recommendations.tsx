@@ -139,22 +139,22 @@ export function Recommendations() {
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
       <div className="flex items-center gap-3 mb-8">
-        <div className="w-10 h-10 bg-gradient-to-br from-[#FFCB3C] to-[#D69E2E] rounded-xl flex items-center justify-center shadow-sm">
+        <div className="w-10 h-10 bg-gradient-to-br from-brand-yellow to-yellow-600 rounded-xl flex items-center justify-center shadow-sm">
           <Sparkles size={20} className="text-white" />
         </div>
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">AI 인재 추천</h1>
-          <p className="text-[14px] text-[#718096]">공고를 선택하면 거리·차량·최신성 기준으로 인재풀을 분석해 추천합니다.</p>
+          <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">AI 인재 추천</h1>
+          <p className="text-[14px] text-muted-foreground">공고를 선택하면 거리·차량·최신성 기준으로 인재풀을 분석해 추천합니다.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-[300px_1fr] gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
         {/* Left Pane - Active Jobs */}
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex flex-col">
-          <h2 className="text-sm font-bold text-[#718096] mb-4">분석할 공고 선택</h2>
+        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
+          <h2 className="text-sm font-bold text-muted-foreground mb-4">분석할 공고 선택</h2>
           <div className="flex flex-col gap-2">
             {jobs.length === 0 && (
-              <div className="text-[13px] text-[#A0AEC0] py-6 text-center">진행 중인 공고가 없어요</div>
+              <div className="text-[13px] text-gray-400 py-6 text-center">진행 중인 공고가 없어요</div>
             )}
             {jobs.map((job) => {
               const total = Object.values(job.counts || {}).reduce((a, b) => a + b, 0);
@@ -162,10 +162,10 @@ export function Recommendations() {
                 <button
                   key={job.id}
                   onClick={() => handleSelect(job.id)}
-                  className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${selectedJobId === job.id ? 'border-[#1A202C] bg-[#F7FAFC] shadow-sm' : 'border-transparent hover:bg-[#F1F4F8]'}`}
+                  className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
                 >
-                  <div className="text-[13px] font-bold text-[#1A202C] mb-1 leading-tight">{job.title}</div>
-                  <div className="text-[11px] text-[#A0AEC0] flex items-center gap-1">
+                  <div className="text-[13px] font-bold text-foreground mb-1 leading-tight">{job.title}</div>
+                  <div className="text-[11px] text-gray-400 flex items-center gap-1">
                     <Briefcase size={12} /> 후보 {total}명 {job.branch ? `· ${job.branch}` : ""}
                   </div>
                 </button>
@@ -176,17 +176,17 @@ export function Recommendations() {
 
         {/* Right Pane - Recommendations */}
         <div className="flex flex-col gap-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex items-center justify-between">
+          <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center justify-between">
             <div>
-              <div className="text-[14px] font-bold text-[#1A202C]">{selectedJob?.title ?? "공고를 선택하세요"}</div>
-              <div className="text-[12px] text-[#718096] mt-0.5">
+              <div className="text-[14px] font-bold text-foreground">{selectedJob?.title ?? "공고를 선택하세요"}</div>
+              <div className="text-[12px] text-muted-foreground mt-0.5">
                 {generated ? `인재풀 ${poolSize.toLocaleString()}명 분석 · 상위 ${recs.length}명` : "AI 추천을 생성하면 거리·차량 기준 상위 후보를 보여줘요"}
               </div>
             </div>
             <button
               onClick={handleGenerate}
               disabled={!selectedJob || loading}
-              className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+              className="min-h-11 flex items-center gap-2 bg-foreground hover:bg-gray-800 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
             >
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {loading ? "분석 중…" : "AI 추천 생성"}
@@ -194,7 +194,7 @@ export function Recommendations() {
           </div>
 
           {!generated && !loading && (
-            <div className="bg-white border border-dashed border-[#E2E8F0] rounded-2xl p-12 text-center text-[#A0AEC0] text-[14px]">
+            <div className="bg-white border border-dashed border-border-strong rounded-2xl p-12 text-center text-gray-400 text-[14px]">
               공고를 선택하고 [AI 추천 생성]을 눌러주세요.
             </div>
           )}
@@ -202,27 +202,27 @@ export function Recommendations() {
           {recs.map((rec) => {
             const tags = buildTags(rec);
             return (
-              <div key={`${rec.source}-${rec.id}`} className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm flex gap-6">
+              <div key={`${rec.source}-${rec.id}`} className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
                 <div className="shrink-0 flex flex-col items-center gap-2 w-[100px]">
-                  <div className="w-16 h-16 rounded-full bg-[#EBF8FF] border-[3px] border-[#3182CE] flex items-center justify-center text-[#3182CE] relative">
+                  <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info relative">
                     <User size={28} />
-                    <div className="absolute -bottom-2 -right-2 bg-[#3182CE] text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
+                    <div className="absolute -bottom-2 -right-2 bg-info text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
                       {rec.score.total}점
                     </div>
                   </div>
-                  <div className="font-extrabold text-[#1A202C]">{rec.name}</div>
+                  <div className="font-extrabold text-foreground">{rec.name}</div>
                 </div>
 
                 <div className="flex-1 flex flex-col justify-center">
                   <div className="flex flex-wrap gap-2 mb-3">
                     {tags.map((tag, i) => (
-                      <span key={i} className="bg-[#F0FFF4] text-[#38A169] border border-[#C6F6D5] px-2.5 py-1 rounded-lg text-[12px] font-bold flex items-center gap-1">
+                      <span key={i} className="bg-success-soft text-success border border-success/25 px-2.5 py-1 rounded-full text-[12px] font-bold flex items-center gap-1">
                         <Check size={12} /> {tag}
                       </span>
                     ))}
                   </div>
-                  <div className="bg-[#F7FAFC] rounded-xl p-4 text-[13px] text-[#4A5568] leading-relaxed relative">
-                    <Sparkles size={16} className="text-[#FFCB3C] absolute top-4 left-4" />
+                  <div className="bg-background rounded-xl p-4 text-[13px] text-gray-700 leading-relaxed relative">
+                    <Sparkles size={16} className="text-brand-yellow absolute top-4 left-4" />
                     <p className="pl-6">{buildReason(rec)}</p>
                   </div>
                 </div>
@@ -233,20 +233,20 @@ export function Recommendations() {
                       <button
                         onClick={() => handleAddCandidate(rec)}
                         disabled={addingId === rec.id || addedIds.has(rec.id)}
-                        className="w-full bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] flex items-center justify-center gap-1.5"
+                        className="w-full bg-foreground hover:bg-gray-800 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow flex items-center justify-center gap-1.5"
                       >
                         {addingId === rec.id ? <Loader2 size={15} className="animate-spin" /> : addedIds.has(rec.id) ? <Check size={15} /> : null}
                         {addedIds.has(rec.id) ? "추가됨" : "공고 후보로 추가"}
                       </button>
                       <button
                         onClick={() => setProfileId(rec.id)}
-                        className="w-full bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] text-[#4A5568] px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                        className="w-full bg-white border border-border-strong hover:bg-background text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                       >
                         프로필 보기
                       </button>
                     </>
                   ) : (
-                    <div className="w-[160px] text-center text-[11.5px] text-[#A0AEC0] bg-[#F7FAFC] border border-dashed border-[#E2E8F0] rounded-xl px-3 py-2.5 leading-relaxed">
+                    <div className="w-[160px] text-center text-[11.5px] text-gray-400 bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
                       레거시 인재풀 후보예요.<br />연락처로 직접 컨택하세요.
                     </div>
                   )}

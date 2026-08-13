@@ -148,41 +148,41 @@ export function Inbox() {
 
   return (
     <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-[#FFCB3C] rounded-2xl flex items-center justify-center shadow-sm">
-            <InboxIcon size={24} className="text-[#1A202C]" />
+          <div className="w-12 h-12 bg-brand-yellow rounded-2xl flex items-center justify-center shadow-sm">
+            <InboxIcon size={24} className="text-foreground" />
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">분류 대기 문자함</h1>
-            <p className="text-[14px] text-[#718096]">어느 지원자의 문자인지 자동으로 연결하지 못한 수신 문자입니다. 아래 버튼으로 직접 분류해주세요.</p>
+            <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">분류 대기 문자함</h1>
+            <p className="text-[14px] text-muted-foreground">어느 지원자의 문자인지 자동으로 연결하지 못한 수신 문자입니다. 아래 버튼으로 직접 분류해주세요.</p>
           </div>
         </div>
         <button
           onClick={() => mutate()}
-          className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
         >
           <RefreshCw size={16} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
       </div>
 
-      <div className="flex items-center gap-2 mb-5 text-[13px] text-[#718096]">
-        <MessageSquareWarning size={16} className="text-[#D69E2E]" />
-        처리 대기 <b className="text-[#1A202C]">{messages.length}</b>건
+      <div className="flex items-center gap-2 mb-5 text-[13px] text-muted-foreground">
+        <MessageSquareWarning size={16} className="text-yellow-600" />
+        처리 대기 <b className="text-foreground">{messages.length}</b>건
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 text-[13px] text-[#A0AEC0] py-10">
+        <div className="flex items-center gap-2 text-[13px] text-gray-400 py-10">
           <Loader2 size={16} className="animate-spin" /> 불러오는 중…
         </div>
       )}
 
       {!loading && messages.length === 0 && (
-        <div className="flex flex-col items-center justify-center text-center py-20 text-[#A0AEC0]">
-          <div className="w-16 h-16 rounded-full bg-[#F0FFF4] flex items-center justify-center mb-4">
-            <Check size={30} className="text-[#38A169]" />
+        <div className="flex flex-col items-center justify-center text-center py-20 text-gray-400">
+          <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mb-4">
+            <Check size={30} className="text-success" />
           </div>
-          <div className="text-[15px] font-bold text-[#4A5568] mb-1">모두 처리했어요</div>
+          <div className="text-[15px] font-bold text-gray-700 mb-1">모두 처리했어요</div>
           <div className="text-[13px]">분류가 필요한 문자가 새로 오면 여기에 표시됩니다.</div>
         </div>
       )}
@@ -191,34 +191,34 @@ export function Inbox() {
         {messages.map((msg) => {
           const busy = busyId === msg.id;
           return (
-            <div key={msg.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+            <div key={msg.id} className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[13px] font-bold text-[#4A5568]">
-                  <Phone size={13} className="text-[#A0AEC0]" /> {msg.applicant_phone}
+                <div className="flex items-center gap-2 text-[13px] font-bold text-gray-700">
+                  <Phone size={13} className="text-gray-400" /> {msg.applicant_phone}
                 </div>
-                <span className="text-[12px] text-[#A0AEC0]">{formatTime(msg.created_at)}</span>
+                <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
               </div>
-              <div className="text-[14px] leading-relaxed text-[#2D3748] bg-[#F7FAFC] border border-[#EDF2F7] rounded-xl px-4 py-3 whitespace-pre-wrap">
+              <div className="text-[14px] leading-relaxed text-gray-800 bg-background border border-muted rounded-xl px-4 py-3 whitespace-pre-wrap">
                 {msg.body}
               </div>
               <div className="flex items-center justify-end gap-2">
                 <button
                   onClick={() => classify(msg, "other")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 >
                   <Ban size={15} /> 기타로 분류
                 </button>
                 <button
                   onClick={() => classify(msg, "ongmanaging")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                 >
                   <ArrowRightLeft size={15} /> 기존 계약자 문의
                 </button>
                 {/* 지원자로 등록 — 어느 라인/공고로 보낼지 선택(도시락 등 실공고 or 배민 커넥트 자동). */}
                 <div className="relative flex items-center">
-                  {busy && <Loader2 size={15} className="animate-spin text-[#A0AEC0] mr-2" />}
+                  {busy && <Loader2 size={15} className="animate-spin text-gray-400 mr-2" />}
                   <select
                     disabled={busy}
                     value=""
@@ -230,7 +230,7 @@ export function Inbox() {
                         classify(msg, "job", { jobId: Number(v), jobLabel: j?.title });
                       }
                     }}
-                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
                     title="이 문의를 지원자로 등록할 공고(라인)를 선택하세요"
                   >
                     <option value="">＋ 지원자로 등록…</option>
@@ -243,7 +243,7 @@ export function Inbox() {
                     )}
                     <option value="baemin">배민 커넥트(자동 분류)</option>
                   </select>
-                  <Check size={14} className="absolute right-3 text-[#FFCB3C] pointer-events-none" />
+                  <Check size={14} className="absolute right-3 text-brand-yellow pointer-events-none" />
                 </div>
               </div>
             </div>

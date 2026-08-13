@@ -287,42 +287,42 @@ export default function PoolPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#FFFBEC] flex items-center justify-center p-6">
-        <p className="text-[18px] font-bold text-[#4A5568]">공고를 불러오고 있어요…</p>
+      <main className="min-h-screen bg-yellow-50 flex items-center justify-center p-6">
+        <p className="text-[18px] font-bold text-gray-700">공고를 불러오고 있어요…</p>
       </main>
     );
   }
 
   if (notFound) {
     return (
-      <main className="min-h-screen bg-[#FFFBEC] flex items-center justify-center p-6">
+      <main className="min-h-screen bg-yellow-50 flex items-center justify-center p-6">
         <div className="text-center">
-          <p className="text-[20px] font-extrabold text-[#1A202C] mb-2">링크를 확인할 수 없어요</p>
-          <p className="text-[15px] text-[#718096]">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
+          <p className="text-[20px] font-extrabold text-foreground mb-2">링크를 확인할 수 없어요</p>
+          <p className="text-[15px] text-muted-foreground">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#FFFBEC]">
-      <div className="max-w-[560px] mx-auto px-5 py-8">
+    <main className="min-h-screen bg-yellow-50">
+      <div className="max-w-[560px] mx-auto w-full px-5 py-8">
         <header className="mb-6">
-          <div className="text-[14px] font-bold text-[#B7791F] mb-1">옹고잉 · 맞춤 일자리</div>
-          <h1 className="text-[24px] font-extrabold text-[#1A202C] leading-snug">
+          <div className="text-[14px] font-bold text-yellow-700 mb-1">옹고잉 · 맞춤 일자리</div>
+          <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
             {name ? `${name}님,` : "안녕하세요,"}
             <br />지금 모집 중인 일자리예요
           </h1>
-          <p className="mt-2 text-[15px] text-[#718096] leading-relaxed">
-            마음에 드는 일자리에 <b className="text-[#1A202C]">[관심 있어요]</b>를 눌러주세요.
+          <p className="mt-2 text-[15px] text-muted-foreground leading-relaxed">
+            마음에 드는 일자리에 <b className="text-foreground">[관심 있어요]</b>를 눌러주세요.
             담당 매니저가 확인 후 연락드립니다.
           </p>
         </header>
 
         {jobs.filter((j) => !j.expired).length === 0 && (
-          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 text-center mb-4">
-            <p className="text-[17px] font-bold text-[#1A202C] mb-1">지금은 모집 중인 공고가 없어요</p>
-            <p className="text-[14px] text-[#718096]">새 일자리가 나오면 문자로 알려드릴게요.</p>
+          <div className="bg-white border border-border-strong rounded-2xl p-6 text-center mb-4">
+            <p className="text-[17px] font-bold text-foreground mb-1">지금은 모집 중인 공고가 없어요</p>
+            <p className="text-[14px] text-muted-foreground">새 일자리가 나오면 문자로 알려드릴게요.</p>
           </div>
         )}
 
@@ -333,28 +333,28 @@ export default function PoolPage() {
             if (job.expired) {
               const notified = notifyIds.has(job.id);
               return (
-                <section key={job.id} className="bg-[#F7FAFC] border border-[#E2E8F0] rounded-2xl p-5">
-                  <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#EDF2F7] text-[#718096] border border-[#E2E8F0]">
+                <section key={job.id} className="bg-background border border-border-strong rounded-2xl p-5">
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-muted text-muted-foreground border border-border-strong">
                     마감됨
                   </span>
-                  <h2 className="mt-2 text-[17px] font-extrabold text-[#718096] leading-snug">{job.title}</h2>
+                  <h2 className="mt-2 text-[17px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
                   {job.interested && (
-                    <p className="mt-2 text-[14px] font-bold text-[#38A169]">
+                    <p className="mt-2 text-[14px] font-bold text-success">
                       ✓ 관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.
                     </p>
                   )}
-                  <p className="mt-2 text-[14px] text-[#A0AEC0] leading-relaxed">
+                  <p className="mt-2 text-[14px] text-gray-400 leading-relaxed">
                     이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
                   </p>
                   {notified ? (
-                    <p className="mt-3 py-3 text-[15px] font-bold text-[#38A169] text-center">
+                    <p className="mt-3 py-3 text-[15px] font-bold text-success text-center">
                       ✓ 네, 새 일자리가 나오면 먼저 안내드릴게요
                     </p>
                   ) : (
                     <button
                       onClick={() => expressNotify(job)}
                       disabled={sendingId !== null}
-                      className="mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#CBD5E0] text-[#4A5568] hover:bg-[#EDF2F7] active:bg-[#EDF2F7]"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-gray-300 text-gray-700 hover:bg-muted active:bg-muted"
                     >
                       {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
                     </button>
@@ -369,51 +369,51 @@ export default function PoolPage() {
             const done = doneIds.has(job.id);
             const pay = payLabel(job);
             return (
-              <section key={job.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+              <section key={job.id} className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {/* 상황 배지 — '나 이 자리 어디까지 했더라'를 카드가 먼저 답한다(문구 규칙은 lib/pool-status). */}
                   {job.status === "talking" && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
                       💬 이야기 중
                     </span>
                   )}
                   {job.status === "paused" && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8]">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-info-soft text-info-strong border border-info/25">
                       매니저 확인 중
                     </span>
                   )}
                   {job.work_period && (
                     <span
-                      className={`inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold ${
+                      className={`inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold ${
                         job.work_period === "정기"
-                          ? "bg-[#F0FFF4] text-[#2F855A] border border-[#C6F6D5]"
-                          : "bg-[#FFF9E6] text-[#B7791F] border border-[#F6E4B0]"
+                          ? "bg-success-soft text-success-strong border border-success/25"
+                          : "bg-yellow-50 text-yellow-700 border border-yellow-200"
                       }`}
                     >
                       {PERIOD_LABEL[job.work_period] ?? job.work_period}
                     </span>
                   )}
                   {job.closes_at && (
-                    <span className="inline-block px-2 py-0.5 rounded-md text-[13px] font-extrabold bg-[#FFF5F5] text-[#C53030] border border-[#FED7D7]">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-error-soft text-error-strong border border-error-soft">
                       ⏰ {closesLabel(job.closes_at)}
                     </span>
                   )}
                 </div>
                 {/* 제목의 끝 '(…원)'은 아래 급여 행과 중복이라 표시에서 제거(불필요한 글자↓).
                     '(7/23~8/24)' 같은 날짜 괄호는 원으로 안 끝나 유지된다. */}
-                <h2 className="mt-2 text-[18px] font-extrabold text-[#1A202C] leading-snug">
+                <h2 className="mt-2 text-[18px] font-extrabold text-foreground leading-snug">
                   {job.title.replace(/\s*\([^)]*원\)\s*$/, "")}
                 </h2>
-                <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-[#4A5568]">
+                <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-gray-700">
                   {pay && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">급여</dt>
-                      <dd className="font-bold text-[#1A202C]">{pay} <span className="font-medium text-[13px] text-[#A0AEC0]">(변동될 수 있어요)</span></dd>
+                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">급여</dt>
+                      <dd className="font-bold text-foreground">{pay} <span className="font-medium text-[13px] text-gray-400">(변동될 수 있어요)</span></dd>
                     </div>
                   )}
                   {(job.branch || job.pickup_address) && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">{job.branch ? "지점" : "출발지"}</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">{job.branch ? "지점" : "출발지"}</dt>
                       {/* 지점명이 없으면 집결지 주소로 대신 보여주되 **권역까지만** — 상세주소(동/번지 뒤)는
                           확정 후 만남장소 안내에서 알려준다. 링크만 있으면 누구나 보는 화면이다. */}
                       <dd className="break-words">{job.branch || coarseArea(job.pickup_address)}</dd>
@@ -421,34 +421,34 @@ export default function PoolPage() {
                   )}
                   {job.distance_km !== null && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">거리</dt>
-                      <dd className="font-bold text-[#38A169]">집에서 약 {job.distance_km}km</dd>
+                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">거리</dt>
+                      <dd className="font-bold text-success">집에서 약 {job.distance_km}km</dd>
                     </div>
                   )}
                   {job.slot && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">근무시간</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">근무시간</dt>
                       <dd>{job.slot}</dd>
                     </div>
                   )}
                   {job.start_date && (
                     <div className="flex gap-2">
-                      <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">시작일</dt>
+                      <dt className="w-[72px] shrink-0 font-bold text-gray-400">시작일</dt>
                       <dd>{startDateLabel(job.start_date)}</dd>
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <dt className="w-[72px] shrink-0 font-bold text-[#A0AEC0]">차량</dt>
+                    <dt className="w-[72px] shrink-0 font-bold text-gray-400">차량</dt>
                     <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
                   </div>
                   {/* 요건이 어긋난 이유 — 서버 fit 판정(lib/pool-fit)의 문장을 그대로 보여준다(판정 한 곳).
                       카드를 감추지는 않는다 — 차량이 새로 생겼을 수 있고, 판단은 지원자 몫. */}
                   {job.fit_reasons.length > 0 && (
-                    <div className="mt-1 rounded-lg bg-[#FFFBEC] border border-[#F6E4B0] px-3 py-2 text-[14px] font-bold text-[#B7791F] leading-snug">
+                    <div className="mt-1 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-[14px] font-bold text-yellow-700 leading-snug">
                       {job.fit_reasons.map((r, i) => (
                         <p key={i}>{r}</p>
                       ))}
-                      <p className="mt-1 font-semibold text-[#B7791F]">
+                      <p className="mt-1 font-semibold text-yellow-700">
                         {done ? "매니저가 연락드릴 때 함께 확인할게요." : "그래도 괜찮으시면 관심을 눌러 주세요."}
                       </p>
                     </div>
@@ -456,16 +456,16 @@ export default function PoolPage() {
                 </dl>
 
                 {job.body && (
-                  <div className="mt-3 border-t border-[#EDF2F7] pt-2">
+                  <div className="mt-3 border-t border-muted pt-2">
                     {/* 본문은 기본 접힘 — 위 요약(급여·시작일·차량)이 스캔 단위. 프로즈가 요약과 겹쳐
                         기본 노출하면 글자만 많아지고 3개 비교가 어렵다. 원하는 사람만 펼쳐 본다. */}
                     {expandedIds.has(job.id) && (
-                      <div className="mt-1 text-[15px] text-[#4A5568] leading-relaxed">
+                      <div className="mt-1 text-[15px] text-gray-700 leading-relaxed">
                         {/* 업무 관련 주요 내용(■ 항목 = 운임·요일·시간·차량 등)은 볼드로 강조 */}
                         {job.body.split("\n").map((line, i) => (
                           <p
                             key={i}
-                            className={line.trimStart().startsWith("■") ? "font-bold text-[#1A202C]" : ""}
+                            className={line.trimStart().startsWith("■") ? "font-bold text-foreground" : ""}
                           >
                             {line || " "}
                           </p>
@@ -474,7 +474,7 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="py-2.5 mb-2 text-[15px] font-bold text-[#B7791F]"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[15px] font-bold text-yellow-700"
                     >
                       {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
                     </button>
@@ -490,12 +490,12 @@ export default function PoolPage() {
                       setConfirmingId(job.id);
                     }}
                     disabled={done || sendingId !== null}
-                    className={`mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
                       done
-                        ? "bg-[#F0FFF4] text-[#38A169] border border-[#9AE6B4]"
+                        ? "bg-success-soft text-success border border-success-soft"
                         : sendingId !== null
-                          ? "bg-[#EDF2F7] text-[#A0AEC0]"
-                          : "bg-[#FFCB3C] text-[#1A202C] hover:bg-[#E0B500] active:bg-[#E0B500]"
+                          ? "bg-muted text-gray-400"
+                          : "bg-brand-yellow text-foreground hover:bg-yellow-500 active:bg-yellow-500"
                     } disabled:cursor-default`}
                   >
                     {done
@@ -512,13 +512,13 @@ export default function PoolPage() {
                   </button>
                 ) : (
                   // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
-                  <div className="mt-5 rounded-xl border-2 border-[#FFCB3C] bg-[#FFFBEC] p-3">
-                    <p className="text-[16px] font-bold text-[#1A202C] text-center leading-snug">
-                      <span className="text-[#B7791F]">{job.title}</span>
+                  <div className="mt-5 rounded-xl border-2 border-brand-yellow bg-yellow-50 p-3">
+                    <p className="text-[16px] font-bold text-foreground text-center leading-snug">
+                      <span className="text-yellow-700">{job.title}</span>
                       <br />이 일자리에 관심 있다고 보낼까요?
                     </p>
                     {job.vehicle_required && ownVehicle === "없음" && (
-                      <p className="mt-2 text-[14px] font-bold text-[#C05621] text-center leading-snug">
+                      <p className="mt-2 text-[14px] font-bold text-warning-strong text-center leading-snug">
                         본인 차량이 필요한 자리예요 — 괜찮으신가요?
                       </p>
                     )}
@@ -526,14 +526,14 @@ export default function PoolPage() {
                       <button
                         onClick={() => setConfirmingId(null)}
                         disabled={sendingId !== null}
-                        className="flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-[#4A5568] border border-[#CBD5E0]"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-gray-700 border border-gray-300"
                       >
                         아니요
                       </button>
                       <button
                         onClick={() => expressInterest(job)}
                         disabled={sendingId !== null}
-                        className="flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-[#FFCB3C] text-[#1A202C] active:bg-[#E0B500] disabled:opacity-70"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
                       >
                         {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
                       </button>
@@ -542,22 +542,22 @@ export default function PoolPage() {
                 )}
 
                 {done && (followupIds.has(job.id) || (job.status !== "talking" && job.status !== "paused")) && (
-                  <div className="mt-3 rounded-xl bg-[#FFFBEC] border border-[#F6E4B0] p-3">
+                  <div className="mt-3 rounded-xl bg-yellow-50 border border-yellow-200 p-3">
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
                     {immediateIds.has(job.id) || availability === "즉시가능" ? (
-                      <p className="text-[15px] font-bold text-[#38A169] text-center">
+                      <p className="text-[15px] font-bold text-success text-center">
                         ⚡ 바로 시작 가능 — 확인했어요! 매니저가 참고할게요
                       </p>
                     ) : (
                       <>
-                        <p className="text-[15px] font-bold text-[#4A5568] text-center mb-2">
+                        <p className="text-[15px] font-bold text-gray-700 text-center mb-2">
                           혹시 시작일에 바로 시작도 가능하세요?
                         </p>
                         <button
                           onClick={() => expressImmediate(job)}
                           disabled={sendingId !== null}
-                          className="w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-[#FFCB3C] text-[#1A202C] hover:bg-[#FFF9E6] active:bg-[#FFF9E6]"
+                          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-brand-yellow text-foreground hover:bg-yellow-50 active:bg-yellow-50"
                         >
                           {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}
                         </button>
@@ -567,7 +567,7 @@ export default function PoolPage() {
                 )}
 
                 {job.closes_at && (
-                  <p className="mt-3 text-[13px] text-[#A0AEC0] text-center leading-relaxed">
+                  <p className="mt-3 text-[13px] text-gray-400 text-center leading-relaxed">
                     마감시각이 지나면 새 지원은 받을 수 없어요.
                     <br />먼저 관심 주신 분부터 매니저가 연락드립니다.
                   </p>
@@ -597,18 +597,18 @@ export default function PoolPage() {
                   {/* 요건이 어긋난 자리는 접어두되 **숨기지 않는다** — 차량이 새로 생겼을 수 있고 판단은 지원자 몫. */}
                   {forceShowOthers ? (
                     // 전부 접힐 상황 — 안내 한 줄을 주고 카드를 그대로 보여준다(빈 화면 금지).
-                    <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 mb-4">
-                      <p className="text-[16px] font-bold text-[#1A202C] leading-snug">
+                    <div className="rounded-2xl bg-white border border-border-strong p-4 mb-4">
+                      <p className="text-[16px] font-bold text-foreground leading-snug">
                         지금 올라온 자리는 등록해 주신 정보와 조건이 좀 달라요
                       </p>
-                      <p className="mt-1 text-[14px] text-[#718096] leading-relaxed">
+                      <p className="mt-1 text-[14px] text-muted-foreground leading-relaxed">
                         그래도 괜찮으시면 관심을 눌러 주세요 — 매니저가 확인 후 연락드립니다.
                       </p>
                     </div>
                   ) : (
                     <button
                       onClick={() => setShowOthers((v) => !v)}
-                      className="w-full py-4 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-dashed border-[#CBD5E0] text-[#718096] hover:bg-[#F7FAFC] active:bg-[#F7FAFC]"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-4 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-dashed border-gray-300 text-muted-foreground hover:bg-background active:bg-background"
                     >
                       {showOthers
                         ? "조건이 다른 자리 접기 ▲"
@@ -625,7 +625,7 @@ export default function PoolPage() {
           );
         })()}
 
-        <footer className="mt-8 text-center text-[13px] text-[#A0AEC0] leading-relaxed">
+        <footer className="mt-8 text-center text-[13px] text-gray-400 leading-relaxed">
           이 페이지는 본인 전용 링크예요. 다른 분과 공유하지 말아주세요.
           <br />관심 표시는 지원 의사 확인이며, 근무 확정은 매니저 안내 후 진행됩니다.
         </footer>

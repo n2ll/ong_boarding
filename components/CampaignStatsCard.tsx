@@ -74,52 +74,52 @@ export function CampaignStatsCard() {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.35 }}
-      className="bg-white border border-[#E2E8F0] rounded-[16px] p-6 shadow-sm flex flex-col"
+      className="bg-white border border-border-strong rounded-[16px] p-6 shadow-sm flex flex-col"
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-[#1A202C] flex items-center gap-1.5">
-            <Megaphone size={15} className="text-[#3182CE]" /> 다시 연락 캠페인 (최근 {data.window_days}일)
+          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
+            <Megaphone size={15} className="text-info" /> 다시 연락 캠페인 (최근 {data.window_days}일)
           </h2>
-          <div className="text-[12px] text-[#718096] mt-0.5" title={`발송 묶음 — 최근 ${data.window_days}일 안에 다시 연락 문자를 받은 인원 묶음`}>
+          <div className="text-[12px] text-muted-foreground mt-0.5" title={`발송 묶음 — 최근 ${data.window_days}일 안에 다시 연락 문자를 받은 인원 묶음`}>
             발송 묶음 {data.sent}명의 반응 현황
-            <span className="text-[#CBD5E0]"> · </span>
+            <span className="text-gray-300"> · </span>
             마지막 발송 {agoLabel(data.last_sent_at, nowTick)}
-            <span className="text-[#CBD5E0]"> · </span>
+            <span className="text-gray-300"> · </span>
             문자 {data.sent_messages}건
           </div>
         </div>
         <button
           onClick={() => void mutate()}
           title="집계 새로고침"
-          className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+          className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
         >
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
       </div>
 
       {/* 단계별 현황 한 줄 — 각 단계 카운트 + 발송 대비 비율. 관심/답장은 처리 큐 카드로 앵커 이동. */}
-      <div className="flex items-stretch gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-stretch">
         {steps.map((s, i) => {
           const inner = (
             <>
-              <div className="text-[11px] font-bold text-[#718096]">{s.label}</div>
+              <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-[20px] font-extrabold text-[#1A202C] leading-none tracking-tight">{s.value}</span>
-                <span className="text-[11px] text-[#A0AEC0] font-bold">명</span>
+                <span className="text-[20px] font-extrabold text-foreground leading-none tracking-tight">{s.value}</span>
+                <span className="text-[11px] text-gray-400 font-bold">명</span>
                 {s.pct !== null && (
-                  <span className="text-[10.5px] font-bold text-[#718096] bg-[#EDF2F7] px-1.5 py-0.5 rounded">{s.pct}%</span>
+                  <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">{s.pct}%</span>
                 )}
               </div>
             </>
           );
           return (
             <Fragment key={s.key}>
-              {i > 0 && <ChevronRight size={14} className="text-[#CBD5E0] shrink-0 self-center" />}
+              {i > 0 && <ChevronRight size={14} className="text-gray-300 shrink-0 self-center" />}
               <button
                 onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
                 title={s.anchor ? `${s.label === "답장" ? "내가 답할 차례" : s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
-                className="flex-1 text-left rounded-xl border border-[#E2E8F0] bg-[#F7FAFC] px-4 py-3 hover:border-[#90CDF4] hover:bg-[#EBF8FF] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                className="flex-1 text-left rounded-xl border border-border-strong bg-background px-4 py-3 hover:border-info/60 hover:bg-info-soft transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
               >
                 {inner}
               </button>
@@ -130,22 +130,22 @@ export function CampaignStatsCard() {
 
       {/* 하단: 공고별 관심 분해 칩 + 실패/수신거부 (있을 때만) */}
       {(data.by_job.length > 0 || data.failed > 0 || data.opted_out > 0) && (
-        <div className="mt-4 pt-3 border-t border-[#F1F4F8] flex items-center gap-2 flex-wrap">
+        <div className="mt-4 pt-3 border-t border-muted flex items-center gap-2 flex-wrap">
           {data.by_job.length > 0 && (
             <>
-              <span className="text-[11px] font-bold text-[#A0AEC0] shrink-0">공고별 관심</span>
+              <span className="text-[11px] font-bold text-gray-400 shrink-0">공고별 관심</span>
               {data.by_job.map((j) => (
                 <button
                   key={j.job_id}
                   onClick={() => scrollToAnchor("interest-queue")}
                   title={`${j.title} — 관심 표시 처리 큐로 이동`}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-[#4A5568] bg-white border border-[#E2E8F0] hover:bg-[#F7FAFC] hover:border-[#90CDF4] px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3182CE]/40"
+                  className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background hover:border-info/60 px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
                 >
-                  <span className="text-[#A0AEC0]">#{j.job_id}</span>
+                  <span className="text-gray-400">#{j.job_id}</span>
                   <span className="max-w-[160px] truncate">{j.title}</span>
-                  <span className="text-[#3182CE]">{j.count}</span>
+                  <span className="text-info">{j.count}</span>
                   {j.immediate_count > 0 && (
-                    <span className="flex items-center gap-0.5 text-[#276749]">
+                    <span className="flex items-center gap-0.5 text-success-strong">
                       · <Zap size={11} /> {j.immediate_count}
                     </span>
                   )}
@@ -155,8 +155,8 @@ export function CampaignStatsCard() {
           )}
           {(data.failed > 0 || data.opted_out > 0) && (
             <span className="ml-auto flex items-center gap-3 shrink-0 text-[11.5px]">
-              {data.failed > 0 && <span className="font-semibold text-[#A0AEC0]">발송 실패 {data.failed}건</span>}
-              {data.opted_out > 0 && <span className="font-bold text-[#E53E3E]">수신거부 {data.opted_out}명</span>}
+              {data.failed > 0 && <span className="font-semibold text-gray-400">발송 실패 {data.failed}건</span>}
+              {data.opted_out > 0 && <span className="font-bold text-error">수신거부 {data.opted_out}명</span>}
             </span>
           )}
         </div>

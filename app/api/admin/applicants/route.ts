@@ -74,12 +74,23 @@ export async function GET(req: NextRequest) {
   let withStage = data ?? [];
   if (withStage.length > 0) {
     const ids = withStage.map((a) => a.id);
-    const { data: jcs } = await supabase
-      .from("job_candidates")
-      .select("id, applicant_id, agent_stage, created_at")
-      .in("applicant_id", ids)
-      .order("created_at", { ascending: false });
+    const jobIds = [...new Set(withStage.map((a) => a.current_job_id).filter((v): v is number => typeof v === "number"))];
 
+    // 아래 세 조회는 서로 의존하지 않는다(모두 위에서 얻은 ids/jobIds만 필요) —
+    // 순차로 await하면 Supabase 왕복 지연이 그대로 더해져 목록이 1초 가까이 걸렸다.
+    const [jcRes, linkRes, jobRes] = await Promise.all([
+      supabase
+        .from("job_candidates")
+        .select("id, applicant_id, agent_stage, created_at")
+        .in("applicant_id", ids)
+        .order("created_at", { ascending: false }),
+      gatherLiveJobLinks(supabase, ids),
+      jobIds.length > 0
+        ? supabase.from("jobs").select("id, recruit_mode").in("id", jobIds)
+        : Promise.resolve({ data: [] as { id: number; recruit_mode: string | null }[] }),
+    ]);
+
+    const jcs = jcRes.data;
     const stageByApplicant = new Map<number, string | null>();
     for (const jc of jcs ?? []) {
       if (!stageByApplicant.has(jc.applicant_id as number)) {
@@ -95,7 +106,7 @@ export async function GET(req: NextRequest) {
     // 위 agent_stage는 '가장 최근 행의 단계'(종료·마감 공고 포함)로 예전부터 쓰던 값이라 그대로 둔다.
     // 배지에 쓰는 집합은 응대 화면 탭·상세 포커스와 **같은 함수**여야 해서 여기서 따로 계산한다
     // (목록에 3건이라 적혀 있으면 열었을 때 탭도 3개 — lib/candidate-links.ts).
-    const { links, error: linkErr } = await gatherLiveJobLinks(supabase, ids);
+    const { links, error: linkErr } = linkRes;
     if (linkErr) {
       // 배지가 없어도 목록은 쓸 수 있다 — 500으로 올리지 않고 로그만 남긴다.
       console.error("[applicants] job_links 조회 실패", linkErr);
@@ -104,11 +115,9 @@ export async function GET(req: NextRequest) {
 
     // 현재 공고(current_job_id)의 라인 형태(recruit_mode)를 함께 내려준다 — 대시보드·목록의
     // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
-    const jobIds = [...new Set(withStage.map((a) => a.current_job_id).filter((v): v is number => typeof v === "number"))];
     if (jobIds.length > 0) {
-      const { data: jobRows } = await supabase.from("jobs").select("id, recruit_mode").in("id", jobIds);
       const modeByJob = new Map<number, string | null>();
-      for (const j of jobRows ?? []) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
+      for (const j of jobRes.data ?? []) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
       withStage = withStage.map((a) => ({
         ...a,
         current_recruit_mode: typeof a.current_job_id === "number" ? modeByJob.get(a.current_job_id) ?? null : null,

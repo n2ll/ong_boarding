@@ -221,23 +221,23 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
-          {!embedded && <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">화주사 관리</h1>}
-          <p className="text-[14px] text-[#718096]">공고가 참조하는 화주사입니다. 실제 화주사는 옹매니징이 원본이라 <b>‘옹매니징 동기화’</b>로 가져옵니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
+          {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">화주사 관리</h1>}
+          <p className="text-[14px] text-muted-foreground">공고가 참조하는 화주사입니다. 실제 화주사는 옹매니징이 원본이라 <b className="whitespace-normal break-keep">‘옹매니징 동기화’</b>로 가져옵니다. 운영 중 {activeCount}곳 · 전체 {clients.length}곳.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={runSync}
             disabled={syncing}
             title="옹매니징(계약·정산)에 등록된 화주사를 공고용으로 가져옵니다"
-            className="flex items-center gap-2 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
           >
             {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 옹매니징 동기화
           </button>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-[#1A202C] hover:bg-[#2D3748] text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
           >
             <Plus size={18} /> 신규 화주사 등록
           </button>
@@ -245,25 +245,25 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {integ && (
-        <div className="mb-6 bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
-          <div className="flex items-center justify-between mb-3">
+        <div className="mb-6 bg-white border border-border-strong rounded-2xl shadow-sm p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
-              <span className="text-[14px] font-bold text-[#1A202C]">데이터 정합성 점검</span>
+              <span className="text-[14px] font-bold text-foreground">데이터 정합성 점검</span>
               {integ.jobs_backfillable + integ.jobs_missing_client + integ.branches_missing_client > 0 ? (
-                <span className="text-[11px] font-bold text-[#DD6B20] bg-[#FFFAF0] border border-[#FBD38D] px-2 py-0.5 rounded-full">자동 연결 가능 항목 있음</span>
+                <span className="text-[11px] font-bold text-warning bg-yellow-50 border border-warning/35 px-2 py-0.5 rounded-full">자동 연결 가능 항목 있음</span>
               ) : (
-                <span className="text-[11px] font-bold text-[#38A169] bg-[#F0FFF4] border border-[#C6F6D5] px-2 py-0.5 rounded-full">정합 상태</span>
+                <span className="text-[11px] font-bold text-success bg-success-soft border border-success/25 px-2 py-0.5 rounded-full">정합 상태</span>
               )}
             </div>
             <button
               onClick={runBackfill}
               disabled={integRunning}
-              className="flex items-center gap-1.5 bg-white border border-[#E2E8F0] text-[#4A5568] hover:bg-[#F7FAFC] px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors disabled:opacity-60"
+              className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 bg-white border border-border-strong text-gray-700 hover:bg-background px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors disabled:opacity-60"
             >
               {integRunning ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 재백필 실행
             </button>
           </div>
-          <div className="grid grid-cols-5 gap-3 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             {[
               { label: "공고 연결됨", value: `${integ.jobs_linked}/${integ.jobs_total}`, warn: false },
               { label: "자동 연결 가능", value: integ.jobs_backfillable, warn: integ.jobs_backfillable > 0 },
@@ -271,31 +271,31 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               { label: "화주사 누락 공고", value: integ.jobs_missing_client, warn: integ.jobs_missing_client > 0 },
               { label: "화주사 누락 지점", value: integ.branches_missing_client, warn: integ.branches_missing_client > 0 },
             ].map((m) => (
-              <div key={m.label} className={`rounded-xl border px-2 py-2.5 ${m.warn ? "border-[#FBD38D] bg-[#FFFAF0]" : "border-[#E2E8F0] bg-[#FCFDFE]"}`}>
-                <div className={`text-[18px] font-extrabold ${m.warn ? "text-[#DD6B20]" : "text-[#1A202C]"}`}>{m.value}</div>
-                <div className="text-[11px] font-bold text-[#718096] mt-0.5">{m.label}</div>
+              <div key={m.label} className={`rounded-xl border px-2 py-2.5 ${m.warn ? "border-warning/35 bg-yellow-50" : "border-border-strong bg-surface-raised"}`}>
+                <div className={`text-[18px] font-extrabold ${m.warn ? "text-warning" : "text-foreground"}`}>{m.value}</div>
+                <div className="text-[11px] font-bold text-muted-foreground mt-0.5">{m.label}</div>
               </div>
             ))}
           </div>
-          <p className="text-[11.5px] text-[#A0AEC0] mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
+          <p className="text-[11.5px] text-gray-400 mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
         </div>
       )}
 
-      <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden flex flex-col">
-        <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between">
+      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+        <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-3">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A0AEC0]" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="기업명·담당자 검색"
-              className="pl-9 pr-4 py-2 border border-[#E2E8F0] rounded-xl text-sm w-[260px] focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]"
+              className="pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm w-[260px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-[#E2E8F0] bg-[#F7FAFC] text-[13px] font-bold text-[#718096]">
+        <div className="grid min-w-[880px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>화주사 명</div>
           <div>유형 / 슬롯</div>
           <div>등록 지점 수</div>
@@ -304,11 +304,11 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="text-right">관리</div>
         </div>
 
-        {loading && <div className="px-6 py-10 text-[13px] text-[#A0AEC0]">불러오는 중…</div>}
+        {loading && <div className="px-6 py-10 text-[13px] text-gray-400">불러오는 중…</div>}
         {!loading && filtered.length === 0 && (
-          <div className="px-6 py-10 text-center text-[13px] text-[#A0AEC0]">
+          <div className="px-6 py-10 text-center text-[13px] text-gray-400">
             {search ? `'${search}' 검색 결과가 없어요.` : (
-              <>등록된 화주사가 없어요. <button onClick={openCreate} className="text-[#3182CE] font-bold hover:underline">신규 등록</button>으로 시작하세요.</>
+              <>등록된 화주사가 없어요. <button onClick={openCreate} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info font-bold hover:underline">신규 등록</button>으로 시작하세요.</>
             )}
           </div>
         )}
@@ -318,33 +318,33 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             const myBranches = branches.filter((b) => b.client_id === client.id);
             const expanded = expandedId === client.id;
             return (
-            <div key={client.id} className={`border-b border-[#F1F4F8] ${client.active ? "" : "opacity-60"}`}>
-              <div className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-[#F7FAFC] transition-colors cursor-pointer ${expanded ? "bg-[#F7FAFC]" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
+            <div key={client.id} className={`border-b border-muted ${client.active ? "" : "opacity-60"}`}>
+              <div className={`grid min-w-[880px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.5fr] items-center px-6 py-5 hover:bg-background transition-colors cursor-pointer ${expanded ? "bg-background" : ""}`} onClick={() => setExpandedId(expanded ? null : client.id)}>
               <div className="flex items-center gap-3">
-                <ChevronRight size={16} className={`text-[#A0AEC0] transition-transform ${expanded ? "rotate-90" : ""}`} />
-                <div className="w-10 h-10 bg-[#EDF2F7] rounded-lg flex items-center justify-center shrink-0">
-                  <Building2 size={18} className="text-[#A0AEC0]" />
+                <ChevronRight size={16} className={`text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
+                  <Building2 size={18} className="text-gray-400" />
                 </div>
                 <div>
-                  <div className="font-extrabold text-[#1A202C] flex items-center gap-2">
+                  <div className="font-extrabold text-foreground flex items-center gap-2">
                     {client.name}
-                    {!client.active && <span className="text-[10px] font-bold bg-[#EDF2F7] text-[#718096] px-1.5 py-0.5 rounded border border-[#CBD5E0]">비활성</span>}
+                    {!client.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-gray-300">비활성</span>}
                   </div>
-                  {client.memo && <div className="text-[12px] text-[#A0AEC0] mt-0.5 line-clamp-1">{client.memo}</div>}
+                  {client.memo && <div className="text-[12px] text-gray-400 mt-0.5 line-clamp-1">{client.memo}</div>}
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#EDF2F7] text-[#4A5568]">{CLIENT_TYPE_LABEL[client.client_type]}</span>
-                {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-[#B7791F]"><Clock4 size={11} /> 확정슬롯</span>}
+                <span className="inline-flex w-fit items-center text-[12px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{CLIENT_TYPE_LABEL[client.client_type]}</span>
+                {client.uses_slots && <span className="inline-flex w-fit items-center gap-1 text-[11px] font-bold text-yellow-700"><Clock4 size={11} /> 확정슬롯</span>}
               </div>
-              <div className="text-[14px] font-bold text-[#1A202C]">{client.branches_count}개</div>
-              <div className="text-[14px] font-bold text-[#3182CE]">{client.active_jobs}건</div>
-              <div className="text-[13px] text-[#4A5568]">
+              <div className="text-[14px] font-bold text-foreground">{client.branches_count}개</div>
+              <div className="text-[14px] font-bold text-info">{client.active_jobs}건</div>
+              <div className="text-[13px] text-gray-700">
                 {client.contact_name || "-"}
-                {client.contact_phone && <div className="text-[11px] text-[#A0AEC0]">{client.contact_phone}</div>}
+                {client.contact_phone && <div className="text-[11px] text-gray-400">{client.contact_phone}</div>}
               </div>
               <div className="flex justify-end">
-                <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="p-2 text-[#718096] hover:bg-[#E2E8F0] hover:text-[#1A202C] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
                   <Pencil size={16} />
                 </button>
               </div>
@@ -352,21 +352,21 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
 
               {/* 소속 지점 목록 */}
               {expanded && (
-                <div className="px-6 pb-5 pt-1 bg-[#FBFCFE]">
+                <div className="px-6 pb-5 pt-1 bg-surface-raised">
                   <div className="flex items-center justify-between mb-2.5">
-                    <span className="text-[12px] font-bold text-[#718096]">소속 지점 {myBranches.length}개</span>
-                    <button onClick={() => addBranchForClient(client.id)} className="flex items-center gap-1.5 text-[12px] font-bold text-[#3182CE] hover:bg-[#EBF8FF] px-3 py-1.5 rounded-lg transition-colors">
+                    <span className="text-[12px] font-bold text-muted-foreground">소속 지점 {myBranches.length}개</span>
+                    <button onClick={() => addBranchForClient(client.id)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12px] font-bold text-info hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
                       <Plus size={14} /> 이 화주사에 지점 추가
                     </button>
                   </div>
                   {myBranches.length === 0 ? (
-                    <div className="text-[12.5px] text-[#A0AEC0] bg-white border border-dashed border-[#E2E8F0] rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                    <div className="text-[12.5px] text-gray-400 bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {myBranches.map((b) => (
-                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-[#E2E8F0] text-[#4A5568]" : "bg-[#F7FAFC] border-dashed border-[#E2E8F0] text-[#A0AEC0]"}`}>
-                          <MapPin size={12} className="text-[#A0AEC0]" /> {b.name}
-                          {!b.active && <span className="text-[10px] text-[#A0AEC0]">(비활성)</span>}
+                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-gray-400"}`}>
+                          <MapPin size={12} className="text-gray-400" /> {b.name}
+                          {!b.active && <span className="text-[10px] text-gray-400">(비활성)</span>}
                         </span>
                       ))}
                     </div>
@@ -383,66 +383,66 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-[#E2E8F0] sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-[#1A202C]">{form.id === null ? "신규 화주사 등록" : "화주사 편집"}</h2>
-              <button onClick={() => setForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568] p-1 rounded-lg"><X size={20} /></button>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
+              <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "신규 화주사 등록" : "화주사 편집"}</h2>
+              <button aria-label="화주사 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
-            <div className="p-6 grid grid-cols-2 gap-5">
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="col-span-2">
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">화주사 이름 <span className="text-[#E53E3E]">*</span></label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: OO도시락 · 우아한형제들(비마트)" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">화주사 이름 <span className="text-error">*</span></label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="예: OO도시락 · 우아한형제들(비마트)" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">유형</label>
-                <select value={form.client_type} onChange={(e) => setForm({ ...form, client_type: e.target.value as ClientType })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">유형</label>
+                <select value={form.client_type} onChange={(e) => setForm({ ...form, client_type: e.target.value as ClientType })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CLIENT_TYPE_LABEL[t]}</option>)}
                 </select>
               </div>
-              <div className="flex items-center justify-between p-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
+              <div className="flex items-center justify-between p-3 bg-background border border-border-strong rounded-xl">
                 <div>
-                  <div className="text-[13px] font-bold text-[#1A202C]">확정슬롯 사용</div>
-                  <div className="text-[11px] text-[#718096] mt-0.5">지점×타임×요일 구인</div>
+                  <div className="text-[13px] font-bold text-foreground">확정슬롯 사용</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">지점×타임×요일 구인</div>
                 </div>
-                <button
+                <button type="button" aria-label="슬롯 기능 사용" aria-checked={form.uses_slots} role="switch"
                   onClick={() => setForm({ ...form, uses_slots: !form.uses_slots })}
-                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.uses_slots ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                  className={`after:absolute after:-inset-2 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.uses_slots ? "bg-success" : "bg-gray-300"}`}
                 >
                   <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.uses_slots ? "translate-x-6" : "translate-x-1"}`} />
                 </button>
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">담당자</label>
-                <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} placeholder="김배달 팀장" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">담당자</label>
+                <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} placeholder="김배달 팀장" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">담당자 연락처</label>
-                <input value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">담당자 연락처</label>
+                <input value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div className="col-span-2">
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">메모</label>
-                <textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} rows={2} placeholder="계약 조건, 특이사항 등" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
+                <textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} rows={2} placeholder="계약 조건, 특이사항 등" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none" />
               </div>
-              <div className="col-span-2 flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
-                <div className="text-[14px] font-bold text-[#1A202C]">활성 상태</div>
-                <button
+              <div className="col-span-2 flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
+                <div className="text-[14px] font-bold text-foreground">활성 상태</div>
+                <button type="button" aria-label="이 화주사 사용" aria-checked={form.active} role="switch"
                   onClick={() => setForm({ ...form, active: !form.active })}
-                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                  className={`after:absolute after:-inset-2 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-success" : "bg-gray-300"}`}
                 >
                   <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
                 </button>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[#E2E8F0] sticky bottom-0 bg-white">
+            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
               <div>
                 {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] border border-[#FEB2B2] disabled:opacity-50">
+                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error hover:bg-error-soft border border-error/30 disabled:opacity-50">
                     <Trash2 size={15} /> 삭제
                   </button>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setForm(null)} disabled={saving} className="px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60">
+                <button onClick={() => setForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
+                <button onClick={handleSave} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60">
                   {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
                 </button>
               </div>

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { SWRConfig } from "swr";
-import { Sidebar } from "@/components/Sidebar";
+import { Sidebar, MobileNav } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { Toaster } from "@/components/ui/sonner";
 import { BranchScopeProvider } from "@/lib/branch-scope";
@@ -46,14 +46,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     >
       <BranchScopeProvider>
         <ConfirmProvider>
-        <div className="flex h-screen w-full overflow-hidden bg-[#EEF1F5] font-sans">
+        {/*
+          Ongboarding UI System 셸 — 종이 배경 위에 도크·헤더·본문이 떠 있다.
+          도크는 fixed라 본문이 lg:ml-[92px]로 자리를 비켜준다.
+          모바일(lg 미만)은 하단 내비가 가리므로 본문 아래에 safe-area만큼 여백을 준다.
+        */}
+        <div className="relative flex h-[100dvh] w-full overflow-hidden bg-background font-sans">
+          <a
+            href="#app-content"
+            className="fixed left-4 top-3 z-[200] -translate-y-20 rounded-xl bg-foreground px-4 py-3 text-sm font-bold text-white shadow-[var(--shadow-xl)] transition-transform focus:translate-y-0"
+          >
+            본문으로 건너뛰기
+          </a>
+
           <Sidebar />
-          <div className="flex flex-col flex-1 min-w-0">
+
+          <div className="flex h-[100dvh] w-full min-w-0 flex-col px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:ml-[92px] lg:w-[calc(100%-92px)] lg:px-0 lg:pb-4 lg:pr-4">
             <Topbar crumb={crumb} pageTitle={pageTitle} />
-            <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-custom bg-[#F7FAFC]">
+            <main
+              id="app-content"
+              tabIndex={-1}
+              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden rounded-[24px] scrollbar-custom"
+            >
               {children}
             </main>
           </div>
+
+          <MobileNav />
           <Toaster position="bottom-right" richColors />
         </div>
         </ConfirmProvider>

@@ -119,21 +119,21 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
-          {!embedded && <h1 className="text-2xl font-extrabold text-[#1A202C] tracking-tight mb-1">팀 · 권한</h1>}
-          <p className="text-[14px] text-[#718096]">현장 담당자와 지점 관리자 연락처·권한을 관리합니다. 만남장소 안내·확정 알림에 사용됩니다.</p>
+          {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">팀 · 권한</h1>}
+          <p className="text-[14px] text-muted-foreground">현장 담당자와 지점 관리자 연락처·권한을 관리합니다. 만남장소 안내·확정 알림에 사용됩니다.</p>
         </div>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 bg-[#FFCB3C] hover:bg-[#E0B500] text-[#1A202C] px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A202C]"
+          className="flex items-center gap-2 bg-brand-yellow hover:bg-yellow-500 text-foreground px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
         >
           <UserPlus size={18} /> 담당자 추가
         </button>
       </div>
 
-      <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden flex flex-col">
-        <div className="grid grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-[#E2E8F0] bg-[#F7FAFC] text-[13px] font-bold text-[#718096]">
+      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+        <div className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>이름 / 연락처</div>
           <div>권한 (Role)</div>
           <div>담당 지점</div>
@@ -141,37 +141,37 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="text-right">관리</div>
         </div>
 
-        {loading && <div className="px-6 py-8 text-[13px] text-[#A0AEC0]">담당자 목록 불러오는 중…</div>}
+        {loading && <div className="px-6 py-8 text-[13px] text-gray-400">담당자 목록 불러오는 중…</div>}
         {!loading && members.length === 0 && (
-          <div className="px-6 py-10 text-center text-[13px] text-[#A0AEC0]">
-            등록된 담당자가 없어요. <button onClick={openCreate} className="text-[#3182CE] font-bold hover:underline">담당자 추가</button>를 눌러 시작하세요.
+          <div className="px-6 py-10 text-center text-[13px] text-gray-400">
+            등록된 담당자가 없어요. <button onClick={openCreate} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info font-bold hover:underline">담당자 추가</button>를 눌러 시작하세요.
           </div>
         )}
 
         <div className="flex flex-col">
           {members.map((member) => (
-            <div key={member.id} className="grid grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-[#F1F4F8] hover:bg-[#F7FAFC] transition-colors">
+            <div key={member.id} className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
               <div className="flex flex-col">
-                <div className="font-extrabold text-[#1A202C]">{member.name}</div>
-                <div className="text-[12px] text-[#A0AEC0] flex items-center gap-1 mt-0.5"><Phone size={10} /> {member.phone || "연락처 없음"}</div>
+                <div className="font-extrabold text-foreground">{member.name}</div>
+                <div className="text-[12px] text-gray-400 flex items-center gap-1 mt-0.5"><Phone size={10} /> {member.phone || "연락처 없음"}</div>
               </div>
 
               <div>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-[#EBF8FF] text-[#3182CE]' : 'bg-[#F1F4F8] text-[#4A5568]'}`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold ${member.role === '마스터' || member.role === '본사' ? 'bg-info-soft text-info' : 'bg-muted text-gray-700'}`}>
                   <Shield size={12} /> {member.role || "현장"}
                 </span>
               </div>
 
-              <div className="text-[13px] font-bold text-[#4A5568]">{member.branch || "전체"}</div>
+              <div className="text-[13px] font-bold text-gray-700">{member.branch || "전체"}</div>
 
               <div>
-                <span className={`inline-flex px-2.5 py-1 rounded-md text-[12px] font-bold ${member.active ? 'bg-[#F0FFF4] text-[#38A169]' : 'bg-[#FFF5F5] text-[#E53E3E]'}`}>
+                <span className={`inline-flex px-2.5 py-1 rounded-full text-[12px] font-bold ${member.active ? 'bg-success-soft text-success' : 'bg-error-soft text-error'}`}>
                   {member.active ? '활성' : '비활성'}
                 </span>
               </div>
 
               <div className="flex justify-end">
-                <button onClick={() => openEdit(member)} title="편집" className="p-2 text-[#718096] hover:bg-[#E2E8F0] hover:text-[#1A202C] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]">
+                <button onClick={() => openEdit(member)} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
                   <Pencil size={16} />
                 </button>
               </div>
@@ -184,57 +184,57 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-[#E2E8F0] sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-[#1A202C]">{form.id === null ? "담당자 추가" : "담당자 편집"}</h2>
-              <button onClick={() => setForm(null)} className="text-[#A0AEC0] hover:text-[#4A5568] p-1 rounded-lg"><X size={20} /></button>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
+              <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "담당자 추가" : "담당자 편집"}</h2>
+              <button aria-label="팀원 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-gray-400 hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
             </div>
-            <div className="p-6 grid grid-cols-2 gap-5">
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">이름 <span className="text-[#E53E3E]">*</span></label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">이름 <span className="text-error">*</span></label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">전화번호 <span className="text-[#E53E3E]">*</span></label>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">전화번호 <span className="text-error">*</span></label>
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01012345678" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">권한</label>
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">권한</label>
+                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">담당 지점</label>
-                <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm bg-white focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C]">
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">담당 지점</label>
+                <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
                   <option value="">전체 / 미지정</option>
                   {branches.map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>
               </div>
               <div className="col-span-2">
-                <label className="block text-[13px] font-bold text-[#4A5568] mb-2">메모</label>
-                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} placeholder="만남장소, 특이사항 등" className="w-full px-4 py-3 border border-[#E2E8F0] rounded-xl text-sm leading-relaxed focus:outline-none focus:border-[#FFCB3C] focus:ring-1 focus:ring-[#FFCB3C] resize-none" />
+                <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
+                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} placeholder="만남장소, 특이사항 등" className="w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none" />
               </div>
-              <div className="col-span-2 flex items-center justify-between p-4 bg-[#F7FAFC] border border-[#E2E8F0] rounded-xl">
-                <div className="text-[14px] font-bold text-[#1A202C]">활성 상태</div>
-                <button
+              <div className="col-span-2 flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
+                <div className="text-[14px] font-bold text-foreground">활성 상태</div>
+                <button type="button" aria-label="이 팀원 사용" aria-checked={form.active} role="switch"
                   onClick={() => setForm({ ...form, active: !form.active })}
-                  className={`w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-[#38A169]" : "bg-[#CBD5E0]"}`}
+                  className={`after:absolute after:-inset-2 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-success" : "bg-gray-300"}`}
                 >
                   <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
                 </button>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[#E2E8F0] sticky bottom-0 bg-white">
+            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
               <div>
                 {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#E53E3E] hover:bg-[#FFF5F5] border border-[#FEB2B2] disabled:opacity-50">
+                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error hover:bg-error-soft border border-error/30 disabled:opacity-50">
                     <Trash2 size={15} /> 삭제
                   </button>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setForm(null)} disabled={saving} className="px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#718096] hover:bg-[#F7FAFC] border border-[#E2E8F0] disabled:opacity-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#1A202C] hover:bg-[#2D3748] disabled:opacity-60">
+                <button onClick={() => setForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
+                <button onClick={handleSave} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60">
                   {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
                 </button>
               </div>

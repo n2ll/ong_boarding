@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { Search, ChevronDown, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox } from "lucide-react";
 import { useBranchScope } from "@/lib/branch-scope";
+import { Button } from "@/components/ui/button";
 
 interface TopbarProps {
   crumb: string;
@@ -28,12 +30,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<{ applicants: ApplicantHit[]; jobs: JobHit[] }>({ applicants: [], jobs: [] });
 
-  // 알림
-  const [notices, setNotices] = useState<Notice[]>([]);
-  const [notifLoading, setNotifLoading] = useState(false);
 
-  // 지점
-  const [branches, setBranches] = useState<BranchOpt[]>([]);
 
   const branchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -61,37 +58,17 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     return () => window.removeEventListener("mousedown", onClick);
   }, []);
 
-  // 지점 목록 로드
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/branches");
-        const json = await res.json();
-        setBranches(((json.data ?? []) as BranchOpt[]).filter((b) => b.active));
-      } catch {
-        /* 무시 */
-      }
-    })();
-  }, []);
+  // 지점 목록 — 다른 화면도 같은 키로 부르므로 useSWR로 캐시를 공유한다(중복 호출 제거).
+  const { data: branchRes } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const branches = useMemo(() => (branchRes?.data ?? []).filter((b) => b.active), [branchRes]);
 
-  // 알림 로드 + 60초 폴링
-  const loadNotices = useCallback(async () => {
-    setNotifLoading(true);
-    try {
-      const res = await fetch("/api/admin/notifications");
-      const json = await res.json();
-      setNotices((json.items ?? []) as Notice[]);
-    } catch {
-      /* 무시 */
-    } finally {
-      setNotifLoading(false);
-    }
-  }, []);
-  useEffect(() => {
-    loadNotices();
-    const t = setInterval(loadNotices, 60_000);
-    return () => clearInterval(t);
-  }, [loadNotices]);
+  // 알림 — 사이드바 배지와 같은 키. useSWR로 묶어 같은 요청이 두 번 나가지 않게 한다.
+  const { data: notiRes, isLoading: notifLoading, mutate: mutateNotices } = useSWR<{ items?: Notice[] }>(
+    "/api/admin/notifications",
+    { refreshInterval: 60_000 }
+  );
+  const notices = useMemo(() => notiRes?.items ?? [], [notiRes]);
+  const loadNotices = useCallback(() => { void mutateNotices(); }, [mutateNotices]);
 
   // 검색 디바운스
   useEffect(() => {
@@ -140,24 +117,31 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
 
   return (
     <>
-      <header className="h-[68px] shrink-0 bg-white border-b border-[#E2E8F0] flex items-center px-7 gap-[18px] z-10 relative">
+      {/*
+        떠 있는 글래스 헤더 (Ongboarding UI System 셸).
+        Glass 컴포넌트가 아니라 .glass 유틸리티를 쓴다 — Glass는 overflow-hidden이라
+        안에 있는 지점 필터·알림 드롭다운(absolute)이 잘린다.
+      */}
+      <header className="relative z-40 mb-3 mt-3 shrink-0 lg:mb-4 lg:mt-4">
+        <div className="glass flex min-h-16 items-center gap-[18px] rounded-[24px] px-4 shadow-[var(--shadow-sm)] lg:px-6">
         <div className="min-w-0">
-          <div className="text-[12px] text-[#718096] font-semibold tracking-wide whitespace-nowrap">{crumb}</div>
-          <div className="text-[21px] font-extrabold tracking-tight text-[#1A202C] leading-snug whitespace-nowrap">
+          {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
+          <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
+          <div className="truncate text-[17px] font-extrabold tracking-tight text-foreground leading-snug lg:whitespace-nowrap lg:text-[21px]">
             {pageTitle}
           </div>
         </div>
 
         <div className="flex-1" />
 
-        {/* Search Button */}
+        {/* Search Button — 좁은 화면에서는 감춘다(⌘K로 계속 열 수 있다) */}
         <button
           onClick={() => setSearchOpen(true)}
-          className="flex items-center gap-2 bg-[#F1F4F8] hover:bg-[#EAEFF5] border border-transparent rounded-[10px] py-[9px] px-[13px] w-[300px] min-w-[150px] shrink cursor-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+          className="hidden items-center gap-2 bg-muted hover:bg-muted border border-transparent rounded-[10px] min-h-11 py-[9px] px-[13px] w-[300px] min-w-[150px] shrink cursor-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow md:flex"
         >
-          <Search size={17} className="text-[#A0AEC0]" />
-          <span className="flex-1 text-left text-sm text-[#A0AEC0]">지원자·공고 검색</span>
-          <span className="text-[11px] font-bold text-[#718096] bg-white border border-[#E2E8F0] rounded-md px-1.5 py-0.5 tracking-wide">
+          <Search size={17} className="text-gray-400" />
+          <span className="flex-1 text-left text-sm text-gray-400">지원자·공고 검색</span>
+          <span className="text-[11px] font-bold text-muted-foreground bg-white border border-border-strong rounded-md px-1.5 py-0.5 tracking-wide">
             ⌘K
           </span>
         </button>
@@ -165,37 +149,40 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         {/* Branch Filter (전역 스코프) */}
         <div className="relative shrink-0" ref={branchRef}>
           <button
+            // sm 미만에서는 라벨을 감추므로 아이콘만 남는다 — 이름을 여기서 보장한다.
+            aria-label={`지점 필터 — 현재 ${scopeBranch ?? "전체 지점"}`}
+            aria-expanded={branchOpen}
             onClick={() => {
               setBranchOpen(!branchOpen);
               setNotifOpen(false);
             }}
-            className={`flex items-center gap-2 bg-white border rounded-[10px] py-[9px] px-[14px] text-sm font-semibold cursor-pointer whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C] ${scopeBranch ? "border-[#FFCB3C] text-[#1A202C] bg-[#FFFBEB]" : "border-[#E2E8F0] text-[#2D3748] hover:border-[#A0AEC0]"}`}
+            className={`flex items-center gap-2 bg-white border rounded-[10px] min-h-11 py-[9px] px-[14px] text-sm font-semibold cursor-pointer whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${scopeBranch ? "border-brand-yellow text-foreground bg-yellow-50" : "border-border-strong text-gray-800 hover:border-gray-400"}`}
           >
-            <MapPin size={16} className={scopeBranch ? "text-[#D69E2E]" : "text-[#718096]"} />
-            <span className="max-w-[140px] truncate">{scopeBranch ?? "전체 지점"}</span>
-            <ChevronDown size={14} className="text-[#A0AEC0]" />
+            <MapPin size={16} className={scopeBranch ? "text-yellow-600" : "text-muted-foreground"} />
+            <span className="hidden max-w-[140px] truncate sm:inline">{scopeBranch ?? "전체 지점"}</span>
+            <ChevronDown size={14} className="text-gray-400" />
           </button>
 
           {branchOpen && (
-            <div className="absolute top-[50px] right-0 w-[220px] bg-white border border-[#E2E8F0] rounded-xl shadow-lg p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
-              <div className="text-[11px] font-bold text-[#A0AEC0] tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
+            <div className="absolute top-[50px] right-0 w-[220px] bg-white border border-border-strong rounded-xl shadow-lg p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
+              <div className="text-[11px] font-bold text-gray-400 tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
-                className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-[#F1F4F8] ${!scopeBranch ? "bg-[#F1F4F8] font-bold text-[#2D3748]" : "bg-transparent font-medium text-[#4A5568] hover:bg-[#F1F4F8]"}`}
+                className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-muted ${!scopeBranch ? "bg-muted font-bold text-gray-800" : "bg-transparent font-medium text-gray-700 hover:bg-muted"}`}
               >
-                전체 지점 {!scopeBranch && <Check size={14} className="text-[#D69E2E]" />}
+                전체 지점 {!scopeBranch && <Check size={14} className="text-yellow-600" />}
               </button>
               {branches.length === 0 && (
-                <div className="px-3 py-2 text-[12.5px] text-[#A0AEC0]">등록된 지점이 없어요.</div>
+                <div className="px-3 py-2 text-[12.5px] text-gray-400">등록된 지점이 없어요.</div>
               )}
               {branches.map((b) => (
                 <button
                   key={b.id}
                   onClick={() => pickBranch(b.name)}
-                  className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-[#F1F4F8] ${scopeBranch === b.name ? "bg-[#F1F4F8] font-bold text-[#2D3748]" : "bg-transparent font-medium text-[#4A5568] hover:bg-[#F1F4F8]"}`}
+                  className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-muted ${scopeBranch === b.name ? "bg-muted font-bold text-gray-800" : "bg-transparent font-medium text-gray-700 hover:bg-muted"}`}
                 >
                   <span className="truncate">{b.name}</span>
-                  {scopeBranch === b.name && <Check size={14} className="text-[#D69E2E] shrink-0" />}
+                  {scopeBranch === b.name && <Check size={14} className="text-yellow-600 shrink-0" />}
                 </button>
               ))}
             </div>
@@ -210,32 +197,32 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
               setBranchOpen(false);
               if (!notifOpen) loadNotices();
             }}
-            className="relative w-[42px] h-[42px] rounded-[10px] border border-[#E2E8F0] hover:border-[#A0AEC0] bg-white flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFCB3C]"
+            aria-label={notices.length > 0 ? `알림 ${notices.length}건 열기` : "알림 열기"} aria-expanded={notifOpen} className="relative w-11 h-11 rounded-[10px] border border-border-strong hover:border-gray-400 bg-white flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
           >
-            <Bell size={19} className="text-[#4A5568]" />
+            <Bell size={19} className="text-gray-700" />
             {notices.length > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#E53E3E] border-2 border-white text-white text-[10px] font-extrabold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-[10px] font-extrabold flex items-center justify-center">
                 {notices.length}
               </span>
             )}
           </button>
 
           {notifOpen && (
-            <div className="absolute top-[50px] right-0 w-[340px] bg-white border border-[#E2E8F0] rounded-2xl shadow-xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
-              <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#F1F4F8]">
-                <span className="text-sm font-bold text-[#1A202C]">알림 {notices.length > 0 && <span className="text-[#E53E3E]">{notices.length}</span>}</span>
+            <div className="absolute top-[50px] right-0 w-[340px] bg-white border border-border-strong rounded-2xl shadow-xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-muted">
+                <span className="text-sm font-bold text-foreground">알림 {notices.length > 0 && <span className="text-error">{notices.length}</span>}</span>
                 <button
                   onClick={loadNotices}
-                  className="flex items-center gap-1 text-xs font-semibold text-[#718096] hover:text-[#1A202C] transition-colors"
+                  className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <RefreshCw size={12} className={notifLoading ? "animate-spin" : ""} /> 새로고침
                 </button>
               </div>
               <div className="max-h-[360px] overflow-y-auto scrollbar-custom">
                 {notices.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-[#A0AEC0]">
-                    <Check size={26} className="text-[#38A169] mb-2" />
-                    <div className="text-[13px] font-bold text-[#4A5568]">새 알림이 없어요</div>
+                  <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-gray-400">
+                    <Check size={26} className="text-success mb-2" />
+                    <div className="text-[13px] font-bold text-gray-700">새 알림이 없어요</div>
                     <div className="text-[12px] mt-0.5">분류 대기 문자함, 사람 확인이 필요한 대화, AI 중단이 생기면 표시됩니다.</div>
                   </div>
                 ) : (
@@ -246,14 +233,14 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                         setNotifOpen(false);
                         router.push(n.path);
                       }}
-                      className="w-full flex gap-3 p-3.5 border-b border-[#F7FAFC] hover:bg-[#F7FAFC] transition-colors text-left"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex gap-3 p-3.5 border-b border-background hover:bg-background transition-colors text-left"
                     >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${n.tone === "red" ? "bg-[#FFF5F5] text-[#E53E3E]" : n.tone === "amber" ? "bg-[#FFFAF0] text-[#D69E2E]" : "bg-[#EDF2F7] text-[#4A5568]"}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${n.tone === "red" ? "bg-error-soft text-error" : n.tone === "amber" ? "bg-yellow-50 text-yellow-600" : "bg-muted text-gray-700"}`}>
                         <Inbox size={16} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-bold text-[#2D3748] leading-snug">{n.title}</div>
-                        <div className="text-[12px] text-[#718096] mt-0.5 leading-snug">{n.desc}</div>
+                        <div className="text-[13px] font-bold text-gray-800 leading-snug">{n.title}</div>
+                        <div className="text-[12px] text-muted-foreground mt-0.5 leading-snug">{n.desc}</div>
                       </div>
                     </button>
                   ))
@@ -263,68 +250,66 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           )}
         </div>
 
-        <button
-          onClick={() => router.push("/jobs?new=1")}
-          className="flex items-center gap-2 bg-[#FFCB3C] hover:bg-[#E0B500] rounded-[10px] py-[10px] px-[16px] text-sm font-bold text-[#1A202C] tracking-tight cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#FFCB3C]"
-        >
+        <Button variant="brand" className="shrink-0 rounded-full" aria-label="공고 등록" onClick={() => router.push("/jobs?new=1")}>
           <Plus size={18} strokeWidth={2.5} />
-          공고 등록
-        </button>
+          <span className="hidden sm:inline">공고 등록</span>
+        </Button>
+        </div>
       </header>
 
       {/* ⌘K Global Search Modal */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-[#00000080] z-50 flex items-start justify-center pt-[10vh] px-4 backdrop-blur-sm" onClick={closeSearch}>
+        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-start justify-center pt-[10vh] px-4 backdrop-blur-sm" onClick={closeSearch}>
           <div
             className="bg-white w-full max-w-[640px] rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-[#E2E8F0]">
-              <Search size={22} className="text-[#A0AEC0]" />
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border-strong">
+              <Search size={22} className="text-gray-400" />
               <input
                 autoFocus
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="지원자 이름·연락처 또는 공고 제목을 검색"
-                className="flex-1 bg-transparent border-none outline-none text-[18px] text-[#1A202C] placeholder:text-[#A0AEC0] font-medium"
+                className="flex-1 bg-transparent border-none outline-none text-[18px] text-foreground placeholder:text-gray-400 font-medium"
               />
-              {searching && <Loader2 size={18} className="text-[#A0AEC0] animate-spin" />}
+              {searching && <Loader2 size={18} className="text-gray-400 animate-spin" />}
               <button
                 onClick={closeSearch}
-                className="bg-[#F1F4F8] hover:bg-[#EAEFF5] text-[#718096] text-[12px] font-bold px-2.5 py-1.5 rounded-lg transition-colors"
+                className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-muted hover:bg-muted text-muted-foreground text-[12px] font-bold px-2.5 py-1.5 rounded-lg transition-colors"
               >
                 ESC
               </button>
             </div>
-            <div className="p-3 bg-[#F7FAFC] max-h-[50vh] overflow-y-auto scrollbar-custom">
+            <div className="p-3 bg-background max-h-[50vh] overflow-y-auto scrollbar-custom">
               {!query.trim() && (
-                <div className="text-center py-10 text-[#A0AEC0]">
-                  <div className="text-[13px] font-bold text-[#718096]">지원자·공고를 검색하세요</div>
+                <div className="text-center py-10 text-gray-400">
+                  <div className="text-[13px] font-bold text-muted-foreground">지원자·공고를 검색하세요</div>
                   <div className="text-[12px] mt-1">이름, 휴대폰 번호, 공고 제목으로 찾을 수 있어요.</div>
                 </div>
               )}
               {query.trim() && !searching && !hasResults && (
-                <div className="text-center py-10 text-[#A0AEC0]">
-                  <div className="text-[13px] font-bold text-[#718096]">‘{query.trim()}’ 검색 결과가 없어요</div>
+                <div className="text-center py-10 text-gray-400">
+                  <div className="text-[13px] font-bold text-muted-foreground">‘{query.trim()}’ 검색 결과가 없어요</div>
                 </div>
               )}
               {results.applicants.length > 0 && (
                 <>
-                  <div className="text-[12px] font-bold text-[#A0AEC0] px-3 pb-2 pt-1">지원자</div>
+                  <div className="text-[12px] font-bold text-gray-400 px-3 pb-2 pt-1">지원자</div>
                   <div className="flex flex-col mb-2">
                     {results.applicants.map((a) => (
                       <button
                         key={`a-${a.id}`}
                         onClick={() => goApplicant(a)}
-                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-[#EDF2F7] rounded-xl text-left transition-colors"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-xl text-left transition-colors"
                       >
-                        <div className="w-8 h-8 rounded-full bg-[#EBF8FF] flex items-center justify-center shrink-0">
-                          <User size={14} className="text-[#3182CE]" />
+                        <div className="w-8 h-8 rounded-full bg-info-soft flex items-center justify-center shrink-0">
+                          <User size={14} className="text-info" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="text-[14px] font-bold text-[#1A202C] truncate">{a.name || "이름 미상"}</div>
-                          <div className="text-[12px] text-[#718096] truncate">
+                          <div className="text-[14px] font-bold text-foreground truncate">{a.name || "이름 미상"}</div>
+                          <div className="text-[12px] text-muted-foreground truncate">
                             {[a.phone, a.branch, a.status].filter(Boolean).join(" · ") || "지원자"}
                           </div>
                         </div>
@@ -335,20 +320,20 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
               )}
               {results.jobs.length > 0 && (
                 <>
-                  <div className="text-[12px] font-bold text-[#A0AEC0] px-3 pb-2 pt-1">채용공고</div>
+                  <div className="text-[12px] font-bold text-gray-400 px-3 pb-2 pt-1">채용공고</div>
                   <div className="flex flex-col">
                     {results.jobs.map((j) => (
                       <button
                         key={`j-${j.id}`}
                         onClick={() => goJob(j)}
-                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-[#EDF2F7] rounded-xl text-left transition-colors"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-xl text-left transition-colors"
                       >
-                        <div className="w-8 h-8 rounded-full bg-[#E2E8F0] flex items-center justify-center shrink-0">
-                          <FileText size={14} className="text-[#718096]" />
+                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
+                          <FileText size={14} className="text-muted-foreground" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="text-[14px] font-bold text-[#1A202C] truncate">{j.title}</div>
-                          <div className="text-[12px] text-[#718096]">채용공고 · {j.status === "closed" ? "마감" : "진행 중"}</div>
+                          <div className="text-[14px] font-bold text-foreground truncate">{j.title}</div>
+                          <div className="text-[12px] text-muted-foreground">채용공고 · {j.status === "closed" ? "마감" : "진행 중"}</div>
                         </div>
                       </button>
                     ))}
