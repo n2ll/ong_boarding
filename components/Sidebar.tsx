@@ -4,7 +4,6 @@ import Link from "next/link";
 import useSWR from "swr";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
 import {
   LayoutDashboard,
   // 파일럿 기간 숨김 메뉴의 아이콘 — NAV_ITEMS 복원 시 함께 주석 해제
@@ -115,13 +114,23 @@ export function Sidebar() {
   };
 
   return (
-    <motion.nav
+    /*
+      폭 전환을 CSS transition으로 한다(예전엔 framer-motion spring).
+      이 파일이 motion을 import하는 유일한 레이아웃 컴포넌트였고, 그 때문에 framer-motion
+      123KB가 **레이아웃 청크**에 들려 모든 어드민 화면의 첫 로드를 막았다. 대시보드·
+      파이프라인·공고는 자기 파일에서 motion을 직접 쓰므로 그대로지만, 실시간 응대는
+      쓰지 않아 이 화면에서 통째로 빠진다(가장 무거웠던 화면이다).
+
+      느낌 차이: spring의 미세한 오버슈트가 없어지고 200ms 감속 곡선으로 펼쳐진다.
+      motion-reduce에서는 즉시 전환한다.
+    */
+    <nav
       aria-label="주요 메뉴"
-      onHoverStart={() => setHovered(true)}
-      onHoverEnd={() => setHovered(false)}
-      animate={{ width: expanded ? 240 : 72 }}
-      transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] border border-white/10 bg-gray-900/95 shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:flex"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] border border-white/10 bg-gray-900/95 shadow-[var(--shadow-xl)] backdrop-blur-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none lg:flex ${
+        expanded ? "w-60" : "w-[72px]"
+      }`}
     >
       <div className="flex h-full w-full flex-col gap-2 p-3 text-white">
         <button
@@ -135,10 +144,10 @@ export function Sidebar() {
             <LogoMark size={26} />
           </span>
           {expanded && (
-            <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-w-0">
+            <span className="min-w-0 animate-in fade-in duration-200 motion-reduce:animate-none">
               <span className="block whitespace-nowrap text-[17px] font-extrabold leading-none tracking-tight">옹보딩</span>
               <span className="mt-[3px] block whitespace-nowrap text-[11px] font-medium tracking-wide text-white/50">시니어 채용 운영</span>
-            </motion.span>
+            </span>
           )}
         </button>
 
@@ -170,7 +179,7 @@ export function Sidebar() {
               옹
             </span>
             {expanded && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex min-w-0 flex-1 items-center gap-1">
+              <div className="flex min-w-0 flex-1 items-center gap-1 animate-in fade-in duration-200 motion-reduce:animate-none">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-semibold leading-tight">옹고잉 채용팀</span>
                   <span className="block truncate text-[11.5px] text-white/50">관리자 콘솔</span>
@@ -184,12 +193,12 @@ export function Sidebar() {
                 >
                   <LogOut size={16} />
                 </button>
-              </motion.div>
+              </div>
             )}
           </div>
         </div>
       </div>
-    </motion.nav>
+    </nav>
   );
 }
 
@@ -273,11 +282,7 @@ function DockItem({
         </span>
 
         {expanded && (
-          <motion.span
-            initial={{ opacity: 0, x: -5 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex min-w-0 flex-1 items-center gap-2"
-          >
+          <span className="flex min-w-0 flex-1 items-center gap-2 animate-in fade-in slide-in-from-left-1 duration-200 motion-reduce:animate-none">
             <span className="min-w-0 flex-1 truncate text-left text-[13.5px] font-bold">{item.label}</span>
             {badge && (
               <span
@@ -288,7 +293,7 @@ function DockItem({
                 {badge.count}
               </span>
             )}
-          </motion.span>
+          </span>
         )}
       </Link>
 
