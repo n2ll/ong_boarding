@@ -51,13 +51,38 @@ const LIST_COLUMNS = [
   "available_slots",
 ].join(", ");
 
+/**
+ * `?scope=live` — 실시간 응대 화면이 읽는 컬럼만.
+ *
+ * 행은 한 명도 줄이지 않는다. 컬럼만 줄인다.
+ * 44컬럼 × 649행 = 785KB → 11컬럼 × 649행 = 169KB.
+ *
+ * 행을 좁히지 않는 이유: 실시간 응대 화면은 좌측에 50명만 그리지만, 서버가 행을 자르면
+ * (1) 확정 직후 status가 '확정인력'으로 바뀌는 순간 우측 상세가 사라져 만남장소 안내를
+ * 못 보내고, (2) 인계 큐가 마감·시스템 공고 건을 의도적으로 싣는데 그 사람들이 목록에
+ * 없으면 카드를 눌러도 대화가 안 열리고, (3) 이 화면엔 '서버가 목록을 잘랐다'는 표시가
+ * 없어서 빈 목록이 "모두 응대했어요 👍"라는 정상 화면으로 나온다.
+ * 행 좁히기의 추가 이득은 169KB→15KB뿐인데 위험은 전부 그쪽에 있다.
+ *
+ * 여기 목록은 LiveConsole의 Applicant 인터페이스와 1:1로 맞춘다 —
+ * 그 파일은 동적 필드 접근이 없어서 이 목록이 곧 필요 필드 전량이다.
+ * 필드를 하나 추가할 땐 양쪽을 같이 고칠 것.
+ */
+const LIVE_COLUMNS = [
+  "id", "name", "phone", "status",
+  "availability", "source", "branch", "branch1",
+  "created_at", "last_message_at", "sms_opt_out_at",
+].join(", ");
+
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
-  const source = new URL(req.url).searchParams.get("source");
+  const params = new URL(req.url).searchParams;
+  const source = params.get("source");
+  const liveScope = params.get("scope") === "live";
 
   let q = supabase
     .from("applicants")
-    .select(LIST_COLUMNS)
+    .select(liveScope ? LIVE_COLUMNS : LIST_COLUMNS)
     .order("created_at", { ascending: false });
 
   if (source) q = q.eq("source", source);
@@ -134,10 +159,14 @@ export async function GET(req: NextRequest) {
   // 링크 복사가 필요한 상세 패널은 별도 상세 GET에서 원문을 받으므로 영향이 없다.
   //
   // 부수 효과로 응답에서 24KB가 빠진다.
-  const safe = withStage.map(({ access_token, ...rest }) => ({
-    ...rest,
-    has_access_token: Boolean(access_token),
-  }));
+  // scope=live는 애초에 토큰 컬럼을 고르지 않으므로 이 변환을 건너뛴다 —
+  // 안 그러면 모두 has_access_token: false가 붙어 '링크 없음'처럼 읽히는 값이 생긴다.
+  const safe = liveScope
+    ? withStage
+    : withStage.map(({ access_token, ...rest }) => ({
+        ...rest,
+        has_access_token: Boolean(access_token),
+      }));
 
   return NextResponse.json({ data: safe });
 }

@@ -265,7 +265,20 @@ export function LiveConsole() {
   const [kbSaving, setKbSaving] = useState(false);
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
-  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  // scope=live — 행은 그대로 전원이고 컬럼만 이 화면이 읽는 11개로 줄인 응답(785KB → 169KB).
+  //
+  // 트레이드오프: 예전엔 대시보드·파이프라인과 **같은 키**라 다른 탭을 거쳐 들어오면 캐시로
+  // 즉시 떴다. 키가 갈라지면서 그 이득은 없어진다. 사이드바에서 바로 들어오는 게 이 화면의
+  // 주 동선이고, 그 경우 785KB 대신 169KB를 받으므로 순이득이라 판단했다.
+  //
+  // 행을 안 줄이는 이유는 라우트의 LIVE_COLUMNS 주석에 있다(확정 직후 패널 소실·인계 큐
+  // 대화 안 열림·'모두 응대했어요'라는 조용한 거짓).
+  // refreshInterval — 이 화면의 갱신은 DB 트리거 → 실시간 broadcast 채널에 걸려 있는데,
+  // 폴링이 하나도 없어서 웹소켓이 끊기면 좌측 목록이 조용히 멈췄다. 대화창은 12초로 계속
+  // 갱신되니 화면은 살아 있어 보이고, 새로 답장한 사람만 안 뜬다. 다른 창을 갔다 와도
+  // 갱신되지 않는다(전역 revalidateOnFocus: false). 백스톱으로 60초를 둔다 —
+  // 위 scope=live로 응답이 172KB로 줄어서 이제 이 주기를 감당할 수 있다(예전 689KB).
+  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
   // 공고 탭이 풀린다.
@@ -332,7 +345,9 @@ export function LiveConsole() {
   );
 
   // 인계 큐도 SWR로 캐시.
-  const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs");
+  // 인계 큐도 broadcast 하나에 의존하고 있었다 — 사람이 직접 답해야 하는 대화가 새로
+  // 들어와도 화면을 열어둔 매니저에게는 안 떴다. 응답이 1KB대라 60초 폴링 비용이 없다.
+  const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs", { refreshInterval: 60_000 });
   const handoffs = useMemo(() => handoffsData?.handoffs ?? [], [handoffsData]);
 
   // 확정 대기 큐(온보딩 완료·미확정) SWR.
@@ -342,7 +357,16 @@ export function LiveConsole() {
   // 전역 킬스위치 상태 — 꺼져 있으면 목록 상단 경고 배너 + 스레드 배지·입력창 동작이 바뀐다.
   // env_forced(AGENT_DISABLED=1)도 토글과 무관하게 항상 중단이므로 함께 '전역 중지'로 취급.
   // mode='draft'(코파일럿)는 AI가 초안만 만드는 상태 — 별도 배너·배지로 안내한다.
-  const { data: killData } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  // AI 응답 모드는 주기적으로 다시 확인한다.
+  //
+  // 이 값이 이 화면의 '지금 AI가 답하고 있다' 배너와 수동 발송 잠금을 좌우한다.
+  // 그런데 폴링이 없어서, 다른 사람이 /brain에서 AI를 꺼도 이 화면을 열어둔 매니저는
+  // 페이지를 새로 열 때까지 옛 값을 보고 있었다 — 성능이 아니라 사고 방지 쪽이다.
+  // 응답이 몇 바이트짜리라 30초로 잡아도 비용이 없다.
+  const { data: killData } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>(
+    "/api/admin/agent/kill-switch",
+    { refreshInterval: 30_000 },
+  );
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
   const copilotMode = !globalKill && killData?.mode === "draft";
 
