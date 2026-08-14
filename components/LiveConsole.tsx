@@ -6,9 +6,40 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { ConversationThread } from "./ConversationThread";
+import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
-import { ApplicantDetailContent } from "./ApplicantDetailPanel";
+
+/**
+ * 대화창과 오른쪽 상세는 **대화를 누르기 전엔 렌더되지 않는다**(아래 `activeChat &&`).
+ * 그런데 정적 import라 화면에 들어오는 순간 24KB를 미리 받고 있었다 — 목록만 보고
+ * 나가는 경우엔 통째로 낭비다. 첫 클릭 때 받아온다.
+ *
+ * 상세 패널이 ConversationThread를 물고 있어 둘은 어차피 같은 덩어리로 묶인다.
+ * ssr: false — 둘 다 클라이언트 전용(fetch·폴링·실시간)이라 서버에서 그릴 것이 없다.
+ */
+const ConversationThread = dynamic(
+  () => import("./ConversationThread").then((m) => m.ConversationThread),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center text-[13px] text-muted-foreground">
+        대화 불러오는 중…
+      </div>
+    ),
+  },
+);
+
+const ApplicantDetailContent = dynamic(
+  () => import("./ApplicantDetailPanel").then((m) => m.ApplicantDetailContent),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center text-[13px] text-muted-foreground">
+        불러오는 중…
+      </div>
+    ),
+  },
+);
 import { getBrowserClient } from "@/lib/supabase";
 import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
 import { Button } from "@/components/ui/button";

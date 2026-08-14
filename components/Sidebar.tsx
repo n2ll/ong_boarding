@@ -27,7 +27,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "./Logo";
-import { getAuthBrowserClient } from "@/lib/supabase";
 
 /**
  * 앱 도크 — Ongboarding UI System의 셸.
@@ -103,6 +102,11 @@ export function Sidebar() {
 
   const signOut = async () => {
     try {
+      // Supabase 클라이언트를 누를 때 받아온다.
+      // 사이드바는 모든 어드민 화면에 붙어 있는데 정적 import면 로그아웃 버튼 하나 때문에
+      // auth·realtime·storage·postgrest(64KB)가 전 화면 첫 로드에 얹힌다.
+      // 로그아웃은 하루에 한 번 누르는 버튼이다.
+      const { getAuthBrowserClient } = await import("@/lib/supabase");
       await getAuthBrowserClient().auth.signOut();
     } catch {
       /* 세션 정리 실패해도 로그인 페이지로 — 미들웨어가 재검증 */
