@@ -133,7 +133,8 @@ interface CardData {
   sido: string | null;
   createdAtIso: string | null;
   lastMessageAtIso: string | null;
-  accessToken: string | null;
+  /** 맞춤 공고 링크가 만들어져 있는지. 목록은 토큰 원문을 받지 않는다(존재 여부만). */
+  hasCustomLink: boolean;
   appliedAtIso: string | null;
   geoPrecision: string | null;
   lat: number | null;
@@ -281,7 +282,7 @@ const POOL_EXCLUDED_STATUS = new Set(["부적합", "이탈"]);
 
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   if (!c.phone) return { sendable: false, reason: "연락처 없음" };
-  if (!c.accessToken) return { sendable: false, reason: "맞춤 공고 링크 없음" };
+  if (!c.hasCustomLink) return { sendable: false, reason: "맞춤 공고 링크 없음" };
   if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
   if (POOL_EXCLUDED_STATUS.has(c.status)) return { sendable: false, reason: `인력풀 제외(${c.status})` };
   return { sendable: true, reason: null };
@@ -298,7 +299,7 @@ function appliedMonth(iso: string | null): string | null {
 // 목록 API가 추가로 내려주는 컬럼 — 공용 Applicant 타입엔 아직 없어 로컬 확장으로 소비.
 type ApplicantRow = Applicant & {
   sms_opt_out_at?: string | null;
-  access_token?: string | null;
+  has_access_token?: boolean;
   applied_at?: string | null;
   /** 지금 붙어 있는 공고들(관심 포함) — 상세 패널의 공고 목록·응대 화면 탭과 같은 집합(lib/candidate-links). */
   job_links?: LiveJobLink[] | null;
@@ -344,7 +345,7 @@ function toCard(a: ApplicantRow): CardData {
     sido: a.sido ?? null,
     createdAtIso: a.created_at ?? null,
     lastMessageAtIso: a.last_message_at ?? null,
-    accessToken: a.access_token ?? null,
+    hasCustomLink: Boolean(a.has_access_token),
     appliedAtIso: a.applied_at ?? null,
     geoPrecision: a.geo_precision ?? null,
     lat: a.lat ?? null,

@@ -125,7 +125,21 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ data: withStage });
+  // 맞춤 공고 링크 토큰은 '있는지 없는지'만 내려보낸다.
+  //
+  // 목록에서 이 값을 쓰는 곳은 파이프라인의 발송 가능 판정 한 군데뿐이고(sendableOf →
+  // `if (!c.accessToken)`), 거기서 필요한 건 존재 여부다. 그런데 지금까지는 649명분
+  // 토큰 원문이 전부 브라우저로 내려갔다 — 목록을 한 번 열 때마다 개인별 맞춤 공고
+  // 링크 649개가 통째로 노출된 셈이다(대시보드·파이프라인·슬롯보드·리포트 4개 화면).
+  // 링크 복사가 필요한 상세 패널은 별도 상세 GET에서 원문을 받으므로 영향이 없다.
+  //
+  // 부수 효과로 응답에서 24KB가 빠진다.
+  const safe = withStage.map(({ access_token, ...rest }) => ({
+    ...rest,
+    has_access_token: Boolean(access_token),
+  }));
+
+  return NextResponse.json({ data: safe });
 }
 
 /**
