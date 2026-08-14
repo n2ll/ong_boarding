@@ -192,24 +192,21 @@ async function processInbound(
         .eq("id", jc.id);
     }
 
-    // 안 읽음 카운터 증가
-    await supabase.rpc("increment_unread", { p_applicant_id: applicant.id }).then(
-      () => {},
-      async () => {
-        const { data: a } = await supabase
-          .from("applicants")
-          .select("unread_count")
-          .eq("id", applicant.id)
-          .single();
-        await supabase
-          .from("applicants")
-          .update({
-            unread_count: ((a as { unread_count?: number } | null)?.unread_count ?? 0) + 1,
-            last_message_at: receivedAt,
-          })
-          .eq("id", applicant.id);
-      }
-    );
+    // 안 읽음 카운터·last_message_at 은 DB 트리거가 한다 — 여기서 하지 않는다.
+    //
+    // messages 테이블의 `trg_match_applicant`(BEFORE INSERT)가 삽입 시점에
+    // last_message_at 갱신과 inbound unread_count +1 을 이미 처리한다.
+    // 삽입 경로가 이 웹훅만이 아니므로(수동 발송·캠페인·에이전트 응대) 테이블 쪽이 맞는 자리다.
+    //
+    // 예전에 여기 있던 코드는 이랬다:
+    //   await supabase.rpc("increment_unread", …).then(() => {}, async () => { /* 폴백 */ });
+    // 두 가지가 겹쳐 **아무 일도 하지 않는 코드**였다 —
+    //   1) increment_unread 함수가 DB에 없다(pg_proc 0건).
+    //   2) Supabase 쿼리 빌더는 실패해도 reject 하지 않고 { error } 로 resolve 하므로
+    //      두 번째(실패) 콜백이 아예 불리지 않는다.
+    // 이 죽은 코드 때문에 "이 컬럼은 갱신되지 않는다"고 잘못 읽고 트리거를 중복으로 붙였다가
+    // unread_count 가 +2 되는 일이 있었다(2026-08-14, 즉시 되돌림).
+    // 자세한 경위는 docs/migrations/2026-08-last-message-at-trigger.sql.
 
     // 캠페인 답장자 편입(아래 4a-2)에서 쓰는 신호 — 가용성 분류가 끝난 뒤에만 판단한다.
     // recentPingAt: 최근 14일 내 ping_sent(캠페인 코호트 판정). inboundOptOut: 이번 인바운드가
