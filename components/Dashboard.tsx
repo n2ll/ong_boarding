@@ -278,8 +278,13 @@ export function Dashboard() {
 
   if (showSkeleton) return <DashboardSkeleton />;
 
+  // [&>*]:shrink-0 — flex 세로 스택에서 내용이 화면보다 길어지면 flex가 자식의 높이를
+  // 뺏어 눌러버린다. overflow-hidden인 카드는 눌린 만큼 내용이 그냥 사라진다.
+  // 실제로 아래 다크 히어로가 352px 잘려 제목 한 줄만 남아 있었고(운영 상태·문자
+  // 발송폰 표시가 전부 안 보였다), '지표 · 분석' 카드도 53px 잘렸다.
+  // 배경색도 여기서 칠하지 않는다 — body의 종이 질감을 덮는다.
   return (
-    <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
+    <div className="p-8 pb-12 flex min-h-full flex-col gap-6 [&>*]:shrink-0">
       {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 발송폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
       <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-xl px-8 py-6 relative overflow-hidden shadow-md text-white">
         <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-info rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
@@ -325,7 +330,7 @@ export function Dashboard() {
               )}
             </div>
           </div>
-          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
+          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/70 backdrop-blur-xl/10 hover:bg-white/70 backdrop-blur-xl/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
             인재풀 · 파이프라인 <ArrowRight size={14} />
           </button>
         </div>
@@ -613,7 +618,7 @@ export function Dashboard() {
 // 첫 진입(캐시 없음) 로딩 중 0값 깜빡임을 막는 스켈레톤. 실제 레이아웃 골격(헤더→할 일→큐 2칸→접이식 헤더)과 동일.
 function DashboardSkeleton() {
   return (
-    <div className="p-8 pb-12 flex flex-col gap-6 bg-background min-h-full">
+    <div className="p-8 pb-12 flex min-h-full flex-col gap-6 [&>*]:shrink-0">
       <div className="bg-foreground rounded-xl px-8 py-6 shadow-md">
         <div className="flex items-center justify-between">
           <div className="space-y-2">

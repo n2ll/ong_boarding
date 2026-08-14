@@ -234,13 +234,13 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             onClick={runSync}
             disabled={syncing}
             title="옹매니징(계약·정산)에 등록된 화주사를 공고용으로 가져옵니다"
-            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 옹매니징 동기화
           </button>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={18} /> 신규 화주사 등록
           </button>
@@ -248,7 +248,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {integ && (
-        <div className="mb-6 bg-white border border-border-strong rounded-2xl shadow-sm p-5">
+        <div className="mb-6 bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-5">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-bold text-foreground">데이터 정합성 점검</span>
@@ -284,7 +284,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       )}
 
-      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+      <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
         <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -293,7 +293,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="기업명·담당자 검색"
-              className="pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm w-[260px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+              className="pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm w-[260px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>
@@ -347,7 +347,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                 {client.contact_phone && <div className="text-[11px] text-muted-foreground">{client.contact_phone}</div>}
               </div>
               <div className="flex justify-end">
-                <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+                <button onClick={(e) => { e.stopPropagation(); openEdit(client); }} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Pencil size={16} />
                 </button>
               </div>

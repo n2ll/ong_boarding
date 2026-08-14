@@ -646,7 +646,7 @@ export function LiveConsole() {
           )}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow bg-muted" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
           </div>
           {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
           <div className="flex gap-1.5 flex-wrap">
@@ -685,7 +685,7 @@ export function LiveConsole() {
             </div>
           ) : null}
           {/* 대량 발송 진입점 — 큰 버튼 대신 작은 링크로(개별 응대 화면에서 실사용 빈도 낮음) */}
-          <Link href="/pipeline" className="self-start flex items-center gap-1 text-[12px] font-bold text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+          <Link href="/pipeline" className="self-start flex items-center gap-1 text-[12px] font-bold text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             대량 발송은 파이프라인에서 <ArrowRight size={13} />
           </Link>
         </div>
@@ -984,7 +984,7 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
+                className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
@@ -1018,7 +1018,7 @@ export function LiveConsole() {
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                  className="min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <div>
@@ -1029,7 +1029,7 @@ export function LiveConsole() {
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none disabled:bg-background"
+                  className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
                 />
               </div>
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>

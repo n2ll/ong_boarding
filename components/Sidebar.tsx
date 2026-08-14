@@ -125,7 +125,7 @@ export function Sidebar() {
           aria-label={pinned ? "메뉴 접기" : "메뉴 펼치기"}
           aria-expanded={expanded}
           onClick={() => setPinned((v) => !v)}
-          className="mb-1 flex min-h-11 shrink-0 items-center gap-3 rounded-2xl px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+          className="mb-1 flex min-h-11 shrink-0 items-center gap-3 rounded-2xl px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white">
             <LogoMark size={26} />
@@ -176,7 +176,7 @@ export function Sidebar() {
                   onClick={signOut}
                   aria-label="로그아웃"
                   title="로그아웃"
-                  className="after:absolute after:-inset-2 after:content-[''] relative shrink-0 rounded-lg p-2 text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="after:absolute after:-inset-2 after:content-[''] relative shrink-0 rounded-lg p-2 text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <LogOut size={16} />
                 </button>
@@ -216,7 +216,7 @@ export function MobileNav() {
             href={path}
             aria-label={label}
             aria-current={active ? "page" : undefined}
-            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[10px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[10px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
               active ? "bg-white text-gray-900" : "text-white/55 hover:bg-white/10 hover:text-white"
             }`}
           >
@@ -249,7 +249,7 @@ function DockItem({
         href={item.path}
         aria-label={item.label}
         aria-current={active ? "page" : undefined}
-        className={`relative z-10 flex min-h-11 w-full min-w-0 items-center gap-3 rounded-2xl pr-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+        className={`relative z-10 flex min-h-11 w-full min-w-0 items-center gap-3 rounded-2xl pr-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring ${
           active ? "bg-white text-gray-900 shadow-[var(--shadow-md)]" : "text-white/60 hover:bg-white/10 hover:text-white"
         }`}
       >

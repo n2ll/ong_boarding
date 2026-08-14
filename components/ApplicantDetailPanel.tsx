@@ -292,7 +292,7 @@ function CollapsibleSection({ title, summary, open, onToggle, children }: {
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+        className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="text-[12.5px] font-extrabold text-foreground">{title}</span>
         <span className="flex items-center gap-1.5 min-w-0">
@@ -927,7 +927,7 @@ export function ApplicantDetailContent({
           <button
             onClick={toggleBlacklist}
             disabled={busy}
-            className="px-2 py-1 rounded-full text-[11px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-50"
+            className="px-2 py-1 rounded-full text-[11px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
           >
             {detail.blacklisted ? "블랙리스트 해제" : "블랙리스트 등록"}
           </button>
@@ -990,7 +990,7 @@ export function ApplicantDetailContent({
                       key={ij.job_id}
                       onClick={() => copyInterestReply(ij)}
                       title={`${ij.title ?? `공고 #${ij.job_id}`} — 관심 클릭 ${relTime(ij.clicked_at)} · 대기 안내 문구를 클립보드에 복사`}
-                      className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-white border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                      className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-white border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       ⭐ {shortJobTitle(ij.title, ij.job_id)}
                       {ij.immediate && <span className="ml-1 text-success-strong">· 바로가능</span>}
@@ -1032,7 +1032,7 @@ export function ApplicantDetailContent({
                   onClick={clearAvailableSlots}
                   disabled={clearingSlots}
                   title="대화·입력으로 채워진 시간대를 지웁니다. 지우면 지원 당시 폼 값으로 판정하고, 이후 대화에서 다시 확인될 수 있어요."
-                  className="text-[10px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"
+                  className="text-[10px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
                 >
                   지우기
                 </button>
@@ -1134,7 +1134,7 @@ export function ApplicantDetailContent({
                         : undefined
                     }
                     className={`rounded-xl border p-3 ${isFocus ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white"} ${
-                      selectable ? "cursor-pointer hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow" : ""
+                      selectable ? "cursor-pointer hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -1216,7 +1216,7 @@ export function ApplicantDetailContent({
                   onClick={toggleOptOut}
                   disabled={busy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-white hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-white hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
                 </button>
@@ -1226,7 +1226,7 @@ export function ApplicantDetailContent({
                 onClick={toggleOptOut}
                 disabled={busy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 수신거부 등록
               </button>
@@ -1255,9 +1255,9 @@ export function ApplicantDetailContent({
               <div className="rounded-xl border border-success/25 bg-success-soft p-3">
                 <div className="text-[12px] font-bold text-success-strong mb-2">확정 후속 안내 발송</div>
                 <div className="flex gap-1.5 flex-wrap">
-                  <button onClick={() => setFollowup("venue")} disabled={!!venueHardBlock} title={venueHardBlock ?? venueWarn ?? "만남장소 안내 발송 (내용 확인·수정)"} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-40 disabled:cursor-not-allowed">만남장소</button>
-                  <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-yellow-50 text-warning-strong border border-yellow-200 hover:bg-yellow-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">첫날규칙</button>
-                  <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-muted text-gray-700 border border-border-strong hover:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">앱안내</button>
+                  <button onClick={() => setFollowup("venue")} disabled={!!venueHardBlock} title={venueHardBlock ?? venueWarn ?? "만남장소 안내 발송 (내용 확인·수정)"} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed">만남장소</button>
+                  <button onClick={() => setFollowup("first_day")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-yellow-50 text-warning-strong border border-yellow-200 hover:bg-yellow-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">첫날규칙</button>
+                  <button onClick={() => setFollowup("app_guide")} className="px-2.5 py-1 rounded-full text-[11.5px] font-bold bg-muted text-gray-700 border border-border-strong hover:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">앱안내</button>
                 </div>
                 {/* **발송 대상 공고를 이름으로 밝힌다** — 이 발송은 '표시 중' 공고가 아니라 확정 결속
                     (current_job_id)을 따른다. 공고 6~7개가 동시에 열리면 매니저는 표시 중 공고를 보고
@@ -1307,7 +1307,7 @@ export function ApplicantDetailContent({
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-muted-foreground">확정 지점</span>
-                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                     <option value="">미지정</option>
                     {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                     {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
@@ -1316,18 +1316,18 @@ export function ApplicantDetailContent({
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-muted-foreground">근무 시작일</span>
-                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
               </label>
               {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
               {!detailInternal && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-muted-foreground">배민 커넥트 ID</span>
-                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-muted-foreground">온보딩 통화</span>
-                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
+                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white">
                   <option value="">미지정</option>
                   {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                   {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1338,7 +1338,7 @@ export function ApplicantDetailContent({
                   가용성
                   {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
                 </span>
-                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white">
+                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white">
                   <option value="">미확인</option>
                   {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -1351,8 +1351,8 @@ export function ApplicantDetailContent({
                 <span className="text-[11px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
                 {!suntopFormOpen ? (
                   <div className="flex items-center gap-2">
-                    <button onClick={() => openSuntopForm("scheduled")} className="text-[11.5px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">+ 예정</button>
-                    <button onClick={() => openSuntopForm("done")} className="text-[11.5px] font-bold text-success-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">+ 완료</button>
+                    <button onClick={() => openSuntopForm("scheduled")} className="text-[11.5px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">+ 예정</button>
+                    <button onClick={() => openSuntopForm("done")} className="text-[11.5px] font-bold text-success-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">+ 완료</button>
                   </div>
                 ) : (
                   <button onClick={() => setSuntopFormOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[11.5px] font-bold text-muted-foreground hover:underline rounded">닫기</button>
@@ -1377,7 +1377,7 @@ export function ApplicantDetailContent({
                     return (
                       <span key={ev.id} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11.5px] font-bold border ${isSched ? "bg-yellow-50 text-warning-strong border-yellow-200" : "bg-success-soft text-success-strong border-success/25"}`}>
                         {isSched ? "예정" : "완료"} · {[ev.meta?.client, ev.meta?.line].filter(Boolean).join(" ") || "선탑"} · {when}
-                        <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"><X size={11} /></button>
+                        <button onClick={() => removeSuntop(ev.id)} title="기록 삭제(오기록 정정)" className="hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"><X size={11} /></button>
                       </span>
                     );
                   })}
@@ -1387,11 +1387,11 @@ export function ApplicantDetailContent({
                 <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-background border border-border-strong">
                   <div className="text-[11px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
-                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                   </div>
                   {suntopStage === "scheduled" && (
-                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                   )}
                   <button onClick={recordSuntop} disabled={busy} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-1.5 rounded-lg text-[12px] font-bold text-white disabled:opacity-50 flex justify-center items-center gap-1.5 ${suntopStage === "scheduled" ? "bg-yellow-700 hover:bg-warning-strong" : "bg-success-strong hover:bg-success-strong"}`}>
                     {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {suntopStage === "scheduled" ? "선탑 예정으로 기록" : "선탑 완료로 기록"}
@@ -1469,7 +1469,7 @@ export function ApplicantDetailContent({
                     key={c.job_id}
                     type="button"
                     onClick={() => pickConfirmJob(c.job_id)}
-                    className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${confirmJobId === c.job_id ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}
+                    className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${confirmJobId === c.job_id ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}
                   >
                     {c.job_title ?? `공고 #${c.job_id}`}
                     {c.agent_stage === "abort" && <span className="ml-1 text-[10px] text-warning-strong">중단</span>}
@@ -1488,13 +1488,13 @@ export function ApplicantDetailContent({
           <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-bold text-muted-foreground">근무 시작일</span>
-              <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow" />
+              <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
             </label>
             {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). 지점 개념 라인·등록 지점 있을 때만. */}
             {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-muted-foreground">확정 지점(선택)</span>
-                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow">
+                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">미지정</option>
                   {confirmBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                   {confirmBranch.trim() !== "" && !confirmBranchNames.includes(confirmBranch) && <option value={confirmBranch}>{confirmBranch} (미등록)</option>}
@@ -1516,7 +1516,7 @@ export function ApplicantDetailContent({
                       key={s}
                       type="button"
                       onClick={() => toggleConfirmSlot(s)}
-                      className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}
+                      className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}
                     >
                       {s}{hoped && !on ? " ·희망" : ""}
                     </button>

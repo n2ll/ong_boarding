@@ -156,7 +156,7 @@ export function Settings() {
             {activeTab === 'team' && <Team embedded />}
           </div>
         ) : (
-        <div className="flex-1 bg-white border border-border-strong rounded-2xl shadow-sm p-8">
+        <div className="flex-1 bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-8">
           {activeTab === 'profile' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-foreground mb-6 border-b border-border-strong pb-4">기본 정보</h2>

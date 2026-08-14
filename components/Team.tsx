@@ -135,7 +135,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
         </button>
       </div>
 
-      <div className="bg-white border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+      <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
         <div className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1.5fr_1fr_0.5fr] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
           <div>이름 / 연락처</div>
           <div>권한 (Role)</div>
@@ -174,7 +174,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
 
               <div className="flex justify-end">
-                <button onClick={() => openEdit(member)} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+                <button onClick={() => openEdit(member)} title="편집" className="after:absolute after:-inset-2 after:content-[''] relative p-2 text-muted-foreground hover:bg-gray-200 hover:text-foreground rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Pencil size={16} />
                 </button>
               </div>

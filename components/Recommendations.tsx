@@ -150,7 +150,7 @@ export function Recommendations() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
         {/* Left Pane - Active Jobs */}
-        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
           <h2 className="text-sm font-bold text-muted-foreground mb-4">분석할 공고 선택</h2>
           <div className="flex flex-col gap-2">
             {jobs.length === 0 && (
@@ -162,7 +162,7 @@ export function Recommendations() {
                 <button
                   key={job.id}
                   onClick={() => handleSelect(job.id)}
-                  className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
+                  className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
                 >
                   <div className="text-[13px] font-bold text-foreground mb-1 leading-tight">{job.title}</div>
                   <div className="text-[11px] text-muted-foreground flex items-center gap-1">
@@ -176,7 +176,7 @@ export function Recommendations() {
 
         {/* Right Pane - Recommendations */}
         <div className="flex flex-col gap-4">
-          <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center justify-between">
+          <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center justify-between">
             <div>
               <div className="text-[14px] font-bold text-foreground">{selectedJob?.title ?? "공고를 선택하세요"}</div>
               <div className="text-[12px] text-muted-foreground mt-0.5">
@@ -186,7 +186,7 @@ export function Recommendations() {
             <button
               onClick={handleGenerate}
               disabled={!selectedJob || loading}
-              className="min-h-11 flex items-center gap-2 bg-foreground hover:bg-gray-800 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+              className="min-h-11 flex items-center gap-2 bg-foreground hover:bg-gray-800 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {loading ? "분석 중…" : "AI 추천 생성"}
@@ -202,7 +202,7 @@ export function Recommendations() {
           {recs.map((rec) => {
             const tags = buildTags(rec);
             return (
-              <div key={`${rec.source}-${rec.id}`} className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
+              <div key={`${rec.source}-${rec.id}`} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
                 <div className="shrink-0 flex flex-col items-center gap-2 w-[100px]">
                   <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info-strong relative">
                     <User size={28} />
@@ -233,14 +233,14 @@ export function Recommendations() {
                       <button
                         onClick={() => handleAddCandidate(rec)}
                         disabled={addingId === rec.id || addedIds.has(rec.id)}
-                        className="w-full bg-foreground hover:bg-gray-800 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow flex items-center justify-center gap-1.5"
+                        className="w-full bg-foreground hover:bg-gray-800 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center gap-1.5"
                       >
                         {addingId === rec.id ? <Loader2 size={15} className="animate-spin" /> : addedIds.has(rec.id) ? <Check size={15} /> : null}
                         {addedIds.has(rec.id) ? "추가됨" : "공고 후보로 추가"}
                       </button>
                       <button
                         onClick={() => setProfileId(rec.id)}
-                        className="w-full bg-white border border-border-strong hover:bg-background text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                        className="w-full bg-white border border-border-strong hover:bg-background text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         프로필 보기
                       </button>

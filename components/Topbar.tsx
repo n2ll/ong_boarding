@@ -137,7 +137,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         {/* Search Button — 좁은 화면에서는 감춘다(⌘K로 계속 열 수 있다) */}
         <button
           onClick={() => setSearchOpen(true)}
-          className="hidden items-center gap-2 bg-muted hover:bg-muted border border-transparent rounded-md min-h-11 py-[9px] px-[13px] w-[300px] min-w-[150px] shrink cursor-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow md:flex"
+          className="hidden items-center gap-2 bg-muted hover:bg-muted border border-transparent rounded-md min-h-11 py-[9px] px-[13px] w-[300px] min-w-[150px] shrink cursor-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
         >
           <Search size={17} className="text-muted-foreground" />
           <span className="flex-1 text-left text-sm text-muted-foreground">지원자·공고 검색</span>
@@ -156,7 +156,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
               setBranchOpen(!branchOpen);
               setNotifOpen(false);
             }}
-            className={`flex items-center gap-2 bg-white border rounded-md min-h-11 py-[9px] px-[14px] text-sm font-semibold cursor-pointer whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${scopeBranch ? "border-brand-yellow text-foreground bg-yellow-50" : "border-border-strong text-gray-800 hover:border-gray-400"}`}
+            className={`flex items-center gap-2 bg-white border rounded-md min-h-11 py-[9px] px-[14px] text-sm font-semibold cursor-pointer whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${scopeBranch ? "border-brand-yellow text-foreground bg-yellow-50" : "border-border-strong text-gray-800 hover:border-gray-400"}`}
           >
             <MapPin size={16} className={scopeBranch ? "text-warning-strong" : "text-muted-foreground"} />
             <span className="hidden max-w-[140px] truncate sm:inline">{scopeBranch ?? "전체 지점"}</span>
@@ -197,7 +197,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
               setBranchOpen(false);
               if (!notifOpen) loadNotices();
             }}
-            aria-label={notices.length > 0 ? `알림 ${notices.length}건 열기` : "알림 열기"} aria-expanded={notifOpen} className="relative w-11 h-11 rounded-md border border-border-strong hover:border-gray-400 bg-white flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            aria-label={notices.length > 0 ? `알림 ${notices.length}건 열기` : "알림 열기"} aria-expanded={notifOpen} className="relative w-11 h-11 rounded-md border border-border-strong hover:border-gray-400 bg-white flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Bell size={19} className="text-gray-700" />
             {notices.length > 0 && (

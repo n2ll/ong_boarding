@@ -63,7 +63,7 @@ function digits(raw: string, max: number): string {
 
 const labelCls = "block text-[15px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-border-strong rounded-xl text-[16px] focus:outline-none focus:border-brand-yellow focus:ring-2 focus:ring-brand-yellow/40 bg-white";
+  "w-full px-4 py-3.5 border border-border-strong rounded-xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-white";
 const requiredMark = <span className="text-error ml-0.5">*</span>;
 
 interface JobContext {

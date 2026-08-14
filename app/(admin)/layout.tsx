@@ -51,7 +51,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           도크는 fixed라 본문이 lg:ml-[92px]로 자리를 비켜준다.
           모바일(lg 미만)은 하단 내비가 가리므로 본문 아래에 safe-area만큼 여백을 준다.
         */}
-        <div className="relative flex h-[100dvh] w-full overflow-hidden bg-background font-sans">
+        {/*
+          여기에 bg-background(불투명)를 두면 안 된다. body에 이식해 둔 종이 질감
+          — 좌상단 옐로 워시 · 우하단 코랄 워시 · 32px 흰 격자 — 을 통째로 덮어서
+          제품 어디서도 보이지 않았다. 유리 면(도크·헤더·모달·패널)이 흐릴 대상이
+          없으니 블러도 효과가 없었고, "라이브러리를 흉내만 냈다"는 인상의 원인이었다.
+          배경색은 body가 칠한다.
+        */}
+        <div className="relative flex h-[100dvh] w-full overflow-hidden font-sans">
           <a
             href="#app-content"
             className="fixed left-4 top-3 z-[200] -translate-y-20 rounded-xl bg-foreground px-4 py-3 text-sm font-bold text-white shadow-[var(--shadow-xl)] transition-transform focus:translate-y-0"

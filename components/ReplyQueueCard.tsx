@@ -187,7 +187,7 @@ export function ReplyQueueCard({
             <select
               value={jobFilter === "all" ? "all" : String(jobFilter)}
               onChange={(e) => setJobFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-              className="pr-8 max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40"
+              className="pr-8 max-w-[180px] text-[12px] font-bold text-gray-700 bg-white border border-border-strong rounded-lg px-2.5 py-1 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-ring"
               title="진행 중 공고별로 답할 차례인 지원자를 걸러 봅니다"
             >
               <option value="all">전체 공고</option>

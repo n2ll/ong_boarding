@@ -67,7 +67,7 @@ function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
             required
-            className="min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+            className="min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div>
@@ -78,7 +78,7 @@ function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
-            className="min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+            className="min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
       </div>

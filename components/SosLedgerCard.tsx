@@ -247,7 +247,7 @@ export function SosLedgerCard() {
   };
 
   const inputCls =
-    "w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow";
+    "w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
@@ -354,7 +354,7 @@ export function SosLedgerCard() {
               <select
                 value={ledgerForm.category}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
-                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[12.5px] bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[12.5px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
                   <option key={k} value={k}>{label}</option>
@@ -366,13 +366,13 @@ export function SosLedgerCard() {
                 placeholder="금액(원)"
                 value={ledgerForm.amount_krw}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <input
                 placeholder="메모 (선택)"
                 value={ledgerForm.memo}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <button
                 onClick={handleAddLedger}

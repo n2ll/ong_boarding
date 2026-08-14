@@ -580,7 +580,7 @@ export function ConversationThread({
                   onClick={handleToggleOptOut}
                   disabled={optOutBusy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
                 </button>
@@ -590,7 +590,7 @@ export function ConversationThread({
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Ban size={12} /> 수신거부 등록
               </button>
@@ -714,7 +714,7 @@ export function ConversationThread({
               <button
                 key={t.label}
                 onClick={() => insertTemplate(t.text)}
-                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 title={t.text}
               >
                 + {t.label}
@@ -745,7 +745,7 @@ export function ConversationThread({
                 onClick={handleSendAndResume}
                 disabled={sending}
                 title="발송 성공 후 AI 자동 응대를 즉시 재개합니다"
-                className="h-[54px] px-3 rounded-lg text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                className="h-[54px] px-3 rounded-lg text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 보내고
                 <br />

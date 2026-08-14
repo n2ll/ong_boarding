@@ -160,7 +160,7 @@ export function Inbox() {
         </div>
         <button
           onClick={() => mutate()}
-          className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+          className="flex items-center gap-2 bg-white/70 backdrop-blur-xl border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <RefreshCw size={16} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
@@ -191,7 +191,7 @@ export function Inbox() {
         {messages.map((msg) => {
           const busy = busyId === msg.id;
           return (
-            <div key={msg.id} className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+            <div key={msg.id} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[13px] font-bold text-gray-700">
                   <Phone size={13} className="text-muted-foreground" /> {msg.applicant_phone}
@@ -205,14 +205,14 @@ export function Inbox() {
                 <button
                   onClick={() => classify(msg, "other")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <Ban size={15} /> 기타로 분류
                 </button>
                 <button
                   onClick={() => classify(msg, "ongmanaging")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <ArrowRightLeft size={15} /> 기존 계약자 문의
                 </button>
@@ -230,7 +230,7 @@ export function Inbox() {
                         classify(msg, "job", { jobId: Number(v), jobLabel: j?.title });
                       }
                     }}
-                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     title="이 문의를 지원자로 등록할 공고(라인)를 선택하세요"
                   >
                     <option value="">＋ 지원자로 등록…</option>

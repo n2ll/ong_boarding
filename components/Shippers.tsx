@@ -107,7 +107,7 @@ export function Shippers() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="화주사 검색"
-              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus:border-brand-yellow bg-white"
+              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
             />
           </div>
 
@@ -121,7 +121,7 @@ export function Shippers() {
                 <div key={c.id} className="rounded-xl border border-border-strong bg-white overflow-hidden">
                   <button
                     onClick={() => setOpenId(open ? null : c.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {open ? (
                       <ChevronDown size={16} className="text-muted-foreground shrink-0" />

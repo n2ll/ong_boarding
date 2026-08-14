@@ -166,7 +166,7 @@ export function Automation() {
           <button
             onClick={runEvaluate}
             disabled={ruleRunning}
-            className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-60"
+            className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
             <Play size={13} /> {ruleRunning ? "점검 중…" : "지금 점검 실행"}
           </button>

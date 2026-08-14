@@ -271,12 +271,12 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               placeholder="지점명, 담당자 검색"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+              className="min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={18} /> 신규 지점 등록
           </button>
@@ -285,7 +285,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
 
       {/* Stats Summary */}
       <div className="flex flex-wrap gap-4 mb-8">
-        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-info-soft flex items-center justify-center shrink-0">
             <Building2 size={24} className="text-info-strong" />
           </div>
@@ -294,7 +294,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-foreground">{activeRows.length}<span className="text-sm font-medium text-muted-foreground ml-1">개</span></div>
           </div>
         </div>
-        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-error-soft flex items-center justify-center shrink-0">
             <AlertTriangle size={24} className="text-error-strong" />
           </div>
@@ -303,7 +303,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-error-strong">{criticalCount}<span className="text-sm font-medium text-muted-foreground ml-1">개 지점</span></div>
           </div>
         </div>
-        <div className="flex-1 min-w-[220px] bg-white border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center shrink-0">
             <Briefcase size={24} className="text-warning-strong" />
           </div>
@@ -342,7 +342,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 {group.branches.map((branch) => {
           const fillRatio = branch.fillRatio;
           return (
-            <div key={branch.id} className={`bg-white border rounded-2xl p-6 transition-all group ${branch.active ? "border-border-strong hover:border-gray-300 hover:shadow-md" : "border-dashed border-border-strong opacity-70"}`}>
+            <div key={branch.id} className={`bg-white/70 backdrop-blur-xl border rounded-2xl p-6 transition-all group ${branch.active ? "border-border-strong hover:border-gray-300 hover:shadow-md" : "border-dashed border-border-strong opacity-70"}`}>
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -353,7 +353,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   </div>
                   <h3 className="text-[18px] font-extrabold text-foreground tracking-tight group-hover:text-info transition-colors">{branch.name}</h3>
                 </div>
-                <button onClick={() => openEdit(branch)} title="지점 편집" className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+                <button onClick={() => openEdit(branch)} title="지점 편집" className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Pencil size={17} />
                 </button>
               </div>

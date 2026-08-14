@@ -119,12 +119,12 @@ export function Reports() {
           <p className="text-[14px] text-muted-foreground">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-muted-foreground">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center bg-white border border-border-strong rounded-xl px-2 py-1 shadow-sm">
+          <div className="flex items-center bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl px-2 py-1 shadow-sm">
             {['이번 주', '이번 달', '올해'].map(range => (
               <button 
                 key={range}
                 onClick={() => setDateRange(range)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${dateRange === range ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-gray-700'}`}
+                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${dateRange === range ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-gray-700'}`}
               >
                 {range}
               </button>
@@ -132,7 +132,7 @@ export function Reports() {
           </div>
           <button 
             onClick={handleDownload}
-            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-brand-yellow"
+            className="flex items-center gap-2 bg-white/70 backdrop-blur-xl border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
           >
             <Download size={16} /> 리포트 다운로드
           </button>
@@ -141,7 +141,7 @@ export function Reports() {
 
       {/* Overview Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <div className="w-10 h-10 rounded-xl bg-success-soft flex items-center justify-center">
               <Users size={20} className="text-success-strong" />
@@ -151,7 +151,7 @@ export function Reports() {
           <div className="text-2xl font-extrabold text-foreground">{stats.total.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
 
-        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <div className="w-10 h-10 rounded-xl bg-info-soft flex items-center justify-center">
               <CheckCircle size={20} className="text-info-strong" />
@@ -161,7 +161,7 @@ export function Reports() {
           <div className="text-2xl font-extrabold text-foreground">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
 
-        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <div className="w-10 h-10 rounded-xl bg-yellow-50 flex items-center justify-center">
               <Coins size={20} className="text-warning-strong" />
@@ -171,7 +171,7 @@ export function Reports() {
           <div className="text-2xl font-extrabold text-foreground">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">원</span></div>
         </div>
 
-        <div className="bg-white border border-border-strong rounded-2xl p-5 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <div className="w-10 h-10 rounded-xl bg-yellow-100 flex items-center justify-center">
               <Brain size={20} className="text-warning-strong" />
@@ -184,7 +184,7 @@ export function Reports() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         {/* Sourcing Trend Chart */}
-        <div className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-6 shadow-sm">
           <h3 className="text-[16px] font-bold text-foreground mb-1">월별 지원자 및 합격자 추이</h3>
           <p className="text-[12px] text-muted-foreground mb-5">실시간 인입 기준(일괄 임포트 제외)</p>
           <div className="h-[280px]">
@@ -217,7 +217,7 @@ export function Reports() {
         </div>
 
         {/* Funnel Chart */}
-        <div className="bg-white border border-border-strong rounded-2xl p-6 shadow-sm">
+        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-6 shadow-sm">
           <h3 className="text-[16px] font-bold text-foreground mb-6">채용 단계별 전환율</h3>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>

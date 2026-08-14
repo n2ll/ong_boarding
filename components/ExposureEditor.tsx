@@ -106,7 +106,7 @@ function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () 
     <button
       type="button"
       onClick={onClick}
-      className={`px-2.5 py-1 rounded-full text-[12px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+      className={`px-2.5 py-1 rounded-full text-[12px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
         on
           ? "bg-foreground text-white border-foreground"
           : "bg-white text-gray-700 border-border-strong hover:border-gray-300"
@@ -309,7 +309,7 @@ export function ExposureEditor({
               href="/pipeline"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"
+              className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
             >
               인재풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
             </a>
@@ -434,7 +434,7 @@ export function ExposureEditor({
                     <button
                       type="button"
                       onClick={() => setRule({ radiusKm: "", radiusIncludeUnknown: false })}
-                      className="text-[11px] font-bold text-error-strong hover:underline px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                      className="text-[11px] font-bold text-error-strong hover:underline px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       해제
                     </button>
@@ -509,7 +509,7 @@ export function ExposureEditor({
                   setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
                 }}
                 placeholder="없음"
-                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[12.5px] focus:outline-none focus:border-brand-yellow"
+                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               개월 이내
             </label>
@@ -557,14 +557,14 @@ export function ExposureEditor({
             <button
               type="button"
               onClick={() => mutateRoster()}
-              className="flex items-center gap-1 text-[11.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"
+              className="flex items-center gap-1 text-[11.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
               title="저장된 기준 명단을 다시 불러옵니다(파이프라인에서 추가한 인원 등 반영). 편집 중 규칙 변경은 저장 후 다음에 열 때 반영돼요."
             >
               <RefreshCw size={12} /> 새로고침
             </button>
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">이 명단은 <b className="text-muted-foreground">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-muted-foreground">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는{" "}
-            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">인재풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
+            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">인재풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
           {rosterLoading ? (
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</div>
           ) : roster ? (
@@ -590,7 +590,7 @@ export function ExposureEditor({
                         onClick={() => overrideCall(p.id, p.via === "include" && !p.linked ? "remove-include" : "exclude", p.linked === true)}
                         disabled={rosterBusy}
                         title={p.linked ? "이 분은 이 공고로 이야기 중이에요 — 빼면 본인 화면에서 공고가 사라지고 AI 응대는 계속됩니다(확인 후 적용)" : p.via === "include" ? "수동 추가를 해제합니다(규칙 비매칭이라 노출 대상에서 빠져요)" : "규칙보다 우선하는 '제외'로 지정합니다"}
-                        className="ml-auto flex items-center gap-1 text-[11px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"
+                        className="ml-auto flex items-center gap-1 text-[11px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
                       >
                         <UserX size={11} /> 제외
                       </button>
@@ -615,7 +615,7 @@ export function ExposureEditor({
                           type="button"
                           onClick={() => overrideCall(p.id, "restore")}
                           disabled={rosterBusy}
-                          className="ml-auto flex items-center gap-1 text-[11px] font-bold text-info-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded"
+                          className="ml-auto flex items-center gap-1 text-[11px] font-bold text-info-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
                         >
                           <RotateCcw size={11} /> 복원
                         </button>

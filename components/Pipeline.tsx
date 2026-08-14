@@ -1657,13 +1657,13 @@ export function Pipeline() {
                 "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white border border-border-strong rounded-xl text-[13px] outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow shadow-sm" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl text-[13px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm" />
             </div>
             {view === "list" && (
               <select
                 value={distanceJobId === null ? "" : String(distanceJobId)}
                 onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
-                className={`pr-8 px-3 py-2 bg-white border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-white/70 backdrop-blur-xl border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
               >
                 <option value="">거리 기준 공고 선택…</option>
@@ -1678,7 +1678,7 @@ export function Pipeline() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-                className={`pr-8 px-3 py-2 bg-white border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-white/70 backdrop-blur-xl border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
               >
                 <option value="recent">최근 등록순</option>
@@ -1699,7 +1699,7 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="채용 진행 단계로 목록 좁히기"
                 >
                   진행 단계
@@ -1729,7 +1729,7 @@ export function Pipeline() {
               onChange={(e) => setRegionFilter(e.target.value as typeof regionFilter)}
               aria-label="사는 지역으로 목록 좁히기"
               title="사는 지역으로 목록 좁히기"
-              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${regionFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring ${regionFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">지역 전체</option>
               <option value="capital">수도권(서울·경기·인천)</option>
@@ -1740,7 +1740,7 @@ export function Pipeline() {
               onChange={(e) => setVehicleFilter(e.target.value as typeof vehicleFilter)}
               aria-label="차량 보유 여부로 목록 좁히기"
               title="차량 보유 여부로 목록 좁히기 — 공고가 차량을 요구할 때 씁니다"
-              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus:border-brand-yellow ${vehicleFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
+              className={`pr-8 px-3 py-2 rounded-lg text-[13px] font-bold border bg-white outline-none cursor-pointer focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring ${vehicleFilter !== "all" ? "border-brand-yellow text-warning-strong bg-yellow-50" : "border-border-strong text-gray-700"}`}
             >
               <option value="all">차량 전체</option>
               <option value="vehicle">차량 보유</option>
@@ -1754,7 +1754,7 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="다시 연락할 대상을 좁히는 조건 — 이미 일하는 분·최근에 연락한 분을 빼고 보냅니다"
                 >
                   발송 준비
@@ -1792,7 +1792,7 @@ export function Pipeline() {
             {/* 조건 더보기 — 실제로 자주 쓰이지 않는 조건(지원 채널·희망 근무·가용성·반응·수신거부)은 여기 안으로 */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
               aria-expanded={showFilters}
             >
               <Filter size={15} /> 조건 더보기
@@ -1935,7 +1935,7 @@ export function Pipeline() {
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
                       placeholder="지금 조건을 이름 붙여 저장 (예: 강남·자차·즉시가능)"
-                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus:border-brand-yellow bg-white"
+                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
                     />
                     <Button variant="brand" size="chip" className="px-3 py-1.5 text-[12.5px] rounded-lg shadow-none" onClick={saveCurrentSegment} disabled={!segNameDraft.trim()}>지금 조건 저장</Button>
                   </div>
@@ -2022,7 +2022,7 @@ export function Pipeline() {
                   value=""
                   onChange={(e) => { if (e.target.value) void selectJobInterested(Number(e.target.value)); }}
                   disabled={interestPickLoading || activeJobs.length === 0}
-                  className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="공고를 고르면 그 공고에 '관심 있음'을 누른 인원(확정인력 제외)이 선택됩니다"
                 >
                   <option value="">{interestPickLoading ? "관심자 조회 중…" : "공고 관심자 선택…"}</option>
@@ -2036,7 +2036,7 @@ export function Pipeline() {
                     min={1}
                     value={topN}
                     onChange={(e) => setTopN(Number(e.target.value))}
-                    className="w-[64px] px-2 py-1.5 bg-white border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow shadow-sm"
+                    className="w-[64px] px-2 py-1.5 bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm"
                     title="선택할 상위 인원 수"
                   />
                   <Button variant="secondary" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg" onClick={selectTopN}><Check size={15} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명 선택</Button>
@@ -2149,7 +2149,7 @@ export function Pipeline() {
                                             key={l.job_id}
                                             onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id), l.job_id); }}
                                             title={`${l.title} — ${interestOnly ? "관심만 누른 자리" : STAGE_KO[l.agent_stage ?? ""] ?? l.agent_stage}. 클릭하면 이 공고 기준으로 상세를 엽니다.`}
-                                            className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${
+                                            className={`cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full max-w-[110px] truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                                               interestOnly
                                                 ? "bg-yellow-50 text-warning-strong"
                                                 : paused
@@ -2165,7 +2165,7 @@ export function Pipeline() {
                                         <button
                                           onClick={(e) => { e.stopPropagation(); openApplicant(Number(c.id)); }}
                                           title={c.jobLinks.map((l) => l.title).join("\n")}
-                                          className="cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+                                          className="cursor-pointer text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                           +{c.jobLinks.length - 2}
                                         </button>
@@ -2369,7 +2369,7 @@ export function Pipeline() {
               {exposureImpactError && (
                 <div className="text-[12px] leading-snug text-error-strong bg-error-soft border border-error/30 rounded-lg px-3 py-2">
                   공고 노출 현황을 불러오지 못했어요 — 저장된 규칙·연결 인원을 확인할 수 없어 적용이 막힐 수 있어요.
-                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">다시 시도</button>
+                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">다시 시도</button>
                 </div>
               )}
               {/* 응답은 왔지만 이 공고만 빠진 경우 — 버튼이 이유 없이 비활성으로 보이지 않게 그 공고를 이름으로 지목한다.
@@ -2377,7 +2377,7 @@ export function Pipeline() {
               {!exposureImpactError && exposureImpact && exposureUnknownJobs.length > 0 && (
                 <div className="text-[12px] leading-snug text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
                   이 공고의 노출 현황을 못 읽었어요 — <b>{exposureUnknownJobs.map((j) => j.title).join(", ")}</b>. 규칙이 있는지 알 수 없어 적용할 수 없습니다.
-                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded">다시 시도</button>
+                  <button onClick={() => void mutateExposureImpact()} className="ml-1 font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">다시 시도</button>
                   {" "}또는 선택을 해제하고 진행하세요.
                 </div>
               )}
@@ -2545,7 +2545,7 @@ export function Pipeline() {
                 // 상세 확정 모달로만 한다(일괄 원클릭 오확정·통계 오염 방지).
                 { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
-                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-border-strong rounded-xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
+                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-border-strong rounded-xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <div className="text-[14px] font-bold text-foreground mb-1">{stage.label}</div>
                   <div className="text-[12px] text-muted-foreground">{stage.desc}</div>
                 </button>
@@ -2669,7 +2669,7 @@ export function Pipeline() {
                 <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 템플릿</label>
                 <select
                   onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
-                  className="pr-8 w-full border border-border-strong rounded-xl px-4 py-3 text-[14px] outline-none focus:border-brand-yellow bg-white"
+                  className="pr-8 w-full border border-border-strong rounded-xl px-4 py-3 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
                 >
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
@@ -2684,7 +2684,7 @@ export function Pipeline() {
                 <textarea
                   value={bulkMsgBody}
                   onChange={(e) => setBulkMsgBody(e.target.value)}
-                  className="w-full h-[150px] border border-border-strong rounded-xl p-4 text-[14px] outline-none focus:border-brand-yellow resize-none leading-relaxed text-gray-800 bg-background"
+                  className="w-full h-[150px] border border-border-strong rounded-xl p-4 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed text-gray-800 bg-background"
                 />
                 <p className="mt-1.5 text-[11.5px] text-muted-foreground">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
@@ -2805,7 +2805,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
         <select
           value={String(days)}
           onChange={(e) => onDaysChange(Number(e.target.value))}
-          className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus:border-brand-yellow focus-visible:ring-2 focus-visible:ring-brand-yellow/40 shadow-sm cursor-pointer"
+          className="pr-8 px-3 py-1.5 bg-white border border-border-strong rounded-lg text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer"
           title="발송 묶음 기간 — 이 기간 안에 다시 연락 문자를 받은 인원"
         >
           <option value="7">최근 7일</option>
@@ -2862,7 +2862,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                         key={m.applicant_id}
                         onClick={() => onCardClick(m.applicant_id)}
                         title="클릭하면 지원자 상세를 엽니다"
-                        className={`w-full text-left bg-white border border-border-strong rounded-xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${m.opted_out ? "opacity-60 grayscale" : ""}`}
+                        className={`w-full text-left bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${m.opted_out ? "opacity-60 grayscale" : ""}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -2958,7 +2958,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
           <span className="text-[12px] font-bold text-muted-foreground bg-gray-200 px-2.5 py-0.5 rounded-full">{column.count}</span>
         </div>
         <div className="relative">
-          <button aria-label="이 단계 메뉴 열기" onClick={() => setMenuOpen((v) => !v)} className="text-muted-foreground hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow rounded-md"><MoreHorizontal size={18} /></button>
+          <button aria-label="이 단계 메뉴 열기" onClick={() => setMenuOpen((v) => !v)} className="text-muted-foreground hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"><MoreHorizontal size={18} /></button>
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
@@ -3012,7 +3012,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
   }));
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-foreground">{card.name} <span className="text-[12px] text-muted-foreground font-medium ml-1">{card.age}세</span></div>
         <div className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>

@@ -484,7 +484,7 @@ export function AgentBrain() {
               setPersona(DEFAULT_PERSONA);
               toast.info("기본 말투·성격으로 되돌렸어요. 저장해야 반영됩니다.");
             }}
-            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="flex items-center gap-2 bg-white/70 backdrop-blur-xl border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={16} /> 기본값으로 초기화
           </button>
@@ -543,7 +543,7 @@ export function AgentBrain() {
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-white border border-border-strong rounded-2xl shadow-sm p-8">
+        <div className="flex-1 bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-8">
           {activeTab === 'overview' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex items-center justify-between mb-2">
@@ -640,7 +640,7 @@ export function AgentBrain() {
                     value={persona.role}
                     onChange={(e) => setPersonaField("role", e.target.value)}
                     disabled={!personaLoaded}
-                    className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow disabled:bg-background"
+                    className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
                   />
                 </div>
 
@@ -651,7 +651,7 @@ export function AgentBrain() {
                     value={persona.instructions}
                     onChange={(e) => setPersonaField("instructions", e.target.value)}
                     disabled={!personaLoaded}
-                    className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow disabled:bg-background"
+                    className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm font-mono leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
                   />
                   <p className="text-[12px] text-muted-foreground mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
                 </div>
@@ -728,7 +728,7 @@ export function AgentBrain() {
                       <button aria-pressed={on}
                         key={c.key}
                         onClick={() => { setKbCategory(c.key); setKbForm(null); }}
-                        className={`px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow ${on ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        className={`px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
                         {c.label} <span className={on ? "text-muted-foreground" : "text-muted-foreground"}>{count}</span>
                       </button>
@@ -774,7 +774,7 @@ export function AgentBrain() {
                             value={kbForm.title}
                             onChange={(e) => setKbForm({ ...kbForm, title: e.target.value })}
                             placeholder={kbForm.category === "facts" ? "예: 강북미아" : kbForm.category === "knowledge" ? "예: 정산·지급일" : kbForm.category === "system_message" ? "예: danggeun_start" : "예: 시급 문의 응대"}
-                            className="min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                            className="min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           />
                         </div>
                         <div>
@@ -784,7 +784,7 @@ export function AgentBrain() {
                             onChange={(e) => setKbForm({ ...kbForm, body: e.target.value })}
                             rows={kbForm.category === "facts" ? 3 : 5}
                             placeholder={kbForm.category === "facts" ? "시급 15,000~20,000원, 토일 08:00-16:00, 픽업 서울 강북구..." : kbForm.category === "knowledge" ? "지원자 질문에 AI가 그대로 인용할 공식 답변을 입력하세요. 예: 급여는 익월 5일에 지급돼요..." : "발송될 문구를 입력하세요. {{이름}}, {{지점}}, {{지원폼주소}} 등 치환자 사용 가능."}
-                            className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
+                            className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                           />
                         </div>
                         <div className="flex items-center justify-end gap-2 pt-1">
@@ -821,8 +821,8 @@ export function AgentBrain() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-3">
-                      <button aria-label={`${ex.title} 수정`} onClick={() => openKbEdit(ex)} title="수정" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"><Pencil size={15} /></button>
-                      <button aria-label={`${ex.title} 삭제`} onClick={() => handleKbDelete(ex)} title="삭제" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-error-soft hover:text-error-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"><Trash2 size={15} /></button>
+                      <button aria-label={`${ex.title} 수정`} onClick={() => openKbEdit(ex)} title="수정" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Pencil size={15} /></button>
+                      <button aria-label={`${ex.title} 삭제`} onClick={() => handleKbDelete(ex)} title="삭제" className="after:absolute after:-inset-2 after:content-[''] relative p-2 rounded-lg text-muted-foreground hover:bg-error-soft hover:text-error-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Trash2 size={15} /></button>
                     </div>
                   </div>
                 ))}
@@ -909,7 +909,7 @@ export function AgentBrain() {
                             onClick={() => handleChangeKillMode(opt.id)}
                             disabled={killLoading || killBusy || killEnvForced}
                             title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : opt.desc}
-                            className={`text-left rounded-xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-border-strong bg-white hover:border-gray-300'}`}
+                            className={`text-left rounded-xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-border-strong bg-white hover:border-gray-300'}`}
                           >
                             <div className={`flex items-center gap-1.5 text-[13px] font-extrabold ${active ? opt.dotCls : 'text-gray-700'}`}>
                               {opt.icon} {opt.label}
@@ -940,7 +940,7 @@ export function AgentBrain() {
                 </div>
               </div>
 
-              <div className="bg-white border border-border-strong rounded-2xl p-7 shadow-sm">
+              <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-7 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl bg-copilot-soft flex items-center justify-center">
                     <Database size={20} className="text-copilot-strong" />
@@ -995,7 +995,7 @@ export function AgentBrain() {
                       onChange={(e) => setSimInbound(e.target.value)}
                       rows={4}
                       placeholder="예: 안녕하세요, 시급이 어떻게 되나요? 오토바이 없어도 지원 가능한가요?"
-                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
+                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                     />
                   </div>
                   <div>
@@ -1005,7 +1005,7 @@ export function AgentBrain() {
                       onChange={(e) => setSimPosting(e.target.value)}
                       rows={5}
                       placeholder="공고문을 붙여넣으면 시급·근무지 등 사실을 그 내용 기준으로 답변합니다. 비워두면 일반 컨텍스트로 응대해요."
-                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
+                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                     />
                   </div>
                   <Button variant="primary" size="lg" onClick={handleRunSimulation} disabled={!simInbound.trim()} isLoading={simRunning} className="w-full">
@@ -1032,7 +1032,7 @@ export function AgentBrain() {
                     <div className="flex flex-col gap-4">
                       <div className="flex items-start gap-2.5">
                         <div className="w-8 h-8 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={16} className="text-foreground" /></div>
-                        <div className="bg-white border border-border-strong rounded-2xl rounded-tl-sm p-3.5 text-[14px] leading-relaxed text-gray-800 whitespace-pre-wrap shadow-sm">
+                        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl rounded-tl-sm p-3.5 text-[14px] leading-relaxed text-gray-800 whitespace-pre-wrap shadow-sm">
                           {simResult.draft_text}
                         </div>
                       </div>

@@ -78,7 +78,7 @@ export function Reengagement() {
         {triggered && (
           <button
             onClick={() => mutate()}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold text-gray-700 border border-border-strong hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold text-gray-700 border border-border-strong hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={14} /> 다시 발굴
           </button>
@@ -92,7 +92,7 @@ export function Reengagement() {
           </p>
           <button
             onClick={() => setTriggered(true)}
-            className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow"
+            className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={15} /> 다시 부를 분 찾기
           </button>
@@ -179,7 +179,7 @@ export function Reengagement() {
             <button
               onClick={runImport}
               disabled={importing || data.activeCount === 0}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               {importing ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
               활동 편입후보 {data.activeCount}명 편입
