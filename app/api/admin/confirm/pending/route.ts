@@ -38,11 +38,17 @@ const IN_PROGRESS_STAGES = new Set(["active", "onboarding", "paused", "screening
 export async function GET() {
   const supabase = createServiceClient();
 
+  // 상한 명시 — limit이 없으면 PostgREST 기본값(1000)에 오류 없이 걸려 확정 대기자가
+  // 화면에서 조용히 빠진다. 확정은 제품 SLA라 누락이 가장 아픈 큐다.
+  // 오래된 순 정렬이라 잘리는 쪽은 방금 스크리닝을 끝낸 사람이 된다.
+  // 실측(2026-08-14) 대상 19명.
+  const MAX_PENDING = 1000;
   const { data: apps, error } = await supabase
     .from("applicants")
     .select("id, name, phone, branch1, confirmed_branch, baemin_id, created_at")
     .eq("status", "스크리닝 완료")
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .limit(MAX_PENDING);
 
   if (error) {
     console.error("[confirm/pending]", error);
@@ -52,6 +58,9 @@ export async function GET() {
     id: number; name: string | null; phone: string | null;
     branch1: string | null; confirmed_branch: string | null; baemin_id: string | null;
   }[];
+  if (applicants.length >= MAX_PENDING) {
+    console.error(`[confirm/pending] 상한 ${MAX_PENDING}명에 도달 — 일부가 큐에서 빠졌다. 상한을 올리거나 페이징이 필요하다.`);
+  }
   if (applicants.length === 0) return NextResponse.json({ pending: [], total: 0 });
 
   const ids = applicants.map((a) => a.id);

@@ -43,16 +43,30 @@ function jobLabel(title: string): string {
 
 export async function GET(_req: NextRequest) {
   const supabase = createServiceClient();
+  // 상한을 명시한다. 예전엔 limit이 없어 PostgREST 기본값(1000)에 **오류 없이** 걸렸고,
+  // 그러면 사람이 직접 답해야 하는 대화가 화면에 아무 표시 없이 빠진다.
+  // 실측(2026-08-14) 2건이라 지금은 여유가 크지만, 공고를 여럿 동시에 올리면 늘어난다.
+  const MAX_HANDOFFS = 1000;
   const { data, error } = await supabase
     .from("job_candidates")
     .select(
       "id, applicant_id, job_id, paused_reason, agent_state, updated_at, jobs:job_id ( id, title, branch ), applicants:applicant_id ( id, name, phone, branch )"
     )
-    .eq("agent_stage", "paused");
+    .eq("agent_stage", "paused")
+    .order("updated_at", { ascending: true })
+    .limit(MAX_HANDOFFS);
 
   if (error) {
     console.error("[handoffs]", error);
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
+  }
+
+  // 상한에 닿았으면 잘렸다는 사실을 남긴다 — 조용한 누락을 만들지 않는다.
+  // 정렬을 오래된 순으로 두어, 잘리는 쪽이 '방금 들어온 건'이 되게 했다(오래 방치된 건이
+  // 먼저 보이는 게 이 큐의 목적이다).
+  const truncated = (data?.length ?? 0) >= MAX_HANDOFFS;
+  if (truncated) {
+    console.error(`[handoffs] 상한 ${MAX_HANDOFFS}건에 도달 — 일부가 큐에서 빠졌다. 상한을 올리거나 페이징이 필요하다.`);
   }
 
   const now = Date.now();
@@ -94,5 +108,7 @@ export async function GET(_req: NextRequest) {
     .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => new Date(a.paused_at).getTime() - new Date(b.paused_at).getTime());
 
-  return NextResponse.json({ handoffs, total: handoffs.length, by_category: byCategory });
+  // truncated를 응답에 실어 보낸다 — 서버 로그만으로는 아무도 모른다.
+  // 지금 화면은 이 값을 읽지 않지만, 잘렸는지 확인할 방법을 남겨두는 게 조용한 누락보다 낫다.
+  return NextResponse.json({ handoffs, total: handoffs.length, by_category: byCategory, truncated });
 }
