@@ -271,7 +271,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               placeholder="지점명, 담당자 검색"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+              className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <button

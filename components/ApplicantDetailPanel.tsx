@@ -890,7 +890,7 @@ export function ApplicantDetailContent({
             <span className="text-[15px] font-extrabold text-foreground">{a.name}</span>
             {age != null && <span className="text-[12px] font-semibold text-muted-foreground">{age}세</span>}
             {telHref ? (
-              <a href={telHref} className="text-[12.5px] font-bold text-info-strong hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">{a.phone}</a>
+              <a href={telHref} className="text-[12.5px] font-bold text-info-strong hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{a.phone}</a>
             ) : (
               <span className="text-[12px] text-muted-foreground">연락처 없음</span>
             )}
@@ -1677,7 +1677,7 @@ export function ApplicantDetailPanel({
                 <div className="text-[12px] text-muted-foreground font-mono">
                   #{applicantId} ·{" "}
                   {a?.phone ? (
-                    <a href={`tel:${a.phone.replace(/[^0-9+]/g, "")}`} className="text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">{a.phone}</a>
+                    <a href={`tel:${a.phone.replace(/[^0-9+]/g, "")}`} className="text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{a.phone}</a>
                   ) : (
                     "연락처 없음"
                   )}

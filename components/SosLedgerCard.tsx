@@ -286,13 +286,13 @@ export function SosLedgerCard() {
               <span className="text-[11.5px] font-bold text-error-strong shrink-0">{elapsedLabel(r.created_at, nowTick)}</span>
               <button
                 onClick={() => handleMakeJob(r)}
-                className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Briefcase size={13} /> 공고로 만들기
               </button>
               <button
                 onClick={() => setResolveForm({ id: r.id, line_label: r.line_label, resolution: "", cost_krw: "", duration_minutes: "", resolution_note: "" })}
-                className="text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                className="text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 해결 기록
               </button>
@@ -323,7 +323,7 @@ export function SosLedgerCard() {
       <div className="mt-4 border-t border-muted pt-3">
         <button
           onClick={() => setLedgerOpen((o) => !o)}
-          className="w-full flex items-center justify-between text-[12.5px] font-bold text-gray-700 hover:text-foreground rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+          className="flex min-h-9 w-full items-center justify-between rounded-lg px-1 text-[12.5px] font-bold text-gray-700 transition-colors hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex items-center gap-1.5"><Wallet size={14} className="text-info" /> {ledgerRes?.month ?? kstMonth()} 운영비 {won(ledgerTotal)}</span>
           {ledgerOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
@@ -377,7 +377,7 @@ export function SosLedgerCard() {
               <button
                 onClick={handleAddLedger}
                 disabled={saving}
-                className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-2 rounded-lg disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-2 rounded-lg disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Plus size={13} /> 추가
               </button>

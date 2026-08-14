@@ -257,7 +257,7 @@ export function ReplyQueueCard({
                         <a
                           href={`tel:${it.phone}`}
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-0.5 text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                          className="relative inline-flex items-center gap-0.5 rounded text-info after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <Phone size={11} /> {it.phone}
                         </a>
@@ -268,7 +268,7 @@ export function ReplyQueueCard({
 
                 <button
                   onClick={() => setDetailId(it.id)}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <MessageSquare size={13} /> 대화 열기
                 </button>

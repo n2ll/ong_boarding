@@ -359,7 +359,7 @@ export function Dashboard() {
                     <button
                       key={s.path}
                       onClick={() => router.push(s.path)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[12.5px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[12.5px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {s.label} <ChevronRight size={15} className="text-muted-foreground" />
                     </button>
@@ -415,7 +415,7 @@ export function Dashboard() {
         <button
           onClick={() => setMetricsOpen((v) => !v)}
           aria-expanded={metricsOpen}
-          className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+          className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
@@ -496,7 +496,7 @@ export function Dashboard() {
               <div className="border border-border-strong rounded-lg p-5 flex flex-col">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
-                  <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40 rounded">응대로</button>
+                  <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">응대로</button>
                 </div>
 
                 {/* 단계별 — 라벨은 실무 언어, 뜻은 툴팁으로 */}
@@ -544,7 +544,7 @@ export function Dashboard() {
                   <h3 className="text-[15px] font-bold text-foreground">파이프라인 단계별 현황</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
                 </div>
-                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
+                <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   상세 보기
                 </button>
               </div>
@@ -579,7 +579,7 @@ export function Dashboard() {
                   <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info-strong" /> 지역별 인재풀 분포</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
                 </div>
-                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40">
+                <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   지도에서 보기
                 </button>
               </div>

@@ -92,7 +92,7 @@ export function CampaignStatsCard() {
         <button
           onClick={() => void mutate()}
           title="집계 새로고침"
-          className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+          className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
@@ -119,7 +119,7 @@ export function CampaignStatsCard() {
               <button
                 onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
                 title={s.anchor ? `${s.label === "답장" ? "내가 답할 차례" : s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
-                className="flex-1 text-left rounded-xl border border-border-strong bg-background px-4 py-3 hover:border-info/60 hover:bg-info-soft transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                className="flex-1 text-left rounded-xl border border-border-strong bg-background px-4 py-3 hover:border-info/60 hover:bg-info-soft transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {inner}
               </button>
@@ -139,7 +139,7 @@ export function CampaignStatsCard() {
                   key={j.job_id}
                   onClick={() => scrollToAnchor("interest-queue")}
                   title={`${j.title} — 관심 표시 처리 큐로 이동`}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background hover:border-info/60 px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"
+                  className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background hover:border-info/60 px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="text-muted-foreground">#{j.job_id}</span>
                   <span className="max-w-[160px] truncate">{j.title}</span>
