@@ -1,4 +1,6 @@
 {
+  "//regions": "서버리스 함수를 서울(icn1)에서 돌린다. Supabase 프로젝트가 ap-northeast-2(서울)인데 기본 리전은 iad1(워싱턴)이라, 쿼리 한 번마다 태평양을 왕복(~200ms)했다. 라우트당 쿼리가 3~5개라 화면 하나가 1~2초씩 걸렸다. 실측: 지원자 목록 1570ms→(서울) 예상 250ms. 트레이드오프 — Anthropic API는 미국이라 응대 호출이 ~200ms 느려지지만 그 호출은 원래 2~10초라 영향이 작다. DB 왕복이 압도적으로 많으므로 서울이 맞다.",
+  "regions": ["icn1"],
   "crons": [
     {
       "path": "/api/admin/cron/onboarding-reminder",
