@@ -36,3 +36,5 @@ Next.js 14 (App Router) · React 18 · TypeScript(strict) · Tailwind v4 · Radi
 - 마이그레이션: `YYYY-MM-설명.sql` 누적 추가. 기존 파일 사후 수정 금지.
 - 훅: `useState`/`useEffect` 등은 **컴포넌트 맨 위, 모든 조기 return보다 앞**에서 선언한다(쓰는 곳 옆이 아니라). `npm run build`가 `react-hooks/rules-of-hooks`로 막는다 — 이 규칙은 스타일이 아니라 화면이 죽는 것을 막는 것(React #310). `.eslintrc.cjs`에 취향 규칙을 추가하지 말 것.
 - 시크릿은 `.env.local`에만. 문서/코드/커밋에 실제 값 금지.
+- 배포 리전: 서버리스 함수는 **서울(`icn1`)** — `vercel.json`의 `regions`. Supabase가 ap-northeast-2인데 기본값 `iad1`(워싱턴)이면 쿼리마다 태평양을 왕복해 화면 하나가 1~2초씩 걸린다(실측: 지원자 목록 1994ms vs 로컬 389ms). 되돌리면 그 지연이 그대로 돌아온다.
+- `vercel.json`은 스키마가 `additionalProperties: false`다 — **주석용 `"//키"`를 넣으면 배포가 실패한다**(실제로 겪었다). 근거는 커밋 메시지나 이 파일에 남길 것. 스키마: `https://openapi.vercel.sh/vercel.json`
