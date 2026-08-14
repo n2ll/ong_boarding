@@ -26,6 +26,13 @@ interface Applicant {
   created_at?: string | null;
   last_message_at?: string | null;
   sms_opt_out_at?: string | null;
+  /**
+   * 목록 API가 사람마다 함께 내려주는 '살아있는 공고 결속'.
+   * /api/admin/applicants/[id]/active-jobs 와 **같은 함수**(gatherLiveJobLinks)가 만든 같은 배열이라
+   * 대화를 열 때 다시 물어볼 필요가 없다. 예전엔 이 필드가 타입에 없어 그대로 버려졌고,
+   * 대화를 누를 때마다 같은 값을 서버에 한 번 더 물었다.
+   */
+  job_links?: LiveJobLink[];
 }
 
 /** /api/admin/applicants/[id]/active-jobs 응답 — lib/candidate-links의 LiveJobLink와 같은 모양이어야 한다. */
@@ -228,6 +235,13 @@ export function LiveConsole() {
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
   const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
+  // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
+  // 공고 탭이 풀린다.
+  const appsRef = useRef<{ data?: Applicant[] } | undefined>(undefined);
+  useEffect(() => {
+    appsRef.current = appsData;
+  }, [appsData]);
   const appsLoaded = !!appsData;
   // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
   // 활성 대화가 없는 풀 응답자의 '마지막 inbound'도 판별할 수 있게 살짝 넓게 잡는다.
@@ -367,26 +381,43 @@ export function LiveConsole() {
       setSelectedJobId(null);
       return;
     }
+    // 사람을 바꾸는 즉시 앞사람의 공고 선택을 버린다.
+    // 예전엔 여기서 비우지 않아, B를 눌러도 /active-jobs 응답이 오기 전까지 selectedJobId가
+    // A의 공고 번호 그대로였다. 그 상태로 대화창이 먼저 뜨면서 'B에게 있지도 않은 공고'로
+    // 메시지를 조회했고(빈 대화창이 한 번 번쩍임), 응답이 오면 올바른 공고로 다시 조회했다.
+    // 클릭 한 번에 조회가 두 번 나가고 첫 번째는 틀린 값이었다.
+    // 큐에서 고른 공고가 살아있는 결속 목록에 없으면(마감·시스템 공고) 그 링크를 끼워 넣는다 —
+    // 조용히 다른 공고로 떨어지지 않게. 판정(gatherLiveJobLinks)은 건드리지 않는다:
+    // 이건 '매니저가 지목한 예외 탭'이고 살아있는 결속의 정의가 아니다(목록 배지 = 탭 수 불변식 유지).
+    // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 **대화가 진행 중인 공고**를 먼저.
+    // (탭에 관심만 누른 공고까지 들어오면서, 먼저 생겼다는 이유로 빈 대화창이 기본이 되는 걸 막는다.)
+    const apply = (jobs: ActiveJob[]) => {
+      const wanted = focusJobIdRef.current;
+      const extra = focusLinkRef.current;
+      const merged =
+        wanted != null && extra != null && !jobs.some((j) => j.job_id === wanted) ? [...jobs, extra] : jobs;
+      setActiveJobs(merged);
+      setSelectedJobId(defaultFocusJobId(merged, wanted));
+      focusJobIdRef.current = null;
+      focusLinkRef.current = null;
+    };
+
+    // 목록이 이미 같은 값을 실어 보냈으면 서버에 다시 묻지 않는다 — 대화 클릭마다 왕복 1회가 빠지고,
+    // 공고 선택이 즉시 정해지므로 대화 내역 조회도 한 번으로 끝난다(예전엔 '전체'로 한 번, 공고가
+    // 정해진 뒤 또 한 번이었다). 목록에 아직 없는 사람(딥링크 등)만 예전 경로로 물어본다.
+    const fromList = (appsRef.current?.data ?? []).find((a) => a.id === selectedChatId)?.job_links;
+    if (fromList) {
+      apply(fromList);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`/api/admin/applicants/${selectedChatId}/active-jobs`);
         const json = await res.json();
         if (cancelled) return;
-        const jobs = (json.jobs ?? []) as ActiveJob[];
-        // 큐에서 고른 공고가 살아있는 결속 목록에 없으면(마감·시스템 공고) 그 링크를 끼워 넣는다 —
-        // 조용히 다른 공고로 떨어지지 않게. 판정(gatherLiveJobLinks)은 건드리지 않는다:
-        // 이건 '매니저가 지목한 예외 탭'이고 살아있는 결속의 정의가 아니다(목록 배지 = 탭 수 불변식 유지).
-        const wanted = focusJobIdRef.current;
-        const extra = focusLinkRef.current;
-        const merged =
-          wanted != null && extra != null && !jobs.some((j) => j.job_id === wanted) ? [...jobs, extra] : jobs;
-        setActiveJobs(merged);
-        // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 **대화가 진행 중인 공고**를 먼저.
-        // (탭에 관심만 누른 공고까지 들어오면서, 먼저 생겼다는 이유로 빈 대화창이 기본이 되는 걸 막는다.)
-        setSelectedJobId(defaultFocusJobId(merged, wanted));
-        focusJobIdRef.current = null;
-        focusLinkRef.current = null;
+        apply((json.jobs ?? []) as ActiveJob[]);
       } catch {
         if (!cancelled) {
           setActiveJobs([]);
@@ -926,8 +957,11 @@ export function LiveConsole() {
             </div>
           )}
 
+          {/* key에 selectedJobId를 넣지 않는다 — 오른쪽 상세 패널이 같은 이유로 이미 뺐다(아래 주석).
+              그 값은 /active-jobs 응답이 온 뒤 비동기로 채워지므로, key에 넣으면 사람을 바꿔 누를
+              때마다 대화창이 두 번 마운트된다(첫 번째는 버려진다). jobId는 prop으로 반응적으로 읽힌다. */}
           <ConversationThread
-            key={`${activeChat.id}:${selectedJobId ?? "all"}`}
+            key={activeChat.id}
             applicantId={activeChat.id}
             applicantName={activeChat.name}
             phone={activeChat.phone}

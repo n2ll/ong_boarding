@@ -186,6 +186,9 @@ export function ConversationThread({
 
   const jobQS = jobId != null ? `?job_id=${jobId}` : "";
 
+  // 편집칸에 이미 실어준 초안의 id. 폴링이 매니저가 고쳐 쓰던 글을 덮어쓰지 않게 하는 기준.
+  const seededDraftIdRef = useRef<string | null>(null);
+
   const loadMessages = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!opts?.silent) setLoadingMsgs(true);
@@ -197,6 +200,19 @@ export function ConversationThread({
         setAccessToken((json.access_token as string | null) ?? null);
         setJobsMap((json.jobs ?? {}) as Record<number, JobLabel>);
         setAgentStage(json.agent_stage ?? null);
+
+        // 미처리 초안은 이 응답에 이미 실려 온다(route.ts의 `draft`).
+        // 예전엔 이걸 두고 /api/admin/drafts/pending을 따로 한 번 더 불렀다 — 같은 테이블·같은
+        // 조건·같은 정렬의 완전히 같은 조회였고, 12초 폴링이라 요청이 두 배로 나가고 있었다.
+        const d = (json.draft as PendingDraft | null) ?? null;
+        setPendingDraft(d);
+        // 글자는 '다른 초안이 왔을 때만' 새로 채운다.
+        // 예전엔 폴링마다 무조건 덮어써서, 매니저가 AI 초안을 고쳐 쓰다 12초를 넘기면
+        // 고친 내용이 소리 없이 원래 초안으로 되돌아갔다(코파일럿 모드의 핵심 동선).
+        if (d?.id !== seededDraftIdRef.current) {
+          seededDraftIdRef.current = d?.id ?? null;
+          setDraftText(d?.draft_text ?? "");
+        }
       } catch {
         if (!opts?.silent) toast.error("대화 내역을 불러오지 못했어요");
       } finally {
@@ -206,33 +222,18 @@ export function ConversationThread({
     [applicantId, jobQS]
   );
 
-  const loadDraft = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/admin/drafts/pending?applicant_id=${applicantId}`);
-      const json = await res.json();
-      const d = (json.data as PendingDraft | null) ?? null;
-      setPendingDraft(d);
-      setDraftText(d?.draft_text ?? "");
-    } catch {
-      setPendingDraft(null);
-      setDraftText("");
-    }
-  }, [applicantId]);
-
   useEffect(() => {
     loadMessages();
-    loadDraft();
-  }, [loadMessages, loadDraft]);
+  }, [loadMessages]);
 
   // 가벼운 폴링 — 화면을 보고 있는 동안 새 메시지/초안 자동 반영
   useEffect(() => {
     if (!pollMs) return;
     const t = setInterval(() => {
       loadMessages({ silent: true });
-      loadDraft();
     }, pollMs);
     return () => clearInterval(t);
-  }, [pollMs, loadMessages, loadDraft]);
+  }, [pollMs, loadMessages]);
 
   // 스크롤: 최초 로드는 '마지막 지원자(inbound) 메시지' 위치로 — 무엇에 답해야 하는지 바로 보이게.
   // inbound가 없으면 기존처럼 맨 아래. 이후 새 메시지 도착 시에는 맨 아래로.
