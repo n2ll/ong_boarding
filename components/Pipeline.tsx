@@ -128,7 +128,6 @@ interface CardData {
   jobLinks: LiveJobLink[];
   status: string;
   availability: string | null;
-  availabilityUpdatedAtIso: string | null;
   smsOptOutAt: string | null;
   sido: string | null;
   createdAtIso: string | null;
@@ -340,7 +339,6 @@ function toCard(a: ApplicantRow): CardData {
     jobLinks: a.job_links ?? [],
     status: a.status,
     availability: a.availability ?? null,
-    availabilityUpdatedAtIso: a.availability_updated_at ?? null,
     smsOptOutAt: a.sms_opt_out_at ?? null,
     sido: a.sido ?? null,
     createdAtIso: a.created_at ?? null,
