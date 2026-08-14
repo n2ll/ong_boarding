@@ -38,3 +38,5 @@ Next.js 14 (App Router) · React 18 · TypeScript(strict) · Tailwind v4 · Radi
 - 시크릿은 `.env.local`에만. 문서/코드/커밋에 실제 값 금지.
 - 배포 리전: 서버리스 함수는 **서울(`icn1`)** — `vercel.json`의 `regions`. Supabase가 ap-northeast-2인데 기본값 `iad1`(워싱턴)이면 쿼리마다 태평양을 왕복해 화면 하나가 1~2초씩 걸린다(실측: 지원자 목록 1994ms vs 로컬 389ms). 되돌리면 그 지연이 그대로 돌아온다.
 - `vercel.json`은 스키마가 `additionalProperties: false`다 — **주석용 `"//키"`를 넣으면 배포가 실패한다**(실제로 겪었다). 근거는 커밋 메시지나 이 파일에 남길 것. 스키마: `https://openapi.vercel.sh/vercel.json`
+- API 페이로드는 **전송량(gzip)으로 재라.** `JSON.stringify(...).length`나 응답 문자열 길이로 재면 이 제품에선 약 7배 부풀려진다(지원자 목록 원본 689KB = 실제 전송 95KB). 브라우저에서 `performance.getEntriesByType("resource")`의 `encodedBodySize`를 보거나 응답을 파일로 받아 `gzip -9`로 재라. 따라오는 결론도 바뀐다 — 같은 값이 수백 번 반복되는 컬럼은 gzip이 거의 0으로 만들고 **자유텍스트만 그대로 남는다.** 컬럼 다이어트의 값어치는 컬럼 수가 아니라 값의 다양성으로 판단할 것.
+- `next dev`와 `next build`/`next start`는 `.next`를 공유한다. dev가 떠 있는 채로 빌드하면 `Cannot find module for page: /_document` 같은 **엉뚱한 오류**가 나고 `.next`가 반쯤 망가진다. 빌드 전에 `ps aux | grep "[n]ext"`로 확인할 것. 그리고 `npm run build | head -3`처럼 파이프를 조기 종료시키면 SIGPIPE로 빌드가 중간에 죽는다(로그는 파일로 받을 것).
