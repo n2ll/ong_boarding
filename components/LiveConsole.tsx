@@ -268,11 +268,12 @@ export function LiveConsole() {
   const [kbSaving, setKbSaving] = useState(false);
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
-  // scope=live — 행은 그대로 전원이고 컬럼만 이 화면이 읽는 11개로 줄인 응답(785KB → 169KB).
+  // scope=live — 행은 그대로 전원이고 컬럼만 이 화면이 읽는 11개로 줄인 응답.
+  // 실측 전송량(gzip): 95KB → 22KB.
   //
   // 트레이드오프: 예전엔 대시보드·파이프라인과 **같은 키**라 다른 탭을 거쳐 들어오면 캐시로
   // 즉시 떴다. 키가 갈라지면서 그 이득은 없어진다. 사이드바에서 바로 들어오는 게 이 화면의
-  // 주 동선이고, 그 경우 785KB 대신 169KB를 받으므로 순이득이라 판단했다.
+  // 주 동선이고, 그 경우 95KB 대신 22KB를 받으므로 순이득이라 판단했다.
   //
   // 행을 안 줄이는 이유는 라우트의 LIVE_COLUMNS 주석에 있다(확정 직후 패널 소실·인계 큐
   // 대화 안 열림·'모두 응대했어요'라는 조용한 거짓).
@@ -280,7 +281,7 @@ export function LiveConsole() {
   // 폴링이 하나도 없어서 웹소켓이 끊기면 좌측 목록이 조용히 멈췄다. 대화창은 12초로 계속
   // 갱신되니 화면은 살아 있어 보이고, 새로 답장한 사람만 안 뜬다. 다른 창을 갔다 와도
   // 갱신되지 않는다(전역 revalidateOnFocus: false). 백스톱으로 60초를 둔다 —
-  // 위 scope=live로 응답이 172KB로 줄어서 이제 이 주기를 감당할 수 있다(예전 689KB).
+  // 위 scope=live로 응답이 22KB(gzip)로 줄어서 이제 이 주기를 감당할 수 있다(예전 95KB).
   const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[]; previews?: Record<number, LastMessagePreview> }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
