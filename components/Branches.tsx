@@ -4,6 +4,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Search, Building2, Users, Briefcase, Plus, ArrowUpRight, AlertTriangle, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
+import { Modal } from "./ui/modal";
+import { Button } from "./ui/button";
+import { Field, TextField, TextareaField, SelectField, ToggleRow, controlBase } from "./ui/field";
+import { cn } from "./ui/utils";
 import { SLOTS, DEFAULT_SLOT_CAPACITY, type SlotKey } from "@/lib/admin/types";
 
 interface ApiBranch {
@@ -406,62 +410,70 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {/* 생성 / 편집 모달 */}
-      {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "신규 지점 등록" : "지점 편집"}</h2>
-              <button aria-label="지점 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+      <Modal
+        open={Boolean(form)}
+        onClose={() => setForm(null)}
+        busy={saving}
+        size="lg"
+        title={form?.id === null ? "신규 지점 등록" : "지점 편집"}
+        description="이름만 넣어도 저장됩니다. 정원·AI 정보는 저장 후에 채울 수 있습니다."
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            {form?.id !== null && form ? (
+              <Button variant="ghost" size="sm" onClick={handleDelete} disabled={saving} className="text-error-strong hover:bg-error-soft">
+                <Trash2 size={15} /> 삭제
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setForm(null)} disabled={saving}>취소</Button>
+              <Button size="sm" onClick={handleSave} isLoading={saving}>
+                <Save size={15} /> 저장
+              </Button>
             </div>
-            <div className="p-6 flex flex-col gap-5">
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">지점 이름 <span className="text-error-strong">*</span></label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="예: 강북미아"
-                  className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
-                />
-              </div>
+          </div>
+        }
+      >
+        {form && (
+          <div className="flex flex-col gap-4">
+            <TextField
+              required
+              label="지점 이름"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="예: 강북미아"
+            />
 
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">소속 화주사</label>
-                <select
-                  value={form.clientId ?? ""}
-                  onChange={(e) => setForm({ ...form, clientId: e.target.value ? Number(e.target.value) : null })}
-                  className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
-                >
-                  <option value="">미지정</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                {clients.length === 0 && (
-                  <p className="text-[11.5px] text-muted-foreground mt-1.5">먼저 ‘화주사’ 화면에서 화주사를 등록하면 여기서 선택할 수 있어요.</p>
-                )}
-              </div>
+            <SelectField
+              label="소속 화주사"
+              value={form.clientId ?? ""}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value ? Number(e.target.value) : null })}
+              hint={clients.length === 0 ? "먼저 \u2018화주사\u2019 화면에서 화주사를 등록하면 여기서 선택할 수 있어요." : undefined}
+            >
+              <option value="">미지정</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </SelectField>
 
-              <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
-                <div>
-                  <div className="text-[14px] font-bold text-foreground">활성 상태</div>
-                  <div className="text-[12px] text-muted-foreground mt-0.5">비활성 시 지원 폼(/apply)에서 숨겨집니다. 어드민에는 계속 표시됩니다.</div>
-                </div>
-                <button type="button" aria-label="이 지점 사용" aria-checked={form.active} role="switch"
-                  onClick={() => setForm({ ...form, active: !form.active })}
-                  className={`after:absolute after:-inset-2 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-success" : "bg-gray-300"}`}
-                >
-                  <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
-                </button>
-              </div>
+            <ToggleRow
+              label="활성 상태"
+              description="끄면 지원 폼(/apply)에서 숨겨집니다. 어드민에는 계속 표시됩니다."
+              checked={form.active}
+              onChange={(v) => setForm({ ...form, active: v })}
+            />
 
-              {form.id !== null && (
-                <>
-                  {/* 슬롯별 정원은 비마트식 슬롯 구인(uses_slots) 화주사만 — 도시락 등 비슬롯 라인은 숨김. */}
-                  {formClientUsesSlots && (
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-2">슬롯별 정원</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {form.id !== null && (
+              <>
+                {/* 슬롯별 정원은 비마트식 슬롯 구인(uses_slots) 화주사만 — 도시락 등 비슬롯 라인은 숨김. */}
+                {formClientUsesSlots && (
+                  <Field
+                    label="슬롯별 정원"
+                    hint="확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다."
+                  >
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       {SLOTS.map((s: SlotKey) => (
-                        <div key={s} className="flex items-center justify-between bg-white border border-border-strong rounded-xl px-3.5 py-2.5">
-                          <span className="text-[13px] font-bold text-gray-700">{s}</span>
+                        <label key={s} className="flex min-h-11 items-center justify-between gap-2 rounded-xl border border-border-strong bg-input-background/70 px-3.5 py-2">
+                          <span className="text-[13px] font-bold text-foreground">{s}</span>
                           <input
                             type="number"
                             min={0}
@@ -473,46 +485,26 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                               })
                             }
                             onFocus={(e) => e.target.select()}
-                            className="w-16 px-2 py-1 border border-border-strong rounded-xl text-sm text-right focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
+                            className={cn(controlBase, "h-9 w-20 shrink-0 px-2 py-1 text-right")}
                           />
-                        </div>
+                        </label>
                       ))}
                     </div>
-                    <p className="text-[11.5px] text-muted-foreground mt-2">확정 슬롯 매트릭스의 정원으로 쓰입니다. 슬롯 구인을 안 하는 지점은 0으로 두면 충원율 계산에서 제외됩니다.</p>
-                  </div>
-                  )}
-
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-2">AI 참고 정보 (운영 정보)</label>
-                    <textarea
-                      value={form.aiFacts}
-                      onChange={(e) => setForm({ ...form, aiFacts: e.target.value })}
-                      rows={3}
-                      placeholder="이 지점 지원자 응대 시 AI가 참고할 정보. 예: 픽업 위치, 시급, 특이사항. 비우면 공통 운영 정보만 사용합니다."
-                      className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
-              <div>
-                {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error-strong hover:bg-error-soft border border-error/30 disabled:opacity-50">
-                    <Trash2 size={15} /> 삭제
-                  </button>
+                  </Field>
                 )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60">
-                  {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
-                </button>
-              </div>
-            </div>
+
+                <TextareaField
+                  label="AI 참고 정보 (운영 정보)"
+                  rows={3}
+                  value={form.aiFacts}
+                  onChange={(e) => setForm({ ...form, aiFacts: e.target.value })}
+                  placeholder="이 지점 지원자 응대 시 AI가 참고할 정보. 예: 픽업 위치, 시급, 특이사항. 비우면 공통 운영 정보만 사용합니다."
+                />
+              </>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 }

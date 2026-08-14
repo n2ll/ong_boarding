@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { ConversationThread } from "./ConversationThread";
+import { Modal } from "./ui/modal";
 import { ApplicantDetailContent } from "./ApplicantDetailPanel";
 import { getBrowserClient } from "@/lib/supabase";
 import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
@@ -962,8 +963,9 @@ export function LiveConsole() {
 
       {/* 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영 */}
       {promote && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !promoteSaving && setPromote(null)}>
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={Boolean(promote)} onClose={() => setPromote(null)} size="md"
+               title="확정 처리"
+        >
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground">공고에 반영</h2>
               <Button variant="ghost" size="icon" aria-label="공고 반영 창 닫기" onClick={() => setPromote(null)}><X size={20} /></Button>
@@ -990,14 +992,14 @@ export function LiveConsole() {
               <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setPromote(null)} disabled={promoteSaving}>취소</Button>
               <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-yellow-700 hover:bg-yellow-700 text-white shadow-none focus-visible:ring-yellow-700" onClick={savePromote} disabled={promoteLoading} isLoading={promoteSaving}>{promoteSaving ? "저장 중…" : "공고에 반영"}</Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 인계 → 지식 자산화(③-2): 매니저 답변을 공통/지점 지식으로 승인 등록 */}
       {kb && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !kbSaving && setKb(null)}>
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={Boolean(kb)} onClose={() => setKb(null)} size="md"
+               title="지식 추가"
+        >
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground">지식 등록</h2>
               <Button variant="ghost" size="icon" aria-label="지식 등록 창 닫기" onClick={() => setKb(null)}><X size={20} /></Button>
@@ -1036,8 +1038,7 @@ export function LiveConsole() {
               <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setKb(null)} disabled={kbSaving}>취소</Button>
               <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong" onClick={saveKb} disabled={kbLoading} isLoading={kbSaving}>{kbSaving ? "등록 중…" : "지식 등록"}</Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
     </div>

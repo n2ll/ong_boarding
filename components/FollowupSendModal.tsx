@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { X, Loader2, Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
+import { Modal } from "./ui/modal";
+import { Button } from "./ui/button";
+import { TextField, TextareaField } from "./ui/field";
 
 /**
  * 확정 후속 안내(만남장소·첫날규칙·앱안내) 발송 모달 — 상세 패널 '후속 안내' 섹션 전용.
@@ -118,86 +121,77 @@ export function FollowupSendModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && onClose()}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border-strong">
-          <h3 className="text-[15px] font-extrabold text-foreground">{KIND_LABEL[kind]} 발송</h3>
-          <button aria-label="팔로업 발송 창 닫기" onClick={onClose} className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-gray-700 p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-yellow">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="p-5 flex flex-col gap-3">
-          {kind === "venue" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">시작일</span>
-                <input
-                  type="date"
-                  value={venueDate}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setVenueDate(v);
-                    if (v) void fetchPreview({ startDate: v, meetingTime: venueTime });
-                    else setPreview(null);
-                  }}
-                  className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">집합 시각(선택)</span>
-                <input
-                  type="time"
-                  value={venueTime}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setVenueTime(v);
-                    if (venueDate) void fetchPreview({ startDate: venueDate, meetingTime: v });
-                  }}
-                  className="border border-border-strong rounded-xl px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:border-brand-yellow"
-                />
-              </label>
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-6 justify-center">
-              <Loader2 size={16} className="animate-spin" /> 미리보기 불러오는 중…
-            </div>
-          ) : (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">발송 내용 (수정 가능)</span>
-                <textarea
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  rows={7}
-                  placeholder={kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
-                  className="border border-border-strong rounded-xl px-3 py-2 text-[13px] leading-relaxed focus:outline-none focus:border-brand-yellow resize-none"
-                />
-              </label>
-              {preview && (
-                <div className="text-[11px] text-muted-foreground">
-                  {preview.sms_type} · 예상 비용 약 {preview.cost_krw}원
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border-strong sticky bottom-0 bg-white">
-          <button onClick={onClose} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">
-            취소
-          </button>
-          <button
+    <Modal
+      open
+      onClose={onClose}
+      busy={saving}
+      size="md"
+      title={`${KIND_LABEL[kind]} 발송`}
+      description="아래 내용 그대로 문자가 나갑니다. 보내기 전에 고칠 수 있습니다."
+      className="z-[60]"
+      footer={
+        <>
+          {/* 비용은 '발송' 바로 옆에 둔다 — 누르기 직전에 보여야 판단이 된다 */}
+          <span className="mr-auto text-[11.5px] font-medium text-muted-foreground">
+            {preview ? `${preview.sms_type} · 예상 약 ${preview.cost_krw}원` : " "}
+          </span>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>취소</Button>
+          <Button
+            size="sm"
             onClick={doSend}
-            disabled={saving || loading || !editText.trim()}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+            isLoading={saving}
+            disabled={loading || !editText.trim()}
+            className="bg-success-strong text-white hover:bg-success-strong/90"
           >
-            {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 발송
-          </button>
-        </div>
+            <Send size={15} /> 발송
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {kind === "venue" && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <TextField
+              label="시작일"
+              type="date"
+              value={venueDate}
+              onChange={(e) => {
+                const v = e.target.value;
+                setVenueDate(v);
+                if (v) void fetchPreview({ startDate: v, meetingTime: venueTime });
+                else setPreview(null);
+              }}
+            />
+            <TextField
+              label="집합 시각"
+              hint="비우면 문구에서 시각이 빠집니다"
+              type="time"
+              value={venueTime}
+              onChange={(e) => {
+                const v = e.target.value;
+                setVenueTime(v);
+                if (venueDate) void fetchPreview({ startDate: venueDate, meetingTime: v });
+              }}
+            />
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-muted-foreground">
+            <Loader2 size={16} className="animate-spin" /> 미리보기 불러오는 중…
+          </div>
+        ) : (
+          <TextareaField
+            label="발송 내용"
+            hint="그대로 나갑니다. 자유롭게 고쳐도 됩니다."
+            aside={`${editText.length}자`}
+            rows={8}
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            placeholder={kind === "venue" && !venueDate ? "시작일을 선택하면 기본 문안이 채워져요. 직접 작성해도 됩니다." : "발송 내용"}
+          />
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Heart, Zap, Phone, Loader2, ExternalLink, Check, XCircle, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
+import { Modal } from "./ui/modal";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 
 /**
@@ -391,11 +392,10 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
 
       {/* 빠른 컨택 모달 — 실제 문자 발송 전 편집·확인(오발송 방지). 발송 성공 후 컨택 완료 스탬프. */}
       {quick && (
-        <div
-          className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-          onClick={() => !quickSending && setQuick(null)}
+        <Modal bare open={Boolean(quick)} onClose={() => setQuick(null)} size="md"
+               title="빠른 컨택" busy={quickSending}
+               className="max-w-[500px] sm:max-w-[500px]"
         >
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <h2 className="text-[16px] font-extrabold text-foreground flex items-center gap-2"><Send size={16} className="text-info" /> 빠른 컨택</h2>
               <button aria-label="빠른 처리 창 닫기" onClick={() => setQuick(null)} disabled={quickSending} className="text-muted-foreground hover:text-gray-700 disabled:opacity-50 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/40"><X size={20} /></button>
@@ -427,8 +427,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 {quickSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 문자 보내고 처리
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 상세 드로어 — 닫힐 때 큐 갱신(상세에서 확정/부적합 처리하면 자동으로 큐에서 빠짐) */}

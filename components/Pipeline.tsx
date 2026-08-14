@@ -3,6 +3,7 @@ import useSWR from "swr";
 import { useSearchParams } from "next/navigation";
 import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, Layers, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye, ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuCheckboxItem } from "./ui/dropdown-menu";
+import { Modal } from "./ui/modal";
 import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -2292,9 +2293,10 @@ export function Pipeline() {
       </div>
 
       {jobPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setJobPickerOpen(false)}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
-          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px] max-h-[80vh] flex flex-col border border-border-strong">
+        <Modal bare open={jobPickerOpen} onClose={() => setJobPickerOpen(false)} size="sm"
+               title="공고 후보로 추가"
+               className="max-w-[440px] sm:max-w-[440px]"
+        >
             <div className="px-6 py-4 border-b border-border-strong flex items-start justify-between">
               <div>
                 <h2 className="text-[16px] font-bold text-foreground">공고 후보로 추가</h2>
@@ -2322,15 +2324,15 @@ export function Pipeline() {
             <div className="px-5 py-3 border-t border-border-strong text-[11.5px] text-muted-foreground">
               추가 후 공고 상세에서 일괄 스크리닝 문자를 발송할 수 있어요.
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* J 타겟 노출 — 선택 인원 × 다중 공고 일괄 노출 추가/제외 (후보 등록과 별개 레이어) */}
       {exposurePickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setExposurePickerOpen(false)}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
-          <div onClick={(e) => e.stopPropagation()} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[520px] max-h-[85vh] flex flex-col border border-border-strong">
+        <Modal bare open={exposurePickerOpen} onClose={() => setExposurePickerOpen(false)} size="md"
+               title="노출 대상 지정"
+               className="max-w-[520px] sm:max-w-[520px]"
+        >
             <div className="px-6 py-4 border-b border-border-strong flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-[16px] font-bold text-foreground">노출 대상 지정</h2>
@@ -2501,8 +2503,7 @@ export function Pipeline() {
                       ({exposureJobIds.size})
                     </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       <ApplicantDetailPanel
@@ -2524,8 +2525,10 @@ export function Pipeline() {
       {/* Modals for Bulk Actions */}
       {/* 1. Bulk Stage Change Modal */}
       {bulkStageModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white w-[500px] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+        <Modal bare open={bulkStageModalOpen} onClose={() => setBulkStageModalOpen(false)} size="md"
+               title="일괄 상태 변경"
+               className="max-w-[500px] sm:max-w-[500px]"
+        >
             <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center">
               <div>
                 <h2 className="text-[16px] font-bold text-foreground">일괄 상태(파이프라인) 변경</h2>
@@ -2548,14 +2551,16 @@ export function Pipeline() {
                 </button>
               ))}
             </div>
-          </motion.div>
-        </div>
+        </Modal>
       )}
 
       {/* 2. Bulk Message/Campaign Modal */}
       {bulkMsgModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white w-[600px] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+        <Modal bare open={bulkMsgModalOpen} onClose={() => setBulkMsgModalOpen(false)} size="lg"
+               title="문자 캠페인 발송"
+               closeOnOutside={false}
+               className="max-w-[600px] sm:max-w-[600px]"
+        >
             <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center">
               <div>
                 <h2 className="text-[16px] font-bold text-foreground">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
@@ -2736,8 +2741,7 @@ export function Pipeline() {
                 </Button>
               </div>
             </div>
-          </motion.div>
-        </div>
+        </Modal>
       )}
 
     </DndProvider>

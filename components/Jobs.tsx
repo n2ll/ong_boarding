@@ -9,6 +9,7 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
 import { Button } from "./ui/button";
+import { Modal } from "./ui/modal";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
@@ -2138,8 +2139,10 @@ export function Jobs() {
 
       {/* AI JD Generator Modal */}
       {aiModalOpen && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[800px] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+        <Modal bare open={aiModalOpen} onClose={closeRegisterModal} size="xl"
+               title="AI 맞춤형 공고 작성"
+               closeOnOutside={false}
+               className="max-w-[800px] sm:max-w-[800px]">
             <div className="flex items-center justify-between px-7 py-5 border-b border-border-strong">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center text-warning-strong">
@@ -2529,15 +2532,16 @@ export function Jobs() {
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 공고 수정 모달 — backdrop 클릭으로 닫지 않는다(긴 편집 중 오클릭 한 번에 수정분이 소리 없이
           날아가던 문제). 닫기는 명시적으로 X·취소 버튼으로만. */}
       {editForm && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[640px] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={Boolean(editForm)} onClose={() => { setEditForm(null); setEditDroppedBranch(null); }} size="lg"
+               title="공고 수정"
+               closeOnOutside={false}
+               className="max-w-[640px] sm:max-w-[640px]">
             <div className="flex items-center justify-between px-7 py-5 border-b border-border-strong">
               <h2 className="text-[18px] font-extrabold text-foreground">공고 수정</h2>
               <Button variant="ghost" size="icon" aria-label="공고 수정 창 닫기" onClick={() => { setEditForm(null); setEditDroppedBranch(null); }}><X size={22} /></Button>
@@ -2826,14 +2830,14 @@ export function Jobs() {
                   {!editSaving && <Save size={16} />} 저장
                 </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 공고 마감 확인 모달 — 미선발 관심자 안내 발송 옵션 포함 */}
       {closeModal && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !closing && setCloseModal(null)}>
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[480px] rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={Boolean(closeModal)} onClose={() => setCloseModal(null)} size="md"
+               title="공고 마감"
+               className="">
             <div className="px-7 pt-6 pb-2">
               <h2 className="text-[18px] font-extrabold text-foreground">공고를 마감할까요?</h2>
               <p className="text-[13.5px] text-muted-foreground mt-2 leading-relaxed">
@@ -2894,15 +2898,15 @@ export function Jobs() {
                     : "마감하기"}
                 </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 새 공고 안내 확인 모달 — 등록 직후(대상 ≥1) 자동 + 행 '대기자에게 안내' 재사용.
           "먼저 안내드릴게요" 약속(waitlist_notice)·알림 신청(notify_request) 이행을 게시 순간 원클릭으로. */}
       {announceModal && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !announcing && setAnnounceModal(null)}>
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[480px] rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={Boolean(announceModal)} onClose={() => setAnnounceModal(null)} size="md"
+               title="공고 안내 발송"
+               className="">
             <div className="px-7 pt-6 pb-2">
               <h2 className="text-[18px] font-extrabold text-foreground">새 공고를 기다리던 분들에게 안내할까요?</h2>
               <p className="text-[13.5px] text-muted-foreground mt-2 leading-relaxed">
@@ -2945,8 +2949,7 @@ export function Jobs() {
                   {announcing ? "발송 중..." : `${announceModal.targets.length}명에게 안내 발송`}
                 </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* 공고별 지원자 보드 (슬라이드) */}
@@ -3165,8 +3168,9 @@ export function Jobs() {
 
       {/* 인재풀에서 후보 추가 — 피커 모달 */}
       {pickerOpen && (
-        <div className="fixed inset-0 bg-foreground/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !adding && setPickerOpen(false)}>
-          <div className="bg-glass-3 backdrop-blur-xl border border-white w-full max-w-[560px] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+        <Modal bare open={pickerOpen} onClose={() => setPickerOpen(false)} size="md"
+               title="대상 추가"
+               className="">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <div>
                 <h2 className="text-[17px] font-extrabold text-foreground flex items-center gap-2"><UserPlus size={18} className="text-copilot" /> 인재풀에서 후보 추가</h2>
@@ -3221,8 +3225,7 @@ export function Jobs() {
               </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       <ApplicantDetailPanel

@@ -3,6 +3,9 @@ import useSWR from "swr";
 import { Shield, UserPlus, Phone, Pencil, Trash2, X, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
+import { Modal } from "./ui/modal";
+import { Button } from "./ui/button";
+import { TextField, TextareaField, SelectField, ToggleRow } from "./ui/field";
 
 interface SiteManager {
   id: number;
@@ -181,67 +184,81 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {/* 생성 / 편집 모달 */}
-      {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setForm(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-foreground">{form.id === null ? "담당자 추가" : "담당자 편집"}</h2>
-              <button aria-label="팀원 편집 창 닫기" onClick={() => setForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
-            </div>
-            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">이름 <span className="text-error">*</span></label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">전화번호 <span className="text-error">*</span></label>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01012345678" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">권한</label>
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
-                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">담당 지점</label>
-                <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow">
-                  <option value="">전체 / 미지정</option>
-                  {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
-                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} placeholder="만남장소, 특이사항 등" className="min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm leading-relaxed focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow resize-none" />
-              </div>
-              <div className="col-span-2 flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
-                <div className="text-[14px] font-bold text-foreground">활성 상태</div>
-                <button type="button" aria-label="이 팀원 사용" aria-checked={form.active} role="switch"
-                  onClick={() => setForm({ ...form, active: !form.active })}
-                  className={`after:absolute after:-inset-2 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-12 h-7 rounded-full relative transition-colors shrink-0 ${form.active ? "bg-success" : "bg-gray-300"}`}
-                >
-                  <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${form.active ? "translate-x-6" : "translate-x-1"}`} />
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
-              <div>
-                {form.id !== null && (
-                  <button onClick={handleDelete} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-error-strong hover:bg-error-soft border border-error/30 disabled:opacity-50">
-                    <Trash2 size={15} /> 삭제
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60">
-                  {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 저장
-                </button>
-              </div>
+      <Modal
+        open={Boolean(form)}
+        onClose={() => setForm(null)}
+        busy={saving}
+        size="lg"
+        title={form?.id === null ? "담당자 추가" : "담당자 편집"}
+        description="이름과 전화번호만 있으면 저장됩니다."
+        footer={
+          <div className="flex w-full items-center justify-between gap-2">
+            {form?.id !== null && form ? (
+              <Button variant="ghost" size="sm" onClick={handleDelete} disabled={saving} className="text-error-strong hover:bg-error-soft">
+                <Trash2 size={15} /> 삭제
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setForm(null)} disabled={saving}>취소</Button>
+              <Button size="sm" onClick={handleSave} isLoading={saving}>
+                <Save size={15} /> 저장
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        }
+      >
+        {form && (
+          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+            <TextField
+              required
+              label="이름"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="홍길동"
+            />
+            <TextField
+              required
+              label="전화번호"
+              inputMode="numeric"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="01012345678"
+            />
+            <SelectField
+              label="권한"
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+            >
+              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </SelectField>
+            <SelectField
+              label="담당 지점"
+              value={form.branch}
+              onChange={(e) => setForm({ ...form, branch: e.target.value })}
+            >
+              <option value="">전체 / 미지정</option>
+              {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+            </SelectField>
+            <TextareaField
+              full
+              label="메모"
+              rows={2}
+              value={form.note}
+              onChange={(e) => setForm({ ...form, note: e.target.value })}
+              placeholder="만남장소, 특이사항 등"
+            />
+            <ToggleRow
+              full
+              label="활성 상태"
+              description="끄면 공고의 현장 매니저 목록에서 숨겨집니다"
+              checked={form.active}
+              onChange={(v) => setForm({ ...form, active: v })}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

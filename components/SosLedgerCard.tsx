@@ -4,6 +4,9 @@ import useSWR from "swr";
 import { motion } from "motion/react";
 import { Siren, Plus, X, Loader2, Save, Trash2, Wallet, ChevronDown, ChevronRight, Briefcase } from "lucide-react";
 import { toast } from "sonner";
+import { Modal } from "./ui/modal";
+import { Button } from "./ui/button";
+import { TextField, TextareaField, SelectField } from "./ui/field";
 import { useConfirm } from "./ConfirmDialog";
 import { SOS_RESOLUTIONS, COST_CATEGORIES, kstMonth, type SosResolution, type CostCategory } from "@/lib/sos";
 
@@ -384,131 +387,122 @@ export function SosLedgerCard() {
       </div>
 
       {/* 긴급 건 기록 모달 */}
-      {createForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setCreateForm(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-foreground">긴급 건 기록</h2>
-              <button aria-label="긴급 건 등록 창 닫기" onClick={() => setCreateForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+      <Modal
+        open={Boolean(createForm)}
+        onClose={() => setCreateForm(null)}
+        busy={saving}
+        size="lg"
+        title="긴급 건 기록"
+        description="지금 사람이 비는 자리를 남겨 둡니다. 아직 아무에게도 문자가 나가지 않습니다."
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setCreateForm(null)} disabled={saving}>취소</Button>
+            <Button size="sm" variant="destructive" onClick={handleCreate} isLoading={saving}>
+              <Siren size={15} /> 기록
+            </Button>
+          </>
+        }
+      >
+        {createForm && (
+          <div className="flex flex-col gap-4">
+            <TextField
+              required
+              label="라인/권역 라벨"
+              value={createForm.line_label}
+              onChange={(e) => setCreateForm({ ...createForm, line_label: e.target.value })}
+              placeholder="예: 강서 새벽 배민"
+            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <TextField
+                label="권역"
+                value={createForm.region}
+                onChange={(e) => setCreateForm({ ...createForm, region: e.target.value })}
+                placeholder="예: 강서"
+              />
+              <TextField
+                label="차종"
+                value={createForm.vehicle}
+                onChange={(e) => setCreateForm({ ...createForm, vehicle: e.target.value })}
+                placeholder="예: 1톤"
+              />
+              <TextField
+                label="필요 인원"
+                type="number"
+                min={1}
+                value={createForm.needed_count}
+                onChange={(e) => setCreateForm({ ...createForm, needed_count: e.target.value })}
+                onFocus={(e) => e.target.select()}
+              />
             </div>
-            <div className="p-6 flex flex-col gap-5">
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">라인/권역 라벨 <span className="text-error">*</span></label>
-                <input
-                  value={createForm.line_label}
-                  onChange={(e) => setCreateForm({ ...createForm, line_label: e.target.value })}
-                  placeholder="예: 강서 새벽 배민"
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">권역</label>
-                  <input value={createForm.region} onChange={(e) => setCreateForm({ ...createForm, region: e.target.value })} placeholder="예: 강서" className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">차종</label>
-                  <input value={createForm.vehicle} onChange={(e) => setCreateForm({ ...createForm, vehicle: e.target.value })} placeholder="예: 1톤" className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">필요 인원</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={createForm.needed_count}
-                    onChange={(e) => setCreateForm({ ...createForm, needed_count: e.target.value })}
-                    onFocus={(e) => e.target.select()}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
-                <textarea
-                  value={createForm.note}
-                  onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })}
-                  rows={2}
-                  placeholder="예: 무단결근 발생, 오전 중 대체 필요"
-                  className={`${inputCls} leading-relaxed resize-none`}
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
-              <button onClick={() => setCreateForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
-              <button onClick={handleCreate} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-error hover:bg-error-strong disabled:opacity-60">
-                {saving ? <Loader2 size={15} className="animate-spin" /> : <Siren size={15} />} 기록
-              </button>
-            </div>
+            <TextareaField
+              label="메모"
+              rows={2}
+              value={createForm.note}
+              onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })}
+              placeholder="예: 무단결근 발생, 오전 중 대체 필요"
+            />
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       {/* 해결 기록 모달 */}
-      {resolveForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && setResolveForm(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border-strong sticky top-0 bg-white">
-              <h2 className="text-[18px] font-extrabold text-foreground">해결 기록 — {resolveForm.line_label}</h2>
-              <button aria-label="긴급 건 처리 창 닫기" onClick={() => setResolveForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={20} /></button>
+      <Modal
+        open={Boolean(resolveForm)}
+        onClose={() => setResolveForm(null)}
+        busy={saving}
+        size="lg"
+        title={resolveForm ? `해결 기록 \u2014 ${resolveForm.line_label}` : "해결 기록"}
+        description="어떻게 메웠는지와 든 비용을 남깁니다. 이 값이 대체 비용 원장이 됩니다."
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setResolveForm(null)} disabled={saving}>취소</Button>
+            <Button size="sm" onClick={handleResolve} isLoading={saving}>
+              <Save size={15} /> 해결로 기록
+            </Button>
+          </>
+        }
+      >
+        {resolveForm && (
+          <div className="flex flex-col gap-4">
+            <SelectField
+              required
+              label="해결 방법"
+              value={resolveForm.resolution}
+              onChange={(e) => setResolveForm({ ...resolveForm, resolution: e.target.value as SosResolution | "" })}
+            >
+              <option value="">선택해주세요</option>
+              {(Object.entries(SOS_RESOLUTIONS) as [SosResolution, string][]).map(([k, label]) => (
+                <option key={k} value={k}>{label}</option>
+              ))}
+            </SelectField>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <TextField
+                label="든 비용 (원)"
+                type="number"
+                min={0}
+                value={resolveForm.cost_krw}
+                onChange={(e) => setResolveForm({ ...resolveForm, cost_krw: e.target.value })}
+                placeholder="예: 150000"
+              />
+              <TextField
+                label="실소요 (분)"
+                type="number"
+                min={0}
+                value={resolveForm.duration_minutes}
+                onChange={(e) => setResolveForm({ ...resolveForm, duration_minutes: e.target.value })}
+                placeholder="예: 40"
+              />
             </div>
-            <div className="p-6 flex flex-col gap-5">
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">해결 방법 <span className="text-error">*</span></label>
-                <select
-                  value={resolveForm.resolution}
-                  onChange={(e) => setResolveForm({ ...resolveForm, resolution: e.target.value as SosResolution | "" })}
-                  className={`pr-8 ${inputCls} bg-white`}
-                >
-                  <option value="">선택해주세요</option>
-                  {(Object.entries(SOS_RESOLUTIONS) as [SosResolution, string][]).map(([k, label]) => (
-                    <option key={k} value={k}>{label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">든 비용 (원)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={resolveForm.cost_krw}
-                    onChange={(e) => setResolveForm({ ...resolveForm, cost_krw: e.target.value })}
-                    placeholder="예: 150000"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">실소요 (분)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={resolveForm.duration_minutes}
-                    onChange={(e) => setResolveForm({ ...resolveForm, duration_minutes: e.target.value })}
-                    placeholder="예: 40"
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[13px] font-bold text-gray-700 mb-2">메모</label>
-                <textarea
-                  value={resolveForm.resolution_note}
-                  onChange={(e) => setResolveForm({ ...resolveForm, resolution_note: e.target.value })}
-                  rows={2}
-                  placeholder="예: 용차 김OO, 프리미엄 5만"
-                  className={`${inputCls} leading-relaxed resize-none`}
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border-strong sticky bottom-0 bg-white">
-              <button onClick={() => setResolveForm(null)} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2.5 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50">취소</button>
-              <button onClick={handleResolve} disabled={saving} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60">
-                {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} 해결로 기록
-              </button>
-            </div>
+            <TextareaField
+              label="메모"
+              rows={2}
+              value={resolveForm.resolution_note}
+              onChange={(e) => setResolveForm({ ...resolveForm, resolution_note: e.target.value })}
+              placeholder="예: 용차 김OO, 프리미엄 5만"
+            />
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </motion.div>
   );
 }
