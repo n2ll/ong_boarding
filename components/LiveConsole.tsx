@@ -184,7 +184,11 @@ function isBaseChat(a: Applicant): boolean {
 const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
 // 미리보기 조회 대상 상한 — 목록 후보가 많아져도 최근 활동순 상위만 조회(URL 길이·메시지 스캔 부하 방지)
-const PREVIEW_TARGET_CAP = 150;
+// 미리보기 대상 선정 규칙(활동 14일·상한 150)은 서버로 옮겼다 —
+// app/api/admin/applicants/route.ts 의 scope=live 분기가 같은 값을 쓴다.
+
+// 빈 미리보기 — 매 렌더 새 객체를 만들면 이 값에 의존하는 useMemo가 계속 무효화된다.
+const EMPTY_PREVIEWS: Record<number, LastMessagePreview> = {};
 
 // '답 대기'(표시 라벨 '상대 답 기다림') 판정: 마지막 메시지가 매니저 수동 발신(14일 내) — 내가 보내고 회신을 기다리는 대화.
 // 캠페인 벌크 핑(system-bulk)·AI 발송은 서버(preview API)가 manual_outbound=false로 걸러준다.
@@ -237,7 +241,6 @@ export function LiveConsole() {
   }, []);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
-  const [previewById, setPreviewById] = useState<Record<number, LastMessagePreview>>({});
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
@@ -278,7 +281,7 @@ export function LiveConsole() {
   // 갱신되니 화면은 살아 있어 보이고, 새로 답장한 사람만 안 뜬다. 다른 창을 갔다 와도
   // 갱신되지 않는다(전역 revalidateOnFocus: false). 백스톱으로 60초를 둔다 —
   // 위 scope=live로 응답이 172KB로 줄어서 이제 이 주기를 감당할 수 있다(예전 689KB).
-  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
+  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[]; previews?: Record<number, LastMessagePreview> }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
   // 공고 탭이 풀린다.
@@ -287,23 +290,13 @@ export function LiveConsole() {
     appsRef.current = appsData;
   }, [appsData]);
   const appsLoaded = !!appsData;
-  // 미리보기 조회 대상: 기본 조건 + 최근 14일 내 활동(last_message_at은 inbound 수신 시각) —
-  // 활성 대화가 없는 풀 응답자의 '마지막 inbound'도 판별할 수 있게 살짝 넓게 잡는다.
-  // 최근 활동순 상위 PREVIEW_TARGET_CAP명으로 상한 — 넘치는 건 오래된 대화라 잘려도 실사용 영향이 없다.
-  // ⚠️ 매니저 발신은 last_message_at을 갱신하지 않으므로 여기서 못 잡는다 —
-  //    '발신만 있는 대화(답 대기)'는 preview API가 with_manual=1로 서버에서 찾아 합집합으로 내려준다.
-  const previewTargets = useMemo(() => {
-    const base = (appsData?.data ?? []).filter(
-      (a) => isBaseChat(a) || (a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS)
-    );
-    if (base.length <= PREVIEW_TARGET_CAP) return base;
-    return [...base]
-      .sort(
-        (x, y) =>
-          new Date(y.last_message_at ?? y.created_at ?? 0).getTime() - new Date(x.last_message_at ?? x.created_at ?? 0).getTime()
-      )
-      .slice(0, PREVIEW_TARGET_CAP);
-  }, [appsData]);
+  // 미리보기는 목록 응답에 함께 실려 온다 — 별도 state가 아니다.
+  //
+  // 예전에는 목록을 받은 뒤 미리보기를 다시 물어 state에 담았다. 그런데 아래 `chats`의
+  // 통과 조건이 이 값에 걸려 있어서, 화면에 처음 뜨는 명단과 미리보기가 도착한 뒤의
+  // 명단이 **서로 달랐다** — 사람이 나타나고 사라지고, 미리보기 줄과 배지가 뒤늦게 붙었다.
+  // 서버가 한 응답에 같이 실어 보내므로 첫 렌더부터 최종 명단이 그려진다.
+  const previewById = appsData?.previews ?? EMPTY_PREVIEWS;
   // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음'(풀 응답)
   // 또는 '마지막 메시지가 매니저 수동 발신'(답 대기) — 발신만 하고 회신을 기다리는 대화(빠른 컨택 등)가
   // 목록에서 사라지지 않는다. previewById에는 서버가 합집합으로 찾아준 답 대기 건도 들어있다.
@@ -393,26 +386,12 @@ export function LiveConsole() {
   // 첫 대화 자동 선택은 하지 않는다 — 탭 진입만으로 열람 처리되는 부작용을 피한다.
   // 선택 전에는 빈 상태 안내를 보여준다.
 
-  // 활성 대화 subset의 마지막 메시지 미리보기를 가볍게 조회(목록이 갱신될 때).
-  // with_manual=1: '최근 14일 내 매니저 수동 발신' 지원자를 서버가 찾아 합집합으로 내려준다 —
-  // ids가 비어도 답 대기 대화가 있을 수 있으므로 목록 로드 후에는 항상 호출한다.
-  useEffect(() => {
-    if (!appsLoaded) return;
-    const ids = previewTargets.map((c) => c.id);
-    let cancelled = false;
-    (async () => {
-      try {
-        const pRes = await fetch(`/api/admin/messages/preview?ids=${ids.join(",")}&with_manual=1`);
-        if (pRes.ok && !cancelled) {
-          const pJson = await pRes.json();
-          setPreviewById(pJson.previews ?? {});
-        }
-      } catch {
-        /* 미리보기는 부가정보이므로 실패 무시 */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [appsLoaded, previewTargets]);
+  // 미리보기 별도 조회는 없앴다 — 목록 응답(scope=live)에 함께 실려 온다.
+  //
+  // 예전에는 목록이 도착한 뒤 그 안의 id로 /api/admin/messages/preview를 한 번 더 불렀다.
+  // 그런데 위 `chats`의 통과 조건이 그 두 번째 응답에 걸려 있어서, 화면에 처음 뜨는 명단과
+  // 1초 뒤 명단이 서로 달랐다. 대상 선정 규칙(활동 14일·상한 150)은 서버로 옮겼다
+  // (app/api/admin/applicants/route.ts — 클라이언트와 같은 규칙이어야 한다).
 
   // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
   // PII 없는 "changed" 신호만 broadcast → 디바운스된 handleChanged로 목록·큐를 재조회한다.

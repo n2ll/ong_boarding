@@ -6,6 +6,7 @@ import { ensureDanggeunSystemJob } from "@/lib/agent/danggeun-job";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { gatherLiveJobLinks } from "@/lib/candidate-links";
+import { gatherMessagePreviews, RECENT_MANUAL_MS } from "@/lib/message-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -168,7 +169,47 @@ export async function GET(req: NextRequest) {
         has_access_token: Boolean(access_token),
       }));
 
-  return NextResponse.json({ data: safe });
+  if (!liveScope) {
+    return NextResponse.json({ data: safe });
+  }
+
+  // 대화 미리보기를 같은 응답에 실어 보낸다 — 실시간 응대 화면의 왕복을 1회로 줄인다.
+  //
+  // 예전에는 클라이언트가 목록을 받은 뒤 그 안의 id로 미리보기를 다시 물었다. 문제는
+  // **목록 통과 조건이 그 두 번째 응답에 걸려 있다**는 것이었다(최근 답장한 풀 응답자,
+  // 매니저가 보내고 회신을 기다리는 대화). 그래서 처음 그려지는 명단과 1초 뒤 명단이
+  // 서로 달랐다 — 사람이 나타나고 사라지고, 미리보기 줄과 배지가 뒤늦게 붙었다.
+  // 느린 게 아니라 두 번 그려지는 것이었다.
+  //
+  // 조회 대상은 클라이언트의 previewTargets와 **같은 규칙**으로 고른다. 규칙이 갈라지면
+  // 목록에 뜨는 사람과 미리보기가 있는 사람이 어긋나 배지가 빈다.
+  const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
+  const recentCut = Date.now() - RECENT_MANUAL_MS;
+  const isBase = (a: Record<string, unknown>) => {
+    const stage = a.agent_stage as string | null;
+    return (Boolean(stage) && stage !== "abort") || ACTIVE_STATUSES.has(a.status as string);
+  };
+  const activityAt = (a: Record<string, unknown>) =>
+    new Date((a.last_message_at as string) ?? (a.created_at as string) ?? 0).getTime();
+
+  const base = safe.filter((a) => isBase(a) || activityAt(a) > recentCut);
+  // 상한 — 후보가 많아져도 최근 활동순 상위만 조회(메시지 스캔 부하 방지).
+  // 잘리는 쪽은 오래된 대화다. 클라이언트의 PREVIEW_TARGET_CAP과 같은 값이어야 한다.
+  const PREVIEW_TARGET_CAP = 150;
+  const targets =
+    base.length <= PREVIEW_TARGET_CAP
+      ? base
+      : [...base].sort((x, y) => activityAt(y) - activityAt(x)).slice(0, PREVIEW_TARGET_CAP);
+
+  // with_manual — '발신만 있고 회신을 기다리는 대화'는 applicants 컬럼만으로 못 찾는다.
+  // 매니저 발신은 last_message_at을 올리지 않으므로 서버가 messages를 직접 뒤져 합집합을 만든다.
+  const previews = await gatherMessagePreviews(
+    supabase,
+    targets.map((a) => a.id),
+    { withManual: true },
+  );
+
+  return NextResponse.json({ data: safe, previews });
 }
 
 /**
