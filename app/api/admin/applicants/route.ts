@@ -74,21 +74,85 @@ const LIST_COLUMNS = [
  * 그 파일은 동적 필드 접근이 없어서 이 목록이 곧 필요 필드 전량이다.
  * 필드를 하나 추가할 땐 양쪽을 같이 고칠 것.
  */
+/**
+ * `?scope=rollup` — 숫자만 그리는 집계 화면 전용(리포트 · 슬롯보드 · 지점 · 자동화).
+ *
+ * 이 네 화면은 지원자를 **한 명도 나열하지 않는다.** 카운트·분모·추이만 그린다.
+ * 그런데 지금까지 649명의 이름·전화번호·주소·경력을 전부 받고 있었다.
+ * route.ts가 access_token에 대해 이미 같은 논리를 적어 뒀다("649명분이 통째로 노출된 셈") —
+ * 전화번호·주소도 다를 게 없다. **이름·전화 0개가 이 스코프의 설계 목표다.**
+ *
+ * 조립 필드(agent_stage · job_links · current_recruit_mode · has_access_token)도 안 붙인다.
+ * 네 화면 중 아무도 읽지 않으므로 job_candidates·jobs·gatherLiveJobLinks **조회 3개를 건너뛴다** —
+ * 바이트보다 이쪽이 체감에 크다(목록이 1초 걸렸던 원인이 그 3개의 순차 await였다).
+ *
+ * 실측 전송량(gzip): 기본 85KB → 16KB.
+ *
+ * ⚠️ 행은 줄이지 않는다. 네 화면 전부 전 행 스캔 카운터다 — 행을 줄이면 확정인력 54명이
+ *    12명으로 찍히고 그게 정상 화면으로 보인다. "최근 200명만" 같은 최적화가 가장 위험하다.
+ *
+ * 컬럼을 하나라도 빼면 나는 증상(그래서 함부로 줄이지 말 것):
+ *   id                 슬롯보드 상단 요약의 머릿수 Set 키 — 표 본문은 맞고 요약만 0명인 모순 화면
+ *   status             네 화면 공통 축(한글 리터럴 정확 일치 비교 — 값 정규화도 금지)
+ *   created_at         리포트 기간 필터·6개월 추이 — 빠지면 전 카드 0명
+ *   airtable_record_id 리포트 임포트분 제외 — 빠지면 649명 전원 통과해 특정 월 가짜 급증
+ *   work_hours         슬롯보드 '대기 N' 배지가 모든 칸에서 사라진다
+ *   confirmed_slot     슬롯보드 확정 슬롯 1순위 — 빠지면 0이 아니라 그럴싸하게 틀린 값
+ *   branch/branch1/confirmed_branch  슬롯보드·지점 매칭 OR 체인(branch는 레거시지만 OR 마지막 항)
+ *   current_branch     지점 '활동중' 매칭 — 빠지면 전 지점에 '충원 시급' 빨간 배지
+ */
+const ROLLUP_COLUMNS = [
+  "id", "status", "created_at", "airtable_record_id",
+  "work_hours", "confirmed_slot",
+  "branch", "branch1", "confirmed_branch", "current_branch",
+].join(", ");
+
 const LIVE_COLUMNS = [
   "id", "name", "phone", "status",
   "availability", "source", "branch", "branch1",
   "created_at", "last_message_at", "sms_opt_out_at",
 ].join(", ");
 
+
+/** 목록에 실어 보낼 경력 자유입력의 최대 길이. 파이프라인 표의 그 칸이 좁아 이 이상은 화면에 안 들어간다. */
+const EXPERIENCE_PREVIEW_LEN = 24;
+
+/**
+ * 경력 자유입력(experience)을 앞 24자까지만 내려보낸다.
+ *
+ * 왜:
+ *  1) 전송량 — 이 컬럼 하나가 목록 응답의 39%였다(gzip 85KB 중 33KB). 506명이 채웠고
+ *     평균 61자·최대 499자인 자유텍스트라 압축이 먹지 않는다. 반복값 컬럼과 성질이 다르다.
+ *  2) 레이아웃 — 파이프라인 표의 그 칸(Pipeline.tsx:2230)에 truncate가 없어서, 499자짜리
+ *     한 명이 표 행 하나를 통째로 늘려 놓는다. 서버에서 자르면 그 문제도 같이 사라진다.
+ *
+ * 전문이 필요한 곳(지원자 상세 패널)은 별도 상세 GET(`/[id]`)에서 원문을 받으므로 영향 없다.
+ * 잘렸다는 표시로 말줄임표를 붙인다 — 매니저가 "이게 전부"라고 오해하지 않게.
+ */
+function withTrimmedExperience<T extends object>(rows: T[]): T[] {
+  return rows.map((r) => {
+    const raw = (r as { experience?: unknown }).experience;
+    const exp = typeof raw === "string" ? raw.trim() : null;
+    if (!exp) return r;
+    return {
+      ...r,
+      experience:
+        exp.length > EXPERIENCE_PREVIEW_LEN ? `${exp.slice(0, EXPERIENCE_PREVIEW_LEN)}…` : exp,
+    };
+  });
+}
+
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
   const params = new URL(req.url).searchParams;
   const source = params.get("source");
-  const liveScope = params.get("scope") === "live";
+  const scope = params.get("scope");
+  const liveScope = scope === "live";
+  const rollupScope = scope === "rollup";
 
   let q = supabase
     .from("applicants")
-    .select(liveScope ? LIVE_COLUMNS : LIST_COLUMNS)
+    .select(rollupScope ? ROLLUP_COLUMNS : liveScope ? LIVE_COLUMNS : LIST_COLUMNS)
     .order("created_at", { ascending: false });
 
   if (source) q = q.eq("source", source);
@@ -103,6 +167,13 @@ export async function GET(req: NextRequest) {
   // 각 applicant의 latest job_candidates.agent_stage를 함께 내려준다.
   // job_candidates가 없는 후보(예: 당근 수동등록)는 null.
   let withStage = data ?? [];
+
+  // rollup은 조립 필드를 아무도 읽지 않으므로 여기서 바로 돌려보낸다 —
+  // job_candidates · gatherLiveJobLinks · jobs 조회 3개를 건너뛴다.
+  if (rollupScope) {
+    return NextResponse.json({ data: withStage });
+  }
+
   if (withStage.length > 0) {
     const ids = withStage.map((a) => a.id);
     const jobIds = [...new Set(withStage.map((a) => a.current_job_id).filter((v): v is number => typeof v === "number"))];
@@ -175,7 +246,7 @@ export async function GET(req: NextRequest) {
       }));
 
   if (!liveScope) {
-    return NextResponse.json({ data: safe });
+    return NextResponse.json({ data: withTrimmedExperience(safe) });
   }
 
   // 대화 미리보기를 같은 응답에 실어 보낸다 — 실시간 응대 화면의 왕복을 1회로 줄인다.

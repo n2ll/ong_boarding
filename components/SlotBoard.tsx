@@ -37,7 +37,10 @@ export function SlotBoard() {
   // 슬롯 현황 3종 데이터는 모두 SWR로 캐시·dedup(타 탭과 키 공유).
   const { data: branchesApi, isLoading } = useSWR<{ data?: ApiBranch[] }>("/api/admin/branches");
   const { data: clientsApi } = useSWR<{ data?: Client[] }>("/api/admin/clients");
-  const { data: applicantsApi } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants");
+  // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
+  // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
+  // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
+  const { data: applicantsApi } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants?scope=rollup");
   const branches = useMemo(() => branchesApi?.data ?? [], [branchesApi]);
   const clients = useMemo(() => clientsApi?.data ?? [], [clientsApi]);
   const applicants = useMemo(() => applicantsApi?.data ?? [], [applicantsApi]);

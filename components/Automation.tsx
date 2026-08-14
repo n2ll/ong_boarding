@@ -99,7 +99,10 @@ export function Automation() {
   };
 
   // 상단 통계는 여러 엔드포인트 조합 — 모두 SWR로 캐시·dedup(타 탭과 키 공유).
-  const { data: appsRes, isLoading: appsLoading } = useSWR<{ data?: { status: string }[] }>("/api/admin/applicants");
+  // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
+  // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
+  // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
+  const { data: appsRes, isLoading: appsLoading } = useSWR<{ data?: { status: string }[] }>("/api/admin/applicants?scope=rollup");
   const { data: killRes } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
   const { data: activeJobsRes } = useSWR<{ jobs?: { title: string }[] }>("/api/admin/jobs?status=active");

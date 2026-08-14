@@ -44,7 +44,10 @@ function inRange(created_at: string | null, range: string): boolean {
 export function Reports() {
   const [dateRange, setDateRange] = useState("올해");
   // applicants는 여러 탭과 동일 키라 SWR이 dedup·캐시; usage도 캐시.
-  const { data: appsRes } = useSWR<{ data?: ApplicantRow[] }>("/api/admin/applicants");
+  // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
+  // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
+  // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
+  const { data: appsRes } = useSWR<{ data?: ApplicantRow[] }>("/api/admin/applicants?scope=rollup");
   const { data: usageRes } = useSWR<{ data?: UsageRow[] }>("/api/admin/usage");
   const apps = useMemo(() => appsRes?.data ?? [], [appsRes]);
   const usage = useMemo(() => usageRes?.data ?? [], [usageRes]);

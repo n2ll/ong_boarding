@@ -104,7 +104,10 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
 
   // 지점 현황은 5종 데이터 조합 — 모두 SWR로 캐시·dedup(타 탭과 키 공유). rows는 파생 계산.
   const { data: branchesApi, isLoading, mutate: mutateBranches } = useSWR<{ data?: ApiBranch[] }>("/api/admin/branches");
-  const { data: applicantsApi } = useSWR<{ data?: ApiApplicant[] }>("/api/admin/applicants");
+  // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
+  // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
+  // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
+  const { data: applicantsApi } = useSWR<{ data?: ApiApplicant[] }>("/api/admin/applicants?scope=rollup");
   const { data: jobsApi } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
   const { data: managersApi } = useSWR<{ data?: ApiManager[] }>("/api/admin/site-managers");
   const { data: clientsApi } = useSWR<{ data?: ClientOption[] }>("/api/admin/clients");
