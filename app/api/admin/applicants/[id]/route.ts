@@ -26,12 +26,50 @@ export async function GET(
 
   const supabase = createServiceClient();
 
-  const { data: applicant, error } = await supabase
-    .from("applicants")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+  // 1파동 — applicantId만 있으면 되는 조회는 한꺼번에 보낸다.
+  //
+  // 예전엔 이 라우트가 await를 8번 줄줄이 세워, 쿼리 자체는 1ms대인데도 응답이 왕복 8회
+  // 대기 시간의 합이었다(대화를 고르면 오른쪽 정보칸이 늦게 차던 이유).
+  // 의존 관계는 셋뿐이다: 화주사 이름은 후보에서 client_id를 얻어야 하고, 관심 공고
+  // 제목 보충은 pool_events가 있어야 하고, 옹매니징·블랙리스트는 전화번호가 필요하다.
+  // 나머지는 서로 무관하므로 파동 3개로 줄인다.
+  //
+  // 재컨택(90일·200건)과 선탑(전체·20건)은 같은 pool_events지만 한 번으로 합치지 않는다 —
+  // limit이 다르고, 합치면 이벤트가 많은 사람에서 선탑 이력이 조용히 잘려나갈 수 있다.
+  // 병렬로 보내면 왕복은 어차피 1회다.
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const [applicantRes, candsRes, poolEvRes, suntopRes] = await Promise.all([
+    supabase.from("applicants").select("*").eq("id", id).maybeSingle(),
+    // 연결된 공고 지원 내역 (없으면 '순수 인재풀')
+    supabase
+      .from("job_candidates")
+      .select(
+        `id, job_id, agent_stage, agent_state, paused_reason,
+       sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
+       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode, pickup_address, site_manager_id )`
+      )
+      .eq("applicant_id", id)
+      .order("created_at", { ascending: false }),
+    // 재컨택 반응 요약(B2) — 상세 패널 '재컨택 반응' 카드용. 최근 90일 pool_events 기반.
+    supabase
+      .from("pool_events")
+      .select("event_type, job_id, meta, created_at")
+      .eq("applicant_id", id)
+      .in("event_type", ["ping_sent", "link_view", "interest_click"])
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    // 선탑(동승) 이력 — 예정+완료 2단계. 프리보딩 자산이라 기간 제한 없이 조회.
+    supabase
+      .from("pool_events")
+      .select("id, event_type, meta, created_at")
+      .eq("applicant_id", id)
+      .in("event_type", ["suntop_scheduled", "suntop_done"])
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
 
+  const { data: applicant, error } = applicantRes;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -39,18 +77,7 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // 연결된 공고 지원 내역 (없으면 '순수 인재풀')
-  const { data: rawCands } = await supabase
-    .from("job_candidates")
-    .select(
-      `id, job_id, agent_stage, agent_state, paused_reason,
-       sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
-       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode, pickup_address, site_manager_id )`
-    )
-    .eq("applicant_id", id)
-    .order("created_at", { ascending: false });
-
-  const cands = rawCands ?? [];
+  const cands = candsRes.data ?? [];
 
   // 화주사 이름 매핑 (jobs.client_id → clients.name)
   const clientIds = Array.from(
@@ -60,15 +87,35 @@ export async function GET(
         .filter((v): v is number => typeof v === "number")
     )
   );
+  // 2파동 — 1파동 결과가 필요한 것들을 한꺼번에. 화주사 이름은 후보의 client_id가,
+  // 옹매니징·블랙리스트는 지원자 전화번호가 있어야 한다.
+  //
+  // 옹매니징은 별도 Supabase 프로젝트라 왕복이 더 비싸다. 예전엔 이 둘이 응답 맨 끝에
+  // 순차로 걸려 상세 전체를 막고 있었다. advisory 성격(실패해도 상세는 떠야 한다)이라
+  // 각각 catch로 감싼 채 병렬로 보낸다.
+  const applicantPhone = (applicant as { phone?: string | null }).phone;
+  const hasPhone = typeof applicantPhone === "string" && applicantPhone.length > 0;
+  const [clientsRes, ongmanaging, blacklisted] = await Promise.all([
+    clientIds.length > 0
+      ? supabase.from("clients").select("id, name").in("id", clientIds)
+      : Promise.resolve({ data: [] as { id: number; name: string }[] }),
+    hasPhone
+      ? fetchWorkerDetailByPhone(applicantPhone as string).catch((e) => {
+          console.error("[applicant GET] ongmanaging enrich failed", e);
+          return null;
+        })
+      : Promise.resolve(null),
+    hasPhone
+      ? isPhoneBlacklisted(applicantPhone as string).catch((e) => {
+          console.error("[applicant GET] blacklist check failed", e);
+          return false;
+        })
+      : Promise.resolve(false),
+  ]);
+
   const clientNameById = new Map<number, string>();
-  if (clientIds.length > 0) {
-    const { data: clients } = await supabase
-      .from("clients")
-      .select("id, name")
-      .in("id", clientIds);
-    for (const cl of clients ?? []) {
-      clientNameById.set(cl.id as number, cl.name as string);
-    }
+  for (const cl of clientsRes.data ?? []) {
+    clientNameById.set(cl.id as number, cl.name as string);
   }
 
   const candidates = cands.map((c) => {
@@ -104,17 +151,8 @@ export async function GET(
     };
   });
 
-  // 재컨택 반응 요약(B2) — 상세 패널 '재컨택 반응' 카드용. 최근 90일 pool_events 기반.
-  // 별도 API 없이 상세 GET에 얹는다(이미 여러 조인을 하는 라우트 — 기존 패턴 재사용).
-  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: poolEvents, error: poolEvErr } = await supabase
-    .from("pool_events")
-    .select("event_type, job_id, meta, created_at")
-    .eq("applicant_id", id)
-    .in("event_type", ["ping_sent", "link_view", "interest_click"])
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  // 재컨택 반응 요약(B2) — 상세 패널 '재컨택 반응' 카드용. 위 1파동에서 함께 받았다.
+  const { data: poolEvents, error: poolEvErr } = poolEvRes;
   if (poolEvErr) console.error("[applicant GET] pool_events fetch failed", poolEvErr);
 
   let lastPingAt: string | null = null;
@@ -152,15 +190,9 @@ export async function GET(
     }))
     .sort((a, b) => Date.parse(b.clicked_at) - Date.parse(a.clicked_at));
 
-  // 선탑(동승) 이력 — 예정+완료 2단계. 프리보딩 자산이라 기간 제한 없이 조회.
+  // 선탑(동승) 이력 — 예정+완료 2단계. 위 1파동에서 함께 받았다.
   // 상세 패널 타임라인·배지, 새 공고 안내 S그룹(최우선), 선탑→투입 전환율 지표의 근거.
-  const { data: suntopRows, error: suntopErr } = await supabase
-    .from("pool_events")
-    .select("id, event_type, meta, created_at")
-    .eq("applicant_id", id)
-    .in("event_type", ["suntop_scheduled", "suntop_done"])
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const { data: suntopRows, error: suntopErr } = suntopRes;
   if (suntopErr) console.error("[applicant GET] suntop fetch failed", suntopErr);
   const suntopEvents = (suntopRows ?? []).map((e) => ({
     id: e.id,
@@ -169,23 +201,8 @@ export async function GET(
     meta: e.meta ?? null,
   }));
 
-  // 옹매니징 인력 보강(단건, 전화 매칭) — 계약 배송원이면 차종·라인·정산개월 요약.
+  // 옹매니징 인력 보강(단건, 전화 매칭)·블랙리스트는 위 2파동에서 함께 받았다.
   // advisory: 실패해도 상세 로딩을 막지 않는다(미구성 시 null). 개인정보·금액은 어댑터가 미반입.
-  let ongmanaging = null;
-  let blacklisted = false;
-  const applicantPhone = (applicant as { phone?: string | null }).phone;
-  if (typeof applicantPhone === "string" && applicantPhone) {
-    try {
-      ongmanaging = await fetchWorkerDetailByPhone(applicantPhone);
-    } catch (e) {
-      console.error("[applicant GET] ongmanaging enrich failed", e);
-    }
-    try {
-      blacklisted = await isPhoneBlacklisted(applicantPhone);
-    } catch (e) {
-      console.error("[applicant GET] blacklist check failed", e);
-    }
-  }
 
   return NextResponse.json({
     applicant,

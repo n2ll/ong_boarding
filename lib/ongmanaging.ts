@@ -161,12 +161,31 @@ export interface WorkingPhoneSignals {
   activeContract: Set<string>;
   recentSettlement: Set<string>;
 }
+/**
+ * 이 두 집합은 '회사 전체'라 호출마다 같은 값이 나온다(활성 계약 · 지난달 확정 정산).
+ * 원래 용도는 재컨택 발송 전 500명 일괄 대조라 한 번 긁는 게 맞았는데, 지원자 상세
+ * 패널이 **한 명씩** active-check를 부르면서 대화를 클릭할 때마다 별도 프로젝트로
+ * 왕복 2회가 새로 나갔다. 같은 인스턴스 안에서 60초간 재사용한다.
+ *
+ * 60초로 잡은 이유: 계약 상태·정산 확정은 일 단위로 바뀌는 값이고, 이 집합은
+ * '보내도 되는가'의 1차 참고일 뿐 최종 가드는 서버 발송 경로에 있다.
+ * 서버리스는 인스턴스별 캐시라 콜드 스타트에서는 그대로 다시 긁는다 —
+ * 이득은 매니저가 대화를 연달아 클릭하는 동안(따뜻한 인스턴스) 난다.
+ */
+const SIGNALS_TTL_MS = 60_000;
+let signalsCache: { at: number; value: WorkingPhoneSignals } | null = null;
+
 export async function fetchWorkingPhoneSignals(): Promise<WorkingPhoneSignals> {
+  if (signalsCache && Date.now() - signalsCache.at < SIGNALS_TTL_MS) {
+    return signalsCache.value;
+  }
   const [activeContract, recentSettlement] = await Promise.all([
     fetchAllActiveContractPhones(),
     fetchLastMonthSettledPhones(),
   ]);
-  return { activeContract, recentSettlement };
+  const value = { activeContract, recentSettlement };
+  signalsCache = { at: Date.now(), value };
+  return value;
 }
 
 /**
