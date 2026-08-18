@@ -1571,25 +1571,13 @@ export function Pipeline() {
   return (
     <DndProvider backend={HTML5Backend}>
       <div
-        className={`flex flex-col h-full overflow-hidden bg-background transition-[padding] duration-300 ${
+        className={`flex flex-col h-full overflow-hidden transition-[padding] duration-300 ${
           splitPanelActive ? "lg:pr-[552px]" : ""
         }`}
       >
-        {/* Top Header */}
-        <div className="bg-white px-8 py-6 border-b border-border-strong shrink-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">인재풀 및 파이프라인 관리</h1>
-              <p className="text-[14px] text-muted-foreground">조건(진행 단계·지역·차량)으로 대상을 골라 다시 연락하는 문자를 보내고, 후보의 진행 단계를 관리하는 화면입니다.</p>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={exportCsv} title={`지금 조건에 맞는 ${filteredCards.length}명이 파일로 나갑니다 (전체 인재풀이 아니라 화면에 적용된 조건 기준)`}>
-                  <FileDown size={16} /> CSV로 내보내기 <span className="font-semibold text-muted-foreground">({filteredCards.length}명)</span>
-                </Button>
-            </div>
-          </div>
-        </div>
-
+        {/* 제목은 탑바가 정본 — 이 화면은 헤더 밴드 없이 툴바부터 시작한다(이중 제목 금지).
+            루트도 배경을 칠하지 않는다: 종이 배경이 밴드 사이로 이어져야
+            공고↔파이프라인 탭 전환 때 배경이 점프하지 않는다. */}
         {/* Toolbar & Filters */}
         <div className="px-8 py-4 flex items-center gap-3 border-b border-border-strong bg-white shrink-0 flex-wrap z-10 shadow-sm">
           <div className="flex bg-muted rounded-lg p-1 border border-border-strong">
@@ -1647,6 +1635,9 @@ export function Pipeline() {
             </div>
           )}
 
+          <Button variant="secondary" className="ml-auto" onClick={exportCsv} title={`지금 조건에 맞는 ${filteredCards.length}명이 파일로 나갑니다 (전체 인재풀이 아니라 화면에 적용된 조건 기준)`}>
+            <FileDown size={16} /> CSV로 내보내기 <span className="font-semibold text-muted-foreground">({filteredCards.length}명)</span>
+          </Button>
         </div>
 
         {/* 조건 바 — 자주 쓰는 조건(진행 단계·지역·차량)은 여기서 바로, 발송 전 좁히기는 한 묶음, 나머지는 '조건 더보기'.
@@ -1659,13 +1650,13 @@ export function Pipeline() {
                 "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl text-[13px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-card border border-border-strong rounded-xl text-[13px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm" />
             </div>
             {view === "list" && (
               <select
                 value={distanceJobId === null ? "" : String(distanceJobId)}
                 onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
-                className={`pr-8 px-3 py-2 bg-white/70 backdrop-blur-xl border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-card border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
               >
                 <option value="">거리 기준 공고 선택…</option>
@@ -1688,7 +1679,7 @@ export function Pipeline() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-                className={`pr-8 px-3 py-2 bg-white/70 backdrop-blur-xl border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-card border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
               >
                 <option value="recent">최근 등록순</option>
@@ -1999,7 +1990,7 @@ export function Pipeline() {
               {/* Floating Bulk Actions Toolbar */}
               <AnimatePresence>
                 {selectedRows.size > 0 && (
-                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 glass-dark backdrop-blur-xl rounded-2xl px-6 py-4 mb-6 shadow-[var(--shadow-xl)]">
+                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 glass-dark backdrop-blur-xl backdrop-saturate-150 rounded-2xl px-6 py-4 mb-6 shadow-[var(--shadow-glass-dark)]">
                     <span className="text-[16px] font-extrabold text-white">
                       <span className="text-brand-yellow text-[18px]">{selectedRows.size}명</span> 선택됨
                     </span>
@@ -2046,7 +2037,7 @@ export function Pipeline() {
                     min={1}
                     value={topN}
                     onChange={(e) => setTopN(Number(e.target.value))}
-                    className="w-[64px] px-2 py-1.5 bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm"
+                    className="w-[64px] px-2 py-1.5 bg-card border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm"
                     title="선택할 상위 인원 수"
                   />
                   <Button variant="secondary" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg" onClick={selectTopN}><Check size={15} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명 선택</Button>
@@ -2058,7 +2049,7 @@ export function Pipeline() {
               )}
 
               {sortMode === "distance" && distanceJobId === null && (
-                <p className="-mt-2 mb-4 text-[12px] font-semibold text-warning">거리순 정렬을 쓰려면 상단에서 &lsquo;거리 기준 공고&rsquo;를 선택하세요. 선택 전에는 기본 순서로 표시됩니다.</p>
+                <p className="-mt-2 mb-4 text-[12px] font-semibold text-warning-strong">거리순 정렬을 쓰려면 상단에서 &lsquo;거리 기준 공고&rsquo;를 선택하세요. 선택 전에는 기본 순서로 표시됩니다.</p>
               )}
 
               {/* Data Table */}
@@ -2899,7 +2890,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                         key={m.applicant_id}
                         onClick={() => onCardClick(m.applicant_id)}
                         title="클릭하면 지원자 상세를 엽니다"
-                        className={`w-full text-left bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${m.opted_out ? "opacity-60 grayscale" : ""}`}
+                        className={`w-full text-left bg-card border border-border-strong rounded-xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${m.opted_out ? "opacity-60 grayscale" : ""}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -3049,7 +3040,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
   }));
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-white/70 backdrop-blur-xl border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-card border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-foreground">{card.name} <span className="text-[12px] text-muted-foreground font-medium ml-1">{card.age}세</span></div>
         <div className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>
