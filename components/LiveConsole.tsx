@@ -1077,7 +1077,7 @@ export function LiveConsole() {
            대신 '가장 오래 기다린 대화 열기'를 명시적 버튼으로 둔다: 클릭은 의도이므로 열람 처리가 맞다. */
         <div className="flex-1 flex min-w-0 items-center justify-center bg-muted p-6">
           <div className="w-full max-w-md text-center">
-            <div className="text-sm font-bold text-muted-foreground mb-4">좌측에서 대화를 선택하세요</div>
+            <div className="text-sm font-bold text-muted-foreground mb-4">지금 응대 현황</div>
             <div className="grid grid-cols-3 gap-2 mb-4">
               <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">지금 답할 차례</div>
