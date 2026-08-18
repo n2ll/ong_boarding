@@ -141,6 +141,7 @@
   /* 유리 면 전용 — 상단 1px 빛맺힘(inset)과 부양 그림자를 한 토큰으로.
      box-shadow는 backdrop-filter와 달리 이 파일에서 안전하다(빌드 실측). */
   --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 4px 14px rgba(17, 24, 39, 0.07);
+  --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 12px 28px rgba(17, 24, 39, 0.12);
   --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 28px 70px rgba(17, 24, 39, 0.18);
   --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 28px 70px rgba(17, 24, 39, 0.35);
 
@@ -195,6 +196,7 @@
   --zone-cool: #161B22;
   --scrim: rgba(0, 0, 0, 0.6);
   --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 28px rgba(0, 0, 0, 0.4);
   --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 28px 70px rgba(0, 0, 0, 0.5);
   --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 28px 70px rgba(0, 0, 0, 0.5);
 
