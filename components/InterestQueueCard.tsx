@@ -251,7 +251,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.32 }}
-      className="scroll-mt-6 bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col"
+      className="scroll-mt-6 bg-zone-cool border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col"
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>

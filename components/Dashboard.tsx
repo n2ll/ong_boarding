@@ -367,7 +367,7 @@ export function Dashboard() {
       </motion.div>
 
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
@@ -423,25 +423,24 @@ export function Dashboard() {
           </div>
       </motion.div>
 
-      {/* 다시 연락 응답 큐 — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치.
-          '오늘의 할 일' 바로 아래, 긴급 건 기록 위. */}
+      {/* 아침 브리핑 순서 — 색과 순서가 같은 문법: 웜 존(문제·긴급)이 먼저, 쿨 존(대기 큐)이 다음,
+          흰 카드(현황)는 마지막. 존 틴트는 대시보드 4카드 한정 파일럿 — 항상 제목·아이콘 동반. */}
+      <div id="sos-ledger" className="scroll-mt-6">
+        <SosLedgerCard />
+      </div>
+
+      {/* 다시 연락 응답 큐(쿨 존) — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
         <InterestQueueCard />
         <ReplyQueueCard onCountsChange={handleReplyCounts} />
       </div>
 
-      {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김.
-          관심/답장 큐 아래·긴급 건 기록 위 배치(단계별 현황에서 처리 큐로 앵커 이동). */}
+      {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김. */}
       <CampaignStatsCard />
-
-      {/* 4행: 긴급 건 기록 (결원·증차 발생~해결 로그 + 월 운영비) — 긴급도상 '오늘의 할 일' 바로 아래로 승격 */}
-      <div id="sos-ledger" className="scroll-mt-6">
-        <SosLedgerCard />
-      </div>
 
       {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
           접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white border border-border-strong rounded-lg shadow-sm overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-hidden">
         <button
           onClick={() => setMetricsOpen((v) => !v)}
           aria-expanded={metricsOpen}

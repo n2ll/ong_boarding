@@ -81,7 +81,7 @@ export function CampaignStatsCard() {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.35 }}
-      className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col"
+      className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col"
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
