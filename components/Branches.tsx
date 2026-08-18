@@ -288,7 +288,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
 
       {/* Stats Summary */}
       <div className="flex flex-wrap gap-4 mb-8">
-        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-info-soft flex items-center justify-center shrink-0">
             <Building2 size={24} className="text-info-strong" />
           </div>
@@ -297,7 +297,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-foreground">{activeRows.length}<span className="text-sm font-medium text-muted-foreground ml-1">개</span></div>
           </div>
         </div>
-        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-error-soft flex items-center justify-center shrink-0">
             <AlertTriangle size={24} className="text-error-strong" />
           </div>
@@ -306,7 +306,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="text-2xl font-extrabold text-error-strong">{criticalCount}<span className="text-sm font-medium text-muted-foreground ml-1">개 지점</span></div>
           </div>
         </div>
-        <div className="flex-1 min-w-[220px] bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
+        <div className="flex-1 min-w-[220px] bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center shrink-0">
             <Briefcase size={24} className="text-warning-strong" />
           </div>
@@ -345,7 +345,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 {group.branches.map((branch) => {
           const fillRatio = branch.fillRatio;
           return (
-            <div key={branch.id} className={`bg-white/70 backdrop-blur-xl border rounded-2xl p-6 transition-all group ${branch.active ? "border-border-strong hover:border-gray-300 hover:shadow-md" : "border-dashed border-border-strong opacity-70"}`}>
+            <div key={branch.id} className={`bg-card border rounded-2xl p-6 transition-all group ${branch.active ? "border-border-strong hover:border-gray-300 hover:shadow-md" : "border-dashed border-border-strong opacity-70"}`}>
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">

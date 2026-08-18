@@ -1813,7 +1813,7 @@ export function Jobs() {
           { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => !j.effectivelyClosed).length : 0, unit: "건", color: "text-info" },
           { label: "응대 시작 전(관심·미발송)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-success" }
         ].map((stat, i) => (
-          <div key={i} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+          <div key={i} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col justify-between">
             <div className="text-[13px] font-bold text-muted-foreground mb-2">{stat.label}</div>
             <div className="flex items-baseline gap-1">
               {/* 데이터를 못 받았으면 숫자를 말하지 않는다 — "0건"과 "모름"은 다른 말이다.
@@ -1833,7 +1833,7 @@ export function Jobs() {
         ))}
       </div>
 
-      <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col min-h-[600px]">
+      <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col min-h-[600px]">
         {/* Toolbar */}
         <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-4">
           <div className="flex gap-1.5">
@@ -2190,7 +2190,7 @@ export function Jobs() {
             <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background [&>*]:shrink-0">
               {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
               {promptOpen ? (
-                <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
+                <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">어떤 포지션을 찾고 계신가요?</label>
                   <textarea
                     value={aiPrompt}
@@ -2223,7 +2223,7 @@ export function Jobs() {
 
               ) : (
                 /* 접힌 상태 — 초안 편집칸을 첫 화면에 올리려고 접는다. 조건은 언제든 다시 펼칠 수 있다. */
-                <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex items-center gap-3">
+                <div className="bg-card border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex items-center gap-3">
                   <Wand2 size={15} className="text-warning-strong shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[12px] font-bold text-gray-700">
@@ -2243,7 +2243,7 @@ export function Jobs() {
                   복제로 열었을 때도 같은 이유로 원본 제목·본문이 안 보였다(지역명을 안 고치고 등록하는 사고). */}
               {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
               {(isGenerating || channelDrafts) && (
-                <div className="bg-white/70 backdrop-blur-xl border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                <div className="bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden">
                   {isGenerating && (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center backdrop-blur-md">
                       <Wand2 size={28} className="text-warning-strong animate-bounce mb-3" />
@@ -2302,7 +2302,7 @@ export function Jobs() {
 
               {/* E15 · 공고 제목 — 맞춤 공고 링크 카드·안내 문자에 그대로 나가므로 명시적으로 편집(예전엔 본문 첫 줄에서 몰래 결정). */}
               {channelDrafts && (
-                <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-5">
+                <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5">
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">공고 제목 <span className="text-muted-foreground font-semibold">— 맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span></label>
                   <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
@@ -2310,7 +2310,7 @@ export function Jobs() {
 
               {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
                   모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
-              <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+              <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
                 <div className="text-[13px] font-bold text-foreground">공고 설정</div>
 
                 {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 대상이 이 값에 따라 달라진다.
@@ -2481,7 +2481,7 @@ export function Jobs() {
               {/* 근무 상세 + AI 응대 근거 — 접이식. pull 카드 표시 필드(근무시간·시작일·집결지)와
                   단가·정책 참고정보를 등록 단계에서 함께 채워 편집 모달 2단계 강제를 없앤다. */}
               {channelDrafts && (
-                <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-hidden">
+                <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-hidden">
                   <button
                     type="button"
                     onClick={() => setNewJobExtraOpen((v) => !v)}
@@ -2552,7 +2552,7 @@ export function Jobs() {
               )}
               {/* J 타겟 노출 — 접이식 밖 독립 섹션(D9): 등록 시에도 항상 보이게. internal/both만(external은 pull 미노출). */}
               {channelDrafts && newJobMode !== "external" && (
-                <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-5">
+                <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5">
                   <div className="text-[13px] font-bold text-foreground mb-0.5">노출 대상 — 이 공고를 누구에게 보여줄까요</div>
                   <div className="text-[12px] text-muted-foreground mb-3">맞춤 공고 링크에서 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
                   <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />

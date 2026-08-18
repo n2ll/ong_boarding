@@ -160,7 +160,7 @@ export function Inbox() {
         </div>
         <button
           onClick={() => mutate()}
-          className="flex items-center gap-2 bg-white/70 backdrop-blur-xl border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <RefreshCw size={16} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
@@ -191,7 +191,7 @@ export function Inbox() {
         {messages.map((msg) => {
           const busy = busyId === msg.id;
           return (
-            <div key={msg.id} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+            <div key={msg.id} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 {/* 번호를 tel: 링크로 — 비밀번호를 묻는 사람에게 필요한 건 분류가 아니라 답이다.
                     분류 액션밖에 없던 화면에 최소한의 '연락 수단'을 올린다. */}

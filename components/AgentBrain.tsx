@@ -484,7 +484,7 @@ export function AgentBrain() {
               setPersona(DEFAULT_PERSONA);
               toast.info("기본 말투·성격으로 되돌렸어요. 저장해야 반영됩니다.");
             }}
-            className="flex items-center gap-2 bg-white/70 backdrop-blur-xl border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={16} /> 기본값으로 초기화
           </button>
@@ -543,7 +543,7 @@ export function AgentBrain() {
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-8">
+        <div className="flex-1 bg-card border border-border-strong rounded-2xl shadow-sm p-8">
           {activeTab === 'overview' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex items-center justify-between mb-2">
@@ -940,7 +940,7 @@ export function AgentBrain() {
                 </div>
               </div>
 
-              <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-7 shadow-sm">
+              <div className="bg-card border border-border-strong rounded-2xl p-7 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl bg-copilot-soft flex items-center justify-center">
                     <Database size={20} className="text-copilot-strong" />
@@ -1032,7 +1032,7 @@ export function AgentBrain() {
                     <div className="flex flex-col gap-4">
                       <div className="flex items-start gap-2.5">
                         <div className="w-8 h-8 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={16} className="text-foreground" /></div>
-                        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl rounded-tl-sm p-3.5 text-[14px] leading-relaxed text-gray-800 whitespace-pre-wrap shadow-sm">
+                        <div className="bg-card border border-border-strong rounded-2xl rounded-tl-sm p-3.5 text-[14px] leading-relaxed text-gray-800 whitespace-pre-wrap shadow-sm">
                           {simResult.draft_text}
                         </div>
                       </div>

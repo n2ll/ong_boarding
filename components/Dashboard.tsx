@@ -423,13 +423,13 @@ export function Dashboard() {
           </div>
       </motion.div>
 
-      {/* 아침 브리핑 순서 — 색과 순서가 같은 문법: 웜 존(문제·긴급)이 먼저, 쿨 존(대기 큐)이 다음,
-          흰 카드(현황)는 마지막. 존 틴트는 대시보드 4카드 한정 파일럿 — 항상 제목·아이콘 동반. */}
+      {/* 아침 브리핑 순서 — 문제(웜 크림)가 먼저, 대기 큐, 현황 순.
+          웜 틴트는 긴급 건 기록 한 곳뿐이다(쿨 존은 2026-08-18 사용자 기각 — 색은 '문제'만 말한다). */}
       <div id="sos-ledger" className="scroll-mt-6">
         <SosLedgerCard />
       </div>
 
-      {/* 다시 연락 응답 큐(쿨 존) — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치 */}
+      {/* 다시 연락 응답 큐 — 관심 표시(맞춤 공고 링크 클릭)와 내가 답할 차례(문자 답장)를 대칭 병렬 배치 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
         <InterestQueueCard />
         <ReplyQueueCard onCountsChange={handleReplyCounts} />

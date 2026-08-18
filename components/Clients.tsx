@@ -248,7 +248,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {integ && (
-        <div className="mb-6 bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm p-5">
+        <div className="mb-6 bg-card border border-border-strong rounded-2xl shadow-sm p-5">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-bold text-foreground">데이터 정합성 점검</span>
@@ -284,7 +284,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       )}
 
-      <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
+      <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col">
         <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />

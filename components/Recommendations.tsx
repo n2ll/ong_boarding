@@ -150,7 +150,7 @@ export function Recommendations() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
         {/* Left Pane - Active Jobs */}
-        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
+        <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col">
           <h2 className="text-sm font-bold text-muted-foreground mb-4">분석할 공고 선택</h2>
           <div className="flex flex-col gap-2">
             {jobs.length === 0 && (
@@ -176,7 +176,7 @@ export function Recommendations() {
 
         {/* Right Pane - Recommendations */}
         <div className="flex flex-col gap-4">
-          <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex items-center justify-between">
+          <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex items-center justify-between">
             <div>
               <div className="text-[14px] font-bold text-foreground">{selectedJob?.title ?? "공고를 선택하세요"}</div>
               <div className="text-[12px] text-muted-foreground mt-0.5">
@@ -202,7 +202,7 @@ export function Recommendations() {
           {recs.map((rec) => {
             const tags = buildTags(rec);
             return (
-              <div key={`${rec.source}-${rec.id}`} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
+              <div key={`${rec.source}-${rec.id}`} className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm flex gap-6">
                 <div className="shrink-0 flex flex-col items-center gap-2 w-[100px]">
                   <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info-strong relative">
                     <User size={28} />

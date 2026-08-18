@@ -165,7 +165,7 @@ export function SlotBoard() {
           { label: "총 정원", value: totals.cap, unit: "명", icon: Clock4, color: "text-foreground" },
           { label: "대기(희망)", value: totals.waiting, unit: "명", icon: AlertTriangle, color: "text-warning-strong" },
         ].map((s, i) => (
-          <div key={i} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
+          <div key={i} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
             <div className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground mb-2">
               <s.icon size={14} /> {s.label}
             </div>
@@ -184,7 +184,7 @@ export function SlotBoard() {
           표시할 지점이 없어요. 슬롯 보드는 확정슬롯을 사용하는 화주사(비마트식 슬롯 구인) 전용이에요 — 화주사 설정에서 &lsquo;확정슬롯 사용&rsquo;을 켠 뒤 지점을 등록해 주세요.
         </div>
       ) : (
-        <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl shadow-sm overflow-x-auto">
+        <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-x-auto">
           <div className="grid min-w-[700px] grid-cols-[1.4fr_repeat(4,1fr)] bg-background border-b border-border-strong text-[13px] font-bold text-muted-foreground">
             <div className="px-5 py-3.5">지점 / 화주사</div>
             {SLOTS.map((s) => (
