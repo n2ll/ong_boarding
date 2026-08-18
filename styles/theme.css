@@ -75,32 +75,35 @@
      bg-foreground/45 표기는 다크 도입 시 밝은 스크림으로 뒤집혀서 전용 토큰으로 분리. */
   --scrim: rgba(28, 25, 23, 0.45);
 
-  /* ── 상태 (예약어) ──────────────────────────────────────── */
-  --success: #16845B;
-  --success-soft: #EAF8F1;
-  --success-strong: #0B6844;
-  --info: #2563EB;
-  --info-soft: #EFF6FF;
-  --info-strong: #1E40AF;
-  --warning: #B86A00;
-  --warning-soft: #FFF7E0;
+  /* ── 상태 (예약어) ────────────────────────────────────────
+     2026-08-18 웜 하모나이즈: hue 문법(성공=초록·정보=파랑…)은 유지하고
+     채도·온도만 웜 세계에 앉혔다(형광 신호등이 아니라 종이 위 인주·색지).
+     strong-on-soft ≥4.5 · 본색 on card ≥3 · soft 상호 ΔE ≥5 전 쌍 계산 검증. */
+  --success: #268158;
+  --success-soft: #E9F2E6;
+  --success-strong: #14603E;
+  --info: #3A5CC0;
+  --info-soft: #E5EDF7;
+  --info-strong: #2A4494;
+  --warning: #A96200;
+  --warning-soft: #FDEFD3;
   --warning-strong: #92400E;
   --error: #D92D20;
-  --error-soft: #FEF1F0;
+  --error-soft: #FBE9E7;
   --error-strong: #B42318;
   /* AI 코파일럿 모드 표시용. 상태 4색과 구분되어야 해서 별도 역할로 둔다. */
-  --copilot: #6D28D9;
-  --copilot-soft: #F5F1FE;
-  --copilot-strong: #5B21B6;
+  --copilot: #5A3596;
+  --copilot-soft: #F2E9F5;
+  --copilot-strong: #482980;
 
   /* 어두운 면(Ink 히어로·glass-dark 패널) 위에 얹는 상태 글자색.
      --success/--error 같은 본 값은 밝은 배경 기준이라 어두운 면에서 죽는다.
      여기 값은 #1C1917 위에서 대비 7:1 이상이다. */
-  --success-on-dark: #86EFAC;
-  --info-on-dark: #93C5FD;
+  --success-on-dark: #A3D9A5;
+  --info-on-dark: #A6C4EA;
   --warning-on-dark: #FCD34D;
-  --error-on-dark: #FCA5A5;
-  --copilot-on-dark: #C4B5FD;
+  --error-on-dark: #F4A896;
+  --copilot-on-dark: #C3B3E8;
 
   /* ── 차트 ───────────────────────────────────────────────
    * categorical 5색 — 고정 순서로 배정하고 순환시키지 않는다.
@@ -195,6 +198,30 @@
   --border-glass: rgba(245, 243, 240, 0.1);
   --zone-warm: #211D17;
   --zone-cool: #1E1C19;
+
+  /* 상태 계열 다크 대응(2026-08-18 신설 — 예전엔 :root 상속이라 다크에서 대비가 죽었다).
+     다크 비활성 상태지만 값이 썩지 않게 유지. 도입 시 재측정. */
+  --success: #4CC38A;
+  --success-soft: #152B1F;
+  --success-strong: #7FDCAC;
+  --info: #7FA3F0;
+  --info-soft: #181F30;
+  --info-strong: #A8C3F4;
+  --warning: #E8A33D;
+  --warning-soft: #2C2113;
+  --warning-strong: #F2C46B;
+  --error: #F2726A;
+  --error-soft: #321A17;
+  --error-strong: #F79A92;
+  --copilot: #A78BE8;
+  --copilot-soft: #241D33;
+  --copilot-strong: #C4AEF2;
+  --success-on-dark: #A3D9A5;
+  --info-on-dark: #A6C4EA;
+  --warning-on-dark: #FCD34D;
+  --error-on-dark: #F4A896;
+  --copilot-on-dark: #C3B3E8;
+  --brand-muted: #352B0E;
   --scrim: rgba(0, 0, 0, 0.6);
   --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.3);
   --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 28px rgba(0, 0, 0, 0.4);

@@ -175,7 +175,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         icon: {
           // 지도 마커는 React 트리 밖 DOM이라 토큰과 같은 값을 hex로 직접 쓴다(--warning / --warning 35%).
           content: `<div style="width:11px;height:11px;border-radius:50%;background:${
-            approx ? "#E2B473" : "#B86A00"
+            approx ? "#E2B473" : "#A96200"
           };border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15);opacity:${approx ? 0.7 : 1}"></div>`,
           anchor: new naver.maps.Point(7, 7),
         },

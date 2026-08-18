@@ -132,10 +132,10 @@ export type Tab =
 export const STATUS_COLORS: Record<string, string> = {
   "스크리닝 전": "#A8A29E", // gray-400 미러
   "스크리닝 중": "#57534E", // gray-600 — 배지 텍스트 12px는 4.5:1 필요(gray-500 미러는 4.18로 미달)
-  "스크리닝 완료": "#2563EB", // --info
-  기타: "#6D28D9", // --copilot
-  확정인력: "#16845B", // --success
-  대기자: "#B86A00", // --warning
+  "스크리닝 완료": "#3A5CC0", // --info
+  기타: "#5A3596", // --copilot
+  확정인력: "#268158", // --success
+  대기자: "#A96200", // --warning
   부적합: "#D92D20", // --error
   이탈: "#B42318", // --error-strong
 };
@@ -148,6 +148,9 @@ export const STATUS_COLORS: Record<string, string> = {
 export const STATUS_TEXT_COLORS: Record<string, string> = {
   ...STATUS_COLORS,
   "스크리닝 전": "#57534E", // gray-600 — 칩 위 6.5:1
+  확정인력: "#14603E", // --success-strong — 본색은 칩 위 4.15:1로 미달
+  대기자: "#92400E", // --warning-strong — 본색 4.08:1 미달
+  부적합: "#B42318", // --error-strong — 본색 4.09:1 미달('이탈'과 같은 hex지만 칩 틴트·라벨이 다르다)
 };
 
 export const ALL_STATUSES = [
