@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Search, ChevronDown, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox } from "lucide-react";
 import { useBranchScope } from "@/lib/branch-scope";
 import { Button } from "@/components/ui/button";
 
@@ -79,7 +79,11 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     "/api/admin/notifications",
     { refreshInterval: 60_000 }
   );
-  const notices = useMemo(() => notiRes?.items ?? [], [notiRes]);
+  const notices = useMemo(() => {
+    // 패널은 '요약 + 가장 급한 것부터' 문법 — 붉은 것(사람이 막힌 것)이 항상 위로.
+    const rank = { red: 0, amber: 1, slate: 2 } as const;
+    return [...(notiRes?.items ?? [])].sort((a, b) => rank[a.tone] - rank[b.tone]);
+  }, [notiRes]);
   const loadNotices = useCallback(() => { void mutateNotices(); }, [mutateNotices]);
 
   // 검색 디바운스
@@ -238,6 +242,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                     <div className="text-[12px] mt-0.5">분류 대기 문자함, 사람 확인이 필요한 대화, AI 중단이 생기면 표시됩니다.</div>
                   </div>
                 ) : (
+                  // 한 줄 요약만 — 설명문은 대시보드 '오늘의 할 일' 몫(같은 말을 두 번 하지 않는다)
                   notices.map((n) => (
                     <button
                       key={n.id}
@@ -245,19 +250,30 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                         setNotifOpen(false);
                         router.push(n.path);
                       }}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex gap-3 p-3.5 border-b border-background hover:bg-background transition-colors text-left"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 px-3.5 py-2.5 border-b border-background hover:bg-background transition-colors text-left"
                     >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${n.tone === "red" ? "bg-error-soft text-error-strong" : n.tone === "amber" ? "bg-yellow-50 text-warning-strong" : "bg-muted text-gray-700"}`}>
-                        <Inbox size={16} />
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${n.tone === "red" ? "bg-error-soft text-error-strong" : n.tone === "amber" ? "bg-yellow-50 text-warning-strong" : "bg-muted text-gray-700"}`}>
+                        <Inbox size={14} />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-bold text-gray-800 leading-snug">{n.title}</div>
-                        <div className="text-[12px] text-muted-foreground mt-0.5 leading-snug">{n.desc}</div>
-                      </div>
+                      <div className="flex-1 min-w-0 truncate text-[13px] font-bold text-gray-800">{n.title}</div>
+                      <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
                     </button>
                   ))
                 )}
               </div>
+              {notices.length > 0 && (
+                <div className="border-t border-border-glass bg-white/45 p-2">
+                  <button
+                    onClick={() => {
+                      setNotifOpen(false);
+                      router.push(notices[0].path);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 py-2 text-[13px] font-bold text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    가장 급한 것부터 처리하기 <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

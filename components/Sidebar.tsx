@@ -263,7 +263,9 @@ function DockItem({
         aria-label={item.label}
         aria-current={active ? "page" : undefined}
         className={`relative z-10 flex min-h-11 w-full min-w-0 items-center gap-3 rounded-2xl pr-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring ${
-          active ? "bg-white text-gray-900 shadow-[var(--shadow-md)]" : "text-white/60 hover:bg-white/10 hover:text-white"
+          active
+            ? "bg-white text-gray-900 shadow-[var(--shadow-md)] after:absolute after:left-1.5 after:top-1/2 after:h-5 after:w-[3px] after:-translate-y-1/2 after:rounded-full after:bg-brand-yellow after:content-['']"
+            : "text-white/60 hover:bg-white/10 hover:text-white"
         }`}
       >
         <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
