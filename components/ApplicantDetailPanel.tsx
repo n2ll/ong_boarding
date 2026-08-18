@@ -1649,7 +1649,7 @@ export function ApplicantDetailPanel({
       {/* 스플릿 뷰에서는 스크림을 깔지 않는다 — 목록을 계속 만질 수 있어야 한다. */}
       {!docked && (
         <AnimatePresence>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[2px]" />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
         </AnimatePresence>
       )}
       <AnimatePresence>

@@ -144,7 +144,7 @@ function Modal({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50 bg-foreground/45 backdrop-blur-[3px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
+          className="fixed inset-0 z-50 bg-scrim backdrop-blur-[3px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
         />
         <DialogPrimitive.Content
           onEscapeKeyDown={guardEsc}
@@ -152,9 +152,10 @@ function Modal({
           onInteractOutside={guardOutside}
           onCloseAutoFocus={restoreFocus}
           className={cn(
-            "fixed z-50 flex flex-col overflow-hidden border shadow-[var(--shadow-xl)] duration-200",
+            "fixed z-50 flex flex-col overflow-hidden border shadow-[var(--shadow-glass-xl)] duration-200",
             // 배경이 비쳐 보이는 유리 면. 글자 대비가 필요한 면이라 가장 불투명한 3단계를 쓴다.
-            "border-white/70 bg-glass-3 backdrop-blur-2xl",
+            // blur는 2단(크롬 lg·오버레이 xl)으로 고정 — 40px(2xl)은 비용 대비 식별 불가라 폐지.
+            "border-border-glass bg-glass-3 backdrop-blur-xl backdrop-saturate-150",
             // 좁은 화면: 아래에서 올라오는 시트
             "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-[24px] pb-[env(safe-area-inset-bottom)]",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",

@@ -2995,7 +2995,7 @@ export function Jobs() {
       <AnimatePresence>
         {candPanel && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setCandPanel(null); setConfirmSignal(null); }} className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[2px]" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setCandPanel(null); setConfirmSignal(null); }} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
             <motion.div
               initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 26, stiffness: 220 }}

@@ -24,7 +24,9 @@
   /* ── 기본 표면 ──────────────────────────────────────────── */
   --background: #F4F2EC;          /* Paper */
   --foreground: #111827;          /* Ink */
-  --card: #FFFFFF;
+  /* 순백이 아니라 미세 웜톤 — 본문 카드를 불투명 시트로 통일하는 로드맵(2026-08-18)에서
+     대면적 순백의 글레어·차가움을 토큰 한 값으로 해소한다. 되돌리기도 이 한 줄. */
+  --card: #FFFDFA;
   --card-foreground: #111827;
   --popover: #FFFFFF;
   --popover-foreground: #111827;
@@ -60,6 +62,18 @@
   --glass-3: rgba(255, 255, 255, 0.9);
   --glass-dark: rgba(17, 24, 39, 0.85);
   --border-glass: rgba(255, 255, 255, 0.72);
+
+  /* 콘텐츠 존 틴트 — 대시보드 큐 카드 4장 한정 파일럿(2026-08-18 확정).
+     긴급(SOS·실패)=warm, 대기 큐(관심·응답)=cool. 상태색 soft 계열보다 채도를
+     확연히 낮게 유지하고, 항상 라벨·아이콘을 동반한다(색만으로 상태 전달 금지). */
+  --zone-warm: #FBF4EC;
+  /* cool은 info-soft(#EFF6FF)와 같은 블루 축이라 더 어둡게 떼어놓는다(ΔE 2.3→3.8).
+     그래도 파스텔끼리는 가까우니: 존 카드 위에 bg-info-soft 칩을 직접 병치하지 말 것. */
+  --zone-cool: #E9EDF2;
+
+  /* 오버레이 뒤 스크림 단일 토큰 — 모달·확인창·패널이 전부 이 값 하나를 쓴다.
+     bg-foreground/45 표기는 다크 도입 시 밝은 스크림으로 뒤집혀서 전용 토큰으로 분리. */
+  --scrim: rgba(17, 24, 39, 0.45);
 
   /* ── 상태 (예약어) ──────────────────────────────────────── */
   --success: #16845B;
@@ -124,6 +138,11 @@
   --shadow-action: 0 8px 18px rgba(17, 24, 39, 0.2);
   --shadow-brand: 0 8px 20px rgba(204, 150, 13, 0.2);
   --shadow-inset: inset 0 1px 2px rgba(17, 24, 39, 0.06);
+  /* 유리 면 전용 — 상단 1px 빛맺힘(inset)과 부양 그림자를 한 토큰으로.
+     box-shadow는 backdrop-filter와 달리 이 파일에서 안전하다(빌드 실측). */
+  --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 4px 14px rgba(17, 24, 39, 0.07);
+  --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 28px 70px rgba(17, 24, 39, 0.18);
+  --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 28px 70px rgba(17, 24, 39, 0.35);
 
   /* ── 사이드바 ───────────────────────────────────────────── */
   --sidebar: #FFFFFF;
@@ -172,6 +191,12 @@
   --glass-3: rgba(23, 26, 33, 0.9);
   --glass-dark: rgba(8, 12, 20, 0.85);
   --border-glass: rgba(243, 244, 246, 0.1);
+  --zone-warm: #211D17;
+  --zone-cool: #161B22;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 28px 70px rgba(0, 0, 0, 0.5);
+  --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 28px 70px rgba(0, 0, 0, 0.5);
 
   --sidebar: #171A21;
   --sidebar-foreground: #F3F4F6;
@@ -181,6 +206,27 @@
   --sidebar-accent-foreground: #F3F4F6;
   --sidebar-border: rgba(243, 244, 246, 0.12);
   --sidebar-ring: #E0B500;
+}
+
+/*
+ * OS '투명도 감소' 설정 대응 — 유리 토큰을 불투명 쪽으로 승격한다.
+ * Baseline이 아닌 미디어쿼리라 보험일 뿐이고, 접근성의 실체는 기본값
+ * (유리 하한 0.68/0.9 · 유리 위 텍스트 muted-foreground 하한)에 있다.
+ * backdrop-filter 선언은 이 파일에 금지(빌드가 떨어뜨린 실측 사고) — 배경 토큰 값만 바꾼다.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-1: rgba(255, 255, 255, 0.92);
+    --glass-2: rgba(255, 255, 255, 0.96);
+    --glass-3: rgba(255, 255, 255, 1);
+    --glass-dark: rgba(17, 24, 39, 0.98);
+  }
+  .dark {
+    --glass-1: rgba(23, 26, 33, 0.92);
+    --glass-2: rgba(23, 26, 33, 0.96);
+    --glass-3: rgba(23, 26, 33, 1);
+    --glass-dark: rgba(8, 12, 20, 0.98);
+  }
 }
 
 @theme inline {
@@ -242,6 +288,9 @@
   --color-glass-3: var(--glass-3);
   --color-glass-dark: var(--glass-dark);
   --color-border-glass: var(--border-glass);
+  --color-zone-warm: var(--zone-warm);
+  --color-zone-cool: var(--zone-cool);
+  --color-scrim: var(--scrim);
 
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -319,8 +368,10 @@
 
   body {
     @apply bg-background text-foreground;
+    /* 옐로 워시 0.18→0.14 (2026-08-18) — 유리·경고 텍스트의 최악 코너 대비 여유 확보.
+       브랜드 옐로는 면이 아니라 액센트라는 상단 규칙과도 정합. */
     background-image:
-      radial-gradient(at 0% 0%, hsla(43, 100%, 70%, 0.18) 0px, transparent 48%),
+      radial-gradient(at 0% 0%, hsla(43, 100%, 70%, 0.14) 0px, transparent 48%),
       radial-gradient(at 100% 100%, hsla(11, 75%, 68%, 0.08) 0px, transparent 46%),
       linear-gradient(rgba(255, 255, 255, 0.24) 1px, transparent 1px),
       linear-gradient(90deg, rgba(255, 255, 255, 0.24) 1px, transparent 1px);

@@ -128,7 +128,7 @@ export function Sidebar() {
       aria-label="주요 메뉴"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] border border-white/10 bg-gray-900/95 shadow-[var(--shadow-xl)] backdrop-blur-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none lg:flex ${
+      className={`fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] border border-white/10 bg-gray-900/95 shadow-[var(--shadow-xl)] backdrop-blur-xl transition-[width] duration-200 ease-out motion-reduce:transition-none lg:flex ${
         expanded ? "w-60" : "w-[72px]"
       }`}
     >
@@ -219,7 +219,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="모바일 주요 메뉴"
-      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-xl border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-2xl lg:hidden"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-xl border border-white/10 bg-gray-900/95 p-2 text-white shadow-[var(--shadow-xl)] backdrop-blur-xl lg:hidden"
     >
       {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
         const active = pathname === path;
