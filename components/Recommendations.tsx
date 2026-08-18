@@ -3,6 +3,7 @@ import useSWR from "swr";
 import { Sparkles, Briefcase, User, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { PageShell } from "./ui/page-shell";
 
 interface ApiJob {
   id: number;
@@ -137,9 +138,9 @@ export function Recommendations() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-10 h-10 bg-gradient-to-br from-brand-yellow to-yellow-600 rounded-xl flex items-center justify-center shadow-sm">
+    <PageShell>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-gradient-to-br from-brand-yellow to-yellow-600 rounded-2xl flex items-center justify-center shadow-sm">
           <Sparkles size={20} className="text-white" />
         </div>
         <div>
@@ -162,7 +163,7 @@ export function Recommendations() {
                 <button
                   key={job.id}
                   onClick={() => handleSelect(job.id)}
-                  className={`text-left p-4 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
+                  className={`text-left p-4 rounded-2xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedJobId === job.id ? 'border-foreground bg-background shadow-sm' : 'border-transparent hover:bg-muted'}`}
                 >
                   <div className="text-[13px] font-bold text-foreground mb-1 leading-tight">{job.title}</div>
                   <div className="text-[11px] text-muted-foreground flex items-center gap-1">
@@ -186,7 +187,7 @@ export function Recommendations() {
             <button
               onClick={handleGenerate}
               disabled={!selectedJob || loading}
-              className="min-h-11 flex items-center gap-2 bg-foreground hover:bg-gray-800 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-h-11 flex items-center gap-2 bg-foreground hover:bg-gray-800 disabled:opacity-50 text-white px-5 py-2.5 rounded-2xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {loading ? "분석 중…" : "AI 추천 생성"}
@@ -221,7 +222,7 @@ export function Recommendations() {
                       </span>
                     ))}
                   </div>
-                  <div className="bg-background rounded-xl p-4 text-[13px] text-gray-700 leading-relaxed relative">
+                  <div className="bg-background rounded-2xl p-4 text-[13px] text-gray-700 leading-relaxed relative">
                     <Sparkles size={16} className="text-brand-yellow absolute top-4 left-4" />
                     <p className="pl-6">{buildReason(rec)}</p>
                   </div>
@@ -233,20 +234,20 @@ export function Recommendations() {
                       <button
                         onClick={() => handleAddCandidate(rec)}
                         disabled={addingId === rec.id || addedIds.has(rec.id)}
-                        className="w-full bg-foreground hover:bg-gray-800 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center gap-1.5"
+                        className="w-full bg-foreground hover:bg-gray-800 disabled:opacity-60 text-white px-5 py-2.5 rounded-2xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center gap-1.5"
                       >
                         {addingId === rec.id ? <Loader2 size={15} className="animate-spin" /> : addedIds.has(rec.id) ? <Check size={15} /> : null}
                         {addedIds.has(rec.id) ? "추가됨" : "공고 후보로 추가"}
                       </button>
                       <button
                         onClick={() => setProfileId(rec.id)}
-                        className="w-full bg-white border border-border-strong hover:bg-background text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="w-full bg-white border border-border-strong hover:bg-background text-gray-700 px-5 py-2.5 rounded-2xl text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         프로필 보기
                       </button>
                     </>
                   ) : (
-                    <div className="w-[160px] text-center text-[12px] text-muted-foreground bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
+                    <div className="w-[160px] text-center text-[12px] text-muted-foreground bg-background border border-dashed border-border-strong rounded-2xl px-3 py-2.5 leading-relaxed">
                       레거시 인재풀 후보예요.<br />연락처로 직접 컨택하세요.
                     </div>
                   )}
@@ -263,6 +264,6 @@ export function Recommendations() {
         applicantId={profileId}
         jobId={selectedJobId}
       />
-    </div>
+    </PageShell>
   );
 }

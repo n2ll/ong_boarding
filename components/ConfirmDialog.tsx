@@ -67,12 +67,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
             )}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => settle(false)} className="rounded-xl">
+            <AlertDialogCancel onClick={() => settle(false)} className="rounded-2xl">
               {opts.cancelText ?? "취소"}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => settle(true)}
-              className={`rounded-xl ${opts.destructive ? "bg-error hover:bg-error-strong" : ""}`}
+              className={`rounded-2xl ${opts.destructive ? "bg-error hover:bg-error-strong" : ""}`}
             >
               {opts.confirmText ?? "확인"}
             </AlertDialogAction>

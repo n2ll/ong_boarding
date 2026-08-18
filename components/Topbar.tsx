@@ -139,7 +139,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         안에 있는 지점 필터·알림 드롭다운(absolute)이 잘린다.
       */}
       <header className="relative z-40 mb-3 mt-3 shrink-0 lg:mb-4 lg:mt-4">
-        <div className={`glass backdrop-blur-lg backdrop-saturate-150 flex min-h-16 items-center gap-[18px] rounded-xl px-4 transition-shadow duration-200 lg:px-6 ${scrolled ? "shadow-[var(--shadow-glass-md)]" : "shadow-[var(--shadow-glass-sm)]"}`}>
+        <div className={`glass backdrop-blur-lg backdrop-saturate-150 flex min-h-16 items-center gap-[18px] rounded-2xl px-4 transition-shadow duration-200 lg:px-8 ${scrolled ? "shadow-[var(--shadow-glass-md)]" : "shadow-[var(--shadow-glass-sm)]"}`}>
         <div className="min-w-0">
           {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
           <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
@@ -180,7 +180,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           </button>
 
           {branchOpen && (
-            <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-xl shadow-[var(--shadow-glass-xl)] p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
+            <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-[var(--shadow-glass-xl)] p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
               <div className="text-[11px] font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
@@ -268,7 +268,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                       setNotifOpen(false);
                       router.push(notices[0].path);
                     }}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 py-2 text-[13px] font-bold text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="w-full flex items-center justify-center gap-1.5 rounded-2xl bg-foreground px-3 py-2 text-[13px] font-bold text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     가장 급한 것부터 처리하기 <ChevronRight size={14} />
                   </button>
@@ -330,7 +330,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                       <button
                         key={`a-${a.id}`}
                         onClick={() => goApplicant(a)}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-xl text-left transition-colors"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-2xl text-left transition-colors"
                       >
                         <div className="w-8 h-8 rounded-full bg-info-soft flex items-center justify-center shrink-0">
                           <User size={14} className="text-info-strong" />
@@ -354,7 +354,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                       <button
                         key={`j-${j.id}`}
                         onClick={() => goJob(j)}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-xl text-left transition-colors"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-3 py-2.5 hover:bg-muted rounded-2xl text-left transition-colors"
                       >
                         <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
                           <FileText size={14} className="text-muted-foreground" />

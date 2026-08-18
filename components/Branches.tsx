@@ -259,7 +259,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
   ].filter((g) => g.branches.length > 0 || g.clientId !== null);
 
   return (
-    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
+    <div className={embedded ? "flex flex-col" : "p-4 pb-12 sm:p-6 lg:p-8 flex flex-col [&>*]:shrink-0"}>
       {/* Header & Tools */}
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
@@ -274,12 +274,12 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               placeholder="지점명, 담당자 검색"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-xl text-sm w-[280px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+              className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 pl-9 pr-4 py-2.5 border border-border-strong rounded-2xl text-sm w-[280px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-2xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={18} /> 신규 지점 등록
           </button>
@@ -367,7 +367,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 </div>
               </div>
 
-              <div className="bg-background rounded-xl p-4 mb-4">
+              <div className="bg-background rounded-2xl p-4 mb-4">
                 <div className="flex justify-between items-end mb-2">
                   <span className="text-[12px] font-bold text-muted-foreground">인력 충원율</span>
                   <span className={`text-[16px] font-extrabold ${fillRatio < 70 ? 'text-error-strong' : fillRatio < 90 ? 'text-warning-strong' : 'text-success'}`}>
@@ -475,7 +475,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                   >
                     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       {SLOTS.map((s: SlotKey) => (
-                        <label key={s} className="flex min-h-11 items-center justify-between gap-2 rounded-xl border border-border-strong bg-input-background/70 px-3.5 py-2">
+                        <label key={s} className="flex min-h-11 items-center justify-between gap-2 rounded-2xl border border-border-strong bg-input-background/70 px-3.5 py-2">
                           <span className="text-[13px] font-bold text-foreground">{s}</span>
                           <input
                             type="number"

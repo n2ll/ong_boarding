@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { Building2, Search, ChevronRight, ChevronDown, Loader2, Truck, Users } from "lucide-react";
 import { jsonFetcher } from "@/lib/swr";
+import { PageShell } from "./ui/page-shell";
 import { Clients } from "./Clients";
 
 interface Line {
@@ -42,7 +43,7 @@ export function Shippers() {
   const totalWorkers = clients.reduce((s, c) => s + c.workerCount, 0);
 
   return (
-    <div className="p-8 pb-12 max-w-4xl w-full space-y-5">
+    <PageShell className="max-w-4xl w-full">
       <div>
         <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
           <Building2 size={20} /> 화주사
@@ -76,13 +77,13 @@ export function Shippers() {
         </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
+        <div className="px-4 py-3 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
           화주사 정보를 불러오지 못했어요.
         </div>
       )}
 
       {!error && data && !data.configured && (
-        <div className="px-4 py-3 rounded-xl bg-muted border border-border-strong text-[13px] font-semibold text-muted-foreground">
+        <div className="px-4 py-3 rounded-2xl bg-muted border border-border-strong text-[13px] font-semibold text-muted-foreground">
           계약 원본(옹매니징)에 연결되지 않아 배송라인·운행 인원을 표시할 수 없어요. 위 목록은 정상 사용할 수 있어요.
         </div>
       )}
@@ -107,7 +108,7 @@ export function Shippers() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="화주사 검색"
-              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background"
+              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-2xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background"
             />
           </div>
 
@@ -172,6 +173,6 @@ export function Shippers() {
         </>
       )}
       </section>
-    </div>
+    </PageShell>
   );
 }

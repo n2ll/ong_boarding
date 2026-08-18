@@ -6,25 +6,14 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
-  // 파일럿 기간 숨김 메뉴의 아이콘 — NAV_ITEMS 복원 시 함께 주석 해제
-  // Activity,
-  // BarChart2,
   MessageSquare,
-  Inbox,
-  Brain,
   Users,
-  UserCheck,
-  // CheckCircle,
   Briefcase,
-  Building2,
-  RefreshCw,
-  // MapPin,
-  // LayoutGrid,
-  // Shield,
   Settings,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
+import { NAV_ITEMS, type NavItem } from "@/lib/admin/nav";
 import { LogoMark } from "./Logo";
 
 /**
@@ -35,14 +24,6 @@ import { LogoMark } from "./Logo";
  * MASTER.md §3 Navigation: 도크가 축소되어도 버튼의 접근 가능한 이름은
  * 유지한다(aria-label + 접힘 상태 툴팁), 현재 항목은 aria-current="page".
  */
-
-interface NavItem {
-  label: string;
-  icon: LucideIcon;
-  path: string;
-  /** 이 항목 위에 구분선을 넣는다 (접힌 도크에서는 그룹 제목을 쓸 수 없다) */
-  dividerBefore?: boolean;
-}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -63,34 +44,7 @@ export function Sidebar() {
   const inbox = notiRes?.counts?.inbox ?? 0;
   const interventions = notiRes?.counts?.interventions ?? 0;
 
-  // 파일럿 기간 숨김: 실사용 5탭(대시보드·인재풀/파이프라인·채용공고·실시간 응대·미분류 인박스)+설정만 노출.
-  // 삭제 아님 — 파일럿 종료 후 복원 대비 주석 보존 (아이콘 import·aiDisabled 상태도 함께 복원)
-  const NAV_ITEMS: NavItem[] = [
-    { label: "대시보드", icon: LayoutDashboard, path: "/" },
-    // { label: "자동화 현황", icon: Activity, path: "/automation" }, // 파일럿 기간 숨김
-    // { label: "리포트 · 분석", icon: BarChart2, path: "/reports" }, // 파일럿 기간 숨김
-
-    { label: "실시간 응대", icon: MessageSquare, path: "/live", dividerBefore: true },
-    // 확정은 매니저만 하는 핵심 업무인데 '실시간 응대' 안 탭에 숨어 가장 먼 액션이었다 → 전용 진입점으로 승격.
-    // 확정 대기 배지는 이 행에만 둔다(예전엔 '실시간 응대' 행에 초록 배지로 붙어, 전용 행을 만들면 같은 숫자가
-    // 두 번 보였다). 색은 확정 계열 초록(confirmCount 경로) — 빨강은 이 레포에서 '미처리 경고' 색이다.
-    // path에 쿼리가 있어 isActive(pathname 정확일치)에는 걸리지 않는다 — /live에선 위 '실시간 응대'가 활성 표시된다.
-    { label: "확정할 지원자", icon: UserCheck, path: "/live?tab=confirm" },
-    { label: "분류 대기 문자함", icon: Inbox, path: "/inbox" },
-    // 자동 응대(auto) 가동으로 재노출 (2026-07-12) — AI 모드 전환·일반 라인 FAQ 편집 진입점
-    { label: "에이전트 두뇌", icon: Brain, path: "/brain" },
-
-    { label: "인재풀 · 파이프라인", icon: Users, path: "/pipeline", dividerBefore: true },
-    { label: "다시 부르기 (외부 인력)", icon: RefreshCw, path: "/reengagement" },
-    // { label: "AI 인재 추천", icon: CheckCircle, path: "/recommendations" }, // 파일럿 기간 숨김
-
-    { label: "채용공고 관리", icon: Briefcase, path: "/jobs", dividerBefore: true },
-    { label: "화주사", icon: Building2, path: "/shippers" },
-    // { label: "화주사 관리", icon: Building2, path: "/clients" }, // 파일럿 기간 숨김
-    // { label: "지점 관리", icon: MapPin, path: "/branches" }, // 파일럿 기간 숨김
-    // { label: "확정/희망 슬롯", icon: LayoutGrid, path: "/slots" }, // 파일럿 기간 숨김
-    // { label: "팀 · 권한", icon: Shield, path: "/team" }, // 파일럿 기간 숨김
-  ];
+  // 메뉴 목록·제목 맵의 단일 소스는 lib/admin/nav.ts — 화면 추가는 그 파일 한 줄이다.
 
   const badgeFor = (path: string): { count: number; tone: "error" | "success" } | null => {
     if (path === "/live" && interventions > 0) return { count: interventions, tone: "error" };
@@ -219,7 +173,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="모바일 주요 메뉴"
-      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-xl glass-dark backdrop-blur-xl backdrop-saturate-150 p-2 shadow-[var(--shadow-glass-dark)] lg:hidden"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-2xl glass-dark backdrop-blur-xl backdrop-saturate-150 p-2 shadow-[var(--shadow-glass-dark)] lg:hidden"
     >
       {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
         const active = pathname === path;
@@ -300,7 +254,7 @@ function DockItem({
       {!expanded && (
         <span
           role="tooltip"
-          className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-[var(--shadow-md)] transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+          className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-[var(--shadow-md)] transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
         >
           {item.label}
         </span>

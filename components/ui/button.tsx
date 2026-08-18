@@ -44,8 +44,8 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground hover:bg-error-strong shadow-[var(--shadow-xs)] focus-visible:ring-destructive",
       },
       size: {
-        sm: "min-h-11 px-3.5 text-xs rounded-xl",
-        default: "min-h-11 px-4 py-2 text-sm rounded-xl",
+        sm: "min-h-11 px-3.5 text-xs rounded-2xl",
+        default: "min-h-11 px-4 py-2 text-sm rounded-2xl",
         lg: "min-h-12 px-6 text-base rounded-2xl",
         icon: "h-11 w-11 rounded-full",
         /**

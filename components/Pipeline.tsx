@@ -1650,13 +1650,13 @@ export function Pipeline() {
                 "누구를 볼지" 고르는 도구가 두 층에 흩어져 있었다. */}
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-card border border-border-strong rounded-xl text-[13px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} type="text" aria-label="이름·연락처·근무지·지역 검색" placeholder="이름, 연락처, 근무지, 지역 검색" className="pl-9 pr-4 py-2 min-h-[38px] w-full max-w-[280px] sm:w-[280px] bg-card border border-border-strong rounded-2xl text-[13px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm" />
             </div>
             {view === "list" && (
               <select
                 value={distanceJobId === null ? "" : String(distanceJobId)}
                 onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
-                className={`pr-8 px-3 py-2 bg-card border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-card border rounded-2xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title="거리 기준 공고 — 상차지 또는 마지막경유지 좌표가 있는 활성 공고만 선택할 수 있어요"
               >
                 <option value="">거리 기준 공고 선택…</option>
@@ -1679,7 +1679,7 @@ export function Pipeline() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-                className={`pr-8 px-3 py-2 bg-card border rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
+                className={`pr-8 px-3 py-2 bg-card border rounded-2xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm cursor-pointer ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
                 title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 왼쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
               >
                 <option value="recent">최근 등록순</option>
@@ -1700,7 +1700,7 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${statusFilter.size > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="채용 진행 단계로 목록 좁히기"
                 >
                   진행 단계
@@ -1708,7 +1708,7 @@ export function Pipeline() {
                   <ChevronDown size={14} className="text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[200px] rounded-xl border-border-strong">
+              <DropdownMenuContent align="start" className="w-[200px] rounded-2xl border-border-strong">
                 <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">여러 개 고를 수 있어요</DropdownMenuLabel>
                 {[...STATUS_TOKENS, ...(showExcluded ? EXCLUDED_STATUS_TOKENS : [])].map((s) => (
                   <DropdownMenuCheckboxItem
@@ -1755,7 +1755,7 @@ export function Pipeline() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sendPrepCount > 0 ? "bg-yellow-50 border-warning text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
                   title="다시 연락할 대상을 좁히는 조건 — 이미 일하는 분·최근에 연락한 분을 빼고 보냅니다"
                 >
                   발송 준비
@@ -1763,7 +1763,7 @@ export function Pipeline() {
                   <ChevronDown size={14} className="text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[290px] rounded-xl border-border-strong">
+              <DropdownMenuContent align="start" className="w-[290px] rounded-2xl border-border-strong">
                 <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">문자 보내기 전에 대상을 좁혀요</DropdownMenuLabel>
                 <DropdownMenuCheckboxItem checked={excludeActive} onSelect={(e) => e.preventDefault()}
                     onCheckedChange={() => setExcludeActive((v) => !v)} title="옹매니징 계약·정산 또는 옹고잉 실배차가 있는 분을 뺍니다. 연동이 안 되어 있으면 아무 것도 빼지 않아요." className="text-[13px] font-semibold text-gray-700">
@@ -1793,7 +1793,7 @@ export function Pipeline() {
             {/* 조건 더보기 — 실제로 자주 쓰이지 않는 조건(지원 채널·희망 근무·가용성·반응·수신거부)은 여기 안으로 */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[13px] font-bold border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${showFilters || moreFilterCount > 0 ? "bg-yellow-50 border-brand-yellow text-warning-strong" : "bg-white border-border-strong text-gray-700 hover:bg-background"}`}
               aria-expanded={showFilters}
             >
               <Filter size={15} /> 조건 더보기
@@ -1936,7 +1936,7 @@ export function Pipeline() {
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
                       placeholder="지금 조건을 이름 붙여 저장 (예: 강남·자차·즉시가능)"
-                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
+                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
                     />
                     <Button variant="brand" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg shadow-none" onClick={saveCurrentSegment} disabled={!segNameDraft.trim()}>지금 조건 저장</Button>
                   </div>
@@ -2037,7 +2037,7 @@ export function Pipeline() {
                     min={1}
                     value={topN}
                     onChange={(e) => setTopN(Number(e.target.value))}
-                    className="w-[64px] px-2 py-1.5 bg-card border border-border-strong rounded-xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm"
+                    className="w-[64px] px-2 py-1.5 bg-card border border-border-strong rounded-2xl text-[13px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring shadow-sm"
                     title="선택할 상위 인원 수"
                   />
                   <Button variant="secondary" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg" onClick={selectTopN}><Check size={15} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명 선택</Button>
@@ -2291,7 +2291,7 @@ export function Pipeline() {
                           <button
                             type="button"
                             onClick={() => setVisibleCount((v) => v + ROWS_PER_CHUNK)}
-                            className="min-h-11 rounded-xl border border-border-strong bg-white px-4 text-[13px] font-bold text-gray-700 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                            className="min-h-11 rounded-2xl border border-border-strong bg-white px-4 text-[13px] font-bold text-gray-700 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                           >
                             {hiddenCount}명 더 보기
                           </button>
@@ -2339,7 +2339,7 @@ export function Pipeline() {
                   key={j.id}
                   onClick={() => addSelectedToJob(j.id)}
                   disabled={addingJobId !== null}
-                  className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-center justify-between gap-3 p-3.5 rounded-xl border border-border-strong hover:border-brand-yellow hover:bg-yellow-50 disabled:opacity-50 transition-all"
+                  className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-center justify-between gap-3 p-3.5 rounded-2xl border border-border-strong hover:border-brand-yellow hover:bg-yellow-50 disabled:opacity-50 transition-all"
                 >
                   <div className="min-w-0">
                     <div className="text-[14px] font-bold text-foreground truncate">{j.title}</div>
@@ -2419,7 +2419,7 @@ export function Pipeline() {
                   <button
                     key={j.id}
                     onClick={() => setExposureJobIds((prev) => { const next = new Set(prev); if (next.has(j.id)) next.delete(j.id); else next.add(j.id); return next; })}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-start gap-3 p-3.5 rounded-xl border transition-all ${on ? "border-foreground ring-1 ring-foreground bg-background" : "border-border-strong hover:border-gray-300"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-start gap-3 p-3.5 rounded-2xl border transition-all ${on ? "border-foreground ring-1 ring-foreground bg-background" : "border-border-strong hover:border-gray-300"}`}
                   >
                     <span className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${on ? "bg-foreground border-foreground" : "border-gray-300"}`}>
                       {on && <Check size={12} className="text-white" />}
@@ -2514,7 +2514,7 @@ export function Pipeline() {
                 노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.
                 <br />명단 확인·개별 제외는 공고 수정 → &lsquo;노출 대상 명단&rsquo;에서 할 수 있어요.
               </span>
-              <Button variant="primary" size="chip" className="px-4 py-2 text-[13px] rounded-xl" onClick={assignExposure} isLoading={exposureSaving} disabled={
+              <Button variant="primary" size="chip" className="px-4 py-2 text-[13px] rounded-2xl" onClick={assignExposure} isLoading={exposureSaving} disabled={
                       exposureJobIds.size === 0 ||
                       // 규칙 2택을 고르지 않으면 진행 불가 — 기본값으로 조용히 정하지 않는다.
                       (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) ||
@@ -2573,7 +2573,7 @@ export function Pipeline() {
                 // 상세 확정 모달로만 한다(일괄 원클릭 오확정·통계 오염 방지).
                 { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
-                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-border-strong rounded-xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-border-strong rounded-2xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <div className="text-[14px] font-bold text-foreground mb-1">{stage.label}</div>
                   <div className="text-[12px] text-muted-foreground">{stage.desc}</div>
                 </button>
@@ -2599,43 +2599,43 @@ export function Pipeline() {
             <div className="p-6 space-y-5">
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
               {modalExcludedCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-warning/35 text-[13px] font-bold text-warning-strong">
+                <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-warning/35 text-[13px] font-bold text-warning-strong">
                   선택 {selectedRows.size}명 중 {modalExcludedCount}명은 지금 조건에서 벗어났거나 연락처가 없어 제외됩니다.
                 </div>
               )}
               {selectedOptOutCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[13px] font-bold text-error-strong">
+                <div className="px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-bold text-error-strong">
                   수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
                 </div>
               )}
               {/* 확정인력 포함 — 막지 않는다. 운행이 멈춰 대기 중인 확정자에게 다른 라인을 안내하는 건 정당한 발송이다.
                   다만 '지금 근무 중인 분에게 다른 일 권유'가 되는 경우도 있어 수를 밝혀 의식적으로 고르게 한다. */}
               {selectedConfirmedCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[13px] font-bold text-warning-strong">
+                <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-yellow-300 text-[13px] font-bold text-warning-strong">
                   이미 확정된 분 {selectedConfirmedCount}명이 포함돼 있어요 — 운행이 멈춰 대기 중인 분이라면 보내도 되고, 지금 근무 중인 분이면 진행 단계 조건에서 <b>확정인력</b>을 빼고 보내세요.
                 </div>
               )}
 
               {/* 템플릿↔대상 경고 — B안(최근 6개월용)에 원지원 6개월 초과자가 섞임(발송은 막지 않음, 인지용) */}
               {bCohortMismatchCount > 0 && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[13px] font-bold text-warning-strong">
+                <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-yellow-300 text-[13px] font-bold text-warning-strong">
                   ⚠️ B안은 최근 6개월 안에 지원한 분들에게 맞는 문구예요 — 현재 대상 중 {bCohortMismatchCount}명이 6개월 초과(원지원일 미상 포함)예요. A안 사용을 검토하세요.
                 </div>
               )}
 
               {/* 옹매니징 현재 활동 중 대조 */}
               {activeCheckLoading && (
-                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-background border border-border-strong text-[13px] font-bold text-muted-foreground">
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-background border border-border-strong text-[13px] font-bold text-muted-foreground">
                   <Loader2 size={14} className="animate-spin" /> 현재 활동 중인 인원을 확인하고 있어요...
                 </div>
               )}
               {!activeCheckLoading && activeCheck && !activeCheck.configured && (
-                <div className="px-4 py-2.5 rounded-xl bg-muted border border-border-strong text-[13px] font-bold text-muted-foreground">
+                <div className="px-4 py-2.5 rounded-2xl bg-muted border border-border-strong text-[13px] font-bold text-muted-foreground">
                   미연동 — 활동 여부 확인 불가
                 </div>
               )}
               {!activeCheckLoading && activeCheck && activeCheck.configured && activeCheck.active.length > 0 && (
-                <div className="rounded-xl bg-yellow-50 border border-yellow-300 p-4 space-y-3">
+                <div className="rounded-2xl bg-yellow-50 border border-yellow-300 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="text-[13px] font-extrabold text-warning-strong">
                       현재 활동 중인 인원 {activeCheck.active.length}명이 포함되어 있어요
@@ -2676,7 +2676,7 @@ export function Pipeline() {
                 const truncated = selectedRows.size > 500 ? selectedRows.size - 500 : 0;
                 if (unchecked === 0 && truncated === 0) return null;
                 return (
-                  <div className="px-4 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[12px] font-semibold text-error-strong leading-relaxed space-y-1">
+                  <div className="px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[12px] font-semibold text-error-strong leading-relaxed space-y-1">
                     {unchecked > 0 && (
                       <div>· 활동 미확인 {unchecked}명 — TMS 동기화 전이라 아직 대조되지 않았어요. 실제 활동 중일 수 있으니 발송 전 확인하세요.</div>
                     )}
@@ -2689,7 +2689,7 @@ export function Pipeline() {
               {/* 야간 안내 — 이 화면 벌크 발송에만 야간 게이트가 없었다(공고탭 안내·cron은 KST 21~08 차단).
                   막지는 않는다(긴급 결원 대응). 작성 중에 보이게 여기, 마지막 확인 모달에 한 번 더. */}
               {isNightKstNow() && (
-                <div className="px-4 py-2.5 rounded-xl bg-yellow-50 border border-yellow-300 text-[12px] font-semibold text-warning-strong leading-relaxed">
+                <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-yellow-300 text-[12px] font-semibold text-warning-strong leading-relaxed">
                   지금은 심야(21~08시)예요. 시니어 대상 심야 문자는 민원이 되기 쉬워요 — 급하지 않으면 아침 9시 이후 발송을 권합니다.
                 </div>
               )}
@@ -2697,7 +2697,7 @@ export function Pipeline() {
                 <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 템플릿</label>
                 <select
                   onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
-                  className="pr-8 w-full border border-border-strong rounded-xl px-4 py-3 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
+                  className="pr-8 w-full border border-border-strong rounded-2xl px-4 py-3 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
                 >
                   <option value="">직접 입력하기</option>
                   <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
@@ -2712,7 +2712,7 @@ export function Pipeline() {
                 <textarea
                   value={bulkMsgBody}
                   onChange={(e) => setBulkMsgBody(e.target.value)}
-                  className="w-full h-[150px] border border-border-strong rounded-xl p-4 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed text-gray-800 bg-background"
+                  className="w-full h-[150px] border border-border-strong rounded-2xl p-4 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed text-gray-800 bg-background"
                 />
                 <p className="mt-1.5 text-[12px] text-muted-foreground">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
@@ -2734,7 +2734,7 @@ export function Pipeline() {
                 <Button variant="secondary" size="lg" onClick={() => setBulkMsgModalOpen(false)}>취소</Button>
                 {/* **발송 실패 명단** — 창을 닫기 전까지 남는다. 사유가 사람마다 다르므로 그대로 보여준다. */}
                 {bulkFailures.length > 0 && (
-                  <div className="w-full mb-3 rounded-xl border border-error/30 bg-error-soft p-3">
+                  <div className="w-full mb-3 rounded-2xl border border-error/30 bg-error-soft p-3">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className="text-[13px] font-bold text-error-strong">
                         못 보낸 {bulkFailures.length}명 — 사유를 확인하고 필요하면 다시 보내세요
@@ -2890,7 +2890,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                         key={m.applicant_id}
                         onClick={() => onCardClick(m.applicant_id)}
                         title="클릭하면 지원자 상세를 엽니다"
-                        className={`w-full text-left bg-card border border-border-strong rounded-xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${m.opted_out ? "opacity-60 grayscale" : ""}`}
+                        className={`w-full text-left bg-card border border-border-strong rounded-2xl p-3.5 shadow-sm hover:border-brand-yellow hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${m.opted_out ? "opacity-60 grayscale" : ""}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -2921,7 +2921,7 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
                     );
                   })}
                   {cards.length === 0 && (
-                    <div className="h-[100px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-[13px] font-bold text-muted-foreground">
+                    <div className="h-[100px] bg-white/40 border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center text-[13px] font-bold text-muted-foreground">
                       해당 단계 인원 없음
                     </div>
                   )}
@@ -2990,7 +2990,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-7 z-30 w-[200px] bg-white border border-border-strong rounded-xl shadow-lg py-1.5">
+              <div className="absolute right-0 top-7 z-30 w-[200px] bg-white border border-border-strong rounded-2xl shadow-lg py-1.5">
                 <button
                   onClick={() => { setMenuOpen(false); onExport(column); }}
                   className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-2.5 px-3.5 py-2 text-[13px] font-bold text-gray-700 hover:bg-background text-left"
@@ -3015,7 +3015,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
           <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card.id)} cardIndex={idx} />
         ))}
         {column.cards.length === 0 && (
-          <div className="h-[120px] bg-white/40 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-muted-foreground gap-2">
+          <div className="h-[120px] bg-white/40 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center text-muted-foreground gap-2">
             <div className="text-[13px] font-bold text-muted-foreground">대기 중인 지원자 없음</div>
           </div>
         )}
@@ -3040,7 +3040,7 @@ function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
   }));
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-card border border-border-strong rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-card border border-border-strong rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-foreground">{card.name} <span className="text-[12px] text-muted-foreground font-medium ml-1">{card.age}세</span></div>
         <div className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>

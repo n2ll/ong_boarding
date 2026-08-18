@@ -30,7 +30,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
       </p>
       <button
         onClick={reset}
-        className="min-h-11 rounded-xl bg-foreground px-5 text-[14px] font-bold text-white outline-none transition-colors hover:bg-gray-800 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="min-h-11 rounded-2xl bg-foreground px-5 text-[14px] font-bold text-white outline-none transition-colors hover:bg-gray-800 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         다시 시도
       </button>

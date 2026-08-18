@@ -246,7 +246,7 @@ export function ReplyQueueCard({
             return (
               <div
                 key={it.id}
-                className={`flex items-center gap-3 p-3 border rounded-xl ${untouched ? "border-error/30 bg-error-soft" : "border-border-strong bg-white"}`}
+                className={`flex items-center gap-3 p-3 border rounded-2xl ${untouched ? "border-error/30 bg-error-soft" : "border-border-strong bg-white"}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">

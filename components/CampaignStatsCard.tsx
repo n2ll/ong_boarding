@@ -126,7 +126,7 @@ export function CampaignStatsCard() {
               <button
                 onClick={() => (s.anchor ? scrollToAnchor(s.anchor) : router.push("/pipeline?view=funnel"))}
                 title={s.anchor ? `${s.label === "답장" ? "내가 답할 차례" : s.label} 처리 큐로 이동` : "캠페인 단계별 현황(사람 명단)으로 이동"}
-                className="flex-1 text-left rounded-xl border border-border-strong bg-background px-4 py-3 hover:border-info/60 hover:bg-info-soft transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex-1 text-left rounded-2xl border border-border-strong bg-background px-4 py-3 hover:border-info/60 hover:bg-info-soft transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {inner}
               </button>

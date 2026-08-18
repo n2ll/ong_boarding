@@ -14,7 +14,7 @@ interface DemoBannerProps {
 export function DemoBanner({ variant = "demo", note }: DemoBannerProps) {
   const isSoon = variant === "soon";
   return (
-    <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-300 rounded-xl px-4 py-3 mb-6">
+    <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-300 rounded-2xl px-4 py-3 mb-6">
       <div className="w-7 h-7 rounded-lg bg-yellow-100 flex items-center justify-center shrink-0 mt-0.5">
         <FlaskConical size={15} className="text-warning-strong" />
       </div>

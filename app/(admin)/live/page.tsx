@@ -14,7 +14,7 @@ export default function Page() {
           <div className="w-[320px] shrink-0 border-r border-border-strong bg-white p-3">
             <div className="h-9 rounded-lg bg-muted mb-3" />
             <div className="h-8 rounded-lg bg-muted mb-2" />
-            {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-16 rounded-xl bg-background mb-2" />)}
+            {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-16 rounded-2xl bg-background mb-2" />)}
           </div>
           {/* 우측 340px 상세 레일은 대화를 고른 뒤에만 렌더된다 — fallback에서 미리 그리면
               하이드레이션 직후 사라지며 오히려 폭 점프가 생긴다. 좌측 목록 + 중앙만 흉내 낸다. */}

@@ -368,7 +368,7 @@ export default function PoolPage() {
                     <button
                       onClick={() => expressNotify(job)}
                       disabled={sendingId !== null}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-3 w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-gray-300 text-gray-700 hover:bg-muted active:bg-muted"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-3 w-full py-3 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-gray-300 text-gray-700 hover:bg-muted active:bg-muted"
                     >
                       {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
                     </button>
@@ -504,7 +504,7 @@ export default function PoolPage() {
                       setConfirmingId(job.id);
                     }}
                     disabled={done || sendingId !== null}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-5 w-full py-5 rounded-xl text-[18px] font-extrabold transition-colors ${
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-5 w-full py-5 rounded-2xl text-[18px] font-extrabold transition-colors ${
                       done
                         ? "bg-success-soft text-success-strong border border-success-soft"
                         : sendingId !== null
@@ -526,7 +526,7 @@ export default function PoolPage() {
                   </button>
                 ) : (
                   // 두 번째 단계 — 어느 공고인지 다시 보여주고 확인받는다. 잘못 눌렀으면 여기서 되돌린다.
-                  <div className="mt-5 rounded-xl border-2 border-brand-yellow bg-yellow-50 p-3">
+                  <div className="mt-5 rounded-2xl border-2 border-brand-yellow bg-yellow-50 p-3">
                     <p className="text-[16px] font-bold text-foreground text-center leading-snug">
                       <span className="text-warning-strong">{job.title}</span>
                       <br />이 일자리에 관심 있다고 보낼까요?
@@ -540,14 +540,14 @@ export default function PoolPage() {
                       <button
                         onClick={() => setConfirmingId(null)}
                         disabled={sendingId !== null}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-xl text-[16px] font-extrabold bg-white text-gray-700 border border-gray-300"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-2xl text-[16px] font-extrabold bg-white text-gray-700 border border-gray-300"
                       >
                         아니요
                       </button>
                       <button
                         onClick={() => expressInterest(job)}
                         disabled={sendingId !== null}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-xl text-[16px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-2xl text-[16px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
                       >
                         {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
                       </button>
@@ -556,7 +556,7 @@ export default function PoolPage() {
                 )}
 
                 {done && (followupIds.has(job.id) || (job.status !== "talking" && job.status !== "paused")) && (
-                  <div className="mt-3 rounded-xl bg-yellow-50 border border-yellow-200 p-3">
+                  <div className="mt-3 rounded-2xl bg-yellow-50 border border-yellow-200 p-3">
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
                     {immediateIds.has(job.id) || availability === "즉시가능" ? (
@@ -571,7 +571,7 @@ export default function PoolPage() {
                         <button
                           onClick={() => expressImmediate(job)}
                           disabled={sendingId !== null}
-                          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-3 rounded-xl text-[16px] font-extrabold bg-white border-2 border-brand-yellow text-foreground hover:bg-yellow-50 active:bg-yellow-50"
+                          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-3 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-brand-yellow text-foreground hover:bg-yellow-50 active:bg-yellow-50"
                         >
                           {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}
                         </button>

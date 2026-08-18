@@ -63,7 +63,7 @@ function digits(raw: string, max: number): string {
 
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-border-strong rounded-xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-white";
+  "w-full px-4 py-3.5 border border-border-strong rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-white";
 const requiredMark = <span className="text-error ml-0.5">*</span>;
 
 interface JobContext {
@@ -226,7 +226,7 @@ function ApplyForm() {
         )}
 
         {error && (
-          <div className="mb-6 flex items-start gap-2 bg-error-soft border border-error/30 text-error-strong rounded-xl px-4 py-3 text-[14px] font-bold">
+          <div className="mb-6 flex items-start gap-2 bg-error-soft border border-error/30 text-error-strong rounded-2xl px-4 py-3 text-[14px] font-bold">
             <AlertCircle size={18} className="shrink-0 mt-0.5" /> {error}
           </div>
         )}
@@ -265,7 +265,7 @@ function ApplyForm() {
                   key={opt}
                   type="button"
                   onClick={() => set("ownVehicle", opt)}
-                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -331,7 +331,7 @@ function ApplyForm() {
                     key={slot.value}
                     type="button"
                     onClick={() => toggleWorkHour(slot.value)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white hover:border-gray-300"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white hover:border-gray-300"}`}
                   >
                     <div>
                       <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
@@ -361,7 +361,7 @@ function ApplyForm() {
                   key={opt}
                   type="button"
                   onClick={() => set("selfOwnership", opt)}
-                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -391,7 +391,7 @@ function ApplyForm() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-sm"
+          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-sm"
         >
           {submitting ? <Loader2 size={20} className="animate-spin" /> : null}
           {submitting ? "제출 중…" : "지원서 제출하기"}

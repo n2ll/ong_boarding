@@ -14,7 +14,7 @@ import { cn } from "./utils";
  * 이미 그리고 있다면 label을 생략하고 `aria-label`을 직접 넘긴다.
  */
 const inputVariants = cva(
-  "flex w-full rounded-xl border font-medium outline-none transition-[background-color,border-color,box-shadow] duration-200 placeholder:text-muted-foreground/75 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive",
+  "flex w-full rounded-2xl border font-medium outline-none transition-[background-color,border-color,box-shadow] duration-200 placeholder:text-muted-foreground/75 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive",
   {
     variants: {
       variant: {

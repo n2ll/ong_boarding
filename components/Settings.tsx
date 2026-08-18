@@ -9,6 +9,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
+import { PageShell } from "./ui/page-shell";
 
 interface Integration {
   key: string;
@@ -47,7 +48,7 @@ function SettingsTab({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`flex items-center gap-3 min-h-11 px-4 py-3 rounded-xl text-sm font-bold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+      className={`flex items-center gap-3 min-h-11 px-4 py-3 rounded-2xl text-sm font-bold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         active
           ? "bg-white border-2 border-foreground text-foreground shadow-sm"
           : "border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong"
@@ -117,11 +118,11 @@ export function Settings() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
+    <PageShell>
       {/* 페이지 전체에 '준비중' 배너·배지를 달면, 실제로 동작하는 화주사·지점·팀·외부연동까지
           미완성으로 오해된다(채용·확정 전 반드시 세팅해야 하는 것들이 여기 있다).
           준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}
-      <div className="mb-8">
+      <div>
         <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">설정</h1>
         <p className="text-[14px] text-muted-foreground">지점·팀과 외부 연동을 관리합니다. 화주사는 ‘화주사’ 화면에서 관리해요. (프로필·알림·보안은 준비 중)</p>
       </div>
@@ -185,7 +186,7 @@ export function Settings() {
                 아직 저장되지 않는 화면이에요(계정 알림 설정 준비 중). 지금 운영 알림은 Slack으로 받고 있어요.
               </p>
               <div className="space-y-6 max-w-2xl opacity-60">
-                <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
+                <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
                   <div>
                     <div className="text-[14px] font-bold text-foreground mb-1">AI 응대 실패 (Human Takeover) 알림</div>
                     <div className="text-[13px] text-muted-foreground">AI가 답변하지 못하거나 지원자가 매니저 연결을 요청할 때 즉시 알림을 받습니다.</div>
@@ -195,7 +196,7 @@ export function Settings() {
                     <div className="w-11 h-6 bg-switch-background peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
                   </label>
                 </div>
-                <div className="flex items-center justify-between p-4 border border-border-strong rounded-xl">
+                <div className="flex items-center justify-between p-4 border border-border-strong rounded-2xl">
                   <div>
                     <div className="text-[14px] font-bold text-foreground mb-1">신규 지원자 발생 알림</div>
                     <div className="text-[13px] text-muted-foreground">새로운 지원서가 접수되었을 때 데일리 리포트 형태로 알림을 받습니다.</div>
@@ -228,7 +229,7 @@ export function Settings() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-foreground mb-1 border-b border-border-strong pb-4">기능 스위치</h2>
               <p className="text-[13px] text-muted-foreground mt-4 mb-6">위험할 수 있는 기능을 매니저가 직접 켜고 끕니다.</p>
-              <div className="rounded-xl border border-border-strong bg-card p-5 max-w-2xl">
+              <div className="rounded-2xl border border-border-strong bg-card p-5 max-w-2xl">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-[14px] font-bold text-foreground mb-1">다시 부르기 (외부 인력)</div>
@@ -285,7 +286,7 @@ export function Settings() {
                   {integrations.map((it) => {
                     const meta = INTEGRATION_META[it.key] ?? { name: it.key, desc: "", badge: "?", badgeColor: "bg-muted text-gray-700" };
                     return (
-                      <div key={it.key} className="p-5 border border-border-strong rounded-xl flex items-start justify-between gap-3">
+                      <div key={it.key} className="p-5 border border-border-strong rounded-2xl flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold shrink-0 ${meta.badgeColor}`}>{meta.badge}</div>
                           <div className="min-w-0">
@@ -324,6 +325,6 @@ export function Settings() {
         </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

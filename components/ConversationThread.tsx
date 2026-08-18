@@ -607,12 +607,12 @@ export function ConversationThread({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
+            <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
               <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
               <Switch checked={isAiEnabled} onCheckedChange={handleToggleAi} disabled={!hasActiveFlow} className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error" />
             </div>
             {isAiEnabled && (
-              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
+              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
             )}
           </div>
         </div>
@@ -698,7 +698,7 @@ export function ConversationThread({
               onChange={(e) => setDraftText(e.target.value)}
               placeholder={pendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
               rows={3}
-              className="w-full bg-input-background border border-border-strong rounded-xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
+              className="w-full bg-input-background border border-border-strong rounded-2xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
             />
             {draftReasoningDisplay && (
               <div className="mt-2 text-[12px] text-muted-foreground leading-relaxed">
@@ -706,8 +706,8 @@ export function ConversationThread({
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
-              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-white border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
-              <button onClick={handleSendDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-5 py-2 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-white border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
+              <button onClick={handleSendDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-5 py-2 rounded-2xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} 검수 후 발송
               </button>
             </div>
@@ -765,7 +765,7 @@ export function ConversationThread({
           </div>
           </>
         ) : (
-          <div className="flex items-center justify-between bg-background border border-border-strong rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between bg-background border border-border-strong rounded-2xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-info-soft flex items-center justify-center border border-info/25"><Bot size={20} className="text-info" /></div>
               <div>

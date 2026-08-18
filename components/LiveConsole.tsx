@@ -755,7 +755,7 @@ export function LiveConsole() {
           )}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
           </div>
           {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
           <div className="flex gap-1.5 flex-wrap">
@@ -812,7 +812,7 @@ export function LiveConsole() {
               return (
                 <div
                   key={head.applicant_id}
-                  className={`rounded-xl transition-all ${groupSelected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}
+                  className={`rounded-2xl transition-all ${groupSelected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}
                 >
                   {/* 이름 줄도 눌러서 연다 — 카드에서 가장 크고 굵은 요소가 죽어 있으면
                       "안 열리는구나"라고 학습하고 떠난다(제목 클릭은 카드 UI의 기본 관습).
@@ -896,7 +896,7 @@ export function LiveConsole() {
             {confirmPending.map((p) => {
               const selected = selectedChatId === p.applicant_id;
               return (
-                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
+                <div key={p.applicant_id} className={`rounded-2xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
                   <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="px-2 py-0.5 rounded-full text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
@@ -928,7 +928,7 @@ export function LiveConsole() {
           {loadingList && (
             <>
               {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="p-3.5 rounded-xl border border-muted bg-card animate-pulse">
+                <div key={i} className="p-3.5 rounded-2xl border border-muted bg-card animate-pulse">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-8 h-8 rounded-lg bg-muted" />
                     <div className="h-3.5 w-24 rounded bg-muted" />
@@ -961,7 +961,7 @@ export function LiveConsole() {
               <button
                 key={chat.id}
                 onClick={() => setSelectedChatId(chat.id)}
-                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 rounded-xl transition-all ${selectedChatId === chat.id ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
+                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 rounded-2xl transition-all ${selectedChatId === chat.id ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
@@ -1081,15 +1081,15 @@ export function LiveConsole() {
           <div className="w-full max-w-md text-center">
             <div className="text-sm font-bold text-muted-foreground mb-4">지금 응대 현황</div>
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
+              <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">지금 답할 차례</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{unansweredCount}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">건</span></div>
               </div>
-              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
+              <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">사람 확인 필요</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{handoffGroups.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
               </div>
-              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
+              <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">확정 대기</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{confirmPending.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
               </div>
@@ -1105,7 +1105,7 @@ export function LiveConsole() {
               return (
                 <button
                   onClick={() => setSelectedChatId(oldest.id)}
-                  className="w-full rounded-xl border border-border-strong bg-white px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-border-strong bg-white px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className="text-[12px] font-bold text-muted-foreground">가장 오래 기다린 대화 열기</div>
                   <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -1168,7 +1168,7 @@ export function LiveConsole() {
                   role="radio"
                   aria-checked={resolveOutcome === o.id}
                   onClick={() => setResolveOutcome(o.id)}
-                  className={`min-h-10 rounded-xl border px-2 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                  className={`min-h-10 rounded-2xl border px-2 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
                     resolveOutcome === o.id
                       ? "border-foreground bg-foreground text-white"
                       : "border-border-strong bg-white text-gray-700 hover:border-foreground/30"
@@ -1213,7 +1213,7 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
@@ -1247,7 +1247,7 @@ export function LiveConsole() {
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <div>
@@ -1258,7 +1258,7 @@ export function LiveConsole() {
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
                 />
               </div>
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>

@@ -146,7 +146,7 @@ export function Automation() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {kpis.map((k, i) => (
-            <div key={i} className="border border-border-strong rounded-xl px-3.5 py-2.5 bg-surface-raised">
+            <div key={i} className="border border-border-strong rounded-2xl px-3.5 py-2.5 bg-surface-raised">
               <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground mb-1">
                 <k.icon size={13} className={k.tone} /> {k.label}
               </div>
@@ -180,7 +180,7 @@ export function Automation() {
             const cfg = ruleConfig[rule.id] ?? { enabled: false };
             const result = ruleResults[rule.id];
             return (
-              <div key={rule.id} className={`border rounded-xl px-3.5 py-2.5 ${cfg.enabled ? "border-border-strong bg-surface-raised" : "border-muted bg-background opacity-70"}`}>
+              <div key={rule.id} className={`border rounded-2xl px-3.5 py-2.5 ${cfg.enabled ? "border-border-strong bg-surface-raised" : "border-muted bg-background opacity-70"}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-bold text-foreground truncate">{rule.label}</div>
@@ -205,7 +205,7 @@ export function Automation() {
                         onChange={(e) => setThreshold(rule.id, Number(e.target.value))}
                         onBlur={() => persistConfig(ruleConfig)}
                         disabled={!cfg.enabled}
-                        className="w-14 border border-border-strong rounded-xl px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
+                        className="w-14 border border-border-strong rounded-2xl px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
                       />
                       {rule.unit}
                     </label>

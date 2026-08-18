@@ -14,6 +14,7 @@ import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
 import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
+import { PageShell } from "@/components/ui/page-shell";
 
 interface JobRow {
   id: string;
@@ -164,7 +165,7 @@ function SlotKeysField({
         value={detail}
         onChange={(e) => onDetailChange(e.target.value)}
         placeholder="상세 시간(선택) — 예: 월~금 07:00~12:00"
-        className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 mt-2 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+        className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 mt-2 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
       />
       <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
         상세 시간은 지원자 카드에 그대로 보이고 AI 안내에 쓰여요. <b className="text-muted-foreground">맞는 분 찾기는 위 칩</b>으로만 합니다 —
@@ -453,7 +454,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
     <div>
       <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 방식</label>
       {!open ? (
-        <div className="flex items-center gap-2 px-4 py-3 border border-border-strong rounded-xl bg-background">
+        <div className="flex items-center gap-2 px-4 py-3 border border-border-strong rounded-2xl bg-background">
           <span className="text-[13px] font-bold text-foreground shrink-0">{RECRUIT_MODE_META[value].label}</span>
           <span className="text-[12px] text-muted-foreground truncate" title={`${RECRUIT_MODE_META[value].desc} · ${RECRUIT_MODE_META[value].aiNote}`}>{RECRUIT_MODE_META[value].desc}</span>
           <button
@@ -476,7 +477,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
                 role="radio"
                 aria-checked={sel}
                 onClick={() => onChange(m)}
-                className={`text-left p-3 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
+                className={`text-left p-3 rounded-2xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
               >
                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{RECRUIT_MODE_META[m].label}</div>
                 <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
@@ -1804,9 +1805,9 @@ export function Jobs() {
   };
 
   return (
-    <div className="p-8 pb-12">
+    <PageShell>
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         {[
           { label: "전체 공고", value: jobs.length, unit: "건" },
           { label: "진행 중인 공고", value: jobs.filter(j => !j.effectivelyClosed).length, unit: "건", highlight: true },
@@ -1858,7 +1859,7 @@ export function Jobs() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-xl px-2 py-1">
+            <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-2xl px-2 py-1">
               <Filter size={15} className="text-muted-foreground ml-1" />
               <select
                 value={clientFilter}
@@ -1894,7 +1895,7 @@ export function Jobs() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="공고명, 지점 검색"
                 aria-label="공고명·지점 검색"
-                className="pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm w-[220px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm w-[220px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
             <Button
@@ -2075,7 +2076,7 @@ export function Jobs() {
                           <Copy size={14} /> 게시 링크
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-[170px] rounded-xl border-border-strong">
+                      <DropdownMenuContent align="end" className="w-[170px] rounded-2xl border-border-strong">
                         <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">게시 채널 선택</DropdownMenuLabel>
                         {PUBLISH_CHANNELS.map((ch) => (
                           <DropdownMenuItem key={ch.source} onSelect={() => copyJobLink(job, ch.source)} className="text-[13px] font-semibold text-gray-700">
@@ -2122,7 +2123,7 @@ export function Jobs() {
                     </DropdownMenuTrigger>
                     {/* 항목 실행을 다음 틱으로 미룬다 — 메뉴가 닫히며 트리거로 포커스를 되돌리는 사이에
                         확인 모달(Radix AlertDialog)이 열리면 포커스를 서로 빼앗는다. */}
-                    <DropdownMenuContent align="end" className="w-[230px] rounded-xl border-border-strong">
+                    <DropdownMenuContent align="end" className="w-[230px] rounded-2xl border-border-strong">
                       {/* 대기자에게 안내 — 진행 중 + 맞춤 공고 링크에 뜨는 공고(우리 인력에게·둘 다)만. '새로 모집'은
                           맞춤 공고 링크에 안 떠서 안내 문자의 링크가 죽은 링크가 되므로 항목 자체를 숨긴다(게시 링크 규칙과 대칭). */}
                       {!job.effectivelyClosed && job.recruitMode !== "external" && (
@@ -2196,7 +2197,7 @@ export function Jobs() {
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
                     placeholder="예: 강북권 새벽 냉장배송, 주 5일 새벽 3~9시, 건당 3,500원, 1톤 냉장차 지참"
-                    className="w-full bg-background border border-border-strong rounded-xl px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none"
+                    className="w-full bg-background border border-border-strong rounded-2xl px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none"
                   />
                   <div className="flex justify-end mt-3">
                     {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
@@ -2286,7 +2287,7 @@ export function Jobs() {
                       <textarea
                         value={channelDrafts[activeChannel]}
                         onChange={(e) => setChannelDrafts({ ...channelDrafts, [activeChannel]: e.target.value })}
-                        className="w-full bg-yellow-50 border-0 rounded-xl px-4 py-3.5 text-[14px] text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-ring min-h-[260px] font-medium resize-none whitespace-pre-wrap"
+                        className="w-full bg-yellow-50 border-0 rounded-2xl px-4 py-3.5 text-[14px] text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-ring min-h-[260px] font-medium resize-none whitespace-pre-wrap"
                       />
                       {/* 안내문은 지금 보는 탭 기준으로 말한다 — 예전엔 당근 탭을 보면서 "알바몬 형식이 저장된다"는
                           고정 문구를 읽어야 해서, 보는 것과 저장되는 것이 다르다는 사실이 오히려 가려졌다. */}
@@ -2304,7 +2305,7 @@ export function Jobs() {
               {channelDrafts && (
                 <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5">
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">공고 제목 <span className="text-muted-foreground font-semibold">— 맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span></label>
-                  <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input value={postingTitle} onChange={(e) => setPostingTitle(e.target.value)} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
               )}
 
@@ -2338,7 +2339,7 @@ export function Jobs() {
                           setNewJobBranchId("");
                         }
                       }}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">화주사 선택</option>
                       {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2359,7 +2360,7 @@ export function Jobs() {
                             if (typeof cid === "number") setNewJobClientId(cid);
                           }
                         }}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">지점 선택</option>
                         {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2372,7 +2373,7 @@ export function Jobs() {
                     <select
                       value={newJobSiteManagerId}
                       onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">미지정</option>
                       {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2390,7 +2391,7 @@ export function Jobs() {
                       value={newJobCapacity}
                       placeholder="예: 3"
                       onChange={(e) => setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1))}
-                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
                   <div>
@@ -2398,7 +2399,7 @@ export function Jobs() {
                     <select
                       value={newJobPeriod}
                       onChange={(e) => setNewJobPeriod(e.target.value)}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">기간 미지정</option>
                       <option value="하루">하루(당일 단기)</option>
@@ -2413,7 +2414,7 @@ export function Jobs() {
                       value={newJobClosesAt}
                       min={nowLocalInput()}
                       onChange={(e) => setNewJobClosesAt(e.target.value)}
-                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
                 </div>
@@ -2425,7 +2426,7 @@ export function Jobs() {
                 )}
 
                 {/* 차량 필요 — 맞춤 공고 링크 카드에 표시. 수정 모달과 같은 토글 카드로 통일(예전엔 등록만 체크박스). */}
-                <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
+                <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
                   <div className="text-[13px] font-bold text-foreground">차량(이륜/사륜) 필요</div>
                   <button
                     type="button"
@@ -2440,7 +2441,7 @@ export function Jobs() {
                 </div>
 
                 {/* E18 · 급여 (선택) — 예전엔 단가형태·금액(푸터)과 정산정보(접이식)로 분산. 한 그룹으로 일원화. 채우면 AI가 단가·정산 문의에 직접 답한다. */}
-                <div className="p-4 bg-background border border-border-strong rounded-xl flex flex-col gap-4">
+                <div className="p-4 bg-background border border-border-strong rounded-2xl flex flex-col gap-4">
                   <div className="text-[12px] font-bold text-gray-700">급여 <span className="text-error-strong" aria-hidden>*</span> — 단가 형태 또는 급여·정산 정보 중 하나는 필수 · 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -2448,7 +2449,7 @@ export function Jobs() {
                       <select
                         value={newJobPayType}
                         onChange={(e) => setNewJobPayType(e.target.value)}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">미지정</option>
                         {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -2463,14 +2464,14 @@ export function Jobs() {
                           value={newJobPayAmount}
                           onChange={(e) => setNewJobPayAmount(e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0))}
                           placeholder="예: 3500"
-                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         />
                       </div>
                     )}
                   </div>
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-1.5">급여·정산 정보</label>
-                    <textarea value={newJobPayInfo} onChange={(e) => setNewJobPayInfo(e.target.value)} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                    <textarea value={newJobPayInfo} onChange={(e) => setNewJobPayInfo(e.target.value)} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                   </div>
                 </div>
 
@@ -2511,7 +2512,7 @@ export function Jobs() {
                             value={newJobStartDate}
                             min={todayLocalDate()}
                             onChange={(e) => setNewJobStartDate(e.target.value)}
-                            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           />
                         </div>
                       </div>
@@ -2522,7 +2523,7 @@ export function Jobs() {
                           value={newJobPickupAddress}
                           onChange={(e) => setNewJobPickupAddress(e.target.value)}
                           placeholder="예: 성수동 물류센터 3번 게이트"
-                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         />
                       </div>
                       <div>
@@ -2532,18 +2533,18 @@ export function Jobs() {
                           value={newJobDropoffAddress}
                           onChange={(e) => setNewJobDropoffAddress(e.target.value)}
                           placeholder="예: 하남 미사강변도시 일대"
-                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         />
                       </div>
-                      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col gap-4">
+                      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-2xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-warning-strong">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 매니저가 직접 답해야 하는 일이 줄어듭니다 (급여는 ‘공고 설정’의 ‘급여’ 그룹에서)</div>
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-1.5">고용·정책 안내</label>
-                          <textarea value={newJobPolicyNotes} onChange={(e) => setNewJobPolicyNotes(e.target.value)} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <textarea value={newJobPolicyNotes} onChange={(e) => setNewJobPolicyNotes(e.target.value)} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                         </div>
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-1.5">기타 참고정보 (근무·차량 정책 등)</label>
-                          <textarea value={newJobAiFacts} onChange={(e) => setNewJobAiFacts(e.target.value)} rows={3} placeholder="예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <textarea value={newJobAiFacts} onChange={(e) => setNewJobAiFacts(e.target.value)} rows={3} placeholder="예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                         </div>
                       </div>
                     </div>
@@ -2596,12 +2597,12 @@ export function Jobs() {
                     {/* 등록 모달에만 있던 안내 — 제목이 어디에 그대로 노출되는지 알려준다. */}
                     <span className="block text-[12px] font-semibold text-muted-foreground mt-0.5">맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span>
                   </label>
-                  <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 기간</label>
-                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                       <option value="">미지정</option>
                       <option value="하루">하루(당일 단기)</option>
                       <option value="단기">단기(며칠~몇 주)</option>
@@ -2610,7 +2611,7 @@ export function Jobs() {
                   </div>
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 마감시각</label>
-                    <input type="datetime-local" value={editForm.closesAt} min={nowLocalInput()} onChange={(e) => setEditForm({ ...editForm, closesAt: e.target.value })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                    <input type="datetime-local" value={editForm.closesAt} min={nowLocalInput()} onChange={(e) => setEditForm({ ...editForm, closesAt: e.target.value })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                     <p className="text-[11px] text-muted-foreground mt-1">지나면 지원자 페이지에서 자동 마감</p>
                   </div>
                 </div>
@@ -2665,7 +2666,7 @@ export function Jobs() {
                             if (cur && !keepBranch) setEditDroppedBranch({ id: cur.id, name: cur.name });
                             setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
                           }}
-                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <option value="">미지정</option>
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2689,7 +2690,7 @@ export function Jobs() {
                               }
                               setEditForm({ ...editForm, branchId: v });
                             }}
-                            className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                            className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <option value="">미지정</option>
                             {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2698,18 +2699,18 @@ export function Jobs() {
                         )}
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 인원</label>
-                          <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                          <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                         </div>
                       </div>
                       {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
-                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                           <option value="">미지정</option>
                           {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>
                       </div>
-                      <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
+                      <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
                         <div className="text-[13px] font-bold text-foreground">차량(이륜/사륜) 필요</div>
                         <button type="button" role="switch" aria-checked={editForm.vehicleRequired} aria-label="차량(이륜/사륜) 필요" onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${editForm.vehicleRequired ? "bg-success" : "bg-switch-background"}`}>
                           <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
@@ -2717,12 +2718,12 @@ export function Jobs() {
                       </div>
                       {/* E18 · 급여 (선택) — 등록 모달과 같은 그룹·같은 섹션 위치로 올렸다.
                           예전엔 '공고 본문·급여·AI 근거' 접이식 안 2단 깊이라, 등록 때는 0클릭이던 급여가 수정 때는 펼쳐야 보였다. */}
-                      <div className="p-4 bg-background border border-border-strong rounded-xl flex flex-col gap-4">
+                      <div className="p-4 bg-background border border-border-strong rounded-2xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-gray-700">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 단가 형태</label>
-                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                               <option value="">미지정</option>
                               {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                             </select>
@@ -2730,13 +2731,13 @@ export function Jobs() {
                           {editForm.payType && editForm.payType !== "협의" && (
                             <div>
                               <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 금액(원)</label>
-                              <input type="number" min={0} value={editForm.payAmount} onChange={(e) => setEditForm({ ...editForm, payAmount: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="예: 3500" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                              <input type="number" min={0} value={editForm.payAmount} onChange={(e) => setEditForm({ ...editForm, payAmount: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="예: 3500" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                             </div>
                           )}
                         </div>
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-2">급여·정산 정보</label>
-                          <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                         </div>
                       </div>
                     </>
@@ -2792,16 +2793,16 @@ export function Jobs() {
                         />
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-2">시작일</label>
-                          <input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                          <input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                         </div>
                       </div>
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">집결지</label>
-                        <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                       </div>
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">마지막 경유지(배송 종료 지점)</label>
-                        <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                       </div>
                       {/* 거리 기준 — 노출 반경 규칙·거리 정렬·'대기자에게 안내' 조건 매칭이 **모두 이 값**을 쓴다.
                           집결지=경유지인 라인은 차이가 없지만, 멀리 떨어진 라인은 대상 수가 크게 갈린다
@@ -2816,7 +2817,7 @@ export function Jobs() {
                                 key={b}
                                 type="button"
                                 onClick={() => setEditForm({ ...editForm, distanceBasis: b })}
-                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-xl border transition-colors ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
+                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
                               >
                                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>
                                   {b === "pickup" ? "집결지만" : "가까운 곳 아무거나"}
@@ -2835,15 +2836,15 @@ export function Jobs() {
                         </p>
                       </div>
                       {/* AI 응대 근거 — 정책·근무 문의(급여는 위 '공고 설정'의 급여 그룹에서). 등록 모달과 같은 섹션에 둔다. */}
-                      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col gap-4">
+                      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-2xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-warning-strong">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 매니저가 직접 답해야 하는 일이 줄어듭니다 (급여는 ‘공고 설정’의 ‘급여’ 그룹에서)</div>
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-2">고용·정책 안내</label>
-                          <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <textarea value={editForm.policyNotes} onChange={(e) => setEditForm({ ...editForm, policyNotes: e.target.value })} rows={2} placeholder="예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산" className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                         </div>
                         <div>
                           <label className="block text-[13px] font-bold text-gray-700 mb-2">기타 참고정보 (근무·차량 정책 등)</label>
-                          <textarea value={editForm.aiFacts} onChange={(e) => setEditForm({ ...editForm, aiFacts: e.target.value })} rows={3} placeholder={"예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가"} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <textarea value={editForm.aiFacts} onChange={(e) => setEditForm({ ...editForm, aiFacts: e.target.value })} rows={3} placeholder={"예: 주말·공휴일 근무 있음(월 2회 로테이션) · 오전+오후 동시 진행 가능 · 렌트/리스 차량 가능(1톤 이하) · 풀타임 불가"} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                         </div>
                       </div>
                     </>
@@ -2858,7 +2859,7 @@ export function Jobs() {
                 >
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">공고 내용</label>
-                        <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                        <textarea value={editForm.body} onChange={(e) => setEditForm({ ...editForm, body: e.target.value })} rows={10} className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
                       </div>
                 </EditSection>
               </div>
@@ -3030,7 +3031,7 @@ export function Jobs() {
                 {!candLoading && candidates.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">아직 지원자가 없어요</div>}
 
                 {!candLoading && candidates.length > 0 && (
-                  <div className="bg-background border border-border-strong rounded-xl p-3.5 space-y-3">
+                  <div className="bg-background border border-border-strong rounded-2xl p-3.5 space-y-3">
                     {/* 단계 분포 */}
                     <div>
                       <div className="text-[11px] font-bold text-muted-foreground mb-1.5">진행 단계</div>
@@ -3113,7 +3114,7 @@ export function Jobs() {
                         <div
                           key={c.id}
                           /* 지금 상세로 보고 있는 후보 — 나란히 뜬 패널과 명단을 눈으로 잇는다 */
-                          className={`bg-card border rounded-xl p-3.5 transition-all ${
+                          className={`bg-card border rounded-2xl p-3.5 transition-all ${
                             c.applicant_id === selectedApplicantId
                               ? "border-foreground shadow-[inset_3px_0_0_0_var(--foreground)]"
                               : "border-border-strong hover:border-gray-300"
@@ -3225,7 +3226,7 @@ export function Jobs() {
                   value={pickerQuery}
                   onChange={(e) => setPickerQuery(e.target.value)}
                   placeholder="이름, 연락처, 지점 검색"
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full pl-9 pr-3 py-2.5 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full pl-9 pr-3 py-2.5 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
             </div>
@@ -3239,7 +3240,7 @@ export function Jobs() {
                   <button
                     key={p.id}
                     onClick={() => setPicked((prev) => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl border transition-colors ${sel ? "border-copilot bg-copilot-soft" : "border-border-strong bg-white hover:border-gray-300"}`}
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-2xl border transition-colors ${sel ? "border-copilot bg-copilot-soft" : "border-border-strong bg-white hover:border-gray-300"}`}
                   >
                     <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${sel ? "bg-copilot border-copilot" : "border-gray-300"}`}>
                       {sel && <CheckCircle2 size={14} className="text-white" />}
@@ -3281,6 +3282,6 @@ export function Jobs() {
         onAutoOpenConfirmConsumed={() => setConfirmSignal(null)}
         onChanged={() => { if (candPanel) loadCandidates(candPanel.jobId); loadJobs(); }}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -9,7 +9,7 @@ import { cn } from "./utils";
  *
  * 이 제품의 입력란은 141곳이 전부 raw <input>/<select>/<textarea>였고,
  * 파일마다 아래 6줄짜리 클래스 문자열을 손으로 복사해 쓰고 있었다:
- *   "min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-sm
+ *   "min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm
  *    focus:outline-none focus:border-brand-yellow focus:ring-1 focus:ring-brand-yellow"
  *
  * 복사본이라 아래가 전부 제각각이었다:
@@ -25,7 +25,7 @@ import { cn } from "./utils";
 
 /** 모든 입력 컨트롤이 공유하는 표면. 유리 면 위에서도 흰 카드 위에서도 같은 무게로 읽힌다. */
 export const controlBase =
-  "w-full rounded-xl border border-border-strong bg-input-background/90 px-3.5 text-[14px] font-medium text-foreground shadow-[var(--shadow-inset)] outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:font-normal placeholder:text-muted-foreground/70 hover:border-foreground/25 focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55 aria-[invalid=true]:border-error aria-[invalid=true]:focus-visible:ring-error";
+  "w-full rounded-2xl border border-border-strong bg-input-background/90 px-3.5 text-[14px] font-medium text-foreground shadow-[var(--shadow-inset)] outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:font-normal placeholder:text-muted-foreground/70 hover:border-foreground/25 focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55 aria-[invalid=true]:border-error aria-[invalid=true]:focus-visible:ring-error";
 
 const CONTROL_H = "min-h-11 py-2.5";
 
@@ -209,7 +209,7 @@ function ToggleRow({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-xl border border-border-strong bg-input-background/70 px-3.5 py-2.5 text-left outline-none transition-colors hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55",
+        "flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-2xl border border-border-strong bg-input-background/70 px-3.5 py-2.5 text-left outline-none transition-colors hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55",
         full && "col-span-full",
         className,
       )}

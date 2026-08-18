@@ -247,7 +247,7 @@ export function SosLedgerCard() {
   };
 
   const inputCls =
-    "w-full px-4 py-3 border border-border-strong rounded-xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring";
+    "w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-zone-warm border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col">
@@ -265,7 +265,7 @@ export function SosLedgerCard() {
       </div>
 
       {/* 이번 달 요약 */}
-      <div className="bg-background rounded-xl px-4 py-2.5 text-[13px] font-semibold text-gray-700 mb-4">
+      <div className="bg-background rounded-2xl px-4 py-2.5 text-[13px] font-semibold text-gray-700 mb-4">
         이번 달 긴급 <b className="text-foreground">{summary?.count ?? 0}건</b> · 해결 <b className="text-foreground">{summary?.resolved ?? 0}건</b> · 건별 비용 <b className="text-foreground">{won(summary?.cost_sum ?? 0)}</b> + 월 운영비 <b className="text-foreground">{won(ledgerTotal)}</b>
       </div>
 
@@ -275,7 +275,7 @@ export function SosLedgerCard() {
       ) : (
         <div className="flex flex-col gap-2">
           {openRows.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 p-3 border border-error/30 bg-error-soft rounded-xl">
+            <div key={r.id} className="flex items-center gap-3 p-3 border border-error/30 bg-error-soft rounded-2xl">
               <span className="w-2 h-2 rounded-full bg-error animate-pulse shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-bold text-foreground truncate">{r.line_label}</div>
@@ -366,13 +366,13 @@ export function SosLedgerCard() {
                 placeholder="금액(원)"
                 value={ledgerForm.amount_krw}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-[110px] px-3 py-2 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <input
                 placeholder="메모 (선택)"
                 value={ledgerForm.memo}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex-1 px-3 py-2 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <button
                 onClick={handleAddLedger}

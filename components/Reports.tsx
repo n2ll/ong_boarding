@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import useSWR from "swr";
+import { PageShell } from "@/components/ui/page-shell";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from "recharts";
 import { Download, TrendingUp, Users, Brain, CheckCircle, Coins } from "lucide-react";
 import { toast } from "sonner";
@@ -114,15 +115,10 @@ export function Reports() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">리포트 · 분석</h1>
-          <p className="text-[14px] text-muted-foreground">기간을 골라 유입·전환·응대 성과를 확인합니다. <span className="text-muted-foreground">· 실시간 인입 기준(일괄 임포트 제외)</span></p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-card border border-border-strong rounded-xl px-2 py-1 shadow-sm">
+    <PageShell>
+      {/* 제목은 탑바가 정본 — 기간·다운로드 액션만 우측 정렬로 남긴다 */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex items-center bg-card border border-border-strong rounded-2xl px-2 py-1 shadow-sm">
             {['이번 주', '이번 달', '올해'].map(range => (
               <button 
                 key={range}
@@ -135,57 +131,56 @@ export function Reports() {
           </div>
           <button 
             onClick={handleDownload}
-            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
           >
             <Download size={16} /> 리포트 다운로드
           </button>
-        </div>
       </div>
 
       {/* Overview Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-success-soft flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-success-soft flex items-center justify-center">
               <Users size={20} className="text-success-strong" />
             </div>
           </div>
           <div className="text-[13px] font-bold text-muted-foreground mb-1">총 지원자 수</div>
-          <div className="text-2xl font-extrabold text-foreground">{stats.total.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
+          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.total.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
 
         <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-info-soft flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-info-soft flex items-center justify-center">
               <CheckCircle size={20} className="text-info-strong" />
             </div>
           </div>
           <div className="text-[13px] font-bold text-muted-foreground mb-1">확정 인력</div>
-          <div className="text-2xl font-extrabold text-foreground">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
+          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
 
         <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-yellow-50 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-yellow-50 flex items-center justify-center">
               <Coins size={20} className="text-warning-strong" />
             </div>
           </div>
           <div className="text-[13px] font-bold text-muted-foreground mb-1">최근 30일 누적 비용</div>
-          <div className="text-2xl font-extrabold text-foreground">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">원</span></div>
+          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">원</span></div>
         </div>
 
         <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-xl bg-yellow-100 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-yellow-100 flex items-center justify-center">
               <Brain size={20} className="text-warning-strong" />
             </div>
           </div>
           <div className="text-[13px] font-bold text-muted-foreground mb-1">스크리닝 진행 중</div>
-          <div className="text-2xl font-extrabold text-foreground">{stats.screening.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
+          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.screening.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Sourcing Trend Chart */}
         <div className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm">
           <h3 className="text-[16px] font-bold text-foreground mb-1">월별 지원자 및 합격자 추이</h3>
@@ -244,6 +239,6 @@ export function Reports() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

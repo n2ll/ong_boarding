@@ -157,10 +157,10 @@ function Modal({
             // blur는 2단(크롬 lg·오버레이 xl)으로 고정 — 40px(2xl)은 비용 대비 식별 불가라 폐지.
             "border-border-glass bg-glass-3 backdrop-blur-xl backdrop-saturate-150",
             // 좁은 화면: 아래에서 올라오는 시트
-            "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-[24px] pb-[env(safe-area-inset-bottom)]",
+            "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
             // 넓은 화면: 가운데 카드
-            "sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-3rem)] sm:max-h-[88dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[24px] sm:pb-0",
+            "sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-3rem)] sm:max-h-[88dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:pb-0",
             "sm:data-[state=closed]:slide-out-to-bottom-0 sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95",
             "motion-reduce:animate-none",
             SIZE[size],
@@ -196,7 +196,7 @@ function Modal({
               <DialogPrimitive.Close
                 aria-label="창 닫기"
                 disabled={busy}
-                className="relative -mr-1 grid size-9 place-items-center rounded-xl text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40"
+                className="relative -mr-1 grid size-9 place-items-center rounded-2xl text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40"
               >
                 <X size={18} />
               </DialogPrimitive.Close>

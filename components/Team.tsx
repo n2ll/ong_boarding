@@ -121,7 +121,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   return (
-    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0"}>
+    <div className={embedded ? "flex flex-col" : "p-4 pb-12 sm:p-6 lg:p-8 flex flex-col [&>*]:shrink-0"}>
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">팀 · 권한</h1>}
@@ -129,7 +129,7 @@ export function Team({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 bg-brand-yellow hover:bg-yellow-500 text-foreground px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+          className="flex items-center gap-2 bg-brand-yellow hover:bg-yellow-500 text-foreground px-5 py-2.5 rounded-2xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
         >
           <UserPlus size={18} /> 담당자 추가
         </button>

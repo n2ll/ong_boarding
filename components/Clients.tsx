@@ -223,7 +223,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
   const activeCount = clients.filter((c) => c.active).length;
 
   return (
-    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0"}>
+    <div className={embedded ? "flex flex-col" : "p-4 pb-12 sm:p-6 lg:p-8 flex flex-col [&>*]:shrink-0"}>
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">화주사 관리</h1>}
@@ -234,13 +234,13 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             onClick={runSync}
             disabled={syncing}
             title="옹매니징(계약·정산)에 등록된 화주사를 공고용으로 가져옵니다"
-            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 옹매니징 동기화
           </button>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-foreground hover:bg-gray-800 text-white px-5 py-2.5 rounded-2xl font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={18} /> 신규 화주사 등록
           </button>
@@ -274,7 +274,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               { label: "화주사 누락 공고", value: integ.jobs_missing_client, warn: integ.jobs_missing_client > 0 },
               { label: "화주사 누락 지점", value: integ.branches_missing_client, warn: integ.branches_missing_client > 0 },
             ].map((m) => (
-              <div key={m.label} className={`rounded-xl border px-2 py-2.5 ${m.warn ? "border-warning/35 bg-yellow-50" : "border-border-strong bg-surface-raised"}`}>
+              <div key={m.label} className={`rounded-2xl border px-2 py-2.5 ${m.warn ? "border-warning/35 bg-yellow-50" : "border-border-strong bg-surface-raised"}`}>
                 <div className={`text-[18px] font-extrabold ${m.warn ? "text-warning" : "text-foreground"}`}>{m.value}</div>
                 <div className="text-[11px] font-bold text-muted-foreground mt-0.5">{m.label}</div>
               </div>
@@ -293,7 +293,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="기업명·담당자 검색"
-              className="pl-9 pr-4 py-2 border border-border-strong rounded-xl text-sm w-[260px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+              className="pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm w-[260px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>
@@ -363,7 +363,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                     </button>
                   </div>
                   {myBranches.length === 0 ? (
-                    <div className="text-[13px] text-muted-foreground bg-card border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                    <div className="text-[13px] text-muted-foreground bg-card border border-dashed border-border-strong rounded-2xl py-4 text-center">아직 등록된 지점이 없어요.</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {myBranches.map((b) => (

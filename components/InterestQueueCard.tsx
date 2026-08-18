@@ -315,7 +315,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
             return (
               <div
                 key={head.applicant_id}
-                className={`border rounded-xl ${rows.some((r) => r.immediate) ? "border-success-soft bg-success-soft" : "border-border-strong bg-white"}`}
+                className={`border rounded-2xl ${rows.some((r) => r.immediate) ? "border-success-soft bg-success-soft" : "border-border-strong bg-white"}`}
               >
                 {/* 사람 머리글 — 이름·가용성·연락처는 한 번만. 공고가 여러 건이면 그 사실을 눈에 띄게 알린다. */}
                 <div className="flex items-center gap-2 flex-wrap px-3 pt-3 pb-1.5">
@@ -426,7 +426,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 onChange={(e) => setQuickBody(e.target.value)}
                 rows={5}
                 disabled={quickSending}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground leading-relaxed">
                 발송에 성공하면 자동으로 <b>컨택 완료</b>로 처리돼 큐에서 빠집니다. 근무 확정·배정을 약속하는 문구는 넣지 마세요.

@@ -140,6 +140,16 @@ export const STATUS_COLORS: Record<string, string> = {
   이탈: "#B42318", // --error-strong
 };
 
+/**
+ * 배지 "텍스트"용 파생 맵 — STATUS_COLORS는 도트·배경(알파 합성)용이라 밝은 상태색이 있고,
+ * 그대로 12px 텍스트에 쓰면 대비가 깨진다('스크리닝 전' #A8A29E는 자기 칩 위 2.5:1).
+ * 텍스트로 쓸 때는 반드시 이 맵을 쓸 것.
+ */
+export const STATUS_TEXT_COLORS: Record<string, string> = {
+  ...STATUS_COLORS,
+  "스크리닝 전": "#57534E", // gray-600 — 칩 위 6.5:1
+};
+
 export const ALL_STATUSES = [
   "스크리닝 전",
   "스크리닝 중",

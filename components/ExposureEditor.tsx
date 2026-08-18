@@ -282,7 +282,7 @@ export function ExposureEditor({
                 key={k}
                 type="button"
                 onClick={() => onChange({ ...value, exposure: k })}
-                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-xl border transition-colors ${
+                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${
                   sel
                     ? "border-foreground bg-white ring-1 ring-foreground"
                     : "border-border-strong bg-white hover:border-gray-300"
@@ -297,7 +297,7 @@ export function ExposureEditor({
       </div>
 
       {targeted && (
-        <div className="rounded-xl border border-border-strong bg-surface-raised p-3.5 space-y-3">
+        <div className="rounded-2xl border border-border-strong bg-surface-raised p-3.5 space-y-3">
           <div className="text-[13px] font-bold text-gray-700">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
           {/* 역방향 동선 — 여기 있는 축(지역·가용성·차량…)으로 안 잡히는 대상은 인재풀에서 직접 골라야 한다.
               **저장된 공고(jobId)에서만** 안내한다 — 등록 폼에서 이 링크를 타면 작성 중 내용을 잃고,
@@ -509,7 +509,7 @@ export function ExposureEditor({
                   setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
                 }}
                 placeholder="없음"
-                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-16 bg-white border border-border-strong rounded-2xl px-2 py-1 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               개월 이내
             </label>
@@ -544,7 +544,7 @@ export function ExposureEditor({
       )}
 
       {targeted && jobId && (
-        <div className="rounded-xl border border-border-strong bg-white p-3.5 space-y-2.5">
+        <div className="rounded-2xl border border-border-strong bg-white p-3.5 space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700">
               <Users size={14} /> 노출 대상 명단

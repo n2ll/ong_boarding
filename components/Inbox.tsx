@@ -1,8 +1,9 @@
 import { useState } from "react";
 import useSWR from "swr";
-import { Inbox as InboxIcon, RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning, ArrowRightLeft } from "lucide-react";
+import { RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
+import { PageShell } from "./ui/page-shell";
 
 interface PendingMessage {
   id: string;
@@ -147,28 +148,18 @@ export function Inbox() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-brand-yellow rounded-2xl flex items-center justify-center shadow-sm">
-            <InboxIcon size={24} className="text-foreground" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">분류 대기 문자함</h1>
-            <p className="text-[14px] text-muted-foreground">어느 지원자의 문자인지 자동으로 연결하지 못한 수신 문자입니다. 아래 버튼으로 직접 분류해주세요.</p>
-          </div>
+    <PageShell>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <MessageSquareWarning size={16} className="text-warning-strong" />
+          처리 대기 <b className="text-foreground">{messages.length}</b>건
         </div>
         <button
           onClick={() => mutate()}
-          className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <RefreshCw size={16} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
-      </div>
-
-      <div className="flex items-center gap-2 mb-5 text-[13px] text-muted-foreground">
-        <MessageSquareWarning size={16} className="text-warning-strong" />
-        처리 대기 <b className="text-foreground">{messages.length}</b>건
       </div>
 
       {loading && (
@@ -215,21 +206,21 @@ export function Inbox() {
                   {formatTime(msg.created_at)}
                 </span>
               </div>
-              <div className="text-[14px] leading-relaxed text-gray-800 bg-background border border-muted rounded-xl px-4 py-3 whitespace-pre-wrap">
+              <div className="text-[14px] leading-relaxed text-gray-800 bg-background border border-muted rounded-2xl px-4 py-3 whitespace-pre-wrap">
                 {msg.body}
               </div>
               <div className="flex items-center justify-end gap-2">
                 <button
                   onClick={() => classify(msg, "other")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <Ban size={15} /> 기타로 분류
                 </button>
                 <button
                   onClick={() => classify(msg, "ongmanaging")}
                   disabled={busy}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-background border border-border-strong disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <ArrowRightLeft size={15} /> 기존 계약자 문의
                 </button>
@@ -247,7 +238,7 @@ export function Inbox() {
                         classify(msg, "job", { jobId: Number(v), jobLabel: j?.title });
                       }
                     }}
-                    className="appearance-none px-5 py-2 pr-9 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="appearance-none px-5 py-2 pr-9 rounded-2xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     title="이 문의를 지원자로 등록할 공고(라인)를 선택하세요"
                   >
                     <option value="">＋ 지원자로 등록…</option>
@@ -267,6 +258,6 @@ export function Inbox() {
           );
         })}
       </div>
-    </div>
+    </PageShell>
   );
 }

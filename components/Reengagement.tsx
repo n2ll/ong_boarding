@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { RefreshCw, Loader2, Users, UserPlus, ShieldAlert, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
+import { PageShell } from "@/components/ui/page-shell";
 
 interface ActiveCandidate {
   name: string | null;
@@ -65,7 +66,7 @@ export function Reengagement() {
   };
 
   return (
-    <div className="p-8 pb-12 max-w-4xl w-full space-y-5">
+    <PageShell className="max-w-4xl w-full">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
@@ -86,13 +87,13 @@ export function Reengagement() {
       </div>
 
       {!triggered && (
-        <div className="rounded-xl border border-border-strong bg-background p-5 text-center space-y-3">
+        <div className="rounded-2xl border border-border-strong bg-background p-5 text-center space-y-3">
           <p className="text-[13px] text-gray-700 leading-relaxed">
             옹고잉·옹매니징 DB를 조회해 다시 부를 만한 분을 찾습니다. 외부 DB 접속이라 자동 실행하지 않아요.
           </p>
           <button
             onClick={() => setTriggered(true)}
-            className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={15} /> 다시 부를 분 찾기
           </button>
@@ -100,12 +101,12 @@ export function Reengagement() {
       )}
 
       {error && (
-        <div className="px-4 py-3 rounded-xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
+        <div className="px-4 py-3 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
           발굴에 실패했어요.
         </div>
       )}
       {!error && data && !data.configured && (
-        <div className="px-4 py-3 rounded-xl bg-muted border border-border-strong text-[13px] font-semibold text-muted-foreground">
+        <div className="px-4 py-3 rounded-2xl bg-muted border border-border-strong text-[13px] font-semibold text-muted-foreground">
           옹고잉·옹매니징 미연동 — 다시 부를 분을 찾을 수 없어요.
         </div>
       )}
@@ -119,7 +120,7 @@ export function Reengagement() {
         <>
           {/* 킬스위치 상태 */}
           <div
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold border ${
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-[13px] font-bold border ${
               data.enabled
                 ? "bg-success-soft border-success/25 text-success-strong"
                 : "bg-yellow-50 border-yellow-300 text-warning-strong"
@@ -143,22 +144,22 @@ export function Reengagement() {
 
           {/* 요약 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="rounded-xl border border-success/25 bg-success-soft p-3">
+            <div className="rounded-2xl border border-success/25 bg-success-soft p-3">
               <div className="text-[11px] font-bold text-success-strong">활동 편입후보</div>
               <div className="text-[20px] font-extrabold text-success-strong">{data.activeCount}</div>
               <div className="text-[11px] text-success">이름+전화 반입</div>
             </div>
-            <div className="rounded-xl border border-border-strong bg-background p-3">
+            <div className="rounded-2xl border border-border-strong bg-background p-3">
               <div className="text-[11px] font-bold text-muted-foreground">비활동 · 사전 동의 필요</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.inactiveCount}</div>
               <div className="text-[11px] text-muted-foreground">집계만 (동의 후 반입)</div>
             </div>
-            <div className="rounded-xl border border-border-strong bg-white p-3">
+            <div className="rounded-2xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">이미 지원자</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedApplicants}</div>
               <div className="text-[11px] text-muted-foreground">중복 제외</div>
             </div>
-            <div className="rounded-xl border border-border-strong bg-white p-3">
+            <div className="rounded-2xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">블랙리스트</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedBlacklist}</div>
               <div className="text-[11px] text-muted-foreground">재채용 불가 제외</div>
@@ -166,7 +167,7 @@ export function Reengagement() {
           </div>
 
           {/* 법적 주의 */}
-          <div className="flex items-start gap-2 px-4 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[12px] text-error-strong">
+          <div className="flex items-start gap-2 px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[12px] text-error-strong">
             <ShieldAlert size={15} className="shrink-0 mt-0.5" />
             <span>
               비지원자에게 보내는 첫 안내입니다. <b>활동자는 바로 안내(+수신거부 고지)</b>, 비활동자는{" "}
@@ -183,7 +184,7 @@ export function Reengagement() {
               onClick={runImport}
               disabled={importing || data.activeCount === 0 || !data.enabled}
               title={!data.enabled ? "'다시 부르기'가 꺼져 있어요 — 설정에서 켜면 편입할 수 있습니다" : undefined}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {importing ? <Loader2 size={15} className="animate-spin" /> : !data.enabled ? <Lock size={15} /> : <UserPlus size={15} />}
               활동 편입후보 {data.activeCount}명 편입{!data.enabled ? " (잠김)" : ""}
@@ -195,11 +196,11 @@ export function Reengagement() {
 
           {/* 첫 접촉 문구(자리표시 — 실운영 전 검토) */}
           <div className="grid sm:grid-cols-2 gap-2">
-            <div className="rounded-xl border border-border-strong bg-surface-raised p-3 space-y-1">
+            <div className="rounded-2xl border border-border-strong bg-surface-raised p-3 space-y-1">
               <div className="text-[12px] font-bold text-success-strong">활동자 · 기회 안내 문구</div>
               <div className="text-[12px] text-gray-700 leading-relaxed">{data.templates.offer}</div>
             </div>
-            <div className="rounded-xl border border-border-strong bg-surface-raised p-3 space-y-1">
+            <div className="rounded-2xl border border-border-strong bg-surface-raised p-3 space-y-1">
               <div className="text-[12px] font-bold text-muted-foreground">비활동자 · 사전 동의 요청 문구</div>
               <div className="text-[12px] text-gray-700 leading-relaxed">{data.templates.optin}</div>
             </div>
@@ -213,7 +214,7 @@ export function Reengagement() {
             {data.activeCandidates.length === 0 ? (
               <div className="text-[13px] text-muted-foreground py-4 text-center">편입 가능한 활동 후보가 없어요.</div>
             ) : (
-              <div className="rounded-xl border border-border-strong divide-y divide-muted overflow-hidden">
+              <div className="rounded-2xl border border-border-strong divide-y divide-muted overflow-hidden">
                 {data.activeCandidates.map((c, i) => (
                   <div key={i} className="flex items-center gap-3 px-4 py-2.5 bg-white">
                     <span className="font-bold text-[13px] text-foreground">{c.name ?? "(이름 미상)"}</span>
@@ -235,6 +236,6 @@ export function Reengagement() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

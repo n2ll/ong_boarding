@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import useSWR from "swr";
 import { LayoutGrid, Clock4, Users, AlertTriangle, Loader2, Filter } from "lucide-react";
+import { PageShell } from "@/components/ui/page-shell";
 import {
   SLOTS,
   type SlotKey,
@@ -132,8 +133,8 @@ export function SlotBoard() {
   }, [visibleBranches, applicants]);
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <PageShell>
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1 flex items-center gap-2">
             <LayoutGrid size={22} className="text-warning-strong" /> 확정/희망 슬롯 보드
@@ -141,7 +142,7 @@ export function SlotBoard() {
           <p className="text-[14px] text-muted-foreground">지점 × 타임(평일/주말 · 오전/오후) 단위로 확정 인원과 정원, 대기(희망) 인원을 한눈에 봅니다.</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-xl px-2 py-1">
+          <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-2xl px-2 py-1">
             <Filter size={15} className="text-muted-foreground ml-1" />
             <select
               value={clientFilter}
@@ -158,7 +159,7 @@ export function SlotBoard() {
       </div>
 
       {/* 요약 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "표시 지점", value: visibleBranches.length, unit: "곳", icon: LayoutGrid, color: "text-foreground" },
           { label: "확정 인원", value: totals.confirmed, unit: "명", icon: Users, color: "text-success" },
@@ -233,6 +234,6 @@ export function SlotBoard() {
         · 정원은 지점 관리에서 슬롯별로 설정합니다. 슬롯을 쓰지 않는 화주사는 ‘전체 지점 보기’로만 표시됩니다.<br />
         · 상단 요약의 확정/대기 인원은 <b>실제 머릿수</b> 기준입니다(한 명이 여러 슬롯에 걸쳐도 1명). 표 안 각 칸 숫자는 해당 슬롯을 커버하는 인원이라 합과 다를 수 있습니다.
       </p>
-    </div>
+    </PageShell>
   );
 }

@@ -10,6 +10,7 @@ import { SosLedgerCard } from "@/components/SosLedgerCard";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
+import { PageShell } from "@/components/ui/page-shell";
 
 interface UrgentItem {
   id: string;
@@ -314,9 +315,9 @@ export function Dashboard() {
   // 발송폰 표시가 전부 안 보였다), '지표 · 분석' 카드도 53px 잘렸다.
   // 배경색도 여기서 칠하지 않는다 — body의 종이 질감을 덮는다.
   return (
-    <div className="p-8 pb-12 flex min-h-full flex-col gap-6 [&>*]:shrink-0">
+    <PageShell className="min-h-full">
       {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 발송폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-xl px-8 py-6 relative overflow-hidden shadow-md text-white">
+      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-foreground rounded-2xl px-8 py-6 relative overflow-hidden shadow-md text-white">
         <div className="absolute right-0 top-0 w-[400px] h-[400px] bg-info rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
 
         <div className="relative z-10 flex items-center justify-between">
@@ -360,7 +361,7 @@ export function Dashboard() {
               )}
             </div>
           </div>
-          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
+          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-2xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
             인재풀 · 파이프라인 <ArrowRight size={14} />
           </button>
         </div>
@@ -389,7 +390,7 @@ export function Dashboard() {
                     <button
                       key={s.path}
                       onClick={() => router.push(s.path)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[13px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl border border-border-strong bg-background hover:bg-muted text-[13px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {s.label} <ChevronRight size={15} className="text-muted-foreground" />
                     </button>
@@ -406,7 +407,7 @@ export function Dashboard() {
                     ? document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" })
                     : router.push(item.path)
                 }
-                className={`p-4 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-error/30 bg-error-soft hover:border-error" : "border-border-strong bg-white hover:border-gray-300"}`}
+                className={`p-4 border rounded-2xl flex items-start gap-3 cursor-pointer transition-colors ${item.tone === "red" ? "border-error/30 bg-error-soft hover:border-error" : "border-border-strong bg-white hover:border-gray-300"}`}
               >
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${item.tone === "red" ? "bg-white text-error border-error/30" : "bg-background text-gray-700 border-border-strong"}`}>
                   {item.tone === "red" ? <Activity size={16} /> : <PhoneCall size={16} />}
@@ -536,7 +537,7 @@ export function Dashboard() {
                     { label: "온보딩", value: flow.onboarding, color: "text-copilot-strong", bg: "bg-copilot-soft", hint: "확정 후 첫 근무 준비(가이드·서류·통화)를 챙기는 단계" },
                     { label: "활동 중", value: flow.active, color: "text-success-strong", bg: "bg-success-soft", hint: "온보딩을 마치고 실제 근무 중인 단계" },
                   ].map((s) => (
-                    <div key={s.label} className={`rounded-xl px-3 py-2 ${s.bg}`} title={s.hint}>
+                    <div key={s.label} className={`rounded-2xl px-3 py-2 ${s.bg}`} title={s.hint}>
                       <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
                       <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-muted-foreground ml-0.5">건</span></div>
                     </div>
@@ -640,21 +641,21 @@ export function Dashboard() {
           </div>
         )}
       </motion.div>
-    </div>
+    </PageShell>
   );
 }
 
 // 첫 진입(캐시 없음) 로딩 중 0값 깜빡임을 막는 스켈레톤. 실제 레이아웃 골격(헤더→할 일→큐 2칸→접이식 헤더)과 동일.
 function DashboardSkeleton() {
   return (
-    <div className="p-8 pb-12 flex min-h-full flex-col gap-6 [&>*]:shrink-0">
-      <div className="bg-foreground rounded-xl px-8 py-6 shadow-md">
+    <PageShell className="min-h-full">
+      <div className="bg-foreground rounded-2xl px-8 py-6 shadow-md">
         <div className="flex items-center justify-between">
           <div className="space-y-2">
             <Skeleton className="h-5 w-64 bg-white/10" />
             <Skeleton className="h-3 w-96 bg-white/10" />
           </div>
-          <Skeleton className="h-9 w-36 rounded-xl bg-white/10" />
+          <Skeleton className="h-9 w-36 rounded-2xl bg-white/10" />
         </div>
       </div>
       <Skeleton className="h-[220px] rounded-lg" />
@@ -664,6 +665,6 @@ function DashboardSkeleton() {
       </div>
       <Skeleton className="h-[180px] rounded-lg" />
       <Skeleton className="h-[56px] rounded-lg" />
-    </div>
+    </PageShell>
   );
 }

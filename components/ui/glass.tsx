@@ -41,7 +41,7 @@ const glassVariants = cva(
       radius: {
         md: "rounded-md",
         lg: "rounded-lg",
-        xl: "rounded-xl",
+        xl: "rounded-2xl",
         "2xl": "rounded-2xl",
       },
       interactive: {

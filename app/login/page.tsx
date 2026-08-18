@@ -49,7 +49,7 @@ function LoginForm() {
   return (
     <form onSubmit={submit} className="w-full max-w-[380px] bg-white rounded-2xl border border-border-strong shadow-sm p-8 space-y-5">
       <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-foreground flex items-center justify-center">
+        <div className="w-11 h-11 rounded-2xl bg-foreground flex items-center justify-center">
           <LogoMark size={30} />
         </div>
         <div>
@@ -67,7 +67,7 @@ function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
             required
-            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div>
@@ -78,13 +78,13 @@ function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
-            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
       </div>
 
       {error && (
-        <div className="px-3.5 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
+        <div className="px-3.5 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
           {error}
         </div>
       )}
@@ -92,7 +92,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={busy}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[14px] font-bold text-foreground bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-[14px] font-bold text-foreground bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
       >
         {busy ? <Loader2 size={16} className="animate-spin" /> : <LogIn size={16} />}
         로그인
