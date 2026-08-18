@@ -1072,7 +1072,49 @@ export function LiveConsole() {
           />
         </div>
       ) : (
-        <div className="flex-1 flex min-w-0 items-center justify-center bg-muted p-6 text-center text-sm text-muted-foreground">좌측에서 대화를 선택하세요</div>
+        /* 빈 가운데(1440px 기준 약 1,000px)를 '오늘 요약 + 바로가기'로 채운다.
+           첫 대화 자동 선택은 하지 않는다 — 탭 진입만으로 열람 처리되는 부작용(위 주석) 때문.
+           대신 '가장 오래 기다린 대화 열기'를 명시적 버튼으로 둔다: 클릭은 의도이므로 열람 처리가 맞다. */
+        <div className="flex-1 flex min-w-0 items-center justify-center bg-muted p-6">
+          <div className="w-full max-w-md text-center">
+            <div className="text-sm font-bold text-muted-foreground mb-4">좌측에서 대화를 선택하세요</div>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+                <div className="text-[11px] font-bold text-muted-foreground">지금 답할 차례</div>
+                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{unansweredCount}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">건</span></div>
+              </div>
+              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+                <div className="text-[11px] font-bold text-muted-foreground">사람 확인 필요</div>
+                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{handoffGroups.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
+              </div>
+              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+                <div className="text-[11px] font-bold text-muted-foreground">확정 대기</div>
+                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{confirmPending.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
+              </div>
+            </div>
+            {(() => {
+              // 가장 오래 기다린 미답 대화 — 명단은 이미 손안에 있다(visibleChats + previewById).
+              const waiting = chats
+                .filter((c) => previewById[c.id]?.direction === "inbound")
+                .sort((a, b) => new Date(lastActivityAt(a) ?? 0).getTime() - new Date(lastActivityAt(b) ?? 0).getTime());
+              const oldest = waiting[0];
+              if (!oldest) return <div className="text-[13px] text-muted-foreground">지금 답을 기다리는 대화가 없어요 👍</div>;
+              const d = Math.max(0, Math.floor((Date.now() - new Date(lastActivityAt(oldest) ?? 0).getTime()) / 86400000));
+              return (
+                <button
+                  onClick={() => setSelectedChatId(oldest.id)}
+                  className="w-full rounded-xl border border-border-strong bg-white px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="text-[12px] font-bold text-muted-foreground">가장 오래 기다린 대화 열기</div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-[14px] font-bold text-foreground">{oldest.name}</span>
+                    <span className={`shrink-0 text-[12px] font-bold ${d >= 7 ? "text-error-strong" : "text-muted-foreground"}`}>{d === 0 ? "오늘" : `${d}일 대기`}</span>
+                  </div>
+                </button>
+              );
+            })()}
+          </div>
+        </div>
       )}
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
