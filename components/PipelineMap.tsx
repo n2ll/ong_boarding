@@ -192,7 +192,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         map: mapRef.current,
         title: j.title,
         icon: {
-          content: `<div style="display:flex;align-items:center;gap:4px;background:#111827;color:#FFCB3C;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;border:1px solid #FFCB3C;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)">📍 ${j.title}</div>`,
+          content: `<div style="display:flex;align-items:center;gap:4px;background:#1C1917;color:#FFCB3C;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;border:1px solid #FFCB3C;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)">📍 ${j.title}</div>`,
           anchor: new naver.maps.Point(10, 12),
         },
       });

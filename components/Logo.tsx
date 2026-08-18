@@ -18,10 +18,10 @@ export function LogoMark({ size = 38, className }: LogoMarkProps) {
       aria-label="옹보딩"
       className={className}
     >
-      <circle cx="24" cy="21" r="6" fill="var(--brand-dark, #0F141E)" />
-      <circle cx="40" cy="21" r="6" fill="var(--brand-dark, #0F141E)" />
+      <circle cx="24" cy="21" r="6" fill="var(--brand-dark, #171310)" />
+      <circle cx="40" cy="21" r="6" fill="var(--brand-dark, #171310)" />
       <path d="M13 32 A19 19 0 0 0 51 32 Z" fill="var(--brand-yellow, #FFCB3C)" />
-      <path d="M17 30 A15 15 0 0 0 47 30 Z" fill="var(--brand-dark, #0F141E)" />
+      <path d="M17 30 A15 15 0 0 0 47 30 Z" fill="var(--brand-dark, #171310)" />
     </svg>
   );
 }

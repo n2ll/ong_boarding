@@ -18,35 +18,35 @@
   /* ── 브랜드 ─────────────────────────────────────────────── */
   /* 화면 코드 실사용 기준으로 통일한 값(#FFCB3C 357곳 vs #FFC83D 1곳) */
   --brand-yellow: #FFCB3C;
-  --brand-dark: #0F141E;
+  --brand-dark: #171310;
   --brand-muted: #FFF5CF;
 
   /* ── 기본 표면 ──────────────────────────────────────────── */
   --background: #F4F2EC;          /* Paper */
-  --foreground: #111827;          /* Ink */
+  --foreground: #1C1917;          /* Ink */
   /* 순백이 아니라 미세 웜톤 — 본문 카드를 불투명 시트로 통일하는 로드맵(2026-08-18)에서
      대면적 순백의 글레어·차가움을 토큰 한 값으로 해소한다. 되돌리기도 이 한 줄. */
   --card: #FFFDFA;
-  --card-foreground: #111827;
-  --popover: #FFFFFF;
-  --popover-foreground: #111827;
+  --card-foreground: #1C1917;
+  --popover: #FFFDFA;
+  --popover-foreground: #1C1917;
 
   /* 핵심 실행은 Ink. Signal Yellow는 brand 변형이 담당한다. */
-  --primary: #111827;
+  --primary: #1C1917;
   --primary-foreground: #FFFFFF;
   --secondary: #EAE7DF;
-  --secondary-foreground: #111827;
+  --secondary-foreground: #1C1917;
   --muted: #EAE7DF;
-  --muted-foreground: #5D6470;
+  --muted-foreground: #6B655C;
   --accent: #E4E0D6;
-  --accent-foreground: #111827;
+  --accent-foreground: #1C1917;
   --destructive: #D92D20;
   --destructive-foreground: #FFFFFF;
 
-  --border: rgba(17, 24, 39, 0.08);
-  --border-strong: rgba(17, 24, 39, 0.14);
+  --border: rgba(28, 25, 23, 0.08);
+  --border-strong: rgba(28, 25, 23, 0.14);
   --input: transparent;
-  --input-background: #FFFFFF;
+  --input-background: #FFFEFC;
   --switch-background: #C9C4B8;
   --ring: #B77900;                /* focus-visible */
 
@@ -55,25 +55,25 @@
   --radius: 0.75rem;              /* 컨트롤 12px */
 
   /* ── 서피스 · 글래스 ────────────────────────────────────── */
-  --surface: rgba(255, 255, 255, 0.62);
-  --surface-raised: #FFFFFF;
+  --surface: rgba(255, 253, 250, 0.62);
+  --surface-raised: #FFFDFA;
   --glass-1: rgba(255, 255, 255, 0.52);
   --glass-2: rgba(255, 255, 255, 0.68);
   --glass-3: rgba(255, 255, 255, 0.9);
-  --glass-dark: rgba(17, 24, 39, 0.85);
+  --glass-dark: rgba(23, 19, 16, 0.85);
   --border-glass: rgba(255, 255, 255, 0.72);
 
   /* 콘텐츠 존 틴트 — 대시보드 큐 카드 4장 한정 파일럿(2026-08-18 확정).
      긴급(SOS·실패)=warm, 대기 큐(관심·응답)=cool. 상태색 soft 계열보다 채도를
      확연히 낮게 유지하고, 항상 라벨·아이콘을 동반한다(색만으로 상태 전달 금지). */
   --zone-warm: #FBF4EC;
-  /* cool은 info-soft(#EFF6FF)와 같은 블루 축이라 더 어둡게 떼어놓는다(ΔE 2.3→3.8).
-     그래도 파스텔끼리는 가까우니: 존 카드 위에 bg-info-soft 칩을 직접 병치하지 말 것. */
-  --zone-cool: #E9EDF2;
+  /* @deprecated 쿨 존은 2026-08-18 사용자 기각("뭔가뭔가") — 사용처 0. 값만 웜 세계와
+     싸우지 않게 블루 틴트를 소거해 둔다. 새 사용처를 만들지 말 것. */
+  --zone-cool: #ECEAE6;
 
   /* 오버레이 뒤 스크림 단일 토큰 — 모달·확인창·패널이 전부 이 값 하나를 쓴다.
      bg-foreground/45 표기는 다크 도입 시 밝은 스크림으로 뒤집혀서 전용 토큰으로 분리. */
-  --scrim: rgba(17, 24, 39, 0.45);
+  --scrim: rgba(28, 25, 23, 0.45);
 
   /* ── 상태 (예약어) ──────────────────────────────────────── */
   --success: #16845B;
@@ -95,7 +95,7 @@
 
   /* 어두운 면(Ink 히어로·glass-dark 패널) 위에 얹는 상태 글자색.
      --success/--error 같은 본 값은 밝은 배경 기준이라 어두운 면에서 죽는다.
-     여기 값은 #111827 위에서 대비 7:1 이상이다. */
+     여기 값은 #1C1917 위에서 대비 7:1 이상이다. */
   --success-on-dark: #86EFAC;
   --info-on-dark: #93C5FD;
   --warning-on-dark: #FCD34D;
@@ -131,28 +131,28 @@
   --chart-step-4: #1A44BC;
 
   /* ── 그림자 ─────────────────────────────────────────────── */
-  --shadow-xs: 0 1px 2px rgba(17, 24, 39, 0.06);
-  --shadow-sm: 0 4px 14px rgba(17, 24, 39, 0.07);
-  --shadow-md: 0 12px 28px rgba(17, 24, 39, 0.1);
-  --shadow-xl: 0 28px 70px rgba(17, 24, 39, 0.18);
-  --shadow-action: 0 8px 18px rgba(17, 24, 39, 0.2);
+  --shadow-xs: 0 1px 2px rgba(28, 25, 23, 0.06);
+  --shadow-sm: 0 4px 14px rgba(28, 25, 23, 0.07);
+  --shadow-md: 0 12px 28px rgba(28, 25, 23, 0.1);
+  --shadow-xl: 0 28px 70px rgba(28, 25, 23, 0.18);
+  --shadow-action: 0 8px 18px rgba(28, 25, 23, 0.2);
   --shadow-brand: 0 8px 20px rgba(204, 150, 13, 0.2);
-  --shadow-inset: inset 0 1px 2px rgba(17, 24, 39, 0.06);
+  --shadow-inset: inset 0 1px 2px rgba(28, 25, 23, 0.06);
   /* 유리 면 전용 — 상단 1px 빛맺힘(inset)과 부양 그림자를 한 토큰으로.
      box-shadow는 backdrop-filter와 달리 이 파일에서 안전하다(빌드 실측). */
-  --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 4px 14px rgba(17, 24, 39, 0.07);
-  --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 12px 28px rgba(17, 24, 39, 0.12);
-  --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 28px 70px rgba(17, 24, 39, 0.18);
-  --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 28px 70px rgba(17, 24, 39, 0.35);
+  --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 4px 14px rgba(28, 25, 23, 0.07);
+  --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 12px 28px rgba(28, 25, 23, 0.12);
+  --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 28px 70px rgba(28, 25, 23, 0.18);
+  --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 28px 70px rgba(28, 25, 23, 0.35);
 
   /* ── 사이드바 ───────────────────────────────────────────── */
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #111827;
-  --sidebar-primary: #111827;
+  --sidebar: #FFFDFA;
+  --sidebar-foreground: #1C1917;
+  --sidebar-primary: #1C1917;
   --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: #EAE7DF;
-  --sidebar-accent-foreground: #111827;
-  --sidebar-border: rgba(17, 24, 39, 0.08);
+  --sidebar-accent-foreground: #1C1917;
+  --sidebar-border: rgba(28, 25, 23, 0.08);
   --sidebar-ring: #B77900;
 }
 
@@ -162,51 +162,51 @@
  * 새 팔레트의 다크 대응만 유지한다. 실제 도입 시 대비를 다시 측정할 것.
  */
 .dark {
-  --background: #0F1115;
-  --foreground: #F3F4F6;
-  --card: #171A21;
-  --card-foreground: #F3F4F6;
-  --popover: #171A21;
-  --popover-foreground: #F3F4F6;
-  --primary: #F3F4F6;
-  --primary-foreground: #111827;
-  --secondary: #262B34;
-  --secondary-foreground: #F3F4F6;
-  --muted: #262B34;
-  --muted-foreground: #9CA3AF;
-  --accent: #2F3541;
-  --accent-foreground: #F3F4F6;
+  --background: #14120F;
+  --foreground: #F5F3F0;
+  --card: #1D1A17;
+  --card-foreground: #F5F3F0;
+  --popover: #1D1A17;
+  --popover-foreground: #F5F3F0;
+  --primary: #F5F3F0;
+  --primary-foreground: #1C1917;
+  --secondary: #2B2723;
+  --secondary-foreground: #F5F3F0;
+  --muted: #2B2723;
+  --muted-foreground: #A8A29E;
+  --accent: #343029;
+  --accent-foreground: #F5F3F0;
   --destructive: #F04438;
   --destructive-foreground: #FFFFFF;
-  --border: rgba(243, 244, 246, 0.12);
-  --border-strong: rgba(243, 244, 246, 0.2);
-  --input: rgba(243, 244, 246, 0.12);
-  --input-background: #171A21;
-  --switch-background: #3A414F;
+  --border: rgba(245, 243, 240, 0.12);
+  --border-strong: rgba(245, 243, 240, 0.2);
+  --input: rgba(245, 243, 240, 0.12);
+  --input-background: #1D1A17;
+  --switch-background: #474139;
   --ring: #E0B500;
 
-  --surface: rgba(23, 26, 33, 0.62);
-  --surface-raised: #171A21;
-  --glass-1: rgba(23, 26, 33, 0.52);
-  --glass-2: rgba(23, 26, 33, 0.68);
-  --glass-3: rgba(23, 26, 33, 0.9);
-  --glass-dark: rgba(8, 12, 20, 0.85);
-  --border-glass: rgba(243, 244, 246, 0.1);
+  --surface: rgba(29, 26, 23, 0.62);
+  --surface-raised: #1D1A17;
+  --glass-1: rgba(29, 26, 23, 0.52);
+  --glass-2: rgba(29, 26, 23, 0.68);
+  --glass-3: rgba(29, 26, 23, 0.9);
+  --glass-dark: rgba(12, 10, 9, 0.85);
+  --border-glass: rgba(245, 243, 240, 0.1);
   --zone-warm: #211D17;
-  --zone-cool: #161B22;
+  --zone-cool: #1E1C19;
   --scrim: rgba(0, 0, 0, 0.6);
   --shadow-glass-sm: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.3);
   --shadow-glass-md: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 28px rgba(0, 0, 0, 0.4);
   --shadow-glass-xl: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 28px 70px rgba(0, 0, 0, 0.5);
   --shadow-glass-dark: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 28px 70px rgba(0, 0, 0, 0.5);
 
-  --sidebar: #171A21;
-  --sidebar-foreground: #F3F4F6;
-  --sidebar-primary: #F3F4F6;
-  --sidebar-primary-foreground: #111827;
-  --sidebar-accent: #262B34;
-  --sidebar-accent-foreground: #F3F4F6;
-  --sidebar-border: rgba(243, 244, 246, 0.12);
+  --sidebar: #1D1A17;
+  --sidebar-foreground: #F5F3F0;
+  --sidebar-primary: #F5F3F0;
+  --sidebar-primary-foreground: #1C1917;
+  --sidebar-accent: #2B2723;
+  --sidebar-accent-foreground: #F5F3F0;
+  --sidebar-border: rgba(245, 243, 240, 0.12);
   --sidebar-ring: #E0B500;
 }
 
@@ -221,30 +221,31 @@
     --glass-1: rgba(255, 255, 255, 0.92);
     --glass-2: rgba(255, 255, 255, 0.96);
     --glass-3: rgba(255, 255, 255, 1);
-    --glass-dark: rgba(17, 24, 39, 0.98);
+    --glass-dark: rgba(23, 19, 16, 0.98);
   }
   .dark {
-    --glass-1: rgba(23, 26, 33, 0.92);
-    --glass-2: rgba(23, 26, 33, 0.96);
-    --glass-3: rgba(23, 26, 33, 1);
-    --glass-dark: rgba(8, 12, 20, 0.98);
+    --glass-1: rgba(29, 26, 23, 0.92);
+    --glass-2: rgba(29, 26, 23, 0.96);
+    --glass-3: rgba(29, 26, 23, 1);
+    --glass-dark: rgba(12, 10, 9, 0.98);
   }
 }
 
 @theme inline {
-  /* 중립 램프 — 라이브러리(src/index.css)와 동일한 값.
-     라이브러리 컴포넌트를 그대로 옮겨도 gray-* 유틸이 같은 색을 낸다. */
-  --color-gray-50: #F9FAFB;
-  --color-gray-100: #F3F4F6;
-  --color-gray-200: #E5E7EB;
-  --color-gray-300: #D1D5DB;
-  --color-gray-400: #9CA3AF;
-  --color-gray-500: #6B7280;
-  --color-gray-600: #4B5563;
-  --color-gray-700: #374151;
-  --color-gray-800: #1F2937;
-  --color-gray-900: #111827;
-  --color-gray-950: #080C14;
+  /* 중립 램프 — 2026-08-18 웜 스톤으로 재조율(hue 24~38°·저채도). 종이·크림 세계와
+     글씨·보더의 쿨 슬레이트가 싸우던 것을 값 차원에서 통일했다. 라이브러리(src/index.css)
+     원본과는 이제 값이 다르다 — 컴포넌트를 옮겨오면 자동으로 웜 톤을 입는 것이 의도. */
+  --color-gray-50: #FAF8F5;
+  --color-gray-100: #F5F3F0;
+  --color-gray-200: #E8E5E0;
+  --color-gray-300: #D7D3CC;
+  --color-gray-400: #A8A29E;
+  --color-gray-500: #78716C;
+  --color-gray-600: #57534E;
+  --color-gray-700: #44403C;
+  --color-gray-800: #292524;
+  --color-gray-900: #1C1917;
+  --color-gray-950: #0C0A09;
 
   /* Signal Yellow 램프 */
   --color-yellow-50: #FFF9E6;
@@ -448,7 +449,7 @@
   select:not([multiple]):not([size]) {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235D6470' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B655C' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
     background-repeat: no-repeat;
     background-position: right 0.7rem center;
     background-size: 1rem 1rem;
@@ -458,7 +459,7 @@
   }
 
   select:not([multiple]):not([size]):disabled {
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23A8A29E' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   }
 
   /* 입력·선택·여러줄입력의 포커스 표시를 버튼과 같은 규칙으로 통일 */
@@ -482,7 +483,7 @@
   html, body, .scrollbar-custom {
     font-family: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
     scrollbar-width: thin;
-    scrollbar-color: rgba(17, 24, 39, 0.18) transparent;
+    scrollbar-color: rgba(28, 25, 23, 0.18) transparent;
   }
 
   ::-webkit-scrollbar {
@@ -490,13 +491,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(17, 24, 39, 0.18);
+    background: rgba(28, 25, 23, 0.18);
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(17, 24, 39, 0.3);
+    background: rgba(28, 25, 23, 0.3);
     background-clip: content-box;
   }
   ::-webkit-scrollbar-track {

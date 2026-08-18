@@ -130,8 +130,8 @@ export type Tab =
  * 구체적인 hex여야 한다. 토큰 값을 바꾸면 여기도 같이 바꾼다.
  */
 export const STATUS_COLORS: Record<string, string> = {
-  "스크리닝 전": "#9CA3AF", // gray-400
-  "스크리닝 중": "#6B7280", // gray-500
+  "스크리닝 전": "#A8A29E", // gray-400 미러
+  "스크리닝 중": "#57534E", // gray-600 — 배지 텍스트 12px는 4.5:1 필요(gray-500 미러는 4.18로 미달)
   "스크리닝 완료": "#2563EB", // --info
   기타: "#6D28D9", // --copilot
   확정인력: "#16845B", // --success
