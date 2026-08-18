@@ -600,7 +600,7 @@ export function ConversationThread({
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Ban size={12} /> 수신거부 등록
               </button>
@@ -706,7 +706,7 @@ export function ConversationThread({
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
-              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-white border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
+              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
               <button onClick={handleSendDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-5 py-2 rounded-2xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} 검수 후 발송
               </button>

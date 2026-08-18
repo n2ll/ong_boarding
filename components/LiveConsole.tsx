@@ -759,9 +759,9 @@ export function LiveConsole() {
           </div>
           {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
           <div className="flex gap-1.5 flex-wrap">
-            <button aria-selected={activeTab === "all"} role="tab" onClick={() => setActiveTab("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
-            <button aria-selected={activeTab === "intervention"} role="tab" onClick={() => setActiveTab("intervention")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-error text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
-            <button aria-selected={activeTab === "confirm"} role="tab" onClick={() => setActiveTab("confirm")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-success-strong text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
+            <button aria-selected={activeTab === "all"} role="tab" onClick={() => setActiveTab("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
+            <button aria-selected={activeTab === "intervention"} role="tab" onClick={() => setActiveTab("intervention")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-error text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
+            <button aria-selected={activeTab === "confirm"} role="tab" onClick={() => setActiveTab("confirm")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-success-strong text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
           </div>
           {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(내가 답할 차례→AI→상대 답 기다림)로 대체(간소화).
               '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
@@ -784,11 +784,11 @@ export function LiveConsole() {
                   {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
                 </span>
               )}
-              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
+              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-card border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
                 const sample = handoffs.find((h) => h.category === cid)!;
                 return (
-                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
+                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-card border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
                 );
               })}
             </div>
@@ -961,7 +961,7 @@ export function LiveConsole() {
               <button
                 key={chat.id}
                 onClick={() => setSelectedChatId(chat.id)}
-                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 rounded-2xl transition-all ${selectedChatId === chat.id ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
+                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 rounded-2xl transition-all ${selectedChatId === chat.id ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2.5">
@@ -1105,7 +1105,7 @@ export function LiveConsole() {
               return (
                 <button
                   onClick={() => setSelectedChatId(oldest.id)}
-                  className="w-full rounded-2xl border border-border-strong bg-white px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-border-strong bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className="text-[12px] font-bold text-muted-foreground">가장 오래 기다린 대화 열기</div>
                   <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -1171,7 +1171,7 @@ export function LiveConsole() {
                   className={`min-h-10 rounded-2xl border px-2 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
                     resolveOutcome === o.id
                       ? "border-foreground bg-foreground text-white"
-                      : "border-border-strong bg-white text-gray-700 hover:border-foreground/30"
+                      : "border-border-strong bg-card text-gray-700 hover:border-foreground/30"
                   }`}
                 >
                   {o.label}
@@ -1204,8 +1204,8 @@ export function LiveConsole() {
                 <b className="text-gray-700">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button aria-pressed={promoteField === "pay_info"} onClick={() => setPromoteField("pay_info")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "pay_info" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>급여·정산</button>
-                <button aria-pressed={promoteField === "policy_notes"} onClick={() => setPromoteField("policy_notes")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>고용·정책</button>
+                <button aria-pressed={promoteField === "pay_info"} onClick={() => setPromoteField("pay_info")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "pay_info" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>급여·정산</button>
+                <button aria-pressed={promoteField === "policy_notes"} onClick={() => setPromoteField("policy_notes")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>고용·정책</button>
               </div>
               <textarea
                 value={promoteText}
@@ -1238,8 +1238,8 @@ export function LiveConsole() {
                 매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button aria-pressed={kbTarget === "common"} onClick={() => setKbTarget("common")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${kbTarget === "common" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>공통(전 지점)</button>
-                <button aria-pressed={kbTarget === "branch"} onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
+                <button aria-pressed={kbTarget === "common"} onClick={() => setKbTarget("common")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${kbTarget === "common" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>공통(전 지점)</button>
+                <button aria-pressed={kbTarget === "branch"} onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
               </div>
               <div>
                 <label className="block text-[12px] font-bold text-gray-700 mb-1.5">제목(무슨 질문인가)</label>

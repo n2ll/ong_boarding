@@ -559,17 +559,17 @@ export function AgentBrain() {
 
               {/* 3계층 커버리지 카드 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <button onClick={() => setActiveTab("knowledge")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-info transition-colors">
+                <button onClick={() => setActiveTab("knowledge")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-info transition-colors">
                   <div className="flex items-center gap-2 text-info mb-2"><Database size={16} /><span className="text-[12px] font-bold">① 공통 운영정보</span></div>
                   <div className="text-[26px] font-extrabold text-foreground">{factsCount}<span className="text-[13px] font-bold text-muted-foreground">개 항목</span></div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">두뇌 &gt; 사내 지식 베이스 <ExternalLink size={11} /></div>
                 </button>
-                <button onClick={() => router.push("/branches")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-success transition-colors">
+                <button onClick={() => router.push("/branches")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-success transition-colors">
                   <div className="flex items-center gap-2 text-success mb-2"><Building2 size={16} /><span className="text-[12px] font-bold">② 지점별 정보</span></div>
                   <div className="text-[26px] font-extrabold text-foreground">{branchesFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovBranches.length} 지점 작성</span></div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">지점관리에서 편집 <ExternalLink size={11} /></div>
                 </button>
-                <button onClick={() => router.push("/jobs")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-white hover:border-warning transition-colors">
+                <button onClick={() => router.push("/jobs")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-warning transition-colors">
                   <div className="flex items-center gap-2 text-warning-strong mb-2"><Briefcase size={16} /><span className="text-[12px] font-bold">③ 공고별 단가·정책</span></div>
                   <div className="text-[26px] font-extrabold text-foreground">{jobsPayFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovJobs.length} 공고 단가입력</span></div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">공고 편집에서 입력 <ExternalLink size={11} /></div>

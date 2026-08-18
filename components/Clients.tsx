@@ -234,7 +234,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             onClick={runSync}
             disabled={syncing}
             title="옹매니징(계약·정산)에 등록된 화주사를 공고용으로 가져옵니다"
-            className="flex items-center gap-2 bg-white border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} 옹매니징 동기화
           </button>

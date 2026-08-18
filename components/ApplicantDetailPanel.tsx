@@ -991,7 +991,7 @@ export function ApplicantDetailContent({
                       key={ij.job_id}
                       onClick={() => copyInterestReply(ij)}
                       title={`${ij.title ?? `공고 #${ij.job_id}`} — 관심 클릭 ${relTime(ij.clicked_at)} · 대기 안내 문구를 클립보드에 복사`}
-                      className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-white border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-card border border-info/25 text-info-strong hover:bg-info/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       ⭐ {shortJobTitle(ij.title, ij.job_id)}
                       {ij.immediate && <span className="ml-1 text-success-strong">· 바로가능</span>}
@@ -1085,11 +1085,11 @@ export function ApplicantDetailContent({
             <MessageSquare size={14} /> 맞춤 공고 링크
           </button>
           {a.status === "확정인력" ? (
-            <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-white border border-warning text-warning hover:bg-yellow-50 py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
+            <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-card border border-warning text-warning-strong hover:bg-yellow-50 py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
           ) : (
             <button onClick={() => openConfirm()} disabled={busy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-foreground hover:bg-gray-800 text-white py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
           )}
-          <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 bg-white border border-error text-error-strong py-2 rounded-2xl text-[13px] font-bold hover:bg-error-soft disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
+          <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 bg-card border border-error text-error-strong py-2 rounded-2xl text-[13px] font-bold hover:bg-error-soft disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
         </div>
       </div>
 
@@ -1217,7 +1217,7 @@ export function ApplicantDetailContent({
                   onClick={toggleOptOut}
                   disabled={busy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-white hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-card hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
                 </button>
@@ -1227,7 +1227,7 @@ export function ApplicantDetailContent({
                 onClick={toggleOptOut}
                 disabled={busy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 수신거부 등록
               </button>

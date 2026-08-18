@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { PageShell } from "@/components/ui/page-shell";
+import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from "recharts";
 import { Download, TrendingUp, Users, Brain, CheckCircle, Coins } from "lucide-react";
 import { toast } from "sonner";
@@ -129,12 +130,9 @@ export function Reports() {
               </button>
             ))}
           </div>
-          <button 
-            onClick={handleDownload}
-            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
-          >
+          <Button variant="secondary" onClick={handleDownload}>
             <Download size={16} /> 리포트 다운로드
-          </button>
+          </Button>
       </div>
 
       {/* Overview Stats */}
