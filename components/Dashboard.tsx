@@ -360,7 +360,7 @@ export function Dashboard() {
               )}
             </div>
           </div>
-          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/70 backdrop-blur-xl/10 hover:bg-white/70 backdrop-blur-xl/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
+          <button onClick={() => router.push('/pipeline')} className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-[13px] font-bold transition-all flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
             인재풀 · 파이프라인 <ArrowRight size={14} />
           </button>
         </div>
