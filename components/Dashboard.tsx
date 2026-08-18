@@ -51,7 +51,11 @@ export function Dashboard() {
   const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
   // 지원자 목록은 파이프라인과 동일 키라 SWR이 중복 호출을 dedup하고, 탭 재방문 시 캐시를 즉시 보여준다.
-  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
+  // scope=dashboard — 이 화면과 답장 큐(ReplyQueueCard)가 읽는 17컬럼+조립 2개만 받는 응답
+  // (gzip 67KB → 29KB, 랜딩 화면 + 60초 폴링이라 절감이 반복된다). ReplyQueueCard와
+  // **반드시 같은 키**여야 한다 — 키가 갈라지면 그쪽이 기본 응답을 또 받고, 답장 큐의
+  // mutate()가 이 화면 통계를 같이 갱신하는 동작(같은 캐시)도 깨진다.
+  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
   const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
   const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");

@@ -69,7 +69,9 @@ export function ReplyQueueCard({
   initialJobId?: number | null;
   onCountsChange?: (counts: { total: number; untouched: number }) => void;
 } = {}) {
-  const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
+  // scope=dashboard — Dashboard.tsx와 **반드시 같은 키**(합집합 컬럼 응답·캐시 공유).
+  // 이 카드의 mutate()가 대시보드 통계까지 갱신하는 것도 같은 키라서 가능하다.
+  const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
   // 공고 제목 매핑용 — Jobs 탭과 동일 SWR 키라 중복 호출을 dedup. 실패해도 필터만 미노출.
   const { data: jobsRes } = useSWR<{ jobs?: JobLite[] }>("/api/admin/jobs?status=all");
   const jobTitleById = useMemo(() => {

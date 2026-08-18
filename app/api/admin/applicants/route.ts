@@ -107,6 +107,31 @@ const ROLLUP_COLUMNS = [
   "branch", "branch1", "confirmed_branch", "current_branch",
 ].join(", ");
 
+/**
+ * `?scope=dashboard` — 대시보드 + '내가 답할 차례' 답장 큐.
+ *
+ * 이 목록은 Dashboard.tsx와 ReplyQueueCard.tsx 두 파일 AppRow의 **합집합**이다.
+ * 두 파일은 반드시 **같은 SWR 키**를 써야 한다 — 한쪽만 옮기면 다른 쪽이 기본 키로
+ * 67KB를 또 받아 절감이 0이 되고, 답장 큐의 mutate()가 대시보드 통계를 같이
+ * 갱신하는 현재 동작(같은 캐시)도 깨진다. 컬럼을 추가할 땐 세 곳(여기 + 두 AppRow)을
+ * 같이 고칠 것.
+ *
+ * 조립 필드는 agent_stage(답장 큐 미착수/응대중 배지 — 빠지면 undefined!=="paused"가
+ * 항상 참이라 전원 '미착수'로 뒤집힌다)와 current_recruit_mode(온보딩 게이지의 배민
+ * 분모)만 붙인다. job_links는 아무도 안 읽으므로 gatherLiveJobLinks 조회를 건너뛴다.
+ * access_token은 select 자체에서 빠진다(has_access_token 변환도 건너뛴다 — 억지로
+ * 붙이면 전원 false가 되어 '링크 없음'으로 읽힌다).
+ *
+ * 실측 전송량(gzip): 기본 67KB → 29KB. 랜딩 화면 + 60초 폴링이라 절감이 반복된다.
+ */
+const DASHBOARD_COLUMNS = [
+  "id", "name", "phone", "status", "created_at",
+  "last_message_at", "sms_opt_out_at", "current_job_id",
+  "branch", "branch1", "confirmed_branch",
+  "airtable_record_id", "guide_sent", "baemin_id", "onboarding_call_status",
+  "sigungu", "sido",
+].join(", ");
+
 const LIVE_COLUMNS = [
   "id", "name", "phone", "status",
   "availability", "source", "branch", "branch1",
@@ -149,10 +174,13 @@ export async function GET(req: NextRequest) {
   const scope = params.get("scope");
   const liveScope = scope === "live";
   const rollupScope = scope === "rollup";
+  const dashboardScope = scope === "dashboard";
 
   let q = supabase
     .from("applicants")
-    .select(rollupScope ? ROLLUP_COLUMNS : liveScope ? LIVE_COLUMNS : LIST_COLUMNS)
+    .select(
+      rollupScope ? ROLLUP_COLUMNS : dashboardScope ? DASHBOARD_COLUMNS : liveScope ? LIVE_COLUMNS : LIST_COLUMNS
+    )
     .order("created_at", { ascending: false });
 
   if (source) q = q.eq("source", source);
@@ -186,7 +214,10 @@ export async function GET(req: NextRequest) {
         .select("id, applicant_id, agent_stage, created_at")
         .in("applicant_id", ids)
         .order("created_at", { ascending: false }),
-      gatherLiveJobLinks(supabase, ids),
+      // dashboard 스코프는 job_links를 아무도 안 읽는다 — 별도 페이징 조회 1개를 건너뛴다.
+      dashboardScope
+        ? Promise.resolve({ links: new Map<number, never[]>(), error: null })
+        : gatherLiveJobLinks(supabase, ids),
       jobIds.length > 0
         ? supabase.from("jobs").select("id, recruit_mode").in("id", jobIds)
         : Promise.resolve({ data: [] as { id: number; recruit_mode: string | null }[] }),
@@ -213,7 +244,9 @@ export async function GET(req: NextRequest) {
       // 배지가 없어도 목록은 쓸 수 있다 — 500으로 올리지 않고 로그만 남긴다.
       console.error("[applicants] job_links 조회 실패", linkErr);
     }
-    withStage = withStage.map((a) => ({ ...a, job_links: links.get(a.id) ?? [] }));
+    if (!dashboardScope) {
+      withStage = withStage.map((a) => ({ ...a, job_links: links.get(a.id) ?? [] }));
+    }
 
     // 현재 공고(current_job_id)의 라인 형태(recruit_mode)를 함께 내려준다 — 대시보드·목록의
     // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
@@ -238,6 +271,10 @@ export async function GET(req: NextRequest) {
   // 부수 효과로 응답에서 24KB가 빠진다.
   // scope=live는 애초에 토큰 컬럼을 고르지 않으므로 이 변환을 건너뛴다 —
   // 안 그러면 모두 has_access_token: false가 붙어 '링크 없음'처럼 읽히는 값이 생긴다.
+  if (dashboardScope) {
+    return NextResponse.json({ data: withStage });
+  }
+
   const safe = liveScope
     ? withStage
     : withStage.map(({ access_token, ...rest }) => ({
