@@ -177,20 +177,23 @@ export function ReplyQueueCard({
 
   const [detailId, setDetailId] = useState<number | null>(null);
 
+  // 빈 큐는 헤더+한 줄로 접는다 — 0건 카드가 설명문으로 자리를 차지하지 않게(2026-08-18 합의)
+  const collapsed = !error && !!data && items.length === 0;
+
   return (
     <motion.div
       id="reply-queue"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.34 }}
-      className="scroll-mt-6 bg-card border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col"
+      className={`scroll-mt-6 bg-card border border-border-strong rounded-2xl shadow-sm flex flex-col ${collapsed ? "p-4" : "p-6"}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div className={`flex flex-wrap items-start justify-between gap-3 ${collapsed ? "" : "mb-4"}`}>
         <div>
           <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
             <MessageCircle size={15} className="text-info" /> 내가 답할 차례
           </h2>
-          <div className="text-[12px] text-muted-foreground mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
+          {!collapsed && <div className="text-[12px] text-muted-foreground mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
@@ -233,7 +236,7 @@ export function ReplyQueueCard({
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
       ) : items.length === 0 ? (
-        <div className="py-4 text-center text-[13px] text-muted-foreground">지금 답할 차례인 지원자가 없어요. 다시 연락 문자에 답장이 오면 여기에 표시됩니다.</div>
+        <div className="mt-1.5 text-[12px] text-muted-foreground">지금 답할 차례가 없어요 · 답장이 오면 여기가 펼쳐집니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((it) => {
