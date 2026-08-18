@@ -363,11 +363,11 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                     </button>
                   </div>
                   {myBranches.length === 0 ? (
-                    <div className="text-[13px] text-muted-foreground bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                    <div className="text-[13px] text-muted-foreground bg-card border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {myBranches.map((b) => (
-                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[13px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-muted-foreground"}`}>
+                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[13px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-card border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-muted-foreground"}`}>
                           <MapPin size={12} className="text-muted-foreground" /> {b.name}
                           {!b.active && <span className="text-[11px] text-muted-foreground">(비활성)</span>}
                         </span>

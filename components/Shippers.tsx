@@ -61,7 +61,7 @@ export function Shippers() {
             공고를 등록할 때 고르는 목록이에요. 계약 원본에 있는 화주사를 여기로 가져오려면 <b>‘옹매니징 동기화’</b>를 누르세요.
           </p>
         </div>
-        <div className="rounded-2xl border border-border-strong bg-white p-4">
+        <div className="rounded-2xl border border-border-strong bg-card shadow-sm p-4">
           <Clients embedded />
         </div>
       </section>
@@ -107,7 +107,7 @@ export function Shippers() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="화주사 검색"
-              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
+              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background"
             />
           </div>
 
@@ -118,7 +118,7 @@ export function Shippers() {
             {filtered.map((c) => {
               const open = openId === c.id;
               return (
-                <div key={c.id} className="rounded-xl border border-border-strong bg-white overflow-hidden">
+                <div key={c.id} className="rounded-2xl border border-border-strong bg-card shadow-sm overflow-hidden">
                   <button
                     onClick={() => setOpenId(open ? null : c.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

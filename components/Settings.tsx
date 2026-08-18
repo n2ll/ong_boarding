@@ -192,7 +192,7 @@ export function Settings() {
                   </div>
                   <label className="relative inline-flex items-center cursor-not-allowed">
                     <input type="checkbox" defaultChecked disabled className="sr-only peer" />
-                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
+                    <div className="w-11 h-6 bg-switch-background peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
                   </label>
                 </div>
                 <div className="flex items-center justify-between p-4 border border-border-strong rounded-xl">
@@ -202,7 +202,7 @@ export function Settings() {
                   </div>
                   <label className="relative inline-flex items-center cursor-not-allowed">
                     <input type="checkbox" disabled className="sr-only peer" />
-                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
+                    <div className="w-11 h-6 bg-switch-background peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
                   </label>
                 </div>
               </div>
@@ -228,7 +228,7 @@ export function Settings() {
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-foreground mb-1 border-b border-border-strong pb-4">기능 스위치</h2>
               <p className="text-[13px] text-muted-foreground mt-4 mb-6">위험할 수 있는 기능을 매니저가 직접 켜고 끕니다.</p>
-              <div className="rounded-xl border border-border-strong bg-white p-5 max-w-2xl">
+              <div className="rounded-xl border border-border-strong bg-card p-5 max-w-2xl">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-[14px] font-bold text-foreground mb-1">다시 부르기 (외부 인력)</div>
@@ -253,7 +253,7 @@ export function Settings() {
                       onClick={toggleReengagement}
                       disabled={switchSaving || !!switchError}
                       title={reEnabled ? "끄면 편입이 잠기고 미리보기만 됩니다" : "켜면 과거 인력을 인력풀로 편입할 수 있어요"}
-                      className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors shrink-0 mt-1 disabled:opacity-60 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${reEnabled ? "bg-success" : "bg-gray-300"}`}
+                      className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors shrink-0 mt-1 disabled:opacity-60 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${reEnabled ? "bg-success" : "bg-switch-background"}`}
                     >
                       <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${reEnabled ? "translate-x-6" : "translate-x-1"}`} />
                     </button>

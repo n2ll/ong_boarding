@@ -288,7 +288,7 @@ function CollapsibleSection({ title, summary, open, onToggle, children }: {
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border-strong bg-white">
+    <div className="rounded-xl border border-border-strong bg-card">
       <button
         type="button"
         onClick={onToggle}
@@ -1134,7 +1134,7 @@ export function ApplicantDetailContent({
                           }
                         : undefined
                     }
-                    className={`rounded-xl border p-3 ${isFocus ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white"} ${
+                    className={`rounded-xl border p-3 ${isFocus ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-card"} ${
                       selectable ? "cursor-pointer hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""
                     }`}
                   >
@@ -1175,7 +1175,7 @@ export function ApplicantDetailContent({
                   const labels = detailInternal ? GENERAL_SCREENING_LABELS : SCREENING_LABELS;
                   const done = keys.filter((k) => screening[k] === true).length;
                   return (
-                    <div className="rounded-xl border border-border-strong p-3.5 bg-white">
+                    <div className="rounded-xl border border-border-strong p-3.5 bg-card">
                       <div className="flex items-center justify-between mb-1">
                         <h3 className="text-[13px] font-extrabold text-foreground">스크리닝 체크리스트</h3>
                         <span className="text-[12px] font-extrabold text-info">{done}/{keys.length}</span>
@@ -1187,7 +1187,7 @@ export function ApplicantDetailContent({
                 })()}
                 {/* 온보딩 체크리스트는 배민 커넥트 온보딩 전용 — internal 라인엔 표시하지 않는다(선탑 이력이 대체). */}
                 {!detailInternal && (focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
-                  <div className="rounded-xl border border-border-strong p-3.5 bg-white">
+                  <div className="rounded-xl border border-border-strong p-3.5 bg-card">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="text-[13px] font-extrabold text-foreground">온보딩 체크리스트</h3>
                       <span className="text-[12px] font-extrabold text-success">{onboardingDone}/{ONBOARDING_KEYS.length}</span>
@@ -1308,7 +1308,7 @@ export function ApplicantDetailContent({
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-bold text-muted-foreground">확정 지점</span>
-                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                     <option value="">미지정</option>
                     {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                     {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
@@ -1328,7 +1328,7 @@ export function ApplicantDetailContent({
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-muted-foreground">온보딩 통화</span>
-                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white">
+                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background">
                   <option value="">미지정</option>
                   {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                   {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1339,7 +1339,7 @@ export function ApplicantDetailContent({
                   가용성
                   {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
                 </span>
-                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white">
+                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background">
                   <option value="">미확인</option>
                   {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -1495,7 +1495,7 @@ export function ApplicantDetailContent({
             {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold text-muted-foreground">확정 지점(선택)</span>
-                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">미지정</option>
                   {confirmBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                   {confirmBranch.trim() !== "" && !confirmBranchNames.includes(confirmBranch) && <option value={confirmBranch}>{confirmBranch} (미등록)</option>}

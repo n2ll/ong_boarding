@@ -581,7 +581,7 @@ export function AgentBrain() {
                   <div className="flex items-center gap-2 text-warning-strong mb-3 text-[14px] font-bold"><AlertTriangle size={16} /> 단가 미입력 공고 {payGapJobs.length}개 — 단가 문의가 오면 매니저가 직접 답해야 합니다</div>
                   <div className="flex flex-col gap-1.5">
                     {payGapJobs.slice(0, 6).map((j) => (
-                      <div key={j.id} className="flex items-center justify-between gap-2 bg-white border border-warning-soft rounded-lg px-3 py-2">
+                      <div key={j.id} className="flex items-center justify-between gap-2 bg-card border border-warning-soft rounded-lg px-3 py-2">
                         <div className="min-w-0">
                           <span className="text-[13px] font-bold text-foreground">{j.title}</span>
                           {j.branch && <span className="ml-2 text-[11px] font-bold text-muted-foreground">{j.branch}</span>}
@@ -595,7 +595,7 @@ export function AgentBrain() {
               )}
 
               {/* 사람 확인 필요 분포(개선3) — 어떤 질문이 자주 매니저로 넘어가나 */}
-              <div className="p-5 border border-border-strong rounded-2xl bg-white">
+              <div className="p-5 border border-border-strong rounded-2xl bg-card">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2 text-foreground text-[14px] font-bold"><TrendingUp size={16} className="text-copilot" /> 사람 확인 필요 사유 분포 (현재 {ovHandoffTotal}건 대기)</div>
                   <button onClick={() => router.push("/live?tab=intervention")} className="relative after:absolute after:-inset-2.5 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[12px] font-bold text-copilot hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
@@ -756,7 +756,7 @@ export function AgentBrain() {
                     exit={{ opacity: 0, height: 0 }}
                     className="overflow-hidden mb-4"
                   >
-                    <div className="border-2 border-foreground rounded-2xl p-5 bg-white">
+                    <div className="border-2 border-foreground rounded-2xl p-5 bg-card">
                       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div className="text-[14px] font-extrabold text-foreground flex items-center gap-2">
                           {kbForm.id === null ? <Plus size={16} /> : <Pencil size={16} />}
@@ -810,7 +810,7 @@ export function AgentBrain() {
                   </div>
                 )}
                 {kbItems.map((ex) => (
-                  <div key={ex.id} className="group flex items-start justify-between p-4 border border-border-strong rounded-xl bg-white hover:border-gray-300 transition-colors">
+                  <div key={ex.id} className="group flex items-start justify-between p-4 border border-border-strong rounded-xl bg-card hover:border-gray-300 transition-colors">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg bg-background flex items-center justify-center text-gray-700 shrink-0">
                         <FileText size={16} />
@@ -842,7 +842,7 @@ export function AgentBrain() {
                   const cat = getCategory(cid);
                   const count = ovByCategory[cid] ?? 0;
                   return (
-                    <div key={cid} className="p-4 border border-border-strong rounded-xl bg-white shadow-sm flex items-center justify-between gap-3">
+                    <div key={cid} className="p-4 border border-border-strong rounded-xl bg-card shadow-sm flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[14px] font-bold text-foreground">{cat.label}</span>
@@ -868,7 +868,7 @@ export function AgentBrain() {
           {activeTab === 'advanced' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               {/* 전역 AI 응답 모드 (실데이터 연동) — 자동 응대 / 코파일럿(초안만) / 완전 중지 */}
-              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-error-soft border-error/30' : killMode === 'draft' && !killEnvForced ? 'bg-copilot-soft border-copilot/30' : 'bg-white border-border-strong'}`}>
+              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-error-soft border-error/30' : killMode === 'draft' && !killEnvForced ? 'bg-copilot-soft border-copilot/30' : 'bg-card border-border-strong'}`}>
                 <div className="flex items-start gap-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${killDisabled || killEnvForced ? 'bg-error-soft' : killMode === 'draft' ? 'bg-copilot-soft' : 'bg-success-soft'}`}>
                     {killMode === 'draft' && !killEnvForced ? (
@@ -1036,7 +1036,7 @@ export function AgentBrain() {
                           {simResult.draft_text}
                         </div>
                       </div>
-                      <div className="bg-white border border-border-strong rounded-xl p-3.5">
+                      <div className="bg-card border border-border-strong rounded-xl p-3.5">
                         <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot-strong" /> 판단 근거 (reasoning)</div>
                         <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">{simResult.reasoning}</div>
                       </div>
@@ -1049,12 +1049,12 @@ export function AgentBrain() {
                         <div className="text-[13px] text-warning-strong leading-relaxed">AI가 자체 답변하지 않고 매니저에게 넘기는 상황이에요. 실제 운영에선 자동 응답이 중단되고 슬랙 알림이 발송됩니다.</div>
                       </div>
                       {simResult.missing_info && (
-                        <div className="bg-white border border-border-strong rounded-xl p-3.5">
+                        <div className="bg-card border border-border-strong rounded-xl p-3.5">
                           <div className="text-[12px] font-bold text-muted-foreground mb-1.5">부족한 정보</div>
                           <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">{simResult.missing_info}</div>
                         </div>
                       )}
-                      <div className="bg-white border border-border-strong rounded-xl p-3.5">
+                      <div className="bg-card border border-border-strong rounded-xl p-3.5">
                         <div className="text-[12px] font-bold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Sparkles size={13} className="text-copilot-strong" /> 판단 근거 (reasoning)</div>
                         <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">{simResult.reasoning}</div>
                       </div>
@@ -1068,7 +1068,7 @@ export function AgentBrain() {
           {activeTab === 'improve' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               {/* R4-3 AI 사용량 카드 — 이번 달 ai_usage_daily 집계 */}
-              <div className="p-5 border border-border-strong rounded-2xl bg-white mb-6">
+              <div className="p-5 border border-border-strong rounded-2xl bg-card mb-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2 text-[14px] font-bold text-foreground">
                     <Coins size={16} className="text-warning-strong" /> 이번 달 AI 사용량
@@ -1162,7 +1162,7 @@ export function AgentBrain() {
               {proposals.length > 0 && (
                 <div className="mt-5 space-y-3">
                   {proposals.map((p, idx) => (
-                    <div key={`${p.kind}-${p.title}-${idx}`} className="border border-border-strong rounded-xl p-4 bg-white hover:border-gray-300 transition-colors">
+                    <div key={`${p.kind}-${p.title}-${idx}`} className="border border-border-strong rounded-xl p-4 bg-card hover:border-gray-300 transition-colors">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
                         <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${p.confidence === 'high' ? 'bg-success-soft text-success-strong border-success/25' : 'bg-background text-muted-foreground border-border-strong'}`}>

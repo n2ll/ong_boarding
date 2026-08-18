@@ -180,7 +180,7 @@ export function SlotBoard() {
       {loading ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
       ) : visibleBranches.length === 0 ? (
-        <div className="bg-white border border-border-strong rounded-2xl p-12 text-center text-[14px] text-muted-foreground">
+        <div className="bg-card border border-border-strong rounded-2xl p-12 text-center text-[14px] text-muted-foreground">
           표시할 지점이 없어요. 슬롯 보드는 확정슬롯을 사용하는 화주사(비마트식 슬롯 구인) 전용이에요 — 화주사 설정에서 &lsquo;확정슬롯 사용&rsquo;을 켠 뒤 지점을 등록해 주세요.
         </div>
       ) : (

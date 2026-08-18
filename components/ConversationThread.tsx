@@ -566,10 +566,11 @@ export function ConversationThread({
     : pendingDraft?.reasoning ?? null;
 
   return (
+    // 대화 스레드 = 불투명 캔버스(유리 금지) — 밴드·말풍선은 bg-muted 위 불투명 표면으로만 놓는다.
     <div className={`flex flex-col bg-muted min-w-0 min-h-0 ${className}`}>
       {/* 상태 헤더 + AI 토글 */}
       {showHeader && (
-        <div className="shrink-0 bg-white border-b border-border-strong px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="shrink-0 bg-card border-b border-border-strong px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             {!hasActiveFlow ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
@@ -663,7 +664,7 @@ export function ConversationThread({
                     {jobChipLabel(jobsMap[msg.job_id]!)}
                   </span>
                 )}
-                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : "bg-white border border-border-strong text-gray-800 rounded-tl-sm"}`}>
+                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : "bg-card border border-border-strong text-gray-800 rounded-tl-sm"}`}>
                   {msg.body}
                 </div>
                 <span className="text-[11px] text-muted-foreground mx-1">{fmtTime(msg.created_at)}</span>
@@ -676,7 +677,7 @@ export function ConversationThread({
 
       {/* AI 초안 검수 카드 */}
       {pendingDraft && (
-        <div className="px-5 pt-4 bg-white border-t border-border-strong">
+        <div className="px-5 pt-4 bg-card border-t border-border-strong">
           <div className="border border-copilot bg-copilot-soft rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2 text-[13px] font-extrabold text-copilot-strong">
@@ -688,7 +689,7 @@ export function ConversationThread({
               <span className="text-[11px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
             </div>
             {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
-              <div className="mb-2.5 text-[12px] text-warning-strong bg-white border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
+              <div className="mb-2.5 text-[12px] text-warning-strong bg-card border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
                 <b>부족한 정보:</b> {pendingDraft.missing_info}
               </div>
             )}
@@ -697,7 +698,7 @@ export function ConversationThread({
               onChange={(e) => setDraftText(e.target.value)}
               placeholder={pendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
               rows={3}
-              className="w-full bg-white border border-border-strong rounded-xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
+              className="w-full bg-input-background border border-border-strong rounded-xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
             />
             {draftReasoningDisplay && (
               <div className="mt-2 text-[12px] text-muted-foreground leading-relaxed">
@@ -715,7 +716,7 @@ export function ConversationThread({
       )}
 
       {/* 입력 영역 */}
-      <div className="p-5 bg-white border-t border-border-strong shrink-0">
+      <div className="p-5 bg-card border-t border-border-strong shrink-0">
         {canSend ? (
           <>
           <div className="flex gap-1.5 flex-wrap mb-2.5">
@@ -731,7 +732,7 @@ export function ConversationThread({
             ))}
           </div>
           <div className="flex items-end gap-3">
-            <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-white ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
+            <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}

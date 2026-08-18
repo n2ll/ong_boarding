@@ -136,9 +136,10 @@ export function Automation() {
   ];
 
   return (
+    // 워크벤치 명문화: bg-background 바닥 위에 밴드가 bg-card 표면으로 놓인다.
     <div className="flex flex-col h-full min-h-0 bg-background">
       {/* 실시간 자동화 현황 (실데이터) */}
-      <div className="shrink-0 bg-white border-b border-border-strong px-8 py-4">
+      <div className="shrink-0 bg-card border-b border-border-strong px-8 py-4">
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
           <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full">실시간 집계</span>
@@ -159,7 +160,7 @@ export function Automation() {
       </div>
 
       {/* 자동 점검 규칙 (실동작) */}
-      <div className="shrink-0 bg-white border-b border-border-strong px-8 py-4">
+      <div className="shrink-0 bg-card border-b border-border-strong px-8 py-4">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</span>
@@ -187,7 +188,7 @@ export function Automation() {
                   </div>
                   <button type="button" aria-label={`${rule.label} 규칙 켜기`} aria-checked={cfg.enabled} role="switch"
                     onClick={() => toggleRule(rule.id)}
-                    className={`after:absolute after:-inset-3 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-success" : "bg-gray-300"}`}
+                    className={`after:absolute after:-inset-3 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-success" : "bg-switch-background"}`}
                     title={cfg.enabled ? "켜짐" : "꺼짐"}
                   >
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${cfg.enabled ? "left-[18px]" : "left-0.5"}`} />

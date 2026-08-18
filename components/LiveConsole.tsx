@@ -1,5 +1,7 @@
 "use client";
 
+// 워크벤치 콘솔 = 불투명 캔버스가 시스템(유리 금지) — 놓인 표면(패널 밴드·카드·행)은 bg-card로 수렴한다.
+
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
@@ -720,7 +722,7 @@ export function LiveConsole() {
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-white lg:flex-row">
+    <div className="flex h-full flex-col overflow-hidden bg-card lg:flex-row">
       {/* Left Sidebar */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[320px] lg:border-b-0 lg:border-r">
         {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
@@ -744,7 +746,7 @@ export function LiveConsole() {
             </span>
           </div>
         )}
-        <div className="p-5 border-b border-border-strong bg-white flex flex-col gap-3">
+        <div className="p-5 border-b border-border-strong bg-card flex flex-col gap-3">
           {/* 배경 갱신 표시 — 데이터가 있는데 새로 불러오는 중이면 '갱신 중'(전체 스켈레톤 대신 비침투적 힌트). */}
           {appsValidating && !loadingList && chats.length > 0 && (
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
@@ -810,7 +812,7 @@ export function LiveConsole() {
               return (
                 <div
                   key={head.applicant_id}
-                  className={`rounded-xl transition-all ${groupSelected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
+                  className={`rounded-xl transition-all ${groupSelected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}
                 >
                   {/* 이름 줄도 눌러서 연다 — 카드에서 가장 크고 굵은 요소가 죽어 있으면
                       "안 열리는구나"라고 학습하고 떠난다(제목 클릭은 카드 UI의 기본 관습).
@@ -850,7 +852,7 @@ export function LiveConsole() {
                     return (
                       <div
                         key={h.candidate_id}
-                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-brand-yellow bg-yellow-50" : "border-muted bg-white hover:border-gray-300"}`}
+                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-brand-yellow bg-yellow-50" : "border-muted bg-card hover:border-gray-300"}`}
                       >
                         <button onClick={() => selectHandoff(h)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
                           <div className="flex items-center justify-between gap-2 mb-1">
@@ -894,7 +896,7 @@ export function LiveConsole() {
             {confirmPending.map((p) => {
               const selected = selectedChatId === p.applicant_id;
               return (
-                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}>
+                <div key={p.applicant_id} className={`rounded-xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
                   <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="px-2 py-0.5 rounded-full text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
@@ -926,7 +928,7 @@ export function LiveConsole() {
           {loadingList && (
             <>
               {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="p-3.5 rounded-xl border border-muted bg-white animate-pulse">
+                <div key={i} className="p-3.5 rounded-xl border border-muted bg-card animate-pulse">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-8 h-8 rounded-lg bg-muted" />
                     <div className="h-3.5 w-24 rounded bg-muted" />
@@ -995,7 +997,7 @@ export function LiveConsole() {
       {/* Middle Chat Window */}
       {activeChat ? (
         <div className="flex-1 flex flex-col bg-muted min-w-0">
-          <div className="min-h-[60px] shrink-0 bg-white border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-h-[60px] shrink-0 bg-card border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[16px] text-muted-foreground">지원자</span></div>
             <div className="flex items-center gap-1.5 flex-wrap">
               {activeChat.source && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
@@ -1008,7 +1010,7 @@ export function LiveConsole() {
           {/* 멀티-잡 공고 선택 탭 — 동시에 2개 이상 공고를 진행 중일 때만 노출.
               공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
           {activeJobs.length > 1 && (
-            <div className="shrink-0 bg-white border-b border-border-strong px-6 py-2 flex items-center gap-2 overflow-x-auto">
+            <div className="shrink-0 bg-card border-b border-border-strong px-6 py-2 flex items-center gap-2 overflow-x-auto">
               <span className="text-[11px] font-bold text-muted-foreground shrink-0">
                 붙어 있는 공고 {activeJobs.length}건 · 탭 전환
                 {activeJobs.some((j) => j.agent_stage == null) && (
@@ -1079,15 +1081,15 @@ export function LiveConsole() {
           <div className="w-full max-w-md text-center">
             <div className="text-sm font-bold text-muted-foreground mb-4">지금 응대 현황</div>
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">지금 답할 차례</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{unansweredCount}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">건</span></div>
               </div>
-              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">사람 확인 필요</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{handoffGroups.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
               </div>
-              <div className="rounded-xl border border-border-strong bg-white px-3 py-3">
+              <div className="rounded-xl border border-border-strong bg-card px-3 py-3">
                 <div className="text-[11px] font-bold text-muted-foreground">확정 대기</div>
                 <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{confirmPending.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
               </div>
@@ -1119,7 +1121,7 @@ export function LiveConsole() {
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
       {activeChat && (
-        <div className="w-[340px] shrink-0 bg-white border-l border-border-strong flex flex-col">
+        <div className="w-[340px] shrink-0 bg-card border-l border-border-strong flex flex-col">
           {/* key에 selectedJobId를 넣지 않는다 — 그 값은 /active-jobs 응답이 온 뒤 비동기로 채워져
               패널을 한 번 더 리마운트시킨다. 큐에서 확정 모달을 열었을 때 그 리마운트가 모달 state를
               날려 '버튼이 씹힌 것처럼' 보이던 경합의 원인이었다. jobId는 prop으로 반응적으로 읽힌다. */}

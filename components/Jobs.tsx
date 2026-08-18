@@ -415,7 +415,7 @@ function EditSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white border border-border-strong rounded-2xl overflow-hidden">
+    <div className="bg-card border border-border-strong rounded-2xl overflow-hidden">
       <button
         type="button"
         onClick={onToggle}
@@ -2338,7 +2338,7 @@ export function Jobs() {
                           setNewJobBranchId("");
                         }
                       }}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">화주사 선택</option>
                       {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2359,7 +2359,7 @@ export function Jobs() {
                             if (typeof cid === "number") setNewJobClientId(cid);
                           }
                         }}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">지점 선택</option>
                         {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2372,7 +2372,7 @@ export function Jobs() {
                     <select
                       value={newJobSiteManagerId}
                       onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">미지정</option>
                       {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2398,7 +2398,7 @@ export function Jobs() {
                     <select
                       value={newJobPeriod}
                       onChange={(e) => setNewJobPeriod(e.target.value)}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">기간 미지정</option>
                       <option value="하루">하루(당일 단기)</option>
@@ -2433,7 +2433,7 @@ export function Jobs() {
                     aria-checked={newJobVehicleRequired}
                     aria-label="차량(이륜/사륜) 필요"
                     onClick={() => setNewJobVehicleRequired(!newJobVehicleRequired)}
-                    className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${newJobVehicleRequired ? "bg-success" : "bg-gray-300"}`}
+                    className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${newJobVehicleRequired ? "bg-success" : "bg-switch-background"}`}
                   >
                     <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${newJobVehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
                   </button>
@@ -2448,7 +2448,7 @@ export function Jobs() {
                       <select
                         value={newJobPayType}
                         onChange={(e) => setNewJobPayType(e.target.value)}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">미지정</option>
                         {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -2601,7 +2601,7 @@ export function Jobs() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 기간</label>
-                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                    <select value={editForm.workPeriod} onChange={(e) => setEditForm({ ...editForm, workPeriod: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                       <option value="">미지정</option>
                       <option value="하루">하루(당일 단기)</option>
                       <option value="단기">단기(며칠~몇 주)</option>
@@ -2665,7 +2665,7 @@ export function Jobs() {
                             if (cur && !keepBranch) setEditDroppedBranch({ id: cur.id, name: cur.name });
                             setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
                           }}
-                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <option value="">미지정</option>
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2689,7 +2689,7 @@ export function Jobs() {
                               }
                               setEditForm({ ...editForm, branchId: v });
                             }}
-                            className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                            className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <option value="">미지정</option>
                             {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -2704,14 +2704,14 @@ export function Jobs() {
                       {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
                       <div>
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
-                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                        <select value={editForm.siteManagerId} onChange={(e) => setEditForm({ ...editForm, siteManagerId: e.target.value === "" ? "" : Number(e.target.value) })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                           <option value="">미지정</option>
                           {siteManagers.filter((m) => m.active || m.id === editForm.siteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>
                       </div>
                       <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-xl">
                         <div className="text-[13px] font-bold text-foreground">차량(이륜/사륜) 필요</div>
-                        <button type="button" role="switch" aria-checked={editForm.vehicleRequired} aria-label="차량(이륜/사륜) 필요" onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${editForm.vehicleRequired ? "bg-success" : "bg-gray-300"}`}>
+                        <button type="button" role="switch" aria-checked={editForm.vehicleRequired} aria-label="차량(이륜/사륜) 필요" onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${editForm.vehicleRequired ? "bg-success" : "bg-switch-background"}`}>
                           <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
                         </button>
                       </div>
@@ -2722,7 +2722,7 @@ export function Jobs() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 단가 형태</label>
-                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                            <select value={editForm.payType} onChange={(e) => setEditForm({ ...editForm, payType: e.target.value })} className="pr-8 w-full px-4 py-3 border border-border-strong rounded-xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                               <option value="">미지정</option>
                               {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                             </select>
@@ -3055,7 +3055,7 @@ export function Jobs() {
                         <div className="text-[11px] font-bold text-muted-foreground mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
                           {slotFill.map((s) => (
-                            <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-success-soft border border-success/25" : "bg-white border border-border-strong"}`}>
+                            <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-success-soft border border-success/25" : "bg-card border border-border-strong"}`}>
                               <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
                               <div className={`text-[14px] font-extrabold ${s.count > 0 ? "text-success" : "text-muted-foreground"}`}>{s.count}</div>
                             </div>
@@ -3113,7 +3113,7 @@ export function Jobs() {
                         <div
                           key={c.id}
                           /* 지금 상세로 보고 있는 후보 — 나란히 뜬 패널과 명단을 눈으로 잇는다 */
-                          className={`bg-white border rounded-xl p-3.5 transition-all ${
+                          className={`bg-card border rounded-xl p-3.5 transition-all ${
                             c.applicant_id === selectedApplicantId
                               ? "border-foreground shadow-[inset_3px_0_0_0_var(--foreground)]"
                               : "border-border-strong hover:border-gray-300"
