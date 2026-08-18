@@ -223,7 +223,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
   const activeCount = clients.filter((c) => c.active).length;
 
   return (
-    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto"}>
+    <div className={embedded ? "flex flex-col" : "p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0"}>
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           {!embedded && <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">화주사 관리</h1>}

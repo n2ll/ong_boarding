@@ -48,7 +48,6 @@ interface Preview {
 }
 
 // 미답 건을 잃지 않도록 미리보기 조회 대상을 넓게 잡는 기간(최근 답장 기준)
-const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
 function agoLabel(iso: string | null | undefined, now: number): string {
   if (!iso) return "-";
@@ -67,7 +66,7 @@ export function ReplyQueueCard({
   onCountsChange,
 }: {
   initialJobId?: number | null;
-  onCountsChange?: (counts: { total: number; untouched: number }) => void;
+  onCountsChange?: (counts: { total: number; untouched: number; oldestDays: number | null }) => void;
 } = {}) {
   // scope=dashboard — Dashboard.tsx와 **반드시 같은 키**(합집합 컬럼 응답·캐시 공유).
   // 이 카드의 mutate()가 대시보드 통계까지 갱신하는 것도 같은 키라서 가능하다.
@@ -80,11 +79,15 @@ export function ReplyQueueCard({
     return m;
   }, [jobsRes]);
 
-  // 미리보기 조회 대상: 최근 14일 내 inbound가 있는 지원자(last_message_at은 inbound 수신 시각).
-  // 열람 여부는 보지 않는다 — 열람만 하고 답장하지 않은 건을 놓치지 않기 위해.
+  // 미리보기 조회 대상: 답장(inbound) 이력이 있는 전원 — 기간 제한 없음.
+  // 예전엔 최근 14일 창으로 조회 대상 자체를 잘랐다. 그 결과 답장이 오고 14일이 지나면
+  // **아직 아무도 답하지 않았어도** 큐에서 조용히 빠졌고, 화면은 "답할 대화 없음"이라는
+  // 정상 화면을 보여줬다. SLA 도구는 오래된 것이 사라지는 게 아니라 위로 와야 한다.
+  // (답한 대화는 아래 미답 판정(마지막 메시지=inbound)에서 자연히 빠진다 — '처리 완료는
+  //  안 보이고 미처리는 무기한'이 이 큐의 새 규칙이다. 2026-08-14 감사)
   const previewTargets = useMemo(() => {
     const rows = data?.data ?? [];
-    return rows.filter((a) => a.last_message_at && Date.now() - new Date(a.last_message_at).getTime() < RECENT_INBOUND_MS);
+    return rows.filter((a) => a.last_message_at);
   }, [data]);
 
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
@@ -119,10 +122,11 @@ export function ReplyQueueCard({
   const allItems = useMemo(() => {
     return previewTargets
       .filter((a) => previewById[a.id]?.direction === "inbound")
+      // 오래 기다린 사람이 맨 위 — 최신순이면 오래된 미답이 아래로 밀려 영영 안 보인다.
       .sort((a, b) => {
         const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
         const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
-        return bt - at;
+        return at - bt;
       });
   }, [previewTargets, previewById]);
 
@@ -155,9 +159,14 @@ export function ReplyQueueCard({
   const onCountsRef = useRef(onCountsChange);
   onCountsRef.current = onCountsChange;
   const allUntouched = useMemo(() => allItems.filter((a) => a.agent_stage !== "paused").length, [allItems]);
+  // 가장 오래 기다린 답장의 경과일 — 대시보드 '오늘의 할 일'이 색 승급(7일+ 빨강)에 쓴다.
+  const oldestDays = useMemo(() => {
+    const t = allItems[0]?.last_message_at; // 오래된 순 정렬이라 첫 행이 최장 대기
+    return t ? Math.max(0, Math.floor((Date.now() - new Date(t).getTime()) / 86400000)) : null;
+  }, [allItems]);
   useEffect(() => {
-    onCountsRef.current?.({ total: allItems.length, untouched: allUntouched });
-  }, [allItems.length, allUntouched]);
+    onCountsRef.current?.({ total: allItems.length, untouched: allUntouched, oldestDays });
+  }, [allItems.length, allUntouched, oldestDays]);
 
   // 상대시각을 화면에 머무는 동안 갱신 (InterestQueueCard와 동일 1분 틱)
   const [nowTick, setNowTick] = useState(() => Date.now());

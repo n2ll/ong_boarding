@@ -28,6 +28,9 @@ export interface LiveJobLink {
   /** null = 관심만 누른 상태(아직 대화 전). 'paused' = 사람 확인 필요. 그 외 = AI 응대 단계. */
   agent_stage: string | null;
   created_at: string | null;
+  /** 단계가 마지막으로 바뀐 시각(행 updated_at) — paused면 '며칠째 사람을 기다리는지'의 근사값.
+      다른 update로도 갱신될 수 있어 정확한 pause 시각은 아니지만, 목록 배지용 근사로 충분하다. */
+  stage_updated_at: string | null;
 }
 
 /**
@@ -81,7 +84,7 @@ export async function gatherLiveJobLinks(
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("job_candidates")
-      .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, status, closes_at )")
+      .select("applicant_id, job_id, agent_stage, created_at, updated_at, jobs:job_id ( id, title, branch, status, closes_at )")
       .in("applicant_id", ids)
       .or("agent_stage.is.null,agent_stage.neq.abort")
       .order("created_at", { ascending: true })
@@ -115,6 +118,7 @@ export async function gatherLiveJobLinks(
       branch: j.branch ?? null,
       agent_stage: (row.agent_stage as string | null) ?? null,
       created_at: (row.created_at as string | null) ?? null,
+      stage_updated_at: (row.updated_at as string | null) ?? null,
     });
     links.set(applicantId, arr);
   }

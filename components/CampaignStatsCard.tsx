@@ -30,7 +30,10 @@ interface CampaignStatsRes {
   by_job: ByJob[];
   replied: number;
   opted_out: number;
+  confirmed: number;
   last_sent_at: string | null;
+  /** true = 최근 창에 발송이 없어 마지막 캠페인에 창을 다시 건 상태(지난 캠페인 표시 중) */
+  stale: boolean;
 }
 
 function agoLabel(iso: string | null, now: number): string {
@@ -58,7 +61,8 @@ export function CampaignStatsCard() {
     return () => clearInterval(t);
   }, []);
 
-  // 발송 이력이 없으면(또는 로딩/오류) 카드 숨김 — 캠페인이 없는 날 대시보드를 차지하지 않는다.
+  // 발송 이력이 아예 없으면(또는 로딩/오류) 카드 숨김. 최근 창에 없더라도 지난 캠페인이
+  // 있으면 서버가 그쪽으로 창을 옮겨 보내준다(stale) — 지난 성과를 판단할 근거는 남긴다.
   if (error || !data || data.sent === 0) return null;
 
   const pctOfSent = (n: number) => (data.sent ? Math.round((n / data.sent) * 100) : 0);
@@ -67,6 +71,9 @@ export function CampaignStatsCard() {
     { key: "viewed", label: "열람", value: data.viewed, pct: pctOfSent(data.viewed), anchor: null },
     { key: "interested", label: "관심", value: data.interested, pct: pctOfSent(data.interested), anchor: "interest-queue" },
     { key: "replied", label: "답장", value: data.replied, pct: pctOfSent(data.replied), anchor: "reply-queue" },
+    // 퍼널의 마지막 칸 — 이 칸이 0이면 "반응은 좋았는데 확정이 안 됐다"는 뜻이다.
+    // 관심·답장만 보고 "캠페인을 더 돌리자"로 가지 않게, 실제 결과를 같은 줄에서 말한다.
+    { key: "confirmed", label: "확정", value: data.confirmed, pct: pctOfSent(data.confirmed), anchor: null },
   ];
 
   return (
@@ -79,7 +86,7 @@ export function CampaignStatsCard() {
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
-            <Megaphone size={15} className="text-info" /> 다시 연락 캠페인 (최근 {data.window_days}일)
+            <Megaphone size={15} className="text-info" /> 다시 연락 캠페인 {data.stale ? "(지난 캠페인)" : `(최근 ${data.window_days}일)`}
           </h2>
           <div className="text-[12px] text-muted-foreground mt-0.5" title={`발송 묶음 — 최근 ${data.window_days}일 안에 다시 연락 문자를 받은 인원 묶음`}>
             발송 묶음 {data.sent}명의 반응 현황

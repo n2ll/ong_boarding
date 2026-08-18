@@ -609,7 +609,9 @@ export function Jobs() {
   // 수정 모달에서 화주사를 바꿔 '떨어져 나간' 지점 — 지점 셀렉트는 그 순간 화면에서 사라지므로(해당 화주사에 지점이 없으면)
   // 무슨 일이 벌어졌는지 배너·확인 모달로 남긴다. 화주사를 원래대로 되돌리면 지점도 복원한다.
   const [editDroppedBranch, setEditDroppedBranch] = useState<{ id: number; name: string } | null>(null);
-  const [newJobCapacity, setNewJobCapacity] = useState(1);
+  // 모집 인원은 빈 칸에서 시작한다 — 예전 프리필 1은 발사 체크리스트가 "가장 위험"이라 적은 값이다.
+  // 1인 채 등록되면 첫 확정 순간 나머지 관심자 전원에게 "자리가 모두 찼어요"가 나간다(07-14 실제 발생).
+  const [newJobCapacity, setNewJobCapacity] = useState<number | "">("");
   const [newJobPayType, setNewJobPayType] = useState("");
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
   const [newJobPeriod, setNewJobPeriod] = useState("");
@@ -1044,7 +1046,7 @@ export function Jobs() {
     setNewJobMode(DEFAULT_RECRUIT_MODE);
     setChannelDraftsFromCopy(false);
     setDuplicatedFrom(null);
-    setNewJobCapacity(1);
+    setNewJobCapacity("");
     setNewJobPayType("");
     setNewJobPayAmount("");
     setNewJobPeriod("");
@@ -1137,7 +1139,7 @@ export function Jobs() {
       if (!dupExternal && j.exposure === "targeted" && !draftToRule(dupRule)) {
         toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
       }
-      setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : 1);
+      setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : "");
       setNewJobPayType(j.pay_type ?? "");
       setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");
       setNewJobPeriod(j.work_period ?? "");
@@ -1180,6 +1182,21 @@ export function Jobs() {
       toast.error("시작일이 지난 날짜입니다. 오늘 이후 날짜로 설정해주세요.");
       return;
     }
+    // 발사 체크리스트가 사람에게 요구하던 13개 중 코드가 막는 건 2개뿐이었다(마감시각·시작일).
+    // 사고로 직결되는 3개를 여기서 막는다 — 화면 라벨과 문서가 서로 반대말을 하던 자리다.
+    if (newJobCapacity === "" || Number(newJobCapacity) < 1) {
+      toast.error("모집 인원을 입력해주세요. 이 숫자가 차면 나머지 관심자에게 '자리가 찼어요'가 나갑니다.");
+      return;
+    }
+    if (!newJobPayType && !newJobPayInfo.trim()) {
+      toast.error("급여를 입력해주세요 — 단가 형태를 고르거나 급여·정산 정보를 적어주세요.");
+      return;
+    }
+    if (!newJobPickupAddress.trim()) {
+      toast.error("집결지를 입력해주세요 — 만남장소 안내 문자와 거리 정렬에 쓰입니다.");
+      setNewJobExtraOpen(true); // 접이식 안에 있는 칸이라, 접힌 채 에러만 나면 어디를 채우라는 건지 알 수 없다
+      return;
+    }
     // resetNewJobForm()이 SOS 상태를 지우기 전에, 등록 후 CTA용으로 스냅샷을 잡아둔다.
     const sosSnapshot = { id: newJobSosId, region: newJobSosRegion, vehicle: newJobSosVehicle };
     // 선택 화주사에 실제 속한 지점만 유효 지점으로 취급(숨겨졌거나 타 화주사에 속한 stale 지점은 무시).
@@ -1207,7 +1224,7 @@ export function Jobs() {
           recruit_mode: newJobMode,
           exposure: newJobExposure.exposure,
           exposure_rule: draftToRule(newJobExposure.rule),
-          capacity: newJobCapacity,
+          capacity: Number(newJobCapacity),
           vehicle_required: newJobVehicleRequired,
           pay_type: newJobPayType || null,
           // 금액은 단가형태가 있고 '협의'가 아닐 때만 저장. '협의'/미지정이면 화면에 숨긴 stale 금액이 실려
@@ -1799,10 +1816,18 @@ export function Jobs() {
           <div key={i} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col justify-between">
             <div className="text-[13px] font-bold text-muted-foreground mb-2">{stat.label}</div>
             <div className="flex items-baseline gap-1">
-              <span className={`text-[28px] font-extrabold tracking-tight leading-none ${stat.highlight ? 'text-warning-strong' : stat.color || 'text-foreground'}`}>
-                {stat.value}
-              </span>
-              <span className="text-sm font-semibold text-muted-foreground">{stat.unit}</span>
+              {/* 데이터를 못 받았으면 숫자를 말하지 않는다 — "0건"과 "모름"은 다른 말이다.
+                  스쳐 보는 매니저에게 로딩·에러 중의 0은 "할 일 없음"으로 읽힌다. */}
+              {jobsFirstLoad || jobsError ? (
+                <span className="text-[28px] font-extrabold tracking-tight leading-none text-muted-foreground/40" title={jobsError ? "불러오지 못했어요" : "불러오는 중"}>—</span>
+              ) : (
+                <>
+                  <span className={`text-[28px] font-extrabold tracking-tight leading-none ${stat.highlight ? 'text-warning-strong' : stat.color || 'text-foreground'}`}>
+                    {stat.value}
+                  </span>
+                  <span className="text-sm font-semibold text-muted-foreground">{stat.unit}</span>
+                </>
+              )}
             </div>
           </div>
         ))}
@@ -2150,7 +2175,7 @@ export function Jobs() {
                 </div>
                 <div>
                   <h2 className="text-[18px] font-extrabold text-foreground tracking-tight">AI 맞춤형 공고 작성</h2>
-                  <p className="text-[13px] text-muted-foreground mt-0.5">간단한 조건만 입력하면 시니어에 최적화된 공고 초안을 생성합니다.</p>
+                  <p className="text-[13px] text-muted-foreground mt-0.5">간단한 조건만 입력하면 당근·알바몬·문자 채널별 공고 초안을 만들어 드려요.</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" aria-label="공고 등록 창 닫기" onClick={closeRegisterModal}>
@@ -2158,7 +2183,11 @@ export function Jobs() {
               </Button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background">
+            {/* [&>*]:shrink-0 — flex 세로 스택 + 자식 overflow-hidden 조합에서 flex가 자식 높이를
+                뺏어 누르면 내용이 그냥 사라진다. 실제로 AI 초안 카드가 높이 44px로 눌려
+                "생성 성공 토스트는 떴는데 본문이 안 보이는" 상태가 재현됐다(2026-08-14 감사).
+                대시보드 히어로 352px 잘림과 같은 원인 — Dashboard.tsx:281 주석 참고. */}
+            <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background [&>*]:shrink-0">
               {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
               {promptOpen ? (
                 <div className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm">
@@ -2166,7 +2195,7 @@ export function Jobs() {
                   <textarea
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
-                    placeholder="예: 스타벅스 성수점 매장 청소 및 테이블 관리, 주 3일 오전반, 시급 1.1만원, 60대 우대"
+                    placeholder="예: 강북권 새벽 냉장배송, 주 5일 새벽 3~9시, 건당 3,500원, 1톤 냉장차 지참"
                     className="w-full bg-background border border-border-strong rounded-xl px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none"
                   />
                   <div className="flex justify-end mt-3">
@@ -2216,7 +2245,7 @@ export function Jobs() {
               {(isGenerating || channelDrafts) && (
                 <div className="bg-white/70 backdrop-blur-xl border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden">
                   {isGenerating && (
-                    <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center backdrop-blur-md">
                       <Wand2 size={28} className="text-warning-strong animate-bounce mb-3" />
                       <div className="text-[14px] font-bold text-foreground">AI 옹봇이 채널별 공고를 작성하고 있습니다...</div>
                       <div className="text-[12px] text-muted-foreground mt-1">당근 · 알바몬 · 문자 형식으로 각각 최적화하는 중</div>
@@ -2259,7 +2288,13 @@ export function Jobs() {
                         onChange={(e) => setChannelDrafts({ ...channelDrafts, [activeChannel]: e.target.value })}
                         className="w-full bg-yellow-50 border-0 rounded-xl px-4 py-3.5 text-[13.5px] text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-ring min-h-[260px] font-medium resize-none whitespace-pre-wrap"
                       />
-                      <div className="mt-2 text-[11.5px] text-muted-foreground">등록 시 <b className="text-muted-foreground">알바몬 형식</b> 본문이 공고 원문으로 저장되어 AI 스크리닝이 참조합니다.</div>
+                      {/* 안내문은 지금 보는 탭 기준으로 말한다 — 예전엔 당근 탭을 보면서 "알바몬 형식이 저장된다"는
+                          고정 문구를 읽어야 해서, 보는 것과 저장되는 것이 다르다는 사실이 오히려 가려졌다. */}
+                      <div className="mt-2 text-[11.5px] text-muted-foreground">
+                        {activeChannel === "albamon"
+                          ? <>이 탭 본문이 <b className="text-muted-foreground">공고 원문</b>으로 저장되어 AI 스크리닝이 참조합니다.</>
+                          : <>지금 보는 {activeChannel === "danggeun" ? "당근알바" : "문자(SMS)"} 탭은 복사·발송용이에요 — <b className="text-muted-foreground">공고 원문(AI 참조)은 알바몬 탭</b> 본문으로 저장됩니다.</>}
+                      </div>
                     </>
                   )}
                 </div>
@@ -2348,12 +2383,13 @@ export function Jobs() {
                 {/* 정원 · 기간 · 마감시각 */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">모집 인원</label>
+                    <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">모집 인원 <span className="text-error-strong" aria-hidden>*</span></label>
                     <input
                       type="number"
                       min={1}
                       value={newJobCapacity}
-                      onChange={(e) => setNewJobCapacity(Math.max(1, Number(e.target.value) || 1))}
+                      placeholder="예: 3"
+                      onChange={(e) => setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1))}
                       className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
@@ -2405,7 +2441,7 @@ export function Jobs() {
 
                 {/* E18 · 급여 (선택) — 예전엔 단가형태·금액(푸터)과 정산정보(접이식)로 분산. 한 그룹으로 일원화. 채우면 AI가 단가·정산 문의에 직접 답한다. */}
                 <div className="p-4 bg-background border border-border-strong rounded-xl flex flex-col gap-4">
-                  <div className="text-[12px] font-bold text-gray-700">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
+                  <div className="text-[12px] font-bold text-gray-700">급여 <span className="text-error-strong" aria-hidden>*</span> — 단가 형태 또는 급여·정산 정보 중 하나는 필수 · 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">대표 단가 형태</label>
@@ -2452,8 +2488,8 @@ export function Jobs() {
                     className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <div>
-                      <div className="text-[13px] font-bold text-foreground">근무 상세 · AI 응대 근거 (선택)</div>
-                      <div className="text-[11.5px] text-muted-foreground mt-0.5">근무시간·시작일·집결지와 정책·참고정보를 채우면 맞춤 공고 링크에 표시되고 AI가 문의에 직접 답합니다.</div>
+                      <div className="text-[13px] font-bold text-foreground">근무 상세 · AI 응대 근거 <span className="text-error-strong" aria-hidden>*</span></div>
+                      <div className="text-[11.5px] text-muted-foreground mt-0.5"><b>집결지는 필수</b> — 만남장소 문자·거리 정렬의 근거예요. 근무시간·정책·참고정보를 채우면 맞춤 공고 링크에 표시되고 AI가 문의에 직접 답합니다.</div>
                     </div>
                     <ChevronRight size={18} className={`text-muted-foreground transition-transform ${newJobExtraOpen ? "rotate-90" : ""}`} />
                   </button>
@@ -2480,7 +2516,7 @@ export function Jobs() {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">집결지</label>
+                        <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">집결지 <span className="text-error-strong" aria-hidden>*</span> <span className="text-muted-foreground font-semibold">— 만남장소 안내 문자·거리 정렬에 그대로 쓰여요</span></label>
                         <input
                           type="text"
                           value={newJobPickupAddress}
@@ -2527,7 +2563,10 @@ export function Jobs() {
             {/* E16 · 푸터 — 라벨 없는 컨트롤 벽은 본문 '공고 설정'으로 승격. 여기는 닫기/등록만. */}
             <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-strong bg-white">
               <Button variant="ghost" size="lg" onClick={closeRegisterModal}>닫기</Button>
-              <Button variant="brand" size="lg" onClick={handleRegisterJob} disabled={!draftBody} isLoading={registering}>
+              {!draftBody && (
+                <span className="text-[12px] font-medium text-muted-foreground">본문을 생성하거나 직접 작성하면 등록할 수 있어요</span>
+              )}
+              <Button variant="primary" size="lg" onClick={handleRegisterJob} disabled={!draftBody} isLoading={registering}>
                 {!registering && <CheckCircle2 size={16} />}
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </Button>
@@ -2549,7 +2588,7 @@ export function Jobs() {
             {editLoading ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
             ) : (
-              <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-4">
+              <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-4 [&>*]:shrink-0">
                 {/* 상단 상시 표시(E17) — 가장 자주 고치는 제목·기간·마감을 접이식 밖 최상단으로. */}
                 <div>
                   <label className="block text-[13px] font-bold text-gray-700 mb-2">

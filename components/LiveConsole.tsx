@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Search, X, AlertTriangle, ArrowRight } from "lucide-react";
+import { Search, X, AlertTriangle, ArrowRight, Phone } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
+import { TextareaField } from "./ui/field";
 
 /**
  * 대화창과 오른쪽 상세는 **대화를 누르기 전엔 렌더되지 않는다**(아래 `activeChat &&`).
@@ -307,6 +308,10 @@ export function LiveConsole() {
         if (isBaseChat(a)) return true;
         const pv = previewById[a.id];
         if (!pv) return false;
+        // 미답(마지막 메시지가 지원자 답장)은 기간 제한 없이 남는다 — 예전엔 14일이 지나면
+        // 아무도 답하지 않았어도 목록에서 사라졌고, 화면은 "진행 중인 대화가 없어요"라는
+        // 정상 화면으로 그 사실을 덮었다. 처리한 대화(마지막이 우리 발신)만 14일 뒤 접는다.
+        if (pv.direction === "inbound") return true;
         const li = pv.last_inbound_at;
         if (li && Date.now() - new Date(li).getTime() < RECENT_INBOUND_MS) return true;
         return isAwaitingPreview(pv);
@@ -497,7 +502,7 @@ export function LiveConsole() {
   const selectHandoff = (h: Handoff) => {
     focusJobIdRef.current = h.job_id;
     // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
-    focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null };
+    focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null, stage_updated_at: h.paused_at ?? null };
     if (h.applicant_id === selectedChatId) {
       // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
       // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
@@ -512,7 +517,43 @@ export function LiveConsole() {
     }
   };
 
-  // 처리 완료 → AI 재개. 큐에서 즉시 제거되도록 새로고침.
+  // '처리 완료' — 전화·문자로 직접 해결한 인계 건을 큐에서 내보낸다(AI는 계속 정지).
+  // 예전엔 이 출구가 없어서, 전화로 끝낸 건도 카드가 남아 방치 일수만 올랐다(실측 30일·22일).
+  // 결과 3택+한 줄 메모는 pool_events로 타임라인에 남는다 — 유선면접이 처음으로 제품 안에 기록된다.
+  const [resolveTarget, setResolveTarget] = useState<Handoff | null>(null);
+  const [resolveOutcome, setResolveOutcome] = useState<"call" | "sms" | "closed">("call");
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolveSaving, setResolveSaving] = useState(false);
+  const openResolve = (h: Handoff) => {
+    setResolveTarget(h);
+    setResolveOutcome("call");
+    setResolveNote("");
+  };
+  const submitResolve = async () => {
+    if (!resolveTarget || resolveSaving) return;
+    setResolveSaving(true);
+    try {
+      const res = await fetch("/api/admin/agent/handoffs/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate_id: resolveTarget.candidate_id, outcome: resolveOutcome, note: resolveNote }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        toast.error(json?.error || "처리 완료에 실패했어요.");
+        return;
+      }
+      toast.success(`${resolveTarget.applicant_name}님 — 처리 완료로 기록했어요. AI는 계속 정지 상태예요.`);
+      setResolveTarget(null);
+      handleChanged();
+    } catch {
+      toast.error("처리 완료에 실패했어요.");
+    } finally {
+      setResolveSaving(false);
+    }
+  };
+
+  // AI 재개 — 봇이 다시 응대를 이어받는다. 큐에서 즉시 제거되도록 새로고침.
   const resumeHandoff = async (h: Handoff) => {
     try {
       const res = await fetch("/api/admin/agent/resume", {
@@ -758,7 +799,7 @@ export function LiveConsole() {
 
         {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
             {handoffGroups.length === 0 && <div className="text-[13px] text-muted-foreground p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
             {handoffGroups.map((items) => {
               const head = items[0];
@@ -771,9 +812,16 @@ export function LiveConsole() {
                   key={head.applicant_id}
                   className={`rounded-xl transition-all ${groupSelected ? "bg-white border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-white border border-transparent hover:border-border-strong"}`}
                 >
+                  {/* 이름 줄도 눌러서 연다 — 카드에서 가장 크고 굵은 요소가 죽어 있으면
+                      "안 열리는구나"라고 학습하고 떠난다(제목 클릭은 카드 UI의 기본 관습).
+                      전화 버튼을 카드에 올린다 — 30일 멈춘 대화에 필요한 건 AI 재개가 아니라
+                      전화인데, 예전엔 대화를 연 뒤 상세 패널까지 3클릭이었다. */}
                   <div className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-1.5">
-                    <div className="text-[14px] font-bold text-foreground flex items-center gap-1.5 min-w-0">
-                      <span className="truncate">{head.applicant_name}</span>
+                    <button
+                      onClick={() => selectHandoff(head)}
+                      className="min-w-0 flex items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+                    >
+                      <span className="truncate text-[14px] font-bold text-foreground">{head.applicant_name}</span>
                       {multi && (
                         <span
                           className="shrink-0 px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-error-soft text-error-strong"
@@ -782,8 +830,20 @@ export function LiveConsole() {
                           공고 {items.length}건
                         </span>
                       )}
+                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {head.phone && (
+                        <a
+                          href={`tel:${head.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title={`${head.applicant_name}님에게 전화 (${head.phone})`}
+                          className="relative flex items-center gap-1 rounded-md text-[11.5px] font-bold text-info after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Phone size={12} /> 전화
+                        </a>
+                      )}
+                      <span className={`text-[11.5px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
                     </div>
-                    <span className={`shrink-0 text-[11.5px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
                   </div>
                   {items.map((h) => {
                     const selected = selectedChatId === h.applicant_id && selectedJobId === h.job_id;
@@ -805,9 +865,10 @@ export function LiveConsole() {
                           </div>
                           {h.reason && <div className="text-[12px] text-gray-700 line-clamp-2 leading-snug">{h.reason}</div>}
                         </button>
-                        <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
-                          <span className="text-[11px] font-bold text-muted-foreground truncate">→ {h.suggested_action}</span>
-                          <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-start justify-between gap-2 px-2.5 pb-2 pt-0.5">
+                          {/* AI가 적어둔 '다음 행동'이 말줄임 뒤에 숨지 않게 두 줄까지 편다 */}
+                          <span className="text-[11px] font-bold text-muted-foreground line-clamp-2 leading-snug">→ {h.suggested_action}</span>
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                             {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
                             {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
                               <Button size="chip" variant="ghost" onClick={() => openPromote(h)} className="px-2.5 bg-yellow-50 text-warning-strong border border-brand-yellow hover:bg-yellow-100 hover:text-warning-strong">공고에 반영</Button>
@@ -816,6 +877,8 @@ export function LiveConsole() {
                               <Button size="chip" variant="ghost" onClick={() => openKb(h)} className="px-2.5 bg-success-soft text-success-strong border border-success/25 hover:bg-success-soft hover:text-success-strong">지식 등록</Button>
                             )}
                             <Button size="chip" variant="ghost" onClick={() => resumeHandoff(h)} className="px-2.5 bg-info-soft text-info-strong border border-info/25 hover:bg-info-soft hover:text-info-strong">AI 재개</Button>
+                            {/* 큐의 출구 — 전화·문자로 해결한 건을 닫는다. AI 재개와 달리 봇을 다시 붙이지 않는다. */}
+                            <Button size="chip" variant="ghost" onClick={() => openResolve(h)} className="px-2.5 bg-foreground text-white border border-foreground hover:bg-gray-800 hover:text-white">처리 완료</Button>
                           </div>
                         </div>
                       </div>
@@ -826,7 +889,7 @@ export function LiveConsole() {
             })}
           </div>
         ) : activeTab === "confirm" ? (
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
             {confirmPending.length === 0 && <div className="text-[13px] text-muted-foreground p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
             {confirmPending.map((p) => {
               const selected = selectedChatId === p.applicant_id;
@@ -857,7 +920,7 @@ export function LiveConsole() {
             })}
           </div>
         ) : (
-        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
           {/* 콜드 로드(데이터 아직 없음)일 때 스켈레톤 카드 — 옛 데이터를 진짜처럼 보여주는 혼동 방지.
               배경 갱신(데이터 있음+isValidating)은 상단 '갱신 중' 표시로만 — 매 주기 전체 스켈레톤은 깜빡여서 안 씀. */}
           {loadingList && (
@@ -1030,9 +1093,62 @@ export function LiveConsole() {
         </div>
       )}
 
+        {/* 처리 완료 모달 — 결과 3택 + 한 줄 메모. 통화 결과가 타임라인(pool_events)에 남아
+          다음 사람이 같은 사람에게 다시 걸거나 아무도 안 거는 일이 없게 한다. */}
+      <Modal
+        open={Boolean(resolveTarget)}
+        onClose={() => setResolveTarget(null)}
+        busy={resolveSaving}
+        size="sm"
+        title={resolveTarget ? `처리 완료 — ${resolveTarget.applicant_name}` : "처리 완료"}
+        description="어떻게 해결했는지 남깁니다. AI는 계속 정지 상태로 두고 큐에서만 내보내요."
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setResolveTarget(null)} disabled={resolveSaving}>취소</Button>
+            <Button size="sm" onClick={submitResolve} isLoading={resolveSaving}>처리 완료로 기록</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="mb-1.5 text-[13px] font-bold text-foreground">어떻게 해결했나요?</div>
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="처리 결과">
+              {([
+                { id: "call", label: "통화로 해결" },
+                { id: "sms", label: "문자로 해결" },
+                { id: "closed", label: "종결(기타)" },
+              ] as const).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={resolveOutcome === o.id}
+                  onClick={() => setResolveOutcome(o.id)}
+                  className={`min-h-10 rounded-xl border px-2 text-[12.5px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                    resolveOutcome === o.id
+                      ? "border-foreground bg-foreground text-white"
+                      : "border-border-strong bg-white text-gray-700 hover:border-foreground/30"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <TextareaField
+            label="한 줄 기록"
+            hint="예: 화·목 가능하다고 함, 다음 주 공고 나오면 연락 주기로 — 타임라인에 남아요"
+            rows={2}
+            value={resolveNote}
+            onChange={(e) => setResolveNote(e.target.value)}
+            placeholder="통화 내용 요약 (선택)"
+          />
+        </div>
+      </Modal>
+
       {/* 인계 → 자산화(③-1): 매니저 답변을 공고 단가·정책 필드에 반영 */}
       {promote && (
-        <Modal bare open={Boolean(promote)} onClose={() => setPromote(null)} size="md"
+      <Modal bare open={Boolean(promote)} onClose={() => setPromote(null)} size="md"
                title="확정 처리"
         >
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">

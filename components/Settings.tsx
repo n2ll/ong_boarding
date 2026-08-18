@@ -117,7 +117,7 @@ export function Settings() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
+    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
       {/* 페이지 전체에 '준비중' 배너·배지를 달면, 실제로 동작하는 화주사·지점·팀·외부연동까지
           미완성으로 오해된다(채용·확정 전 반드시 세팅해야 하는 것들이 여기 있다).
           준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}

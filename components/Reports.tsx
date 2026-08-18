@@ -114,7 +114,7 @@ export function Reports() {
   };
 
   return (
-    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto">
+    <div className="p-8 pb-12 flex flex-col h-full overflow-y-auto [&>*]:shrink-0">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
         <div>

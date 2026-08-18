@@ -27,7 +27,7 @@ interface JcRow {
   applicant_id: number;
   job_id: number;
   paused_reason: string | null;
-  agent_state: { meta?: { paused_at?: string; pause?: PauseMeta } } | null;
+  agent_state: { meta?: { paused_at?: string; pause?: PauseMeta; handoff_resolved?: unknown } } | null;
   updated_at: string;
   jobs: { id: number; title: string; branch: string | null } | null;
   applicants: { id: number; name: string | null; phone: string | null; branch: string | null } | null;
@@ -76,6 +76,9 @@ export async function GET(_req: NextRequest) {
     .map((c) => {
       const job = c.jobs ?? null;
       if (!job || typeof job.title !== "string") return null;
+      // '처리 완료'(handoffs/resolve) 표식이 있으면 큐에서 제외 — stage는 paused 그대로라
+      // (AI는 계속 정지) 조건만으로는 못 거른다. 표식이 큐의 유일한 출구다.
+      if (c.agent_state?.meta?.handoff_resolved) return null;
       const isSystemJob = job.title.startsWith("__");
       const pausedAt = c.agent_state?.meta?.paused_at ?? c.updated_at;
       const ageDays = Math.max(0, Math.floor((now - new Date(pausedAt).getTime()) / 86400000));

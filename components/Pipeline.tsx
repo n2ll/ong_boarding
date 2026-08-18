@@ -1669,7 +1669,15 @@ export function Pipeline() {
                 {distanceJobs.map((j) => (
                   <option key={j.id} value={String(j.id)}>{j.title}</option>
                 ))}
-                {distanceJobs.length === 0 && <option value="" disabled>상차지·마지막경유지 좌표가 있는 공고가 없어요</option>}
+                {/* 빈 이유를 정확히 말한다 — 예전엔 활성 공고가 0개여도 "좌표가 없어요"라고 해서,
+                    실무자가 멀쩡한 주소를 다시 입력하러 가게 만들었다(좌표는 있었고 공고가 마감된 것). */}
+                {distanceJobs.length === 0 && (
+                  <option value="" disabled>
+                    {visibleJobs.length === 0
+                      ? "진행 중인 공고가 없어요 — 공고를 먼저 등록하세요"
+                      : "진행 중인 공고에 상차지·경유지 주소(좌표)가 없어요"}
+                  </option>
+                )}
               </select>
             )}
 
@@ -2189,10 +2197,34 @@ export function Pipeline() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1 items-start">
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-border-strong text-gray-700' : c.stageId === 'screening' ? 'border-yellow-300 text-warning-strong bg-yellow-100' : c.stageId === 'interview' ? 'border-success-soft text-success-strong bg-success-soft' : c.stageId === 'excluded' ? 'border-gray-300 text-muted-foreground bg-background' : 'border-info/60 text-info-strong bg-info-soft'}`}>
-                                <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
-                                {c.stage}
-                              </span>
+                              {(() => {
+                                /* 같은 사람을 두 화면이 다르게 말하던 문제 — 이 배지는 applicants.status를,
+                                   인계 큐는 job_candidates.agent_stage를 읽어서, 22일째 사람을 기다리는 분이
+                                   여기서는 "AI 스크리닝 중"(노란 배지)으로 보였다. 안심시키는 쪽이 더 자주
+                                   보는 화면이라, 큐를 따로 열지 않으면 멈춘 사실을 알 방법이 없었다.
+                                   paused 결속이 있으면 상태 배지 대신 '사람 확인 필요 · N일'을 먼저 말한다. */
+                                const pausedLink = c.jobLinks.find((l) => l.agent_stage === "paused");
+                                if (pausedLink) {
+                                  const days = pausedLink.stage_updated_at
+                                    ? Math.max(0, Math.floor((Date.now() - new Date(pausedLink.stage_updated_at).getTime()) / 86400000))
+                                    : null;
+                                  return (
+                                    <span
+                                      className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border border-error/40 bg-error-soft text-error-strong"
+                                      title="AI가 답을 멈추고 매니저에게 넘긴 대화예요 — 실시간 응대의 '사람 확인 필요' 탭에서 처리하세요"
+                                    >
+                                      <div className="w-1.5 h-1.5 rounded-full bg-error" />
+                                      사람 확인 필요{days != null && days > 0 ? ` · ${days}일` : ""}
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-bold px-3 py-1.5 rounded-lg border bg-white ${c.stageId === 'applied' ? 'border-border-strong text-gray-700' : c.stageId === 'screening' ? 'border-yellow-300 text-warning-strong bg-yellow-100' : c.stageId === 'interview' ? 'border-success-soft text-success-strong bg-success-soft' : c.stageId === 'excluded' ? 'border-gray-300 text-muted-foreground bg-background' : 'border-info/60 text-info-strong bg-info-soft'}`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${c.stageColor}`} />
+                                    {c.stage}
+                                  </span>
+                                );
+                              })()}
                               {/* 배지는 2개까지만 — '가장 강한 반응 신호' + '문자 발송 불가 사유'.
                                   예전엔 가용성·마지막 연락·활동중·차량 미확인까지 최대 7개가 쌓여 무엇이 중요한지 알 수 없었고
                                   뜻은 마우스를 올려야 보였다. 나머지 값은 행의 다른 열과 지원자 상세에서 그대로 볼 수 있다. */}
@@ -2724,7 +2756,7 @@ export function Pipeline() {
                         이 {bulkFailures.length}명만 다시 보내기
                       </Button>
                     </div>
-                    <div className="max-h-[140px] overflow-y-auto flex flex-col gap-0.5">
+                    <div className="max-h-[140px] overflow-y-auto flex flex-col gap-0.5 [&>*]:shrink-0">
                       {bulkFailures.map((f, i) => (
                         <div key={`${f.phone}-${i}`} className="text-[11.5px] text-error-strong flex items-center gap-2">
                           <span className="font-bold shrink-0">{f.name}</span>

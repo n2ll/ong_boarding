@@ -56,17 +56,17 @@ export function Dashboard() {
   // **반드시 같은 키**여야 한다 — 키가 갈라지면 그쪽이 기본 응답을 또 받고, 답장 큐의
   // mutate()가 이 화면 통계를 같이 갱신하는 동작(같은 캐시)도 깨진다.
   const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
-  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
+  const { data: inboxRes } = useSWR<{ data?: { created_at?: string | null }[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
-  const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean } }>("/api/admin/notifications");
+  const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null } }>("/api/admin/notifications");
   // 확정 대기 큐(스크리닝 완료·미확정) — 사이드바 배지·LiveConsole '확정 대기' 탭과 동일 소스. '오늘의 할 일'에 합류(주제 C1 발견성).
-  const { data: confirmRes } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
+  const { data: confirmRes } = useSWR<{ total?: number; pending?: { created_at?: string | null }[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
   const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
   const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
-  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
+  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
   const { data: killRes } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
@@ -210,9 +210,9 @@ export function Dashboard() {
   // (예전엔 여기서 unread_count>0으로 셌다. 그 값은 '스레드를 아직 열지 않았다'는 뜻이라 열람만으로 0이 되고,
   //  실데이터에서도 전원 0이어서 이 항목이 뜬 적이 없다. 판정은 '마지막 메시지가 inbound' 한 가지로 통일하고,
   //  공식을 두 곳에 두면 어긋나므로 큐 카드 한 곳에서만 계산한다.)
-  const [replyCounts, setReplyCounts] = useState({ total: 0, untouched: 0 });
-  const handleReplyCounts = useCallback((c: { total: number; untouched: number }) => {
-    setReplyCounts((prev) => (prev.total === c.total && prev.untouched === c.untouched ? prev : c));
+  const [replyCounts, setReplyCounts] = useState<{ total: number; untouched: number; oldestDays?: number | null }>({ total: 0, untouched: 0, oldestDays: null });
+  const handleReplyCounts = useCallback((c: { total: number; untouched: number; oldestDays?: number | null }) => {
+    setReplyCounts((prev) => (prev.total === c.total && prev.untouched === c.untouched && prev.oldestDays === c.oldestDays ? prev : c));
   }, []);
   const poolReplies = replyCounts.untouched;
   const interestCount = interestRes?.count ?? 0;
@@ -220,6 +220,15 @@ export function Dashboard() {
   const confirmPendingCount = confirmRes?.total ?? confirmRes?.pending?.length ?? 0;
   const urgent = useMemo(() => {
     const u: UrgentItem[] = [];
+    // '오늘의 할 일'이 건수만 말하고 시간을 말하지 않던 문제 — 7개 항목 중 경과 시간이
+    // 붙은 것은 긴급 건 하나뿐이라, 1일이든 32일이든 같은 노란 줄이었다. 32일 방치가
+    // 빨갛게 뜨면 그날 처리된다(안쪽 인계 큐에는 이미 빨간 ⏱ 배지가 있었는데 홈까지
+    // 올라오지 않았다). 색은 항목 종류가 아니라 '얼마나 오래됐나'를 말한다.
+    const days = (iso: string | null | undefined) =>
+      iso ? Math.max(0, Math.floor((nowTick - new Date(iso).getTime()) / 86400000)) : null;
+    const AGE_RED = 7; // 이 이상 방치되면 무엇이든 빨간색
+    const esc = (base: "red" | "amber", d: number | null): "red" | "amber" => ((d ?? 0) >= AGE_RED ? "red" : base);
+    const suffix = (d: number | null) => ((d ?? 0) >= 1 ? ` · 최장 ${d}일` : "");
     if (notiCounts?.aiDisabled) {
       u.push({ id: "ai-off", tone: "red", title: "AI 자동응대가 중단된 상태예요", desc: "전역 응답 스위치가 꺼져 있어 신규 인입에 자동 응대하지 않습니다.", cta: "자동화 현황으로", path: "/automation" });
     }
@@ -230,30 +239,47 @@ export function Dashboard() {
       u.push({ id: "sos", tone: "red", title: `진행 중 긴급 건 ${sosOpen.length}건 · 최장 ${elapsed} 경과`, desc: "결원·증차 긴급 건이 해결 대기 중이에요.", cta: "긴급 건 기록으로", path: "#sos-ledger" });
     }
     if (interestCount > 0) {
+      const oldest = days(
+        (interestRes?.items ?? []).reduce<string | null>((min, it) => {
+          const t = it.interested_at ?? null;
+          return t && (!min || t < min) ? t : min;
+        }, null)
+      );
       u.push({
         id: "interest-queue",
-        tone: interestImmediate > 0 ? "red" : "amber",
-        title: `관심 표시 처리 대기 ${interestCount}건${interestImmediate > 0 ? ` (바로가능 ${interestImmediate}건)` : ""}`,
+        tone: interestImmediate > 0 ? "red" : esc("amber", oldest),
+        title: `관심 표시 처리 대기 ${interestCount}건${interestImmediate > 0 ? ` (바로가능 ${interestImmediate}건)` : ""}${suffix(oldest)}`,
         desc: "맞춤 공고 링크에서 관심을 누른 후보가 연락을 기다리고 있어요.",
         cta: "관심 표시 처리로",
         path: "#interest-queue",
       });
     }
     if (inboxCount > 0) {
-      u.push({ id: "inbox", tone: "red", title: `분류 대기 문자함 ${inboxCount}건`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
+      // 기본은 amber — 스팸이 섞이는 분류함이 항상 최상단 빨강이면, 32일째 답을 기다리는
+      // 사람보다 "스팸 분류하러 가기"가 더 급해 보인다. 오래 묵으면(7일+) 빨강으로 올라온다.
+      const oldest = days(
+        (inboxRes?.data ?? []).reduce<string | null>((min, it) => {
+          const t = it.created_at ?? null;
+          return t && (!min || t < min) ? t : min;
+        }, null)
+      ) ?? notiCounts?.inbox_oldest_days ?? null;
+      u.push({ id: "inbox", tone: esc("amber", oldest), title: `분류 대기 문자함 ${inboxCount}건${suffix(oldest)}`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
+      const oldest = notiCounts?.interventions_oldest_days ?? null;
       // 목적 탭으로 딥링크 — 예전엔 둘 다 '전체' 탭으로 떨어져 매니저가 탭을 다시 찾아야 했다.
-      u.push({ id: "live", tone: "amber", title: `사람 확인 필요 ${notiCounts!.interventions}건`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "실시간 응대로", path: "/live?tab=intervention" });
+      u.push({ id: "live", tone: esc("amber", oldest), title: `사람 확인 필요 ${notiCounts!.interventions}건${suffix(oldest)}`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "실시간 응대로", path: "/live?tab=intervention" });
     }
     if (confirmPendingCount > 0) {
-      u.push({ id: "confirm-pending", tone: "amber", title: `확정 대기 ${confirmPendingCount}명`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
+      const oldest = days(confirmRes?.pending?.[0]?.created_at ?? null); // 라우트가 오래된 순 정렬
+      u.push({ id: "confirm-pending", tone: esc("amber", oldest), title: `확정 대기 ${confirmPendingCount}명${suffix(oldest)}`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
-      u.push({ id: "pool-reply", tone: "amber", title: `내가 답할 차례 ${poolReplies}건`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
+      const oldest = replyCounts.oldestDays ?? null;
+      u.push({ id: "pool-reply", tone: esc("amber", oldest), title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
     }
     return u;
-  }, [notiCounts, sosOpen, inboxCount, poolReplies, interestCount, interestImmediate, confirmPendingCount, nowTick]);
+  }, [notiCounts, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
 
   // 문자 발송폰(법인폰) 상태 칩 — 최신 기기 1건 기준. 10분 무신호 또는 발송 대기 적체 시 경고색.
   const gateway = useMemo(() => {
@@ -349,7 +375,7 @@ export function Dashboard() {
             </h2>
           </div>
 
-          <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-3 flex-1 overflow-y-auto [&>*]:shrink-0">
             {urgent.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-success mb-2" />

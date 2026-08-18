@@ -56,6 +56,14 @@ function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): strin
       return typeof meta.to === "string" && meta.to ? `🕐 가용성 → ${meta.to}` : "🕐 가용성 변경";
     case "opt_out_set":
       return "🚫 수신거부 등록";
+    case "handoff_resolved": {
+      // 인계 큐 '처리 완료' — 매니저가 전화·문자로 직접 해결한 기록. 통화 결과가 타임라인에 남아
+      // 다음 사람이 같은 사람에게 다시 걸거나 아무도 안 거는 일이 없게 한다.
+      const m = (ev.meta ?? {}) as { outcome?: unknown; note?: unknown };
+      const outcome = m.outcome === "call" ? "통화로 해결" : m.outcome === "sms" ? "문자로 해결" : "종결";
+      const note = typeof m.note === "string" && m.note.trim() ? ` — ${m.note.trim()}` : "";
+      return `☎️ 매니저 처리 완료 (${outcome})${note}`;
+    }
     default:
       return ev.event_type;
   }

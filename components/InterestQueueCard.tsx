@@ -280,9 +280,17 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
               <Zap size={12} /> 바로가능 {immediateCount}건
             </span>
           )}
-          <span className="text-[12px] font-bold text-gray-700 bg-background border border-border-strong px-2.5 py-1 rounded-full">
-            총 {count}건
-          </span>
+          {/* 숫자 배지는 데이터가 있을 때만 — 예전엔 에러 분기 밖에 있어 "총 0건"과
+              "목록을 불러오지 못했어요"가 한 화면에 같이 떴다. 거짓 0은 "할 일 없음"으로 읽힌다. */}
+          {!error && data ? (
+            <span className="text-[12px] font-bold text-gray-700 bg-background border border-border-strong px-2.5 py-1 rounded-full">
+              총 {count}건
+            </span>
+          ) : (
+            <span className="text-[12px] font-bold text-muted-foreground/60 bg-background border border-border-strong px-2.5 py-1 rounded-full" title={error ? "불러오지 못했어요" : "불러오는 중"}>
+              총 —건
+            </span>
+          )}
         </div>
       </div>
 

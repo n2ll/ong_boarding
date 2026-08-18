@@ -28,9 +28,38 @@ export async function GET(req: NextRequest) {
   const daysParam = Number(req.nextUrl.searchParams.get("days"));
   const days =
     Number.isFinite(daysParam) && daysParam > 0 ? Math.min(Math.floor(daysParam), MAX_DAYS) : DEFAULT_DAYS;
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  let since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const supabase = createServiceClient();
+
+  // 창 안에 발송이 없으면 **마지막 캠페인에 창을 다시 건다**.
+  // 이 사업의 주기는 "화주사 계약 따라 폭증하는 스파이크형" — 몇 주 간격인데, 고정 14일
+  // 창은 그 사이 지난 캠페인을 통째로 숨겼다(실측: 마지막 발송 35일 전 → 카드 자체가
+  // 사라져 "인력풀 반응이 저조한가?"를 판단할 근거가 화면에 없었다). 최근 발송이 없으면
+  // 가장 최근 ping 시각을 찾아 그 시각부터 days 만큼을 창으로 쓴다. stale=true로 표시해
+  // 카드가 "이건 지난 캠페인"임을 말할 수 있게 한다.
+  let stale = false;
+  {
+    const { data: recent } = await supabase
+      .from("pool_events")
+      .select("created_at")
+      .eq("event_type", "ping_sent")
+      .gte("created_at", since)
+      .limit(1);
+    if (!recent || recent.length === 0) {
+      const { data: latest } = await supabase
+        .from("pool_events")
+        .select("created_at")
+        .eq("event_type", "ping_sent")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const latestAt = latest?.[0]?.created_at as string | undefined;
+      if (latestAt) {
+        since = new Date(Date.parse(latestAt) - days * 24 * 60 * 60 * 1000).toISOString();
+        stale = true;
+      }
+    }
+  }
 
   // 1) pool_events 기간 스캔 1회 — created_at asc라 '첫 ping 이후 반응' 게이트를 단일 패스로 판정.
   const { data: events, error: evErr } = await supabase
@@ -91,7 +120,9 @@ export async function GET(req: NextRequest) {
       by_job: [],
       replied: 0,
       opted_out: 0,
+      confirmed: 0,
       last_sent_at: null,
+      stale,
     });
   }
 
@@ -113,7 +144,7 @@ export async function GET(req: NextRequest) {
       .in("applicant_id", cohortIds)
       .gte("created_at", since)
       .limit(SCAN_LIMIT),
-    supabase.from("applicants").select("id, availability, sms_opt_out_at").in("id", cohortIds),
+    supabase.from("applicants").select("id, availability, sms_opt_out_at, status, hired_at").in("id", cohortIds),
     jobIds.length > 0
       ? supabase.from("jobs").select("id, title").in("id", jobIds)
       : Promise.resolve({ data: [], error: null }),
@@ -141,7 +172,19 @@ export async function GET(req: NextRequest) {
     id: number;
     availability: string | null;
     sms_opt_out_at: string | null;
+    status: string | null;
+    hired_at: string | null;
   }[];
+
+  // 퍼널의 마지막 칸 — 캠페인 코호트 중 '첫 ping 이후 매니저 확정'된 인원.
+  // 이 칸이 없으면 "관심 10 · 답장 20 — 반응 좋음"까지만 보이고 실제 결과(확정 0)를
+  // 아무 화면도 말해주지 않는다. 반응이 좋은 것과 확정이 되는 것은 다른 문제다.
+  // hired_at이 없는 확정인력(과거 백필분)은 캠페인 성과로 귀속할 수 없어 세지 않는다.
+  const confirmedCount = applicantRows.filter((a) => {
+    if (a.status !== "확정인력" || !a.hired_at) return false;
+    const pingAt = pingAtByApplicant.get(a.id);
+    return pingAt !== undefined && Date.parse(a.hired_at) >= pingAt;
+  }).length;
   const optedOut = applicantRows.filter((a) => a.sms_opt_out_at && a.sms_opt_out_at >= since).length;
   const immediateAvailability = new Set(
     applicantRows.filter((a) => a.availability === "즉시가능").map((a) => a.id)
@@ -177,6 +220,8 @@ export async function GET(req: NextRequest) {
     by_job: byJob,
     replied: replied.size,
     opted_out: optedOut,
+    confirmed: confirmedCount,
     last_sent_at: lastSentAt,
+    stale,
   });
 }

@@ -305,14 +305,20 @@ export async function GET(req: NextRequest) {
   const activityAt = (a: Record<string, unknown>) =>
     new Date((a.last_message_at as string) ?? (a.created_at as string) ?? 0).getTime();
 
-  const base = safe.filter((a) => isBase(a) || activityAt(a) > recentCut);
-  // 상한 — 후보가 많아져도 최근 활동순 상위만 조회(메시지 스캔 부하 방지).
-  // 잘리는 쪽은 오래된 대화다. 클라이언트의 PREVIEW_TARGET_CAP과 같은 값이어야 한다.
-  const PREVIEW_TARGET_CAP = 150;
+  // 메시지 이력이 있는 전원을 대상에 넣는다(기간 무제한) — 미답 판정(마지막 메시지가 inbound)은
+  // 미리보기가 있어야만 가능해서, 여기서 14일로 자르면 오래 방치된 미답이 화면에서 사라진다.
+  // recentCut은 '이력은 없지만 최근 활동한 사람'을 추가로 포함하는 보조 조건으로만 남는다.
+  const base = safe.filter((a) => isBase(a) || a.last_message_at != null || activityAt(a) > recentCut);
+  // 상한 — 실측 이력 보유자 211명(2026-08). 500이면 당분간 잘릴 일이 없고,
+  // 잘리기 시작하면 아래 로그가 먼저 알린다.
+  const PREVIEW_TARGET_CAP = 500;
   const targets =
     base.length <= PREVIEW_TARGET_CAP
       ? base
       : [...base].sort((x, y) => activityAt(y) - activityAt(x)).slice(0, PREVIEW_TARGET_CAP);
+  if (base.length > PREVIEW_TARGET_CAP) {
+    console.error(`[applicants scope=live] 미리보기 대상 ${base.length}명이 상한 ${PREVIEW_TARGET_CAP}을 넘어 오래된 쪽이 잘렸다 — 오래 방치된 미답이 목록에서 빠질 수 있다.`);
+  }
 
   // with_manual — '발신만 있고 회신을 기다리는 대화'는 applicants 컬럼만으로 못 찾는다.
   // 매니저 발신은 last_message_at을 올리지 않으므로 서버가 messages를 직접 뒤져 합집합을 만든다.
