@@ -261,7 +261,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
             <button
               onClick={runBackfill}
               disabled={integRunning}
-              className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 bg-white border border-border-strong text-gray-700 hover:bg-background px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors disabled:opacity-60"
+              className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 bg-white border border-border-strong text-gray-700 hover:bg-background px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors disabled:opacity-60"
             >
               {integRunning ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 재백필 실행
             </button>
@@ -280,7 +280,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             ))}
           </div>
-          <p className="text-[11.5px] text-muted-foreground mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
+          <p className="text-[12px] text-muted-foreground mt-3">‘재백필 실행’은 지점명 매칭으로 공고·지점의 화주사/지점 연결만 채웁니다. 기존 데이터를 삭제하지 않으며, 미매칭 공고는 지점명을 확인해 수정해주세요.</p>
         </div>
       )}
 
@@ -331,7 +331,7 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                 <div>
                   <div className="font-extrabold text-foreground flex items-center gap-2">
                     {client.name}
-                    {!client.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-gray-300">비활성</span>}
+                    {!client.active && <span className="text-[11px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-gray-300">비활성</span>}
                   </div>
                   {client.memo && <div className="text-[12px] text-muted-foreground mt-0.5 line-clamp-1">{client.memo}</div>}
                 </div>
@@ -363,13 +363,13 @@ export function Clients({ embedded = false }: { embedded?: boolean } = {}) {
                     </button>
                   </div>
                   {myBranches.length === 0 ? (
-                    <div className="text-[12.5px] text-muted-foreground bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
+                    <div className="text-[13px] text-muted-foreground bg-white border border-dashed border-border-strong rounded-xl py-4 text-center">아직 등록된 지점이 없어요.</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {myBranches.map((b) => (
-                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[12.5px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-muted-foreground"}`}>
+                        <span key={b.id} className={`inline-flex items-center gap-1.5 text-[13px] font-bold px-3 py-1.5 rounded-lg border ${b.active ? "bg-white border-border-strong text-gray-700" : "bg-background border-dashed border-border-strong text-muted-foreground"}`}>
                           <MapPin size={12} className="text-muted-foreground" /> {b.name}
-                          {!b.active && <span className="text-[10px] text-muted-foreground">(비활성)</span>}
+                          {!b.active && <span className="text-[11px] text-muted-foreground">(비활성)</span>}
                         </span>
                       ))}
                     </div>

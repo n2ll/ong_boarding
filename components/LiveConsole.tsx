@@ -778,15 +778,15 @@ export function LiveConsole() {
               {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
                   한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
               {visibleHandoffs.length !== handoffGroups.length && (
-                <span className="w-full text-[11.5px] font-bold text-muted-foreground">
+                <span className="w-full text-[12px] font-bold text-muted-foreground">
                   {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
                 </span>
               )}
-              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
+              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
               {catOrder.map((cid) => {
                 const sample = handoffs.find((h) => h.category === cid)!;
                 return (
-                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[11.5px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
+                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-white border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
                 );
               })}
             </div>
@@ -824,7 +824,7 @@ export function LiveConsole() {
                       <span className="truncate text-[14px] font-bold text-foreground">{head.applicant_name}</span>
                       {multi && (
                         <span
-                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-error-soft text-error-strong"
+                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-error-soft text-error-strong"
                           title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
                           공고 {items.length}건
@@ -837,12 +837,12 @@ export function LiveConsole() {
                           href={`tel:${head.phone}`}
                           onClick={(e) => e.stopPropagation()}
                           title={`${head.applicant_name}님에게 전화 (${head.phone})`}
-                          className="relative flex items-center gap-1 rounded-md text-[11.5px] font-bold text-info after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="relative flex items-center gap-1 rounded-md text-[12px] font-bold text-info after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <Phone size={12} /> 전화
                         </a>
                       )}
-                      <span className={`text-[11.5px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
+                      <span className={`text-[12px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
                     </div>
                   </div>
                   {items.map((h) => {
@@ -902,7 +902,7 @@ export function LiveConsole() {
                     </div>
                     <div className="text-[14px] font-bold text-foreground mb-0.5 flex items-center gap-1.5">
                       {p.name}
-                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
+                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
                     </div>
                     <div className="text-[12px] text-gray-700 leading-snug line-clamp-2">
                       {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
@@ -996,7 +996,7 @@ export function LiveConsole() {
       {activeChat ? (
         <div className="flex-1 flex flex-col bg-muted min-w-0">
           <div className="min-h-[60px] shrink-0 bg-white border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[15px] text-muted-foreground">지원자</span></div>
+            <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[16px] text-muted-foreground">지원자</span></div>
             <div className="flex items-center gap-1.5 flex-wrap">
               {activeChat.source && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
@@ -1039,7 +1039,7 @@ export function LiveConsole() {
                   >
                     {label}
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
                         interestOnly
                           ? selected ? "bg-yellow-700 text-white" : "bg-yellow-50 text-warning-strong"
                           : paused
@@ -1124,7 +1124,7 @@ export function LiveConsole() {
                   role="radio"
                   aria-checked={resolveOutcome === o.id}
                   onClick={() => setResolveOutcome(o.id)}
-                  className={`min-h-10 rounded-xl border px-2 text-[12.5px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                  className={`min-h-10 rounded-xl border px-2 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
                     resolveOutcome === o.id
                       ? "border-foreground bg-foreground text-white"
                       : "border-border-strong bg-white text-gray-700 hover:border-foreground/30"
@@ -1156,12 +1156,12 @@ export function LiveConsole() {
               <Button variant="ghost" size="icon" aria-label="공고 반영 창 닫기" onClick={() => setPromote(null)}><X size={20} /></Button>
             </div>
             <div className="p-6 flex flex-col gap-4">
-              <div className="text-[12.5px] text-muted-foreground leading-relaxed">
+              <div className="text-[13px] text-muted-foreground leading-relaxed">
                 <b className="text-gray-700">{promote.job_title}</b> 공고에 반영합니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button aria-pressed={promoteField === "pay_info"} onClick={() => setPromoteField("pay_info")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "pay_info" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>급여·정산</button>
-                <button aria-pressed={promoteField === "policy_notes"} onClick={() => setPromoteField("policy_notes")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>고용·정책</button>
+                <button aria-pressed={promoteField === "pay_info"} onClick={() => setPromoteField("pay_info")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "pay_info" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>급여·정산</button>
+                <button aria-pressed={promoteField === "policy_notes"} onClick={() => setPromoteField("policy_notes")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${promoteField === "policy_notes" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>고용·정책</button>
               </div>
               <textarea
                 value={promoteText}
@@ -1169,13 +1169,13 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
-              <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setPromote(null)} disabled={promoteSaving}>취소</Button>
-              <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-yellow-700 hover:bg-yellow-700 text-white shadow-none focus-visible:ring-yellow-700" onClick={savePromote} disabled={promoteLoading} isLoading={promoteSaving}>{promoteSaving ? "저장 중…" : "공고에 반영"}</Button>
+              <Button size="chip" variant="ghost" className="px-4 py-2 text-[14px] rounded-lg" onClick={() => setPromote(null)} disabled={promoteSaving}>취소</Button>
+              <Button size="chip" variant="primary" className="px-5 py-2 text-[14px] rounded-lg bg-yellow-700 hover:bg-yellow-700 text-white shadow-none focus-visible:ring-yellow-700" onClick={savePromote} disabled={promoteLoading} isLoading={promoteSaving}>{promoteSaving ? "저장 중…" : "공고에 반영"}</Button>
             </div>
         </Modal>
       )}
@@ -1190,12 +1190,12 @@ export function LiveConsole() {
               <Button variant="ghost" size="icon" aria-label="지식 등록 창 닫기" onClick={() => setKb(null)}><X size={20} /></Button>
             </div>
             <div className="p-6 flex flex-col gap-4">
-              <div className="text-[12.5px] text-muted-foreground leading-relaxed">
+              <div className="text-[13px] text-muted-foreground leading-relaxed">
                 매니저가 검토·승인한 내용만 옹봇 지식이 됩니다. 저장하면 다음부터 같은 질문은 AI가 직접 답해서, 매니저가 직접 답해야 하는 일이 줄어듭니다.
               </div>
               <div className="flex gap-1.5">
-                <button aria-pressed={kbTarget === "common"} onClick={() => setKbTarget("common")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all ${kbTarget === "common" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>공통(전 지점)</button>
-                <button aria-pressed={kbTarget === "branch"} onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
+                <button aria-pressed={kbTarget === "common"} onClick={() => setKbTarget("common")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${kbTarget === "common" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>공통(전 지점)</button>
+                <button aria-pressed={kbTarget === "branch"} onClick={() => kb.branch && setKbTarget("branch")} disabled={!kb.branch} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all disabled:opacity-40 ${kbTarget === "branch" ? "bg-foreground text-white" : "bg-white border border-border-strong text-muted-foreground"}`}>{kb.branch ? `${kb.branch} 지점만` : "지점 정보 없음"}</button>
               </div>
               <div>
                 <label className="block text-[12px] font-bold text-gray-700 mb-1.5">제목(무슨 질문인가)</label>
@@ -1203,7 +1203,7 @@ export function LiveConsole() {
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[13.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <div>
@@ -1214,14 +1214,14 @@ export function LiveConsole() {
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
                 />
               </div>
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
-              <Button size="chip" variant="ghost" className="px-4 py-2 text-[13.5px] rounded-lg" onClick={() => setKb(null)} disabled={kbSaving}>취소</Button>
-              <Button size="chip" variant="primary" className="px-5 py-2 text-[13.5px] rounded-lg bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong" onClick={saveKb} disabled={kbLoading} isLoading={kbSaving}>{kbSaving ? "등록 중…" : "지식 등록"}</Button>
+              <Button size="chip" variant="ghost" className="px-4 py-2 text-[14px] rounded-lg" onClick={() => setKb(null)} disabled={kbSaving}>취소</Button>
+              <Button size="chip" variant="primary" className="px-5 py-2 text-[14px] rounded-lg bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong" onClick={saveKb} disabled={kbLoading} isLoading={kbSaving}>{kbSaving ? "등록 중…" : "지식 등록"}</Button>
             </div>
         </Modal>
       )}

@@ -331,7 +331,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 <span className="text-[12px] font-bold text-muted-foreground bg-muted px-2.5 py-0.5 rounded-full">{group.branches.length}개 지점</span>
               </div>
               {group.clientId != null && (
-                <button onClick={() => openCreateForClient(group.clientId)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[12.5px] font-bold text-info-strong hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
+                <button onClick={() => openCreateForClient(group.clientId)} className="min-h-11 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 text-[13px] font-bold text-info-strong hover:bg-info-soft px-3 py-1.5 rounded-lg transition-colors">
                   <Plus size={15} /> 이 화주사에 지점 추가
                 </button>
               )}
@@ -350,9 +350,9 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-bold text-muted-foreground">#{branch.id}</span>
-                    {!branch.active && <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-gray-300">비활성</span>}
-                    {branch.active && branch.status === 'critical' && <span className="text-[10px] font-bold bg-error-soft text-error-strong px-2 py-0.5 rounded-full border border-error/30">충원 시급</span>}
-                    {branch.active && branch.status === 'warning' && <span className="text-[10px] font-bold bg-yellow-100 text-warning-strong px-2 py-0.5 rounded-full border border-yellow-300">충원 필요</span>}
+                    {!branch.active && <span className="text-[11px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-gray-300">비활성</span>}
+                    {branch.active && branch.status === 'critical' && <span className="text-[11px] font-bold bg-error-soft text-error-strong px-2 py-0.5 rounded-full border border-error/30">충원 시급</span>}
+                    {branch.active && branch.status === 'warning' && <span className="text-[11px] font-bold bg-yellow-100 text-warning-strong px-2 py-0.5 rounded-full border border-yellow-300">충원 필요</span>}
                   </div>
                   <h3 className="text-[18px] font-extrabold text-foreground tracking-tight group-hover:text-info transition-colors">{branch.name}</h3>
                 </div>
@@ -370,7 +370,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="bg-background rounded-xl p-4 mb-4">
                 <div className="flex justify-between items-end mb-2">
                   <span className="text-[12px] font-bold text-muted-foreground">인력 충원율</span>
-                  <span className={`text-[15px] font-extrabold ${fillRatio < 70 ? 'text-error-strong' : fillRatio < 90 ? 'text-warning-strong' : 'text-success'}`}>
+                  <span className={`text-[16px] font-extrabold ${fillRatio < 70 ? 'text-error-strong' : fillRatio < 90 ? 'text-warning-strong' : 'text-success'}`}>
                     {branch.targetStaff > 0 ? `${fillRatio}%` : "정원 미설정"}
                   </span>
                 </div>
@@ -380,7 +380,7 @@ export function Branches({ embedded = false }: { embedded?: boolean } = {}) {
                     style={{ width: `${Math.min(fillRatio, 100)}%` }}
                   ></div>
                 </div>
-                <div className="text-[11.5px] text-muted-foreground text-right">
+                <div className="text-[12px] text-muted-foreground text-right">
                   확정 <b className="text-gray-700">{branch.currentStaff}명</b> / 정원 {branch.targetStaff}명
                 </div>
               </div>

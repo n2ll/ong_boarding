@@ -78,7 +78,7 @@ export function Reengagement() {
         {triggered && (
           <button
             onClick={() => mutate()}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-bold text-gray-700 border border-border-strong hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-gray-700 border border-border-strong hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RefreshCw size={14} /> 다시 발굴
           </button>
@@ -119,7 +119,7 @@ export function Reengagement() {
         <>
           {/* 킬스위치 상태 */}
           <div
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12.5px] font-bold border ${
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold border ${
               data.enabled
                 ? "bg-success-soft border-success/25 text-success-strong"
                 : "bg-yellow-50 border-yellow-300 text-warning-strong"
@@ -146,22 +146,22 @@ export function Reengagement() {
             <div className="rounded-xl border border-success/25 bg-success-soft p-3">
               <div className="text-[11px] font-bold text-success-strong">활동 편입후보</div>
               <div className="text-[20px] font-extrabold text-success-strong">{data.activeCount}</div>
-              <div className="text-[10.5px] text-success">이름+전화 반입</div>
+              <div className="text-[11px] text-success">이름+전화 반입</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-background p-3">
               <div className="text-[11px] font-bold text-muted-foreground">비활동 · 사전 동의 필요</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.inactiveCount}</div>
-              <div className="text-[10.5px] text-muted-foreground">집계만 (동의 후 반입)</div>
+              <div className="text-[11px] text-muted-foreground">집계만 (동의 후 반입)</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">이미 지원자</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedApplicants}</div>
-              <div className="text-[10.5px] text-muted-foreground">중복 제외</div>
+              <div className="text-[11px] text-muted-foreground">중복 제외</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-white p-3">
               <div className="text-[11px] font-bold text-muted-foreground">블랙리스트</div>
               <div className="text-[20px] font-extrabold text-gray-700">{data.excludedBlacklist}</div>
-              <div className="text-[10.5px] text-muted-foreground">재채용 불가 제외</div>
+              <div className="text-[11px] text-muted-foreground">재채용 불가 제외</div>
             </div>
           </div>
 
@@ -176,15 +176,19 @@ export function Reengagement() {
 
           {/* 편입 실행 */}
           <div className="flex items-center gap-3">
+            {/* 잠금이면 버튼도 잠가 보인다 — 예전엔 기능 스위치가 꺼져 있어도 버튼이 활성처럼
+                보여서, 누르고 나서야 "잠겨 있어요" 토스트를 받았다. 상태와 겉모습을 일치시킨다.
+                색도 화면마다 다르던 주 버튼(여기만 녹색)을 핵심 실행=Ink 규칙으로 통일. */}
             <button
               onClick={runImport}
-              disabled={importing || data.activeCount === 0}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-success-strong hover:bg-success-strong transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              disabled={importing || data.activeCount === 0 || !data.enabled}
+              title={!data.enabled ? "'다시 부르기'가 꺼져 있어요 — 설정에서 켜면 편입할 수 있습니다" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold text-white bg-foreground hover:bg-gray-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {importing ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
-              활동 편입후보 {data.activeCount}명 편입
+              {importing ? <Loader2 size={15} className="animate-spin" /> : !data.enabled ? <Lock size={15} /> : <UserPlus size={15} />}
+              활동 편입후보 {data.activeCount}명 편입{!data.enabled ? " (잠김)" : ""}
             </button>
-            <span className="text-[11.5px] text-muted-foreground">
+            <span className="text-[12px] text-muted-foreground">
               편입 후 발송은 발송 플로에서 매니저가 진행(블랙리스트·수신거부 하드 가드 적용).
             </span>
           </div>
@@ -192,18 +196,18 @@ export function Reengagement() {
           {/* 첫 접촉 문구(자리표시 — 실운영 전 검토) */}
           <div className="grid sm:grid-cols-2 gap-2">
             <div className="rounded-xl border border-border-strong bg-surface-raised p-3 space-y-1">
-              <div className="text-[11.5px] font-bold text-success-strong">활동자 · 기회 안내 문구</div>
+              <div className="text-[12px] font-bold text-success-strong">활동자 · 기회 안내 문구</div>
               <div className="text-[12px] text-gray-700 leading-relaxed">{data.templates.offer}</div>
             </div>
             <div className="rounded-xl border border-border-strong bg-surface-raised p-3 space-y-1">
-              <div className="text-[11.5px] font-bold text-muted-foreground">비활동자 · 사전 동의 요청 문구</div>
+              <div className="text-[12px] font-bold text-muted-foreground">비활동자 · 사전 동의 요청 문구</div>
               <div className="text-[12px] text-gray-700 leading-relaxed">{data.templates.optin}</div>
             </div>
           </div>
 
           {/* 활동 후보 목록(이름 + 마스킹 전화) */}
           <div>
-            <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-gray-700 mb-2">
+            <div className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700 mb-2">
               <Users size={14} /> 활동 편입후보 {data.activeCandidates.length}명
             </div>
             {data.activeCandidates.length === 0 ? (
@@ -218,7 +222,7 @@ export function Reengagement() {
                       {c.sources.map((s) => (
                         <span
                           key={s}
-                          className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700"
+                          className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-gray-700"
                         >
                           {SRC_LABEL[s] ?? s}
                         </span>

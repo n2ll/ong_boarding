@@ -60,7 +60,7 @@ function LoginForm() {
 
       <div className="space-y-3">
         <div>
-          <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">이메일</label>
+          <label className="block text-[13px] font-bold text-gray-700 mb-1.5">이메일</label>
           <input
             type="email"
             value={email}
@@ -71,7 +71,7 @@ function LoginForm() {
           />
         </div>
         <div>
-          <label className="block text-[12.5px] font-bold text-gray-700 mb-1.5">비밀번호</label>
+          <label className="block text-[13px] font-bold text-gray-700 mb-1.5">비밀번호</label>
           <input
             type="password"
             value={password}
@@ -84,7 +84,7 @@ function LoginForm() {
       </div>
 
       {error && (
-        <div className="px-3.5 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[12.5px] font-semibold text-error-strong">
+        <div className="px-3.5 py-2.5 rounded-xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
           {error}
         </div>
       )}
@@ -98,7 +98,7 @@ function LoginForm() {
         로그인
       </button>
 
-      <p className="text-[11.5px] text-muted-foreground leading-relaxed">
+      <p className="text-[12px] text-muted-foreground leading-relaxed">
         계정은 관리자가 발급합니다. 로그인 문제는 팀 채널로 문의해주세요.
       </p>
     </form>

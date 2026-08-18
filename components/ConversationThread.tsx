@@ -589,7 +589,7 @@ export function ConversationThread({
                   onClick={handleToggleOptOut}
                   disabled={optOutBusy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-[12px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
                 </button>
@@ -599,7 +599,7 @@ export function ConversationThread({
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="flex items-center gap-1 text-[11.5px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-white hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Ban size={12} /> 수신거부 등록
               </button>
@@ -638,7 +638,7 @@ export function ConversationThread({
                   <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className="bg-gray-200 text-muted-foreground text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className="bg-gray-200 text-muted-foreground text-[11px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, jobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>
@@ -657,9 +657,9 @@ export function ConversationThread({
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.2) }} data-msg-id={msg.id} className={`flex gap-3 ${sender === "user" ? "justify-end" : "justify-start"}`}>
               {sender === "ai" && <div className="w-9 h-9 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={18} className="text-foreground" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
-                {sender === "ai" && <span className="text-[11.5px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
+                {sender === "ai" && <span className="text-[12px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
                 {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
-                  <span className="text-[10.5px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
+                  <span className="text-[11px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
                     {jobChipLabel(jobsMap[msg.job_id]!)}
                   </span>
                 )}
@@ -700,7 +700,7 @@ export function ConversationThread({
               className="w-full bg-white border border-border-strong rounded-xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
             />
             {draftReasoningDisplay && (
-              <div className="mt-2 text-[11.5px] text-muted-foreground leading-relaxed">
+              <div className="mt-2 text-[12px] text-muted-foreground leading-relaxed">
                 <b className="text-copilot-strong">판단 근거:</b> {draftReasoningDisplay}
               </div>
             )}
@@ -723,7 +723,7 @@ export function ConversationThread({
               <button
                 key={t.label}
                 onClick={() => insertTemplate(t.text)}
-                className="text-[11.5px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="text-[12px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 title={t.text}
               >
                 + {t.label}

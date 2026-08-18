@@ -1,0 +1,27 @@
+-- 2026-08-18 · job_candidates.confirmed_at → screening_passed_at 개명
+--
+-- ■ 왜
+--
+-- 이 컬럼은 이름과 달리 **매니저 확정이 아니라 AI 스크리닝 통과 시점**에 기록된다
+-- (lib/agent/transitions.ts, screening → onboarding 전이). 매니저 확정은
+-- applicants.status='확정인력' + hired_at이다.
+--
+-- 이름이 사실과 달라서 실제 사고가 났다 — 2026-07-14 공고 33(용산·한남권):
+--   02:55 송시권 스크리닝 통과 → confirmed_at 기록(매니저 확정 아님, hired_at은 지금도 null)
+--   04:22 정원 1명 '도달'로 판정돼 공고 자동 마감
+--   04:22 심정훈에게 "안내드리는 사이에 이번 자리가 먼저 채워졌어요" 발송
+--   07-28 송시권 부적합 처리 → 실제 채용 0명
+-- 스크리닝 통과자를 '확정'으로 센 자동 마감은 #105(07-28)에서 hired 기준으로 고쳐졌지만,
+-- 이름이 남아 있는 한 다음 사람이 같은 오해를 반복한다. 지금은 주석 세 곳이 오해를 막고
+-- 있었다 — 이름을 사실에 맞추는 것이 유일한 영구 해법이다(2026-08-14 감사).
+--
+-- ■ 적용 시점 주의
+--
+-- RENAME은 즉시 반영되므로, 옛 컬럼명을 select하는 배포본이 떠 있는 동안 지원자 상세·
+-- 공고 후보 API가 실패한다. 코드 배포와 같은 타이밍에 실행할 것(이번엔 push 직전 적용,
+-- Vercel 빌드 ~3분 창). 값은 그대로 보존된다(실측 78행).
+--
+-- ■ 되돌리기
+--   alter table job_candidates rename column screening_passed_at to confirmed_at;
+
+alter table job_candidates rename column confirmed_at to screening_passed_at;

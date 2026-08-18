@@ -21,11 +21,11 @@ export function DemoBanner({ variant = "demo", note }: DemoBannerProps) {
       <div className="min-w-0">
         <div className="text-[13px] font-extrabold text-warning-strong flex items-center gap-2">
           {isSoon ? "준비 중인 화면입니다" : "데모 화면입니다"}
-          <span className="text-[10px] font-bold text-foreground bg-yellow-100 px-1.5 py-0.5 rounded-full">
+          <span className="text-[11px] font-bold text-foreground bg-yellow-100 px-1.5 py-0.5 rounded-full">
             {isSoon ? "COMING SOON" : "DEMO"}
           </span>
         </div>
-        <div className="text-[12.5px] text-warning-strong/80 leading-relaxed mt-0.5">
+        <div className="text-[13px] text-warning-strong/80 leading-relaxed mt-0.5">
           {note ??
             (isSoon
               ? "백엔드 연동 전이라 동작은 아직 제공되지 않습니다. 화면 구성·흐름 미리보기 용도입니다."

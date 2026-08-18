@@ -252,9 +252,13 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
       if (transition.to === "onboarding") {
         // screening → onboarding: 앱·교육 안내 자동 발송 + applicants.status='스크리닝 완료'
         // (별도 "확정 안내" 메시지는 보내지 않음 — AI의 마지막 응답 + 가이드 본문이 그 역할 대신)
+        // screening_passed_at — AI 스크리닝 통과 시점. 예전 이름 confirmed_at은 '매니저 확정'처럼
+        // 읽혀서, 확정 0명인 공고가 "확정 도달"로 집계돼 자동 마감되고 대기자에게 "자리가
+        // 찼어요"가 나간 사고(07-14 공고 33)의 원인 중 하나였다. 매니저 확정은 이 컬럼이 아니라
+        // applicants.status='확정인력' + hired_at이다(2026-08 컬럼 개명).
         await supabase
           .from("job_candidates")
-          .update({ confirmed_at: now })
+          .update({ screening_passed_at: now })
           .eq("id", candidate_id);
         // 자동 status는 매니저 미터치 케이스에만 갱신
         await supabase

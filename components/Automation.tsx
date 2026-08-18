@@ -146,7 +146,7 @@ export function Automation() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {kpis.map((k, i) => (
             <div key={i} className="border border-border-strong rounded-xl px-3.5 py-2.5 bg-surface-raised">
-              <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-muted-foreground mb-1">
+              <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground mb-1">
                 <k.icon size={13} className={k.tone} /> {k.label}
               </div>
               <div className={`text-[18px] font-extrabold tracking-tight flex items-center gap-1.5 ${k.tone}`}>
@@ -169,7 +169,7 @@ export function Automation() {
           <button
             onClick={runEvaluate}
             disabled={ruleRunning}
-            className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
             <Play size={13} /> {ruleRunning ? "점검 중…" : "지금 점검 실행"}
           </button>
@@ -182,7 +182,7 @@ export function Automation() {
               <div key={rule.id} className={`border rounded-xl px-3.5 py-2.5 ${cfg.enabled ? "border-border-strong bg-surface-raised" : "border-muted bg-background opacity-70"}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-bold text-foreground truncate">{rule.label}</div>
+                    <div className="text-[13px] font-bold text-foreground truncate">{rule.label}</div>
                     <div className="text-[11px] text-muted-foreground leading-tight mt-0.5 line-clamp-2">{rule.desc}</div>
                   </div>
                   <button type="button" aria-label={`${rule.label} 규칙 켜기`} aria-checked={cfg.enabled} role="switch"

@@ -206,7 +206,7 @@ export function Recommendations() {
                 <div className="shrink-0 flex flex-col items-center gap-2 w-[100px]">
                   <div className="w-16 h-16 rounded-full bg-info-soft border-[3px] border-info flex items-center justify-center text-info-strong relative">
                     <User size={28} />
-                    <div className="absolute -bottom-2 -right-2 bg-info text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
+                    <div className="absolute -bottom-2 -right-2 bg-info text-white text-[11px] font-extrabold px-1.5 py-0.5 rounded-full">
                       {rec.score.total}점
                     </div>
                   </div>
@@ -246,7 +246,7 @@ export function Recommendations() {
                       </button>
                     </>
                   ) : (
-                    <div className="w-[160px] text-center text-[11.5px] text-muted-foreground bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
+                    <div className="w-[160px] text-center text-[12px] text-muted-foreground bg-background border border-dashed border-border-strong rounded-xl px-3 py-2.5 leading-relaxed">
                       레거시 인재풀 후보예요.<br />연락처로 직접 컨택하세요.
                     </div>
                   )}

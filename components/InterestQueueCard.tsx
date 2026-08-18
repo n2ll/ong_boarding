@@ -255,7 +255,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
+          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
             <Heart size={15} className="text-error" /> 관심 표시 처리 대기
           </h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">맞춤 공고 링크에서 관심을 누른 후보 · 상세 확인 후 컨택/보류로 처리</div>
@@ -318,17 +318,17 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 <div className="flex items-center gap-2 flex-wrap px-3 pt-3 pb-1.5">
                   <span className="text-[13px] font-bold text-foreground">{head.name || "이름 미상"}</span>
                   {rows.some((r) => r.immediate) && (
-                    <span className="flex items-center gap-0.5 text-[10.5px] font-bold text-success-strong">
+                    <span className="flex items-center gap-0.5 text-[11px] font-bold text-success-strong">
                       <Zap size={11} /> 바로 가능
                     </span>
                   )}
-                  <span className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
                   {optOut && (
-                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
+                    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
                   )}
                   {multi && (
                     <span
-                      className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong"
+                      className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong"
                       title="이 한 분이 여러 공고에 관심을 눌렀어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                     >
                       공고 {rows.length}건
@@ -338,7 +338,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                     <a
                       href={`tel:${head.phone}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-info hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <Phone size={11} /> {head.phone}
                     </a>
@@ -346,7 +346,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                   <div className="flex-1" />
                   <button
                     onClick={() => setDetailId(head.applicant_id)}
-                    className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <ExternalLink size={13} /> 상세
                   </button>
@@ -360,7 +360,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                   const busy = busyId === it.candidate_id;
                   return (
                     <div key={it.candidate_id} className="flex items-center gap-2 mx-2 mb-2 px-2.5 py-2 rounded-lg border border-muted bg-white flex-wrap">
-                      <div className="flex-1 min-w-0 text-[11.5px] text-muted-foreground truncate">
+                      <div className="flex-1 min-w-0 text-[12px] text-muted-foreground truncate">
                         <span className="font-semibold text-gray-700">{it.job_title}</span>
                         <span className="text-muted-foreground"> · </span>
                         관심 {agoLabel(it.interested_at, nowTick)}
@@ -369,7 +369,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                         onClick={() => openQuick(it)}
                         disabled={busy || !it.phone}
                         title={it.phone ? "공고 맥락 문자를 보내고 컨택 완료로 처리" : "전화번호가 없어 문자 발송 불가"}
-                        className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <Send size={13} /> 빠른 컨택
                       </button>
@@ -377,7 +377,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                         onClick={() => handleAction(it.candidate_id, "contacted")}
                         disabled={busy}
                         title="문자 발송 없이 처리 (직접 전화 등으로 이미 연락한 경우)"
-                        className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} 컨택 완료
                       </button>
@@ -385,7 +385,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                         onClick={() => handleAction(it.candidate_id, "dismiss")}
                         disabled={busy}
                         title="보류"
-                        className="flex items-center gap-1 text-[11.5px] font-bold text-muted-foreground bg-white border border-border-strong hover:bg-background hover:text-error px-2.5 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
+                        className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground bg-white border border-border-strong hover:bg-background hover:text-error px-2.5 py-1.5 rounded-lg shrink-0 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
                       >
                         <XCircle size={13} /> 보류
                       </button>
@@ -409,7 +409,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
               <button aria-label="빠른 처리 창 닫기" onClick={() => setQuick(null)} disabled={quickSending} className="text-muted-foreground hover:text-gray-700 disabled:opacity-50 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X size={20} /></button>
             </div>
             <div className="p-6 flex flex-col gap-3">
-              <div className="text-[12.5px] text-muted-foreground leading-relaxed">
+              <div className="text-[13px] text-muted-foreground leading-relaxed">
                 <b className="text-gray-700">{quick.name || "이름 미상"}</b>님({quick.phone})에게 <b className="text-error">실제 문자</b>가 발송됩니다. 아래 내용을 확인·편집한 뒤 보내세요.
                 {quick.job_title && (
                   <>
@@ -423,15 +423,15 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 onChange={(e) => setQuickBody(e.target.value)}
                 rows={5}
                 disabled={quickSending}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[13.5px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground leading-relaxed">
                 발송에 성공하면 자동으로 <b>컨택 완료</b>로 처리돼 큐에서 빠집니다. 근무 확정·배정을 약속하는 문구는 넣지 마세요.
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
-              <button onClick={() => setQuick(null)} disabled={quickSending} className="px-4 py-2 rounded-lg text-[13.5px] font-bold text-gray-700 hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">취소</button>
-              <button onClick={handleQuickSend} disabled={quickSending || !quickBody.trim()} className="px-5 py-2 rounded-lg text-[13.5px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <button onClick={() => setQuick(null)} disabled={quickSending} className="px-4 py-2 rounded-lg text-[14px] font-bold text-gray-700 hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">취소</button>
+              <button onClick={handleQuickSend} disabled={quickSending || !quickBody.trim()} className="px-5 py-2 rounded-lg text-[14px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 {quickSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 문자 보내고 처리
               </button>
             </div>

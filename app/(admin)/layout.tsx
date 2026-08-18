@@ -17,6 +17,10 @@ function resolveHeader(pathname: string): { pageTitle: string; crumb: string } {
   if (pathname.startsWith("/brain")) return { pageTitle: "에이전트 두뇌", crumb: "AI 에이전트 > 에이전트 두뇌" };
   if (pathname.startsWith("/sourcing")) return { pageTitle: "인력 소싱", crumb: "인재 관리 > 인력 소싱" };
   if (pathname.startsWith("/pipeline")) return { pageTitle: "인재풀 · 파이프라인", crumb: "인재 관리 > 인재풀 · 파이프라인" };
+  // ⚠️ 이 맵과 Sidebar.tsx의 NAV_ITEMS는 별개 목록이다 — 화면을 추가하면 **두 곳을 같이**
+  // 고쳐야 한다. /shippers도, /reengagement도 여기만 빠져 상단 제목이 '대시보드'로 떴다
+  // (같은 버그가 두 번 났다). 아래 기본값 반환이 조용한 폴백이라 빠져도 에러가 안 난다.
+  if (pathname.startsWith("/reengagement")) return { pageTitle: "다시 부르기 (외부 인력)", crumb: "인재 관리 > 다시 부르기" };
   if (pathname.startsWith("/recommendations")) return { pageTitle: "AI 인재 추천", crumb: "인재 관리 > AI 인재 추천" };
   if (pathname.startsWith("/jobs")) return { pageTitle: "채용공고 관리", crumb: "채용 운영 > 채용공고 관리" };
   // /shippers = 합쳐진 화주사 화면(공고용 목록 + 계약 원본). 매핑이 없어 상단 제목이 '대시보드'로 뜨던 문제.

@@ -55,7 +55,7 @@ function SettingsTab({
     >
       <Icon size={18} /> {label}
       {badge && (
-        <span className="ml-auto text-[10px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
+        <span className="ml-auto text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
           {badge}
         </span>
       )}
@@ -181,7 +181,7 @@ export function Settings() {
               <h2 className="text-lg font-bold text-foreground mb-2 border-b border-border-strong pb-4">알림 설정</h2>
               {/* 토글이 눈으로는 켜지는데 저장되지 않는 '거짓 어포던스'였다 — 켜둔 줄 알고 알림을 기다리게 된다.
                   저장 경로가 생길 때까지 비활성 + 사유 명시. 실제 운영 알림은 Slack 웹훅으로 나간다. */}
-              <p className="text-[12.5px] text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-6">
+              <p className="text-[13px] text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-6">
                 아직 저장되지 않는 화면이에요(계정 알림 설정 준비 중). 지금 운영 알림은 Slack으로 받고 있어요.
               </p>
               <div className="space-y-6 max-w-2xl opacity-60">
@@ -259,7 +259,7 @@ export function Settings() {
                     </button>
                   )}
                 </div>
-                <div className="mt-4 pt-4 border-t border-muted flex items-center gap-2 text-[12.5px] font-bold">
+                <div className="mt-4 pt-4 border-t border-muted flex items-center gap-2 text-[13px] font-bold">
                   {switchError ? (
                     <span className="text-error">상태를 불러오지 못했어요 — 새로고침 후 다시 확인해 주세요(켜짐/꺼짐을 알 수 없어 조작을 막았어요).</span>
                   ) : switchSaving ? (

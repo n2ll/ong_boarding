@@ -369,7 +369,7 @@ export function Dashboard() {
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-[15px] font-bold text-foreground flex items-center gap-2">
+            <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
               {urgent.length > 0 && <span className="bg-error text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
             </h2>
@@ -389,7 +389,7 @@ export function Dashboard() {
                     <button
                       key={s.path}
                       onClick={() => router.push(s.path)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[12.5px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-border-strong bg-background hover:bg-muted text-[13px] font-bold text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {s.label} <ChevronRight size={15} className="text-muted-foreground" />
                     </button>
@@ -414,7 +414,7 @@ export function Dashboard() {
                 <div className="flex-1">
                   <div className={`text-[13px] font-bold ${item.tone === "red" ? "text-error-strong" : "text-foreground"}`}>{item.title}</div>
                   <div className={`text-[12px] mt-0.5 mb-2.5 ${item.tone === "red" ? "text-error-strong" : "text-muted-foreground"}`}>{item.desc}</div>
-                  <span className={`text-[11.5px] font-bold px-3 py-1.5 rounded-lg ${item.tone === "red" ? "bg-error text-white" : "bg-muted text-gray-700"}`}>
+                  <span className={`text-[12px] font-bold px-3 py-1.5 rounded-lg ${item.tone === "red" ? "bg-error text-white" : "bg-muted text-gray-700"}`}>
                     {item.cta}
                   </span>
                 </div>
@@ -448,8 +448,8 @@ export function Dashboard() {
           className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
-            <span className="text-[12.5px] text-muted-foreground">
+            <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
+            <span className="text-[13px] text-muted-foreground">
               총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
               <span className="text-muted-foreground"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
               <span className="text-muted-foreground"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명
@@ -491,7 +491,7 @@ export function Dashboard() {
               <div className="col-span-2 border border-border-strong rounded-lg p-6 flex flex-col">
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 최근 14일 신규 유입 추이</h3>
+                    <h3 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 최근 14일 신규 유입 추이</h3>
                     <div className="text-[12px] text-muted-foreground mt-0.5">새로 들어온 지원자의 일별 흐름 · 실시간 인입 기준(일괄 임포트 제외)</div>
                   </div>
                   <div className="text-right">
@@ -526,7 +526,7 @@ export function Dashboard() {
               <div className="border border-border-strong rounded-lg p-5 flex flex-col">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
-                  <button onClick={() => router.push('/live')} className="text-[11.5px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">응대로</button>
+                  <button onClick={() => router.push('/live')} className="text-[12px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">응대로</button>
                 </div>
 
                 {/* 단계별 — 라벨은 실무 언어, 뜻은 툴팁으로 */}
@@ -546,7 +546,7 @@ export function Dashboard() {
 
                 {/* 온보딩 체크 진행도 */}
                 <div className="border-t border-muted pt-3 space-y-2.5">
-                  <div className="text-[11.5px] font-bold text-muted-foreground flex items-center justify-between">온보딩 진행 <span className="text-muted-foreground font-medium">대상 {flow.targets}명</span></div>
+                  <div className="text-[12px] font-bold text-muted-foreground flex items-center justify-between">온보딩 진행 <span className="text-muted-foreground font-medium">대상 {flow.targets}명</span></div>
                   {[
                     { label: "가이드 전달", value: flow.guideSent, total: flow.targets, pct: flow.pct(flow.guideSent), icon: ClipboardCheck, color: "var(--chart-1)" },
                     // 배민 ID는 배민 라인 전용 — 분모를 배민 대상으로. 배민 대상이 없으면(도시락만) 숨김.
@@ -554,7 +554,7 @@ export function Dashboard() {
                     { label: "온보딩 통화", value: flow.called, total: flow.targets, pct: flow.pct(flow.called), icon: PhoneCall, color: "var(--chart-3)" },
                   ].map((m) => (
                     <div key={m.label}>
-                      <div className="flex items-center justify-between text-[11.5px] mb-1">
+                      <div className="flex items-center justify-between text-[12px] mb-1">
                         <span className="flex items-center gap-1.5 font-semibold text-gray-700"><m.icon size={12} style={{ color: m.color }} /> {m.label}</span>
                         <span className="font-bold text-foreground">{m.value}/{m.total}</span>
                       </div>
@@ -571,7 +571,7 @@ export function Dashboard() {
             <div className="border border-border-strong rounded-lg p-6 flex flex-col">
               <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <div>
-                  <h3 className="text-[15px] font-bold text-foreground">파이프라인 단계별 현황</h3>
+                  <h3 className="text-[16px] font-bold text-foreground">파이프라인 단계별 현황</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">유입부터 확정 인력까지 단계별 전환율</div>
                 </div>
                 <button onClick={() => router.push('/pipeline')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -582,7 +582,7 @@ export function Dashboard() {
               <div className="flex flex-col gap-3 flex-1 justify-center">
                 {funnel.map((f, i) => (
                   <div key={i} className="flex items-center gap-3">
-                    <div className="w-[88px] shrink-0 text-[12.5px] font-bold text-gray-700 text-right">{f.step}</div>
+                    <div className="w-[88px] shrink-0 text-[13px] font-bold text-gray-700 text-right">{f.step}</div>
                     <div className="flex-1 h-9 bg-background rounded-lg overflow-hidden relative">
                       <div
                         className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
@@ -594,7 +594,7 @@ export function Dashboard() {
                     <div className="w-[92px] shrink-0 flex items-center justify-end gap-1.5">
                       <span className="text-[12px] font-bold text-foreground">{f.pctTotal}%</span>
                       {f.conv !== null && (
-                        <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">전환 {f.conv}%</span>
+                        <span className="text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">전환 {f.conv}%</span>
                       )}
                     </div>
                   </div>
@@ -606,7 +606,7 @@ export function Dashboard() {
             <div className="border border-border-strong rounded-lg p-6 flex flex-col">
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info-strong" /> 지역별 인재풀 분포</h3>
+                  <h3 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><MapPin size={15} className="text-info-strong" /> 지역별 인재풀 분포</h3>
                   <div className="text-[12px] text-muted-foreground mt-0.5">거주지(시/군/구) 기준 상위 5개 지역</div>
                 </div>
                 <button onClick={() => router.push('/pipeline?view=map')} className="text-[12px] font-bold text-info-strong bg-info-soft hover:bg-info/25 px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -620,20 +620,20 @@ export function Dashboard() {
                 <div className="flex flex-col gap-3">
                   {regionDist.top.map((r) => (
                     <div key={r.region} className="flex items-center gap-3">
-                      <div className="w-[120px] shrink-0 text-[12.5px] font-bold text-gray-700 text-right truncate" title={r.region}>{r.region}</div>
+                      <div className="w-[120px] shrink-0 text-[13px] font-bold text-gray-700 text-right truncate" title={r.region}>{r.region}</div>
                       <div className="flex-1 h-8 bg-background rounded-lg overflow-hidden relative">
                         <div
                           className="h-full rounded-lg transition-all duration-500 flex items-center px-3 bg-info"
                           style={{ width: `${Math.max(Math.round((r.count / regionDist.max) * 100), 8)}%` }}
                         >
-                          <span className="text-[12.5px] font-extrabold text-gray-800">{r.count.toLocaleString()}</span>
+                          <span className="text-[13px] font-extrabold text-gray-800">{r.count.toLocaleString()}</span>
                         </div>
                       </div>
                       <div className="w-[40px] shrink-0 text-[12px] font-bold text-muted-foreground text-right">명</div>
                     </div>
                   ))}
                   {regionDist.unknownCount > 0 && (
-                    <div className="text-[11.5px] text-muted-foreground mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
+                    <div className="text-[12px] text-muted-foreground mt-1">주소 미입력 {regionDist.unknownCount.toLocaleString()}명 (지도/분포 집계 제외)</div>
                   )}
                 </div>
               )}

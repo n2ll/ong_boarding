@@ -253,7 +253,7 @@ export function SosLedgerCard() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white border border-border-strong rounded-lg p-6 shadow-sm flex flex-col">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error-strong" /> 긴급 건 기록</h2>
+          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error-strong" /> 긴급 건 기록</h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">결원·증차 발생~해결 로그와 월 운영비 (기록 전용)</div>
         </div>
         <button
@@ -265,7 +265,7 @@ export function SosLedgerCard() {
       </div>
 
       {/* 이번 달 요약 */}
-      <div className="bg-background rounded-xl px-4 py-2.5 text-[12.5px] font-semibold text-gray-700 mb-4">
+      <div className="bg-background rounded-xl px-4 py-2.5 text-[13px] font-semibold text-gray-700 mb-4">
         이번 달 긴급 <b className="text-foreground">{summary?.count ?? 0}건</b> · 해결 <b className="text-foreground">{summary?.resolved ?? 0}건</b> · 건별 비용 <b className="text-foreground">{won(summary?.cost_sum ?? 0)}</b> + 월 운영비 <b className="text-foreground">{won(ledgerTotal)}</b>
       </div>
 
@@ -279,20 +279,20 @@ export function SosLedgerCard() {
               <span className="w-2 h-2 rounded-full bg-error animate-pulse shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-bold text-foreground truncate">{r.line_label}</div>
-                <div className="text-[11.5px] text-error-strong truncate">
+                <div className="text-[12px] text-error-strong truncate">
                   {[r.region, r.vehicle, `${r.needed_count}명 필요`, r.note].filter(Boolean).join(" · ")}
                 </div>
               </div>
-              <span className="text-[11.5px] font-bold text-error-strong shrink-0">{elapsedLabel(r.created_at, nowTick)}</span>
+              <span className="text-[12px] font-bold text-error-strong shrink-0">{elapsedLabel(r.created_at, nowTick)}</span>
               <button
                 onClick={() => handleMakeJob(r)}
-                className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Briefcase size={13} /> 공고로 만들기
               </button>
               <button
                 onClick={() => setResolveForm({ id: r.id, line_label: r.line_label, resolution: "", cost_krw: "", duration_minutes: "", resolution_note: "" })}
-                className="text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 해결 기록
               </button>
@@ -304,7 +304,7 @@ export function SosLedgerCard() {
       {/* 최근 처리 내역 */}
       {recentRows.length > 0 && (
         <div className="mt-3 border-t border-muted pt-3">
-          <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">최근 처리</div>
+          <div className="text-[12px] font-bold text-muted-foreground mb-1.5">최근 처리</div>
           <div className="flex flex-col gap-1">
             {recentRows.map((r) => (
               <div key={r.id} className="flex items-center gap-2 text-[12px] text-gray-700">
@@ -323,7 +323,7 @@ export function SosLedgerCard() {
       <div className="mt-4 border-t border-muted pt-3">
         <button
           onClick={() => setLedgerOpen((o) => !o)}
-          className="flex min-h-9 w-full items-center justify-between rounded-lg px-1 text-[12.5px] font-bold text-gray-700 transition-colors hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-9 w-full items-center justify-between rounded-lg px-1 text-[13px] font-bold text-gray-700 transition-colors hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex items-center gap-1.5"><Wallet size={14} className="text-info" /> {ledgerRes?.month ?? kstMonth()} 운영비 {won(ledgerTotal)}</span>
           {ledgerOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
@@ -337,8 +337,8 @@ export function SosLedgerCard() {
             {ledgerRows.map((row) => (
               <div key={row.id} className="flex items-center gap-3 px-3 py-2 bg-background rounded-lg">
                 <span className="text-[12px] font-bold text-gray-700 w-[110px] shrink-0">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
-                <span className="text-[12.5px] font-extrabold text-foreground shrink-0">{won(row.amount_krw)}</span>
-                <span className="flex-1 text-[11.5px] text-muted-foreground truncate">{row.memo}</span>
+                <span className="text-[13px] font-extrabold text-foreground shrink-0">{won(row.amount_krw)}</span>
+                <span className="flex-1 text-[12px] text-muted-foreground truncate">{row.memo}</span>
                 <button
                   onClick={() => handleDeleteLedger(row)}
                   title="삭제"
@@ -354,7 +354,7 @@ export function SosLedgerCard() {
               <select
                 value={ledgerForm.category}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
-                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[12.5px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[13px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
                   <option key={k} value={k}>{label}</option>
@@ -366,13 +366,13 @@ export function SosLedgerCard() {
                 placeholder="금액(원)"
                 value={ledgerForm.amount_krw}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-[110px] px-3 py-2 border border-border-strong rounded-xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <input
                 placeholder="메모 (선택)"
                 value={ledgerForm.memo}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex-1 px-3 py-2 border border-border-strong rounded-xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <button
                 onClick={handleAddLedger}

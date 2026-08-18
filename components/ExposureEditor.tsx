@@ -298,7 +298,7 @@ export function ExposureEditor({
 
       {targeted && (
         <div className="rounded-xl border border-border-strong bg-surface-raised p-3.5 space-y-3">
-          <div className="text-[12.5px] font-bold text-gray-700">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
+          <div className="text-[13px] font-bold text-gray-700">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
           {/* 역방향 동선 — 여기 있는 축(지역·가용성·차량…)으로 안 잡히는 대상은 인재풀에서 직접 골라야 한다.
               **저장된 공고(jobId)에서만** 안내한다 — 등록 폼에서 이 링크를 타면 작성 중 내용을 잃고,
               아직 공고가 없어 명단을 만들 수도 없다. */}
@@ -318,7 +318,7 @@ export function ExposureEditor({
           )}
 
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">지역(시도)</div>
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">지역(시도)</div>
             <div className="flex flex-wrap gap-1.5">
               {(options?.sidos ?? []).map((s) => (
                 <Chip key={s} label={s} on={value.rule.sido.includes(s)} onClick={() => setRule({ sido: toggleIn(value.rule.sido, s) })} />
@@ -337,13 +337,13 @@ export function ExposureEditor({
 
           {/* 시군구(구 단위) — 시·도로는 강남권/용산권을 못 가른다. 동명이구(중구·서구)가 있어 시도별로 묶어 보여준다. */}
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
               시군구 <span className="font-semibold text-muted-foreground">— 권역별 라인이면 여기서 구를 고르세요</span>
             </div>
             <div className="flex flex-col gap-2">
               {(options?.sigunguGroups ?? []).map((g) => (
                 <div key={g.sido}>
-                  <div className="text-[10.5px] font-bold text-muted-foreground mb-1">
+                  <div className="text-[11px] font-bold text-muted-foreground mb-1">
                     {g.sido}
                     {g.sido === SIGUNGU_NO_SIDO && <span className="font-semibold"> — 주소 정리가 필요한 분들</span>}
                   </div>
@@ -379,7 +379,7 @@ export function ExposureEditor({
           {/* 희망 시간대 — 폼 4슬롯 토큰과 자유 입력(`월,화,수,목,금 9:00~18:00`)을 같은 함수로 판정한다.
               미확인은 값이 '~' 한 글자이거나 야간·새벽 근무인 분들이라, 고르지 않으면 조용히 빠진다. */}
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
               희망 시간대 <span className="font-semibold text-muted-foreground">— 오전·오후 라인이면 여기서 고르세요</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -400,7 +400,7 @@ export function ExposureEditor({
               )}
             </div>
             {(options?.unknown?.slot ?? 0) > 0 && (
-              <p className="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+              <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
                 미확인 {options?.unknown?.slot}명 — 지원 당시 시간대를 안 남기신 분
                 {(options?.unknown?.slot_partial ?? 0) > 0 &&
                   `, 그리고 요일이나 시각을 적었지만 오전·오후로 판정할 수 없는 분 ${options?.unknown?.slot_partial}명(야간·새벽 근무 포함)`}
@@ -412,7 +412,7 @@ export function ExposureEditor({
           {/* 집결지 거리 반경 — 권역 라인의 핵심 축. 기준점(집결지만/경유지 포함)은 공고 수정에서 고른다.
               좌표 없는 분은 어떤 반경으로도 안 걸리므로 '주소 미확인 포함'을 따로 둔다(조용한 탈락 방지). */}
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
               집결지 거리{" "}
               <span className="font-semibold text-muted-foreground">
                 {jobId ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요" : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
@@ -441,7 +441,7 @@ export function ExposureEditor({
                   )}
                 </div>
                 {value.rule.radiusKm !== "" && (
-                  <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-700 mt-1.5 cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700 mt-1.5 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={value.rule.radiusIncludeUnknown}
@@ -466,7 +466,7 @@ export function ExposureEditor({
           </div>
 
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">가용성</div>
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">가용성</div>
             <div className="flex flex-wrap gap-1.5">
               {(options?.availabilities ?? []).map((s) => (
                 <Chip key={s} label={s} on={value.rule.availability.includes(s)} onClick={() => setRule({ availability: toggleIn(value.rule.availability, s) })} />
@@ -476,7 +476,7 @@ export function ExposureEditor({
           </div>
 
           <div>
-            <div className="text-[11.5px] font-bold text-muted-foreground mb-1.5">
+            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
               차량 <span className="font-semibold text-muted-foreground">— 차량이 필요한 라인이면 '있음'만 골라 주세요</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -487,7 +487,7 @@ export function ExposureEditor({
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-1.5 text-[12.5px] font-bold text-gray-700 cursor-pointer">
+            <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
                 checked={value.rule.suntopDone}
@@ -496,7 +496,7 @@ export function ExposureEditor({
               />
               선탑(동승) 완료자만
             </label>
-            <label className="flex items-center gap-1.5 text-[12.5px] font-bold text-gray-700">
+            <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700">
               지원(등록)
               <input
                 type="number"
@@ -509,13 +509,13 @@ export function ExposureEditor({
                   setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
                 }}
                 placeholder="없음"
-                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[12.5px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-16 bg-white border border-border-strong rounded-xl px-2 py-1 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
               개월 이내
             </label>
           </div>
 
-          <p className="text-[10.5px] text-muted-foreground leading-snug border-t border-muted pt-2">
+          <p className="text-[11px] text-muted-foreground leading-snug border-t border-muted pt-2">
             여기 숫자는 <b className="text-muted-foreground">노출 기준 인재풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
             문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
           </p>
@@ -546,7 +546,7 @@ export function ExposureEditor({
       {targeted && jobId && (
         <div className="rounded-xl border border-border-strong bg-white p-3.5 space-y-2.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-gray-700">
+            <div className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700">
               <Users size={14} /> 노출 대상 명단
               {roster && (
                 <span className="text-muted-foreground font-semibold">
@@ -557,7 +557,7 @@ export function ExposureEditor({
             <button
               type="button"
               onClick={() => mutateRoster()}
-              className="flex items-center gap-1 text-[11.5px] font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+              className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
               title="저장된 기준 명단을 다시 불러옵니다(파이프라인에서 추가한 인원 등 반영). 편집 중 규칙 변경은 저장 후 다음에 열 때 반영돼요."
             >
               <RefreshCw size={12} /> 새로고침
@@ -574,12 +574,12 @@ export function ExposureEditor({
               ) : (
                 <div className="max-h-44 overflow-y-auto divide-y divide-background">
                   {roster.effective.map((p) => (
-                    <div key={p.id} className="flex items-center gap-2 py-1.5 text-[12.5px]">
+                    <div key={p.id} className="flex items-center gap-2 py-1.5 text-[13px]">
                       <span className="font-bold text-foreground">{p.name ?? `#${p.id}`}</span>
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
+                      <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{p.auto ? "자동" : VIA_LABEL[p.via]}</span>
                       {/* 이야기 중인 분을 '수동 추가'와 같게 보여주면, 클릭 한 번에 보호가 사라진다 */}
                       {p.linked && (
-                        <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning-strong border border-warning/35" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
+                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning-strong border border-warning/35" title="이 공고로 관심을 누르거나 후보로 진행 중인 분이에요. 명단에서 빼면 본인 맞춤 공고 링크에서 이 공고가 사라집니다.">
                           이 공고로 이야기 중
                         </span>
                       )}
@@ -600,14 +600,14 @@ export function ExposureEditor({
               )}
               {roster.excluded.length > 0 && (
                 <div className="border-t border-muted pt-2">
-                  <div className="text-[11.5px] font-bold text-muted-foreground mb-1">제외해둔 인원 {roster.excluded.length}명</div>
+                  <div className="text-[12px] font-bold text-muted-foreground mb-1">제외해둔 인원 {roster.excluded.length}명</div>
                   <div className="max-h-24 overflow-y-auto divide-y divide-background">
                     {roster.excluded.map((p) => (
                       <div key={p.id} className="flex items-center gap-2 py-1 text-[12px] text-muted-foreground">
                         <span className="font-semibold line-through">{p.name ?? `#${p.id}`}</span>
                         {/* 제외됐는데 이야기 중인 분 — AI만 그 공고를 말하는 상태다. 여기서 발견·복원할 수 있어야 한다. */}
                         {p.linked && (
-                          <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong border border-error/30" title="이 분은 이 공고로 이야기 중인데 노출에서 제외돼 있어요 — 본인 화면에서는 이 공고를 볼 수 없습니다.">
+                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong border border-error/30" title="이 분은 이 공고로 이야기 중인데 노출에서 제외돼 있어요 — 본인 화면에서는 이 공고를 볼 수 없습니다.">
                             이야기 중인데 제외됨
                           </span>
                         )}

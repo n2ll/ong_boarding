@@ -145,7 +145,7 @@ export function Sidebar() {
           </span>
           {expanded && (
             <span className="min-w-0 animate-in fade-in duration-200 motion-reduce:animate-none">
-              <span className="block whitespace-nowrap text-[17px] font-extrabold leading-none tracking-tight">옹보딩</span>
+              <span className="block whitespace-nowrap text-[16px] font-extrabold leading-none tracking-tight">옹보딩</span>
               <span className="mt-[3px] block whitespace-nowrap text-[11px] font-medium tracking-wide text-white/50">시니어 채용 운영</span>
             </span>
           )}
@@ -175,14 +175,14 @@ export function Sidebar() {
 
           {/* 중립 표기 프로필 — 특정 개인 하드코딩 대신 팀 계정. 로그아웃(I-2 Supabase Auth) */}
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-dark text-[15px] font-bold text-brand-yellow">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-dark text-[16px] font-bold text-brand-yellow">
               옹
             </span>
             {expanded && (
               <div className="flex min-w-0 flex-1 items-center gap-1 animate-in fade-in duration-200 motion-reduce:animate-none">
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13.5px] font-semibold leading-tight">옹고잉 채용팀</span>
-                  <span className="block truncate text-[11.5px] text-white/50">관리자 콘솔</span>
+                  <span className="block truncate text-[14px] font-semibold leading-tight">옹고잉 채용팀</span>
+                  <span className="block truncate text-[12px] text-white/50">관리자 콘솔</span>
                 </span>
                 <button
                   type="button"
@@ -229,7 +229,7 @@ export function MobileNav() {
             href={path}
             aria-label={label}
             aria-current={active ? "page" : undefined}
-            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[10px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[11px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
               active ? "bg-white text-gray-900" : "text-white/55 hover:bg-white/10 hover:text-white"
             }`}
           >
@@ -272,7 +272,7 @@ function DockItem({
               숫자를 글자로 같이 보여 색만으로 전달하지 않는다(MASTER.md §1). */}
           {badge && !expanded && (
             <span
-              className={`absolute right-0 top-0 min-w-[17px] rounded-full px-[4px] text-[10px] font-extrabold leading-[17px] text-white ${
+              className={`absolute right-0 top-0 min-w-[17px] rounded-full px-[4px] text-[11px] font-extrabold leading-[17px] text-white ${
                 badge.tone === "error" ? "bg-error" : "bg-success-strong"
               }`}
             >
@@ -283,7 +283,7 @@ function DockItem({
 
         {expanded && (
           <span className="flex min-w-0 flex-1 items-center gap-2 animate-in fade-in slide-in-from-left-1 duration-200 motion-reduce:animate-none">
-            <span className="min-w-0 flex-1 truncate text-left text-[13.5px] font-bold">{item.label}</span>
+            <span className="min-w-0 flex-1 truncate text-left text-[14px] font-bold">{item.label}</span>
             {badge && (
               <span
                 className={`shrink-0 rounded-full px-[7px] py-[1px] text-[11px] font-extrabold tracking-tight text-white ${

@@ -181,11 +181,11 @@ function Modal({
 
           <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-glass px-5 py-4 sm:px-6 sm:py-5">
             <div className="min-w-0">
-              <DialogPrimitive.Title className="text-[17px] font-extrabold leading-snug text-foreground sm:text-[18px]">
+              <DialogPrimitive.Title className="text-[16px] font-extrabold leading-snug text-foreground sm:text-[18px]">
                 {title}
               </DialogPrimitive.Title>
               {description && (
-                <DialogPrimitive.Description className="mt-1 text-[12.5px] font-medium leading-relaxed text-muted-foreground">
+                <DialogPrimitive.Description className="mt-1 text-[13px] font-medium leading-relaxed text-muted-foreground">
                   {description}
                 </DialogPrimitive.Description>
               )}

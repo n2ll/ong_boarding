@@ -182,7 +182,7 @@ export function Inbox() {
           <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mb-4">
             <Check size={30} className="text-success" />
           </div>
-          <div className="text-[15px] font-bold text-gray-700 mb-1">모두 처리했어요</div>
+          <div className="text-[16px] font-bold text-gray-700 mb-1">모두 처리했어요</div>
           <div className="text-[13px]">분류가 필요한 문자가 새로 오면 여기에 표시됩니다.</div>
         </div>
       )}
@@ -192,11 +192,28 @@ export function Inbox() {
           const busy = busyId === msg.id;
           return (
             <div key={msg.id} className="bg-white/70 backdrop-blur-xl border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[13px] font-bold text-gray-700">
-                  <Phone size={13} className="text-muted-foreground" /> {msg.applicant_phone}
-                </div>
-                <span className="text-[12px] text-muted-foreground">{formatTime(msg.created_at)}</span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                {/* 번호를 tel: 링크로 — 비밀번호를 묻는 사람에게 필요한 건 분류가 아니라 답이다.
+                    분류 액션밖에 없던 화면에 최소한의 '연락 수단'을 올린다. */}
+                <a
+                  href={`tel:${msg.applicant_phone}`}
+                  title="이 번호로 전화 걸기"
+                  className="relative flex items-center gap-2 rounded text-[13px] font-bold text-info after:absolute after:-inset-1.5 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Phone size={13} /> {msg.applicant_phone}
+                </a>
+                <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                  {(() => {
+                    // 경과일 배지 — 절대 날짜만 있으면 "오래됐다"는 사실이 눈에 안 들어온다.
+                    const d = Math.max(0, Math.floor((Date.now() - new Date(msg.created_at).getTime()) / 86400000));
+                    return d >= 1 ? (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${d >= 7 ? "bg-error-soft text-error-strong" : "bg-muted text-gray-700"}`}>
+                        {d}일 경과
+                      </span>
+                    ) : null;
+                  })()}
+                  {formatTime(msg.created_at)}
+                </span>
               </div>
               <div className="text-[14px] leading-relaxed text-gray-800 bg-background border border-muted rounded-xl px-4 py-3 whitespace-pre-wrap">
                 {msg.body}

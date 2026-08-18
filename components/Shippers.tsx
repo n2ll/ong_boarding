@@ -56,8 +56,8 @@ export function Shippers() {
           헷갈렸다 → 한 화면으로 합친다. 위=공고에 쓰는 목록(편집·동기화), 아래=계약 원본(읽기 전용). */}
       <section className="space-y-2">
         <div>
-          <h2 className="text-[15px] font-extrabold text-foreground">공고에 쓰는 화주사</h2>
-          <p className="text-[12.5px] text-muted-foreground mt-0.5">
+          <h2 className="text-[16px] font-extrabold text-foreground">공고에 쓰는 화주사</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             공고를 등록할 때 고르는 목록이에요. 계약 원본에 있는 화주사를 여기로 가져오려면 <b>‘옹매니징 동기화’</b>를 누르세요.
           </p>
         </div>
@@ -68,8 +68,8 @@ export function Shippers() {
 
       <section className="space-y-2">
         <div>
-          <h2 className="text-[15px] font-extrabold text-foreground">계약 원본 (옹매니징)</h2>
-          <p className="text-[12.5px] text-muted-foreground mt-0.5">
+          <h2 className="text-[16px] font-extrabold text-foreground">계약 원본 (옹매니징)</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             계약·배송라인의 원본 시스템에서 그대로 읽어옵니다(여기서는 수정할 수 없어요).
             ‘운행 인원’은 그 라인에서 실제 운행 중인 인원으로, 이 콘솔의 <b>확정</b>과는 다른 값이에요.
           </p>
@@ -95,7 +95,7 @@ export function Shippers() {
 
       {data?.configured && (
         <>
-          <div className="flex flex-wrap gap-2 text-[12.5px] font-bold text-gray-700">
+          <div className="flex flex-wrap gap-2 text-[13px] font-bold text-gray-700">
             <span className="px-3 py-1.5 rounded-lg bg-info-soft text-info-strong">화주사 {clients.length}</span>
             <span className="px-3 py-1.5 rounded-lg bg-success-soft text-success-strong">배송라인 {totalLines}</span>
             <span className="px-3 py-1.5 rounded-lg bg-yellow-50 text-warning-strong">운행 인원 {totalWorkers}</span>
@@ -140,13 +140,13 @@ export function Shippers() {
                   {open && (
                     <div className="border-t border-muted px-4 py-3 bg-surface-raised">
                       {c.lines.length === 0 ? (
-                        <div className="text-[12.5px] text-muted-foreground">등록된 배송라인이 없어요.</div>
+                        <div className="text-[13px] text-muted-foreground">등록된 배송라인이 없어요.</div>
                       ) : (
                         <div className="space-y-1.5">
                           {c.lines.map((l, i) => (
                             <div
                               key={i}
-                              className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12.5px] text-gray-700"
+                              className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-gray-700"
                             >
                               <span className="font-bold text-success-strong">{l.lineName}</span>
                               {l.workDays && <span className="text-muted-foreground">근무 {l.workDays}</span>}

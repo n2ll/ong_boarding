@@ -54,7 +54,7 @@ const buttonVariants = cva(
          * 44px를 주면 행 높이가 무너져 한 화면에 보이는 후보 수가 줄어든다.
          * 화면의 주요 실행(저장·발송·등록)에는 절대 쓰지 말 것.
          */
-        chip: "min-h-7 px-2 py-1 text-[11.5px] rounded-md gap-1 [&_svg:not([class*='size-'])]:size-3",
+        chip: "min-h-7 px-2 py-1 text-[12px] rounded-md gap-1 [&_svg:not([class*='size-'])]:size-3",
         /** 도구 모음의 아이콘+글자 버튼. chip과 같은 취지의 예외. */
         toolbar: "min-h-8 px-2 py-2 text-[12px] rounded-lg gap-1",
       },

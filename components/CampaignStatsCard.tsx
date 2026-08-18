@@ -85,7 +85,7 @@ export function CampaignStatsCard() {
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
+          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
             <Megaphone size={15} className="text-info" /> 다시 연락 캠페인 {data.stale ? "(지난 캠페인)" : `(최근 ${data.window_days}일)`}
           </h2>
           <div className="text-[12px] text-muted-foreground mt-0.5" title={`발송 묶음 — 최근 ${data.window_days}일 안에 다시 연락 문자를 받은 인원 묶음`}>
@@ -99,7 +99,7 @@ export function CampaignStatsCard() {
         <button
           onClick={() => void mutate()}
           title="집계 새로고침"
-          className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <RefreshCw size={13} className={isValidating ? "animate-spin" : ""} /> 새로고침
         </button>
@@ -115,7 +115,7 @@ export function CampaignStatsCard() {
                 <span className="text-[20px] font-extrabold text-foreground leading-none tracking-tight">{s.value}</span>
                 <span className="text-[11px] text-muted-foreground font-bold">명</span>
                 {s.pct !== null && (
-                  <span className="text-[10.5px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">{s.pct}%</span>
+                  <span className="text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">{s.pct}%</span>
                 )}
               </div>
             </>
@@ -146,7 +146,7 @@ export function CampaignStatsCard() {
                   key={j.job_id}
                   onClick={() => scrollToAnchor("interest-queue")}
                   title={`${j.title} — 관심 표시 처리 큐로 이동`}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background hover:border-info/60 px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background hover:border-info/60 px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="text-muted-foreground">#{j.job_id}</span>
                   <span className="max-w-[160px] truncate">{j.title}</span>
@@ -161,7 +161,7 @@ export function CampaignStatsCard() {
             </>
           )}
           {(data.failed > 0 || data.opted_out > 0) && (
-            <span className="ml-auto flex items-center gap-3 shrink-0 text-[11.5px]">
+            <span className="ml-auto flex items-center gap-3 shrink-0 text-[12px]">
               {data.failed > 0 && <span className="font-semibold text-muted-foreground">발송 실패 {data.failed}건</span>}
               {data.opted_out > 0 && <span className="font-bold text-error">수신거부 {data.opted_out}명</span>}
             </span>

@@ -211,7 +211,7 @@ export async function GET(req: NextRequest) {
     const [jcRes, linkRes, jobRes] = await Promise.all([
       supabase
         .from("job_candidates")
-        .select("id, applicant_id, agent_stage, created_at")
+        .select("id, applicant_id, agent_stage, created_at, updated_at")
         .in("applicant_id", ids)
         .order("created_at", { ascending: false }),
       // dashboard 스코프는 job_links를 아무도 안 읽는다 — 별도 페이징 조회 1개를 건너뛴다.
@@ -224,15 +224,23 @@ export async function GET(req: NextRequest) {
     ]);
 
     const jcs = jcRes.data;
-    const stageByApplicant = new Map<number, string | null>();
+    const stageByApplicant = new Map<number, { stage: string | null; at: string | null }>();
     for (const jc of jcs ?? []) {
       if (!stageByApplicant.has(jc.applicant_id as number)) {
-        stageByApplicant.set(jc.applicant_id as number, jc.agent_stage as string | null);
+        stageByApplicant.set(jc.applicant_id as number, {
+          stage: jc.agent_stage as string | null,
+          at: (jc.updated_at as string | null) ?? null,
+        });
       }
     }
+    // agent_stage_updated_at — 단계가 바뀐 시각의 근사(행 updated_at). 파이프라인이
+    // '사람 확인 필요 · N일' 배지에 쓴다. 마감·시스템 공고의 paused도 인계 큐에 실리므로
+    // (큐가 그런 건을 의도적으로 담는다) 살아있는 결속(job_links)만으로는 판정할 수 없다 —
+    // 실측: 인계 2건 모두 마감/시스템 공고라 job_links에 없어 배지가 영영 안 떴다.
     withStage = withStage.map((a) => ({
       ...a,
-      agent_stage: stageByApplicant.get(a.id) ?? null,
+      agent_stage: stageByApplicant.get(a.id)?.stage ?? null,
+      agent_stage_updated_at: stageByApplicant.get(a.id)?.at ?? null,
     }));
 
     // 살아있는 공고 결속(관심 포함)을 함께 내려준다 — 목록 배지 "공고 N건"용.

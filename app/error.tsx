@@ -21,12 +21,12 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center">
-      <div className="text-[40px]" aria-hidden>⚠️</div>
+      <div className="text-4xl" aria-hidden>⚠️</div>
       <h1 className="text-[20px] font-extrabold text-foreground">화면을 불러오지 못했어요</h1>
       <p className="max-w-md text-[14px] leading-relaxed text-muted-foreground">
         일시적인 오류일 수 있어요. 아래 버튼으로 다시 시도하고, 반복되면 새로고침(⌘R) 후에도
         같은지 확인해 주세요.
-        {error.digest && <span className="mt-1 block text-[11.5px] text-muted-foreground/70">오류 코드: {error.digest}</span>}
+        {error.digest && <span className="mt-1 block text-[12px] text-muted-foreground/70">오류 코드: {error.digest}</span>}
       </p>
       <button
         onClick={reset}

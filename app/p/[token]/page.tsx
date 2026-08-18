@@ -298,7 +298,7 @@ export default function PoolPage() {
       <main className="min-h-screen bg-yellow-50 flex items-center justify-center p-6">
         <div className="text-center">
           <p className="text-[20px] font-extrabold text-foreground mb-2">링크를 확인할 수 없어요</p>
-          <p className="text-[15px] text-muted-foreground">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
+          <p className="text-[16px] text-muted-foreground">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
         </div>
       </main>
     );
@@ -307,21 +307,35 @@ export default function PoolPage() {
   return (
     <main className="min-h-screen bg-yellow-50">
       <div className="max-w-[560px] mx-auto w-full px-5 py-8">
-        <header className="mb-6">
-          <div className="text-[14px] font-bold text-warning-strong mb-1">옹고잉 · 맞춤 일자리</div>
-          <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
-            {name ? `${name}님,` : "안녕하세요,"}
-            <br />지금 모집 중인 일자리예요
-          </h1>
-          <p className="mt-2 text-[15px] text-muted-foreground leading-relaxed">
-            마음에 드는 일자리에 <b className="text-foreground">[관심 있어요]</b>를 눌러주세요.
-            담당 매니저가 확인 후 연락드립니다.
-          </p>
-        </header>
+        {/* 빈 상태에서 제목·안내가 바뀐다 — 예전엔 공고 0개여도 "지금 모집 중인 일자리예요 /
+            [관심 있어요]를 눌러주세요"가 그대로 떠서, 한 화면이 "일자리가 있다(제목) ·
+            없는 버튼을 눌러라(안내) · 없다(카드)"를 동시에 말했다(2026-08-14 감사, 649명 노출). */}
+        {(() => {
+          const hasOpenJobs = jobs.some((j) => !j.expired);
+          return (
+            <header className="mb-6">
+              <div className="text-[14px] font-bold text-warning-strong mb-1">옹고잉 · 맞춤 일자리</div>
+              <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
+                {name ? `${name}님,` : "안녕하세요,"}
+                <br />{hasOpenJobs ? "지금 모집 중인 일자리예요" : "지금은 준비된 일자리가 없어요"}
+              </h1>
+              <p className="mt-2 text-[16px] text-muted-foreground leading-relaxed">
+                {hasOpenJobs ? (
+                  <>
+                    마음에 드는 일자리에 <b className="text-foreground">[관심 있어요]</b>를 눌러주세요.
+                    담당 매니저가 확인 후 연락드립니다.
+                  </>
+                ) : (
+                  <>새 일자리가 나오면 이 페이지에 먼저 올라와요. 문자로도 알려드립니다.</>
+                )}
+              </p>
+            </header>
+          );
+        })()}
 
         {jobs.filter((j) => !j.expired).length === 0 && (
           <div className="bg-white border border-border-strong rounded-2xl p-6 text-center mb-4">
-            <p className="text-[17px] font-bold text-foreground mb-1">지금은 모집 중인 공고가 없어요</p>
+            <p className="text-[16px] font-bold text-foreground mb-1">지금은 모집 중인 공고가 없어요</p>
             <p className="text-[14px] text-muted-foreground">새 일자리가 나오면 문자로 알려드릴게요.</p>
           </div>
         )}
@@ -337,7 +351,7 @@ export default function PoolPage() {
                   <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-muted text-muted-foreground border border-border-strong">
                     마감됨
                   </span>
-                  <h2 className="mt-2 text-[17px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
+                  <h2 className="mt-2 text-[16px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
                   {job.interested && (
                     <p className="mt-2 text-[14px] font-bold text-success-strong">
                       ✓ 관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.
@@ -347,7 +361,7 @@ export default function PoolPage() {
                     이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
                   </p>
                   {notified ? (
-                    <p className="mt-3 py-3 text-[15px] font-bold text-success-strong text-center">
+                    <p className="mt-3 py-3 text-[16px] font-bold text-success-strong text-center">
                       ✓ 네, 새 일자리가 나오면 먼저 안내드릴게요
                     </p>
                   ) : (
@@ -404,7 +418,7 @@ export default function PoolPage() {
                 <h2 className="mt-2 text-[18px] font-extrabold text-foreground leading-snug">
                   {job.title.replace(/\s*\([^)]*원\)\s*$/, "")}
                 </h2>
-                <dl className="mt-3 flex flex-col gap-1.5 text-[15px] text-gray-700">
+                <dl className="mt-3 flex flex-col gap-1.5 text-[16px] text-gray-700">
                   {pay && (
                     <div className="flex gap-2">
                       <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">급여</dt>
@@ -460,7 +474,7 @@ export default function PoolPage() {
                     {/* 본문은 기본 접힘 — 위 요약(급여·시작일·차량)이 스캔 단위. 프로즈가 요약과 겹쳐
                         기본 노출하면 글자만 많아지고 3개 비교가 어렵다. 원하는 사람만 펼쳐 본다. */}
                     {expandedIds.has(job.id) && (
-                      <div className="mt-1 text-[15px] text-gray-700 leading-relaxed">
+                      <div className="mt-1 text-[16px] text-gray-700 leading-relaxed">
                         {/* 업무 관련 주요 내용(■ 항목 = 운임·요일·시간·차량 등)은 볼드로 강조 */}
                         {job.body.split("\n").map((line, i) => (
                           <p
@@ -474,7 +488,7 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[15px] font-bold text-warning-strong"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[16px] font-bold text-warning-strong"
                     >
                       {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
                     </button>
@@ -526,14 +540,14 @@ export default function PoolPage() {
                       <button
                         onClick={() => setConfirmingId(null)}
                         disabled={sendingId !== null}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-xl text-[17px] font-extrabold bg-white text-gray-700 border border-gray-300"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-xl text-[16px] font-extrabold bg-white text-gray-700 border border-gray-300"
                       >
                         아니요
                       </button>
                       <button
                         onClick={() => expressInterest(job)}
                         disabled={sendingId !== null}
-                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-xl text-[17px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
+                        className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-xl text-[16px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
                       >
                         {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
                       </button>
@@ -546,12 +560,12 @@ export default function PoolPage() {
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
                     {immediateIds.has(job.id) || availability === "즉시가능" ? (
-                      <p className="text-[15px] font-bold text-success text-center">
+                      <p className="text-[16px] font-bold text-success text-center">
                         ⚡ 바로 시작 가능 — 확인했어요! 매니저가 참고할게요
                       </p>
                     ) : (
                       <>
-                        <p className="text-[15px] font-bold text-gray-700 text-center mb-2">
+                        <p className="text-[16px] font-bold text-gray-700 text-center mb-2">
                           혹시 시작일에 바로 시작도 가능하세요?
                         </p>
                         <button

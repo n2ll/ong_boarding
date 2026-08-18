@@ -132,7 +132,7 @@ export function FollowupSendModal({
       footer={
         <>
           {/* 비용은 '발송' 바로 옆에 둔다 — 누르기 직전에 보여야 판단이 된다 */}
-          <span className="mr-auto text-[11.5px] font-medium text-muted-foreground">
+          <span className="mr-auto text-[12px] font-medium text-muted-foreground">
             {preview ? `${preview.sms_type} · 예상 약 ${preview.cost_krw}원` : " "}
           </span>
           <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>취소</Button>

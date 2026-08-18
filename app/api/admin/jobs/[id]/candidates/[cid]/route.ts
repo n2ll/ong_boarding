@@ -32,7 +32,7 @@ export async function GET(
     .from("job_candidates")
     .select(`
       id, job_id, applicant_id, agent_stage, agent_state, paused_reason,
-      sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason,
+      sent_at, responded_at, screening_passed_at, activated_at, closed_at, closed_reason,
       created_at, updated_at,
       applicants:applicant_id (*),
       jobs:job_id (*)

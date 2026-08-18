@@ -127,7 +127,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         <div className="min-w-0">
           {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
           <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
-          <div className="truncate text-[17px] font-extrabold tracking-tight text-foreground leading-snug lg:whitespace-nowrap lg:text-[21px]">
+          <div className="truncate text-[16px] font-extrabold tracking-tight text-foreground leading-snug lg:whitespace-nowrap lg:text-[20px]">
             {pageTitle}
           </div>
         </div>
@@ -173,7 +173,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                 전체 지점 {!scopeBranch && <Check size={14} className="text-warning-strong" />}
               </button>
               {branches.length === 0 && (
-                <div className="px-3 py-2 text-[12.5px] text-muted-foreground">등록된 지점이 없어요.</div>
+                <div className="px-3 py-2 text-[13px] text-muted-foreground">등록된 지점이 없어요.</div>
               )}
               {branches.map((b) => (
                 <button
@@ -201,7 +201,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           >
             <Bell size={19} className="text-gray-700" />
             {notices.length > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-[10px] font-extrabold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-[11px] font-extrabold flex items-center justify-center">
                 {notices.length}
               </span>
             )}

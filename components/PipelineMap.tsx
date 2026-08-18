@@ -228,8 +228,8 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
             <div className="w-12 h-12 rounded-2xl bg-yellow-50 border border-warning/35 flex items-center justify-center text-warning">
               <MapPin size={22} />
             </div>
-            <div className="text-[15px] font-bold text-foreground">지도 키 설정이 필요해요</div>
-            <p className="text-[12.5px] text-muted-foreground leading-relaxed max-w-[420px]">
+            <div className="text-[16px] font-bold text-foreground">지도 키 설정이 필요해요</div>
+            <p className="text-[13px] text-muted-foreground leading-relaxed max-w-[420px]">
               네이버 클라우드 <b>Maps · Web Dynamic Map</b> 클라이언트 ID를{" "}
               <code className="px-1 py-0.5 rounded bg-muted text-gray-700">NEXT_PUBLIC_NAVER_MAPS_CLIENT_ID</code>{" "}
               에 넣고 서비스 도메인을 등록하면 지도가 표시됩니다. 그동안은 우측 분포 요약으로 지역 현황을 확인하세요.
@@ -244,7 +244,7 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
           <h3 className="text-[14px] font-extrabold text-foreground flex items-center gap-1.5">
             <MapPin size={15} className="text-warning" /> 지역별 인력 분포
           </h3>
-          <div className="text-[11.5px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
+          <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
             <span>총 {applicants.length.toLocaleString()}명</span>
             <span className="text-muted-foreground">·</span>
             <span>좌표 {withCoords.length.toLocaleString()}명</span>
@@ -258,12 +258,12 @@ export function PipelineMap({ applicants, jobs }: { applicants: MapApplicant[]; 
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-custom p-2">
           {regions.length === 0 && unknownCount === 0 ? (
-            <div className="text-center text-[12.5px] text-muted-foreground py-8">표시할 지원자가 없어요.</div>
+            <div className="text-center text-[13px] text-muted-foreground py-8">표시할 지원자가 없어요.</div>
           ) : (
             <>
               {regions.map((d) => (
                 <div key={d.region} className="px-2.5 py-2 rounded-lg hover:bg-background">
-                  <div className="flex items-center justify-between text-[12.5px] mb-1">
+                  <div className="flex items-center justify-between text-[13px] mb-1">
                     <span className="font-bold text-gray-800 truncate">{d.region}</span>
                     <span className="font-extrabold text-foreground tabular-nums ml-2">{d.count}</span>
                   </div>

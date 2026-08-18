@@ -208,7 +208,7 @@ export function SlotBoard() {
                   return (
                     <div key={s} className="px-3 py-4 border-l border-muted flex flex-col items-center justify-center gap-1.5">
                       <div className="flex items-baseline gap-0.5">
-                        <span className={`text-[17px] font-extrabold ${full ? "text-success" : confirmed > 0 ? "text-foreground" : "text-muted-foreground"}`}>{confirmed}</span>
+                        <span className={`text-[16px] font-extrabold ${full ? "text-success" : confirmed > 0 ? "text-foreground" : "text-muted-foreground"}`}>{confirmed}</span>
                         <span className="text-[12px] font-bold text-muted-foreground">/ {cap}</span>
                       </div>
                       <div className="w-full max-w-[88px] h-1.5 bg-muted rounded-full overflow-hidden">

@@ -75,7 +75,7 @@ function Field({
               </span>
             )}
           </label>
-          {aside && <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground">{aside}</span>}
+          {aside && <span className="shrink-0 text-[12px] font-medium text-muted-foreground">{aside}</span>}
         </div>
       )}
       {typeof children === "function"
@@ -215,9 +215,9 @@ function ToggleRow({
       )}
     >
       <span className="min-w-0">
-        <span className="block text-[13.5px] font-bold leading-tight text-foreground">{label}</span>
+        <span className="block text-[14px] font-bold leading-tight text-foreground">{label}</span>
         {description && (
-          <span className="mt-0.5 block text-[11.5px] font-medium leading-snug text-muted-foreground">
+          <span className="mt-0.5 block text-[12px] font-medium leading-snug text-muted-foreground">
             {description}
           </span>
         )}

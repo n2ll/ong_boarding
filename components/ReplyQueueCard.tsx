@@ -187,7 +187,7 @@ export function ReplyQueueCard({
     >
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-bold text-foreground flex items-center gap-1.5">
+          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
             <MessageCircle size={15} className="text-info" /> 내가 답할 차례
           </h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>
@@ -241,15 +241,15 @@ export function ReplyQueueCard({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
-                      className={`text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-warning-strong border-yellow-300"}`}
+                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-warning-strong border-yellow-300"}`}
                     >
                       {untouched ? "미착수" : "응대중"}
                     </span>
                     {optOut && (
-                      <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
+                      <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full border bg-error-soft text-error-strong border-error/30">수신거부</span>
                     )}
                   </div>
-                  <div className="text-[11.5px] text-muted-foreground truncate mt-0.5">
+                  <div className="text-[12px] text-muted-foreground truncate mt-0.5">
                     {pv?.body ? (
                       <>
                         <span className="font-semibold text-info">{pv.direction === "inbound" ? "답장" : "발신"}</span>
@@ -279,7 +279,7 @@ export function ReplyQueueCard({
 
                 <button
                   onClick={() => setDetailId(it.id)}
-                  className="flex items-center gap-1 text-[11.5px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <MessageSquare size={13} /> 대화 열기
                 </button>

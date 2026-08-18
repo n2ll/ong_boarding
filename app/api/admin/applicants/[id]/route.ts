@@ -45,7 +45,7 @@ export async function GET(
       .from("job_candidates")
       .select(
         `id, job_id, agent_stage, agent_state, paused_reason,
-       sent_at, responded_at, confirmed_at, activated_at, closed_at, closed_reason, created_at,
+       sent_at, responded_at, screening_passed_at, activated_at, closed_at, closed_reason, created_at,
        jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode, pickup_address, site_manager_id )`
       )
       .eq("applicant_id", id)
@@ -130,7 +130,7 @@ export async function GET(
       paused_reason: c.paused_reason,
       sent_at: c.sent_at,
       responded_at: c.responded_at,
-      confirmed_at: c.confirmed_at,
+      screening_passed_at: c.screening_passed_at,
       activated_at: c.activated_at,
       closed_at: c.closed_at,
       closed_reason: c.closed_reason,
