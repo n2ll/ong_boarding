@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
 import { Modal } from "./ui/modal";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { Button } from "@/components/ui/button";
 
 /**
  * 관심 표시 처리 대기 카드 (내부 매니저용).
@@ -433,10 +434,10 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
-              <button onClick={() => setQuick(null)} disabled={quickSending} className="px-4 py-2 rounded-lg text-[14px] font-bold text-gray-700 hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">취소</button>
-              <button onClick={handleQuickSend} disabled={quickSending || !quickBody.trim()} className="px-5 py-2 rounded-lg text-[14px] font-bold text-white bg-foreground hover:bg-gray-800 disabled:opacity-60 flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {quickSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 문자 보내고 처리
-              </button>
+              <Button variant="ghost" onClick={() => setQuick(null)} disabled={quickSending}>취소</Button>
+              <Button variant="primary" onClick={handleQuickSend} disabled={!quickBody.trim()} isLoading={quickSending}>
+                {!quickSending && <Send size={15} />} 문자 보내고 처리
+              </Button>
             </div>
         </Modal>
       )}

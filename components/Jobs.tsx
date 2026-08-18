@@ -477,7 +477,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
                 role="radio"
                 aria-checked={sel}
                 onClick={() => onChange(m)}
-                className={`text-left p-3 rounded-2xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
+                className={`text-left p-3 rounded-2xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-card hover:border-gray-300"}`}
               >
                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{RECRUIT_MODE_META[m].label}</div>
                 <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
@@ -1840,19 +1840,19 @@ export function Jobs() {
           <div className="flex gap-1.5">
             <button aria-selected={activeTab === 'all'} role="tab"
               onClick={() => setActiveTab('all')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'all' ? 'bg-foreground text-white' : 'bg-white border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'all' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               전체
             </button>
             <button aria-selected={activeTab === 'active'} role="tab"
               onClick={() => setActiveTab('active')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'active' ? 'bg-foreground text-white' : 'bg-white border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'active' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => !j.effectivelyClosed).length}</span>
             </button>
             <button aria-selected={activeTab === 'closed'} role="tab"
               onClick={() => setActiveTab('closed')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'closed' ? 'bg-foreground text-white' : 'bg-white border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'closed' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.effectivelyClosed).length}</span>
             </button>
@@ -2562,7 +2562,7 @@ export function Jobs() {
             </div>
 
             {/* E16 · 푸터 — 라벨 없는 컨트롤 벽은 본문 '공고 설정'으로 승격. 여기는 닫기/등록만. */}
-            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-strong bg-white">
+            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-glass bg-white/45">
               <Button variant="ghost" size="lg" onClick={closeRegisterModal}>닫기</Button>
               {!draftBody && (
                 <span className="text-[12px] font-medium text-muted-foreground">본문을 생성하거나 직접 작성하면 등록할 수 있어요</span>
@@ -2817,7 +2817,7 @@ export function Jobs() {
                                 key={b}
                                 type="button"
                                 onClick={() => setEditForm({ ...editForm, distanceBasis: b })}
-                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-white hover:border-gray-300"}`}
+                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-card hover:border-gray-300"}`}
                               >
                                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>
                                   {b === "pickup" ? "집결지만" : "가까운 곳 아무거나"}
@@ -2864,7 +2864,7 @@ export function Jobs() {
                 </EditSection>
               </div>
             )}
-            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-strong bg-white">
+            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-glass bg-white/45">
               <Button variant="ghost" size="lg" disabled={editSaving} onClick={() => { setEditForm(null); setEditDroppedBranch(null); }}>취소</Button>
               <Button variant="primary" size="lg" onClick={handleEditSave} disabled={editLoading} isLoading={editSaving}>
                   {!editSaving && <Save size={16} />} 저장
@@ -3240,7 +3240,7 @@ export function Jobs() {
                   <button
                     key={p.id}
                     onClick={() => setPicked((prev) => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-2xl border transition-colors ${sel ? "border-copilot bg-copilot-soft" : "border-border-strong bg-white hover:border-gray-300"}`}
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-2xl border transition-colors ${sel ? "border-copilot bg-copilot-soft" : "border-border-strong bg-card hover:border-gray-300"}`}
                   >
                     <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${sel ? "bg-copilot border-copilot" : "border-gray-300"}`}>
                       {sel && <CheckCircle2 size={14} className="text-white" />}
@@ -3256,7 +3256,7 @@ export function Jobs() {
                 );
               })}
             </div>
-            <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border-strong bg-white">
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border-glass bg-white/45">
               <div className="text-[13px] font-bold text-gray-700">{picked.size}명 선택</div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="lg" disabled={adding} onClick={() => setPickerOpen(false)}>취소</Button>
