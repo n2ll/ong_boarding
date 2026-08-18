@@ -1661,7 +1661,7 @@ export function ApplicantDetailPanel({
           className={
             docked
               ? // 셸과 같은 언어로 떠 있는 패널. 위치·크기는 부르는 화면이 정한다.
-                `fixed ${dockedClassName} max-w-[94vw] bg-glass-3 backdrop-blur-xl shadow-[var(--shadow-xl)] flex flex-col rounded-2xl border border-white overflow-hidden`
+                `fixed ${dockedClassName} max-w-[94vw] bg-glass-3 backdrop-blur-xl shadow-xl flex flex-col rounded-2xl border border-white overflow-hidden`
               : "fixed top-0 right-0 w-[560px] max-w-[94vw] h-full bg-glass-3 backdrop-blur-xl shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-50 flex flex-col border-l border-white"
           }
         >

@@ -152,7 +152,7 @@ function Modal({
           onInteractOutside={guardOutside}
           onCloseAutoFocus={restoreFocus}
           className={cn(
-            "fixed z-50 flex flex-col overflow-hidden border shadow-[var(--shadow-glass-xl)] duration-200",
+            "fixed z-50 flex flex-col overflow-hidden border shadow-glass-xl duration-200",
             // 배경이 비쳐 보이는 유리 면. 글자 대비가 필요한 면이라 가장 불투명한 3단계를 쓴다.
             // blur는 2단(크롬 lg·오버레이 xl)으로 고정 — 40px(2xl)은 비용 대비 식별 불가라 폐지.
             "border-border-glass bg-glass-3 backdrop-blur-xl backdrop-saturate-150",

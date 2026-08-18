@@ -1626,7 +1626,7 @@ export function Pipeline() {
                   title={hint}
                   onClick={() => pickDensity(key)}
                   className={`flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[12px] font-bold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
-                    density === key ? "bg-foreground text-white shadow-[var(--shadow-xs)]" : "text-muted-foreground hover:text-foreground"
+                    density === key ? "bg-foreground text-white shadow-xs" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   <Icon size={14} /> {label}
@@ -1990,7 +1990,7 @@ export function Pipeline() {
               {/* Floating Bulk Actions Toolbar */}
               <AnimatePresence>
                 {selectedRows.size > 0 && (
-                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 glass-dark backdrop-blur-xl backdrop-saturate-150 rounded-2xl px-6 py-4 mb-6 shadow-[var(--shadow-glass-dark)]">
+                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-3 glass-dark backdrop-blur-xl backdrop-saturate-150 rounded-2xl px-6 py-4 mb-6 shadow-glass-dark">
                     <span className="text-[16px] font-extrabold text-white">
                       <span className="text-brand-yellow text-[18px]">{selectedRows.size}명</span> 선택됨
                     </span>

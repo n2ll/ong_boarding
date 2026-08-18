@@ -32,16 +32,16 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "bg-primary text-primary-foreground hover:bg-gray-800 shadow-[var(--shadow-action)] hover:-translate-y-px",
+          "bg-primary text-primary-foreground hover:bg-gray-800 shadow-action hover:-translate-y-px",
         brand:
-          "bg-brand-yellow text-foreground hover:bg-yellow-300 shadow-[var(--shadow-brand)] hover:-translate-y-px",
+          "bg-brand-yellow text-foreground hover:bg-yellow-300 shadow-brand hover:-translate-y-px",
         secondary:
-          "bg-surface-raised border border-border-strong text-foreground hover:bg-gray-50 shadow-[var(--shadow-xs)]",
+          "bg-surface-raised border border-border-strong text-foreground hover:bg-gray-50 shadow-xs",
         ghost: "text-muted-foreground hover:bg-accent hover:text-foreground",
         glass:
-          "bg-white/55 border border-white/75 text-foreground hover:bg-white/90 backdrop-blur-md shadow-[var(--shadow-xs)]",
+          "bg-white/55 border border-white/75 text-foreground hover:bg-white/90 backdrop-blur-md shadow-xs",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-error-strong shadow-[var(--shadow-xs)] focus-visible:ring-destructive",
+          "bg-destructive text-destructive-foreground hover:bg-error-strong shadow-xs focus-visible:ring-destructive",
       },
       size: {
         sm: "min-h-11 px-3.5 text-xs rounded-2xl",

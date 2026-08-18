@@ -1213,7 +1213,7 @@ export function LiveConsole() {
                 rows={5}
                 disabled={promoteLoading}
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
@@ -1247,7 +1247,7 @@ export function LiveConsole() {
                   value={kbTitle}
                   onChange={(e) => setKbTitle(e.target.value)}
                   placeholder="예: 앱 설치·가입 순서 / 정산 지급일"
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <div>
@@ -1258,7 +1258,7 @@ export function LiveConsole() {
                   rows={4}
                   disabled={kbLoading}
                   placeholder={kbLoading ? "불러오는 중…" : "예: 정산은 익월 5일 지급, 유류비는 개인 부담입니다."}
-                  className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                  className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
                 />
               </div>
               <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>

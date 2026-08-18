@@ -139,7 +139,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         안에 있는 지점 필터·알림 드롭다운(absolute)이 잘린다.
       */}
       <header className="relative z-40 mb-3 mt-3 shrink-0 lg:mb-4 lg:mt-4">
-        <div className={`glass backdrop-blur-lg backdrop-saturate-150 flex min-h-16 items-center gap-[18px] rounded-2xl px-4 transition-shadow duration-200 lg:px-8 ${scrolled ? "shadow-[var(--shadow-glass-md)]" : "shadow-[var(--shadow-glass-sm)]"}`}>
+        <div className={`glass backdrop-blur-lg backdrop-saturate-150 flex min-h-16 items-center gap-[18px] rounded-2xl px-4 transition-shadow duration-200 lg:px-8 ${scrolled ? "shadow-glass-md" : "shadow-glass-sm"}`}>
         <div className="min-w-0">
           {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
           <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
@@ -180,7 +180,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           </button>
 
           {branchOpen && (
-            <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-[var(--shadow-glass-xl)] p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
+            <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-glass-xl p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
               <div className="text-[11px] font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
@@ -224,7 +224,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           </button>
 
           {notifOpen && (
-            <div className="absolute top-[50px] right-0 w-[340px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-[var(--shadow-glass-xl)] z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
+            <div className="absolute top-[50px] right-0 w-[340px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-glass-xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
               <div className="flex items-center justify-between px-4 py-3.5 border-b border-muted">
                 <span className="text-sm font-bold text-foreground">알림 {notices.length > 0 && <span className="text-error">{notices.length}</span>}</span>
                 <button
@@ -289,7 +289,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
       {searchOpen && (
         <div className="fixed inset-0 bg-scrim z-50 flex items-start justify-center pt-[10vh] px-4 backdrop-blur-[3px]" onClick={closeSearch}>
           <div
-            className="bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass w-full max-w-[640px] rounded-2xl shadow-[var(--shadow-glass-xl)] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            className="bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass w-full max-w-[640px] rounded-2xl shadow-glass-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 px-5 py-4 border-b border-border-strong">

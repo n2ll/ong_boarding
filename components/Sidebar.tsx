@@ -82,7 +82,7 @@ export function Sidebar() {
       aria-label="주요 메뉴"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] glass-dark backdrop-blur-xl backdrop-saturate-150 shadow-[var(--shadow-glass-dark)] transition-[width] duration-200 ease-out motion-reduce:transition-none lg:flex ${
+      className={`fixed bottom-4 left-4 top-4 z-50 hidden overflow-hidden rounded-[32px] glass-dark backdrop-blur-xl backdrop-saturate-150 shadow-glass-dark transition-[width] duration-200 ease-out motion-reduce:transition-none lg:flex ${
         expanded ? "w-60" : "w-[72px]"
       }`}
     >
@@ -173,7 +173,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="모바일 주요 메뉴"
-      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-2xl glass-dark backdrop-blur-xl backdrop-saturate-150 p-2 shadow-[var(--shadow-glass-dark)] lg:hidden"
+      className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-50 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 rounded-2xl glass-dark backdrop-blur-xl backdrop-saturate-150 p-2 shadow-glass-dark lg:hidden"
     >
       {MOBILE_NAV.map(({ label, icon: Icon, path }) => {
         const active = pathname === path;
@@ -217,7 +217,7 @@ function DockItem({
         aria-label={item.label}
         aria-current={active ? "page" : undefined}
         className={`relative z-10 flex min-h-11 w-full min-w-0 items-center gap-3 rounded-2xl pr-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring ${
-          active ? "bg-white text-gray-900 shadow-[var(--shadow-md)]" : "text-white/60 hover:bg-white/10 hover:text-white"
+          active ? "bg-white text-gray-900 shadow-md" : "text-white/60 hover:bg-white/10 hover:text-white"
         }`}
       >
         <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
@@ -254,7 +254,7 @@ function DockItem({
       {!expanded && (
         <span
           role="tooltip"
-          className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-[var(--shadow-md)] transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+          className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-md transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
         >
           {item.label}
         </span>

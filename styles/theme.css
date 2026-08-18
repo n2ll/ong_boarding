@@ -134,6 +134,7 @@
   --shadow-xs: 0 1px 2px rgba(28, 25, 23, 0.06);
   --shadow-sm: 0 4px 14px rgba(28, 25, 23, 0.07);
   --shadow-md: 0 12px 28px rgba(28, 25, 23, 0.1);
+  --shadow-lg: 0 20px 44px rgba(28, 25, 23, 0.14);
   --shadow-xl: 0 28px 70px rgba(28, 25, 23, 0.18);
   --shadow-action: 0 8px 18px rgba(28, 25, 23, 0.2);
   --shadow-brand: 0 8px 20px rgba(204, 150, 13, 0.2);
@@ -344,6 +345,26 @@
   --radius-xl: 24px;   /* 카드 상한 · 모달 */
   --radius-2xl: 24px;  /* Tailwind 기본 16px이 xl과 겹쳐 구분이 없었다 */
 
+  /*
+   * 그림자 — radius에 이미 한 수술의 반복(2026-08-18). 예전엔 :root 정의만 있고
+   * shadow-sm 등 유틸 108곳은 Tailwind 기본 그림자(0 1px 3px, 작고 딱딱함)를 입었다.
+   * inline이라 유틸에 var()가 그대로 박히고, 값의 정본은 위 :root 램프 하나다.
+   */
+  --shadow-2xs: var(--shadow-xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-xl);
+  --shadow-action: var(--shadow-action);
+  --shadow-brand: var(--shadow-brand);
+  --shadow-inset: var(--shadow-inset);
+  --shadow-glass-sm: var(--shadow-glass-sm);
+  --shadow-glass-md: var(--shadow-glass-md);
+  --shadow-glass-xl: var(--shadow-glass-xl);
+  --shadow-glass-dark: var(--shadow-glass-dark);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -517,7 +538,10 @@
   }
 
   .glass-dark {
-    background: var(--glass-dark);
+    background-color: var(--glass-dark);
+    /* 그레인 — 넓은 어두운 유리 면(독·선택 액션바)의 밴딩을 죽이는 4% 노이즈.
+       밝은 유리에는 얹지 않는다(텍스트 선명도 우선). */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #FFFFFF;
   }

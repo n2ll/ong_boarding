@@ -43,7 +43,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="relative flex h-[100dvh] w-full overflow-hidden font-sans">
           <a
             href="#app-content"
-            className="fixed left-4 top-3 z-[200] -translate-y-20 rounded-2xl bg-foreground px-4 py-3 text-sm font-bold text-white shadow-[var(--shadow-xl)] transition-transform focus:translate-y-0"
+            className="fixed left-4 top-3 z-[200] -translate-y-20 rounded-2xl bg-foreground px-4 py-3 text-sm font-bold text-white shadow-xl transition-transform focus:translate-y-0"
           >
             본문으로 건너뛰기
           </a>

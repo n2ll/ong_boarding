@@ -426,7 +426,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                 onChange={(e) => setQuickBody(e.target.value)}
                 rows={5}
                 disabled={quickSending}
-                className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
+                className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
               <div className="text-[11px] text-muted-foreground leading-relaxed">
                 발송에 성공하면 자동으로 <b>컨택 완료</b>로 처리돼 큐에서 빠집니다. 근무 확정·배정을 약속하는 문구는 넣지 마세요.

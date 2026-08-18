@@ -641,7 +641,7 @@ export function AgentBrain() {
                     value={persona.role}
                     onChange={(e) => setPersonaField("role", e.target.value)}
                     disabled={!personaLoaded}
-                    className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
+                    className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
                   />
                 </div>
 
@@ -652,7 +652,7 @@ export function AgentBrain() {
                     value={persona.instructions}
                     onChange={(e) => setPersonaField("instructions", e.target.value)}
                     disabled={!personaLoaded}
-                    className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm font-mono leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
+                    className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm font-mono leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:bg-background"
                   />
                   <p className="text-[12px] text-muted-foreground mt-2">‘말투·성격 저장’을 누르면 60초 이내 실제 AI 응대(응대 미리보기 포함)에 반영됩니다. 안전 규칙(민감한 질문은 매니저에게 넘기기 등)은 항상 유지됩니다.</p>
                 </div>
@@ -775,7 +775,7 @@ export function AgentBrain() {
                             value={kbForm.title}
                             onChange={(e) => setKbForm({ ...kbForm, title: e.target.value })}
                             placeholder={kbForm.category === "facts" ? "예: 강북미아" : kbForm.category === "knowledge" ? "예: 정산·지급일" : kbForm.category === "system_message" ? "예: danggeun_start" : "예: 시급 문의 응대"}
-                            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                            className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-2.5 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           />
                         </div>
                         <div>
@@ -785,7 +785,7 @@ export function AgentBrain() {
                             onChange={(e) => setKbForm({ ...kbForm, body: e.target.value })}
                             rows={kbForm.category === "facts" ? 3 : 5}
                             placeholder={kbForm.category === "facts" ? "시급 15,000~20,000원, 토일 08:00-16:00, 픽업 서울 강북구..." : kbForm.category === "knowledge" ? "지원자 질문에 AI가 그대로 인용할 공식 답변을 입력하세요. 예: 급여는 익월 5일에 지급돼요..." : "발송될 문구를 입력하세요. {{이름}}, {{지점}}, {{지원폼주소}} 등 치환자 사용 가능."}
-                            className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                            className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                           />
                         </div>
                         <div className="flex items-center justify-end gap-2 pt-1">
@@ -996,7 +996,7 @@ export function AgentBrain() {
                       onChange={(e) => setSimInbound(e.target.value)}
                       rows={4}
                       placeholder="예: 안녕하세요, 시급이 어떻게 되나요? 오토바이 없어도 지원 가능한가요?"
-                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                      className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                     />
                   </div>
                   <div>
@@ -1006,7 +1006,7 @@ export function AgentBrain() {
                       onChange={(e) => setSimPosting(e.target.value)}
                       rows={5}
                       placeholder="공고문을 붙여넣으면 시급·근무지 등 사실을 그 내용 기준으로 답변합니다. 비워두면 일반 컨텍스트로 응대해요."
-                      className="bg-input-background/90 font-medium shadow-[var(--shadow-inset)] hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                      className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none"
                     />
                   </div>
                   <Button variant="primary" size="lg" onClick={handleRunSimulation} disabled={!simInbound.trim()} isLoading={simRunning} className="w-full">

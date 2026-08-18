@@ -32,11 +32,11 @@ const glassVariants = cva(
   {
     variants: {
       level: {
-        2: "overflow-hidden bg-glass-2 backdrop-blur-lg backdrop-saturate-150 border border-border-glass shadow-[var(--shadow-glass-sm)]",
-        3: "overflow-hidden bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass shadow-[var(--shadow-glass-xl)]",
-        dark: "overflow-hidden bg-glass-dark backdrop-blur-xl backdrop-saturate-150 border border-white/10 shadow-[var(--shadow-glass-dark)] text-white",
-        card: "bg-card border border-border-strong shadow-[var(--shadow-xs)]",
-        warm: "bg-zone-warm border border-border-strong shadow-[var(--shadow-xs)]",
+        2: "overflow-hidden bg-glass-2 backdrop-blur-lg backdrop-saturate-150 border border-border-glass shadow-glass-sm",
+        3: "overflow-hidden bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass shadow-glass-xl",
+        dark: "overflow-hidden bg-glass-dark backdrop-blur-xl backdrop-saturate-150 border border-white/10 shadow-glass-dark text-white",
+        card: "bg-card border border-border-strong shadow-xs",
+        warm: "bg-zone-warm border border-border-strong shadow-xs",
       },
       radius: {
         md: "rounded-md",
@@ -45,7 +45,7 @@ const glassVariants = cva(
         "2xl": "rounded-2xl",
       },
       interactive: {
-        true: "hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 motion-reduce:transform-none cursor-pointer",
+        true: "hover:shadow-md hover:-translate-y-0.5 motion-reduce:transform-none cursor-pointer",
         false: "",
       },
     },

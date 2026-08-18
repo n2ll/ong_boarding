@@ -19,9 +19,9 @@ const inputVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-surface-raised border-border-strong text-foreground hover:border-gray-300 shadow-[var(--shadow-inset)]",
+          "bg-surface-raised border-border-strong text-foreground hover:border-gray-300 shadow-inset",
         glass:
-          "bg-white/55 border-white/75 text-foreground hover:bg-white/75 focus:bg-white backdrop-blur-md shadow-[var(--shadow-inset)]",
+          "bg-white/55 border-white/75 text-foreground hover:bg-white/75 focus:bg-white backdrop-blur-md shadow-inset",
         ghost:
           "bg-transparent border-transparent text-foreground hover:bg-black/[0.03] focus:bg-white/75",
       },
