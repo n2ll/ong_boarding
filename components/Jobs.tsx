@@ -2168,7 +2168,7 @@ export function Jobs() {
         <Modal bare open={aiModalOpen} onClose={closeRegisterModal} size="full"
                title="AI 맞춤형 공고 작성"
                closeOnOutside={false}
-               className="max-w-[800px] sm:max-w-[800px]">
+               className="xl:max-w-6xl max-w-[800px] sm:max-w-[800px]">
             <div className="flex items-center justify-between px-7 py-5 border-b border-border-strong">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center text-warning-strong">
