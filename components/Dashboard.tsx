@@ -11,6 +11,7 @@ import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
 import { PageShell } from "@/components/ui/page-shell";
+import { Button } from "@/components/ui/button";
 
 interface UrgentItem {
   id: string;
@@ -369,11 +370,27 @@ export function Dashboard() {
 
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
               {urgent.length > 0 && <span className="bg-error text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
             </h2>
+            {/* 트리아지 단일 진입 — 알림 패널과 같은 문법(붉은 것 우선). 목록을 읽고 고르는 대신
+                버튼 하나로 가장 급한 화면에 착지한다. */}
+            {urgent.length > 0 && (
+              <Button
+                size="sm"
+                variant="primary"
+                title="가장 오래 밀린 붉은 항목부터 엽니다"
+                onClick={() => {
+                  const t = urgent.find((i) => i.tone === "red") ?? urgent[0];
+                  if (t.path.startsWith("#")) document.getElementById(t.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  else router.push(t.path);
+                }}
+              >
+                가장 급한 것부터 처리하기 <ChevronRight size={15} />
+              </Button>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto [&>*]:shrink-0">
