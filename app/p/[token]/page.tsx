@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { coarseArea } from "@/lib/geo";
 import { POOL_STATUS_DONE_LABEL } from "@/lib/pool-status";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 
 interface PoolJob {
   id: number;
@@ -288,8 +289,8 @@ export default function PoolPage() {
   if (loading) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-[22px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+        <div className="flex flex-col items-center gap-3">
+          <Image src="/onggoing-logo.png" alt="옹고잉" width={84} height={65} priority />
           <p className="text-[18px] font-bold text-gray-700">공고를 불러오고 있어요…</p>
         </div>
       </main>
@@ -300,7 +301,7 @@ export default function PoolPage() {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
         <div className="text-center">
-          <span className="mb-3 block text-[22px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+          <Image src="/onggoing-logo.png" alt="옹고잉" width={84} height={65} className="mx-auto mb-3" />
           <p className="text-[20px] font-extrabold text-foreground mb-2">링크를 확인할 수 없어요</p>
           <p className="text-[16px] text-muted-foreground">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
         </div>
@@ -318,8 +319,8 @@ export default function PoolPage() {
           const hasOpenJobs = jobs.some((j) => !j.expired);
           return (
             <header className="mb-6">
-              <div className="mb-4 flex items-baseline gap-2">
-                <span className="border-b-[3px] border-brand-yellow pb-0.5 text-[20px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+              <div className="mb-4 flex items-center gap-2.5">
+                <Image src="/onggoing-logo.png" alt="옹고잉" width={64} height={50} priority />
                 <span aria-hidden="true" className="text-muted-foreground">·</span>
                 <span className="text-[14px] font-bold text-warning-strong">맞춤 일자리</span>
               </div>
@@ -648,8 +649,8 @@ export default function PoolPage() {
         })()}
 
         <footer className="mt-10 border-t border-border-strong pt-6 pb-2 text-center">
-          <div className="mb-2 flex items-center justify-center">
-            <span className="text-[15px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+          <div className="mb-2.5 flex items-center justify-center">
+            <Image src="/onggoing-logo.png" alt="옹고잉" width={52} height={40} />
           </div>
           <p className="text-[14px] font-bold text-gray-700 leading-relaxed">
             궁금한 점은 받으신 문자에 답장해 주세요.

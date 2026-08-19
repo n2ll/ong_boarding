@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import Image from "next/image";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 
 const TIMESLOTS = [
@@ -202,8 +203,8 @@ function ApplyForm() {
       <div className="max-w-[560px] mx-auto w-full">
         {/* Header */}
         <div className="mb-8 text-center">
-          <div className="inline-flex items-baseline gap-2 mb-3">
-            <span className="border-b-[3px] border-brand-yellow pb-0.5 text-[20px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+          <div className="inline-flex items-center gap-2.5 mb-3">
+            <Image src="/onggoing-logo.png" alt="옹고잉" width={72} height={56} priority />
             <span className="text-[18px] font-extrabold text-foreground">배송원 지원</span>
           </div>
           <p className="text-[16px] text-muted-foreground">아래 항목을 작성해주세요. <span className="text-error-strong">*</span> 표시는 필수입니다.</p>
