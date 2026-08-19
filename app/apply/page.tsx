@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { LogoMark } from "@/components/Logo";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 
 const TIMESLOTS = [
@@ -63,7 +62,7 @@ function digits(raw: string, max: number): string {
 
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-border-strong rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-white";
+  "w-full px-4 py-3.5 border border-border-strong rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-input-background";
 const requiredMark = <span className="text-error ml-0.5">*</span>;
 
 interface JobContext {
@@ -183,8 +182,8 @@ function ApplyForm() {
 
   if (done) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="bg-white border border-border-strong rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="bg-card border border-border-strong rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
           <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mx-auto mb-5">
             <CheckCircle2 size={36} className="text-success-strong" />
           </div>
@@ -199,19 +198,19 @@ function ApplyForm() {
   }
 
   return (
-    <div className="min-h-screen bg-background py-10 px-5">
+    <div className="min-h-screen py-10 px-5">
       <div className="max-w-[560px] mx-auto w-full">
         {/* Header */}
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 mb-3">
-            <LogoMark size={36} />
-            <span className="text-[18px] font-extrabold text-foreground">옹고잉 배송원 지원</span>
+          <div className="inline-flex items-baseline gap-2 mb-3">
+            <span className="border-b-[3px] border-brand-yellow pb-0.5 text-[20px] font-extrabold tracking-tight text-foreground">옹고잉</span>
+            <span className="text-[18px] font-extrabold text-foreground">배송원 지원</span>
           </div>
           <p className="text-[16px] text-muted-foreground">아래 항목을 작성해주세요. <span className="text-error-strong">*</span> 표시는 필수입니다.</p>
         </div>
 
         {job && (
-          <div className="mb-6 bg-white border border-border-strong rounded-2xl px-5 py-4 shadow-sm">
+          <div className="mb-6 bg-card border border-border-strong rounded-2xl px-5 py-4 shadow-sm">
             <div className="text-[12px] font-bold text-warning-strong bg-yellow-50 inline-flex items-center px-2 py-0.5 rounded-full mb-2">지원 공고</div>
             <div className="text-[16px] font-extrabold text-foreground leading-tight">{job.title}</div>
             <div className="text-[13px] text-muted-foreground mt-1">
@@ -231,7 +230,7 @@ function ApplyForm() {
           </div>
         )}
 
-        <div className="bg-white border border-border-strong rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col gap-7">
+        <div className="bg-card border border-border-strong rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col gap-7">
           {/* 이름 */}
           <div>
             <label className={labelCls}>이름{requiredMark}</label>
@@ -265,7 +264,7 @@ function ApplyForm() {
                   key={opt}
                   type="button"
                   onClick={() => set("ownVehicle", opt)}
-                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-card text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -331,7 +330,7 @@ function ApplyForm() {
                     key={slot.value}
                     type="button"
                     onClick={() => toggleWorkHour(slot.value)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-white hover:border-gray-300"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-card hover:border-gray-300"}`}
                   >
                     <div>
                       <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
@@ -361,7 +360,7 @@ function ApplyForm() {
                   key={opt}
                   type="button"
                   onClick={() => set("selfOwnership", opt)}
-                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-white text-gray-700 hover:border-gray-300"}`}
+                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-3.5 rounded-2xl text-[16px] font-bold border-2 transition-all ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-card text-gray-700 hover:border-gray-300"}`}
                 >
                   {opt}
                 </button>
@@ -391,7 +390,7 @@ function ApplyForm() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-sm"
+          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-brand"
         >
           {submitting ? <Loader2 size={20} className="animate-spin" /> : null}
           {submitting ? "제출 중…" : "지원서 제출하기"}

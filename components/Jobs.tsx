@@ -2165,7 +2165,7 @@ export function Jobs() {
 
       {/* AI JD Generator Modal */}
       {aiModalOpen && (
-        <Modal bare open={aiModalOpen} onClose={closeRegisterModal} size="xl"
+        <Modal bare open={aiModalOpen} onClose={closeRegisterModal} size="full"
                title="AI 맞춤형 공고 작성"
                closeOnOutside={false}
                className="max-w-[800px] sm:max-w-[800px]">
@@ -2188,7 +2188,7 @@ export function Jobs() {
                 뺏어 누르면 내용이 그냥 사라진다. 실제로 AI 초안 카드가 높이 44px로 눌려
                 "생성 성공 토스트는 떴는데 본문이 안 보이는" 상태가 재현됐다(2026-08-14 감사).
                 대시보드 히어로 352px 잘림과 같은 원인 — Dashboard.tsx:281 주석 참고. */}
-            <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background [&>*]:shrink-0">
+            <div className={`flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background [&>*]:shrink-0 ${(isGenerating || channelDrafts) ? "xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start" : ""}`}>
               {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
               {promptOpen ? (
                 <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
@@ -2244,7 +2244,7 @@ export function Jobs() {
                   복제로 열었을 때도 같은 이유로 원본 제목·본문이 안 보였다(지역명을 안 고치고 등록하는 사고). */}
               {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
               {(isGenerating || channelDrafts) && (
-                <div className="bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                <div className="bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden xl:sticky xl:top-0 xl:col-start-2 xl:row-start-1 xl:row-span-6 xl:self-start xl:max-h-[calc(88dvh-170px)] xl:overflow-y-auto">
                   {isGenerating && (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center backdrop-blur-md">
                       <Wand2 size={28} className="text-warning-strong animate-bounce mb-3" />
