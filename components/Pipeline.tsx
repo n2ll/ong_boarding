@@ -1828,7 +1828,7 @@ export function Pipeline() {
 
         {/* 적용 중 조건 칩 — 트리거 버튼들의 하이라이트만으론 '무엇으로 좁혔는지'가 흩어져 보인다.
             여기서 한 줄로 읽고, ×로 그 조건만 해제한다(전체 해제는 위 '조건 초기화'). */}
-        {view !== "funnel" && activeFilterCount > 0 && (
+        {view !== "funnel" && (activeFilterCount > 0 || query.trim() !== "") && (
           <div className="px-8 py-2 flex items-center gap-1.5 flex-wrap border-b border-border-strong bg-background shrink-0">
             <span className="text-[12px] font-bold text-muted-foreground shrink-0">적용 중:</span>
             {query.trim() !== "" && <FilterChip label={`검색 "${query.trim()}"`} onClear={() => setQuery("")} />}
