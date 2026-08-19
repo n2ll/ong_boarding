@@ -1826,6 +1826,42 @@ export function Pipeline() {
           </div>
         )}
 
+        {/* 적용 중 조건 칩 — 트리거 버튼들의 하이라이트만으론 '무엇으로 좁혔는지'가 흩어져 보인다.
+            여기서 한 줄로 읽고, ×로 그 조건만 해제한다(전체 해제는 위 '조건 초기화'). */}
+        {view !== "funnel" && activeFilterCount > 0 && (
+          <div className="px-8 py-2 flex items-center gap-1.5 flex-wrap border-b border-border-strong bg-background shrink-0">
+            <span className="text-[12px] font-bold text-muted-foreground shrink-0">적용 중:</span>
+            {query.trim() !== "" && <FilterChip label={`검색 "${query.trim()}"`} onClear={() => setQuery("")} />}
+            {statusFilter.size > 0 && (
+              <FilterChip
+                label={statusFilter.size <= 2 ? `단계: ${[...statusFilter].join(" · ")}` : `진행 단계 ${statusFilter.size}개`}
+                onClear={() => setStatusFilter(new Set())}
+              />
+            )}
+            {regionFilter !== "all" && (
+              <FilterChip label={regionFilter === "seoul" ? "서울만" : "수도권만"} onClear={() => setRegionFilter("all")} />
+            )}
+            {vehicleFilter !== "all" && (
+              <FilterChip
+                label={vehicleFilter === "vehicle" ? "차량 보유" : vehicleFilter === "walk" ? "도보" : "차량 미확인"}
+                onClear={() => setVehicleFilter("all")}
+              />
+            )}
+            {sendPrepCount > 0 && (
+              <FilterChip
+                label={`발송 전 좁히기 ${sendPrepCount}개`}
+                onClear={() => { setExcludeActive(false); setExcludeRecentPing(false); setGeoConfirmedOnly(false); setRecentAppliedOnly(false); }}
+              />
+            )}
+            {moreFilterCount > 0 && (
+              <FilterChip
+                label={`추가 조건 ${moreFilterCount}개`}
+                onClear={() => { setChannelFilter(new Set()); setSlotFilter(new Set()); setAvailabilityFilter(new Set()); setReactionOnly(false); setOptOutOnly(false); setShowExcluded(false); }}
+              />
+            )}
+          </div>
+        )}
+
         {/* '조건 더보기' 패널 — 자주 쓰지 않는 조건. 리스트·칸반·지도에 모두 적용된다(단계별 현황 뷰에서는 숨김). */}
         <AnimatePresence>
           {showFilters && view !== "funnel" && (
@@ -2963,6 +2999,23 @@ interface KanbanColumnProps {
   columnIndex: number;
   onExport: (column: ColumnData) => void;
   onBulkMessage: (column: ColumnData) => void;
+}
+
+/** 적용 중 조건 알약 — 조건 바가 "무엇으로 좁혔나"를 숫자로만 말하던 것을 문장으로. */
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-brand-yellow bg-yellow-50 py-0.5 pl-2.5 pr-1 text-[12px] font-bold text-warning-strong">
+      {label}
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label={`${label} 조건 해제`}
+        className="grid h-5 w-5 place-items-center rounded-full transition-colors hover:bg-brand-yellow/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X size={12} />
+      </button>
+    </span>
+  );
 }
 
 function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, onBulkMessage }: KanbanColumnProps) {
