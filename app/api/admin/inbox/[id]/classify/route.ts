@@ -77,9 +77,10 @@ async function stampAgentRun(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const routeParams = await params;
     const { action, reason, job_id } = (await req.json()) as {
       action?: "baemin" | "job" | "other" | "ongmanaging" | "undo";
       reason?: string;
@@ -96,7 +97,7 @@ export async function POST(
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
       .select("id, applicant_phone, body, created_at, raw_payload, classification")
-      .eq("id", params.id)
+      .eq("id", routeParams.id)
       .single();
     if (msgErr || !msg) {
       return NextResponse.json({ error: "message not found" }, { status: 404 });

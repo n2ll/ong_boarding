@@ -1,7 +1,35 @@
 import crypto from "crypto";
 
 const SOLAPI_URL = "https://api.solapi.com/messages/v4/send-many/detail";
+const SOLAPI_LIST_URL = "https://api.solapi.com/messages/v4/list";
 const FROM_NUMBER = "01035037252";
+const MANUAL_MESSAGE_CORRELATION_FIELD = "ongboardingRequestId";
+const PROVIDER_RECONCILIATION_MAX_PAGES = 2;
+
+export type SmsSendResult =
+  | {
+      success: true;
+      messageId?: string;
+      failureKind?: never;
+      error?: never;
+    }
+  | {
+      success: false;
+      /** declared만 공급자가 등록 거절을 확정한 상태다. unknown은 자동 재발송하면 안 된다. */
+      failureKind: "declared" | "unknown";
+      error?: string;
+      messageId?: never;
+    };
+
+export interface SmsSendOptions {
+  /** 공급자 성공 뒤 DB 응답 유실을 read-only 조회로 복구하기 위한 caller UUID. */
+  clientRequestId?: string;
+}
+
+export type SmsProviderLookupResult =
+  | { kind: "found"; messageId: string }
+  | { kind: "not_found" }
+  | { kind: "error"; error: string };
 
 /**
  * 실제 SMS 발송을 건너뛸지 판단(개발 오발송 방지).
@@ -31,8 +59,9 @@ function getAuthHeader() {
 export async function sendSms(
   to: string,
   text: string,
-  subject?: string
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  subject?: string,
+  options: SmsSendOptions = {}
+): Promise<SmsSendResult> {
   if (isSmsDryRun()) {
     console.warn(`[SMS DRY-RUN] 발송 생략 (SMS_DRY_RUN) to=${to} text="${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
     return { success: true, messageId: "dry-run" };
@@ -46,14 +75,28 @@ export async function sendSms(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      messages: [{ to, from: FROM_NUMBER, text, ...(subject ? { subject } : {}) }],
+      messages: [{
+        to,
+        from: FROM_NUMBER,
+        text,
+        ...(subject ? { subject } : {}),
+        ...(options.clientRequestId
+          ? {
+              customFields: {
+                [MANUAL_MESSAGE_CORRELATION_FIELD]: options.clientRequestId,
+              },
+            }
+          : {}),
+      }],
     }),
   });
 
   if (!res.ok) {
     const body = await res.text();
     console.error("[SOLAPI error]", body);
-    return { success: false, error: body };
+    // 5xx처럼 서버가 요청을 처리한 뒤 응답만 실패했을 가능성이 있다. HTTP non-OK만으로
+    // 미등록을 확정하지 않고, 중복 발송을 막기 위해 결과 불명으로 보존한다.
+    return { success: false, failureKind: "unknown", error: body };
   }
 
   const data = await res.json();
@@ -70,7 +113,11 @@ export async function sendSms(
       JSON.stringify(data?.groupInfo?.count ?? {}),
       JSON.stringify(failedList).slice(0, 300)
     );
-    return { success: false, error: `발송 등록 실패: ${reason}` };
+    return {
+      success: false,
+      failureKind: "declared",
+      error: `발송 등록 실패: ${reason}`,
+    };
   }
 
   // solapi 응답에서 messageId 추출
@@ -82,12 +129,96 @@ export async function sendSms(
   return { success: true, messageId };
 }
 
+/**
+ * 공급자에 미리 실은 caller UUID가 정확히 일치하는 메시지만 찾는다.
+ * 전화번호·본문·시각 유사성만으로는 절대 성공으로 간주하지 않는다.
+ */
+export async function findSmsByClientRequestId({
+  phone,
+  clientRequestId,
+  createdAt,
+  fetchImpl = fetch,
+}: {
+  phone: string;
+  clientRequestId: string;
+  createdAt: string;
+  fetchImpl?: typeof fetch;
+}): Promise<SmsProviderLookupResult> {
+  const createdAtMs = new Date(createdAt).getTime();
+  if (!Number.isFinite(createdAtMs)) {
+    return { kind: "error", error: "invalid outbox created_at" };
+  }
+
+  const startDate = new Date(createdAtMs - 10 * 60 * 1000).toISOString();
+  const endDate = new Date(createdAtMs + 30 * 60 * 1000).toISOString();
+  let startKey: string | null = null;
+
+  try {
+    for (let page = 0; page < PROVIDER_RECONCILIATION_MAX_PAGES; page += 1) {
+      const params = new URLSearchParams({
+        to: phone,
+        startDate,
+        endDate,
+        dateType: "CREATED",
+        limit: "500",
+      });
+      if (startKey) params.set("startKey", startKey);
+
+      const response = await fetchImpl(`${SOLAPI_LIST_URL}?${params.toString()}`, {
+        method: "GET",
+        headers: { Authorization: getAuthHeader() },
+      });
+      if (!response.ok) {
+        return {
+          kind: "error",
+          error: `SOLAPI lookup failed (${response.status})`,
+        };
+      }
+
+      const payload = await response.json() as Record<string, unknown>;
+      const rawMessageList = payload.messageList;
+      const messages = Array.isArray(rawMessageList)
+        ? rawMessageList
+        : rawMessageList && typeof rawMessageList === "object"
+          ? Object.values(rawMessageList as Record<string, unknown>)
+          : [];
+
+      for (const value of messages) {
+        if (!value || typeof value !== "object") continue;
+        const message = value as Record<string, unknown>;
+        const customFields = message.customFields;
+        if (!customFields || typeof customFields !== "object" || Array.isArray(customFields)) continue;
+        if (
+          (customFields as Record<string, unknown>)[MANUAL_MESSAGE_CORRELATION_FIELD] === clientRequestId
+          && message.to === phone
+          && typeof message.messageId === "string"
+          && message.messageId.length > 0
+        ) {
+          return { kind: "found", messageId: message.messageId };
+        }
+      }
+
+      startKey = typeof payload.nextKey === "string" && payload.nextKey
+        ? payload.nextKey
+        : null;
+      if (!startKey) break;
+    }
+  } catch (error) {
+    return {
+      kind: "error",
+      error: error instanceof Error ? error.message : "SOLAPI lookup failed",
+    };
+  }
+
+  return { kind: "not_found" };
+}
+
 export async function sendAlimtalk(
   to: string,
   templateId: string,
   variables: Record<string, string>,
   fallbackText?: string
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+): Promise<SmsSendResult> {
   if (isSmsDryRun()) {
     console.warn(`[SMS DRY-RUN] 알림톡 발송 생략 (SMS_DRY_RUN) to=${to} template=${templateId}`);
     return { success: true, messageId: "dry-run" };
@@ -120,10 +251,26 @@ export async function sendAlimtalk(
   if (!res.ok) {
     const body = await res.text();
     console.error("[SOLAPI alimtalk error]", body);
-    return { success: false, error: body };
+    return { success: false, failureKind: "unknown", error: body };
   }
 
   const data = await res.json();
+  const failedList = Array.isArray(data?.failedMessageList) ? data.failedMessageList : [];
+  const registeredFailed = Number(data?.groupInfo?.count?.registeredFailed ?? 0);
+  if (failedList.length > 0 || registeredFailed > 0) {
+    const first = failedList[0] ?? {};
+    const reason = first.statusMessage || first.statusCode || `등록 실패 ${registeredFailed}건`;
+    console.error(
+      "[SOLAPI alimtalk registration failed]",
+      JSON.stringify(data?.groupInfo?.count ?? {}),
+      JSON.stringify(failedList).slice(0, 300)
+    );
+    return {
+      success: false,
+      failureKind: "declared",
+      error: `발송 등록 실패: ${reason}`,
+    };
+  }
   const messageId =
     data?.groupInfo?.groupId ||
     data?.messageList?.[Object.keys(data.messageList || {})[0]]?.messageId ||
@@ -150,12 +297,9 @@ export async function sendNotification(
   templateKey: TemplateKey,
   variables: Record<string, string>,
   fallbackText: string
-): Promise<{
-  success: boolean;
+): Promise<SmsSendResult & {
   via: "alimtalk" | "sms";
-  messageId?: string;
   templateId?: string;
-  error?: string;
 }> {
   const templateId = process.env[`SOLAPI_TEMPLATE_${templateKey}`];
 

@@ -15,8 +15,9 @@ import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }

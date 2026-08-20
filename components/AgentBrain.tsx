@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import useSWR from "swr";
-import { Brain, Save, RefreshCw, MessageSquare, Database, Sparkles, Settings2, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap, Lightbulb, Coins } from "lucide-react";
+import { Save, RefreshCw, MessageSquare, Database, Sparkles, SlidersHorizontal, UploadCloud, FileText, CheckCircle2, Loader2, FlaskConical, Bot, PlayCircle, AlertTriangle, Plus, Pencil, Trash2, X, Sprout, Power, Layers, Building2, Briefcase, ExternalLink, TrendingUp, Zap, Lightbulb, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useConfirm } from "./ConfirmDialog";
 import { AGENT_CATEGORY_IDS, getCategory } from "@/lib/agent/handoff-category";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/ui/page-shell";
+import { brainOverview, type BrainCountMetric, type BrainMode } from "@/lib/admin/brain-overview";
+import { brainTabFromParam, brainTabHref, type BrainTab } from "@/lib/admin/brain-navigation";
 
 interface OverviewBranch {
   id: number;
@@ -130,28 +133,55 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
+function countMetricText(metric: BrainCountMetric, suffix: string) {
+  if (metric.state === "loading") return "확인 중";
+  if (metric.state === "error") return "확인 실패";
+  return `${metric.value}${suffix}`;
+}
+
+const MODE_LABEL: Record<BrainMode, string> = {
+  auto: "자동 응대",
+  draft: "코파일럿",
+  off: "완전 중지",
+};
+
+const BRAIN_TAB_GROUPS = [
+  {
+    label: "운영 제어",
+    items: [
+      { id: "overview" as BrainTab, label: "운영 현황", icon: Layers, activeIcon: "text-warning-strong" },
+      { id: "mode" as BrainTab, label: "응답 모드·안전", icon: Power, activeIcon: "text-error-strong" },
+      { id: "rules" as BrainTab, label: "사람 개입 규칙", icon: SlidersHorizontal, activeIcon: "text-success" },
+    ],
+  },
+  {
+    label: "응답 품질",
+    items: [
+      { id: "knowledge" as BrainTab, label: "지식 베이스", icon: Database, activeIcon: "text-info" },
+      { id: "persona" as BrainTab, label: "말투·성격", icon: MessageSquare, activeIcon: "text-warning-strong" },
+      { id: "simulator" as BrainTab, label: "응대 미리보기", icon: FlaskConical, activeIcon: "text-copilot" },
+      { id: "improve" as BrainTab, label: "개선 제안", icon: Lightbulb, activeIcon: "text-warning-strong" },
+    ],
+  },
+];
+
 export function AgentBrain() {
   const confirm = useConfirm();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("overview");
+  const searchParams = useSearchParams();
+  const activeTab = brainTabFromParam(searchParams.get("tab"));
   // AI 지식 현황(개선1·3): 사실 3계층 집계 + 인계 분포 — 모두 SWR로 캐시·dedup(타 탭과 키 공유).
-  const { data: ovBranchesApi, mutate: mutateOvBranches } = useSWR<{ data?: OverviewBranch[] }>("/api/admin/branches");
-  const { data: ovJobsApi, mutate: mutateOvJobs } = useSWR<{ jobs?: OverviewJob[] }>("/api/admin/jobs?status=active");
-  const { data: ovHandoffsApi, isLoading: ovHandoffsLoading, mutate: mutateOvHandoffs } = useSWR<{ by_category?: Record<string, number>; total?: number }>("/api/admin/agent/handoffs");
-  const ovBranches = useMemo(() => ovBranchesApi?.data ?? [], [ovBranchesApi]);
+  const { data: ovBranchesApi, error: ovBranchesError, isValidating: ovBranchesValidating, mutate: mutateOvBranches } = useSWR<{ data?: OverviewBranch[] }>("/api/admin/branches", { refreshInterval: 60_000 });
+  const { data: ovJobsApi, error: ovJobsError, isValidating: ovJobsValidating, mutate: mutateOvJobs } = useSWR<{ jobs?: OverviewJob[] }>("/api/admin/jobs?status=active", { refreshInterval: 60_000 });
+  const { data: ovHandoffsApi, error: ovHandoffsError, isValidating: ovHandoffsValidating, mutate: mutateOvHandoffs } = useSWR<{ by_category?: Record<string, number>; total?: number }>("/api/admin/agent/handoffs", { refreshInterval: 60_000 });
   const ovJobs = useMemo(() => ((ovJobsApi?.jobs ?? []) as OverviewJob[]).filter((j) => !j.title.startsWith("__")), [ovJobsApi]);
   const ovByCategory = useMemo(() => ovHandoffsApi?.by_category ?? {}, [ovHandoffsApi]);
   const ovHandoffTotal = ovHandoffsApi?.total ?? 0;
-  const ovLoading = ovHandoffsLoading;
-  const loadOverview = useCallback(() => {
-    void mutateOvBranches();
-    void mutateOvJobs();
-    void mutateOvHandoffs();
-  }, [mutateOvBranches, mutateOvJobs, mutateOvHandoffs]);
   const [isSaving, setIsSaving] = useState(false);
-  const { data: examplesApi, isLoading: examplesLoading, mutate: mutateExamples } = useSWR<{ data?: PromptExample[] }>("/api/admin/prompt-examples");
+  const { data: examplesApi, error: examplesError, isLoading: examplesLoading, isValidating: examplesValidating, mutate: mutateExamples } = useSWR<{ data?: PromptExample[] }>("/api/admin/prompt-examples", { refreshInterval: 60_000 });
   const examples = useMemo(() => examplesApi?.data ?? [], [examplesApi]);
-  const kbLoading = examplesLoading && examples.length === 0;
+  const kbLoading = examplesLoading && examplesApi === undefined;
+  const kbFailed = Boolean(examplesError);
   const loadExamples = useCallback(async () => { await mutateExamples(); }, [mutateExamples]);
   const [kbCategory, setKbCategory] = useState<KbCategory>("facts");
   const [kbForm, setKbForm] = useState<KbForm | null>(null);
@@ -247,9 +277,9 @@ export function AgentBrain() {
     setProposals((prev) => prev.filter((_, i) => i !== idx));
 
   // 운영자 페르소나 (시스템 프롬프트에 반영) — SWR로 로드 후 폼에 시드(이후 로컬 편집).
-  const { data: personaApi, isLoading: personaLoading } = useSWR<{ data?: { role?: string; instructions?: string; tone?: string; emoji?: number } }>("/api/admin/agent/persona");
+  const { data: personaApi, error: personaError, isLoading: personaLoading, mutate: mutatePersona } = useSWR<{ data?: { role?: string; instructions?: string; tone?: string; emoji?: number } }>("/api/admin/agent/persona");
   const [persona, setPersona] = useState<PersonaForm>(DEFAULT_PERSONA);
-  const personaLoaded = !personaLoading;
+  const personaLoaded = personaApi !== undefined && !personaError;
   useEffect(() => {
     const d = personaApi?.data;
     if (d) {
@@ -267,9 +297,8 @@ export function AgentBrain() {
 
   // 전역 AI 응답 모드 (kill-switch 3단): auto=자동 응대 / draft=코파일럿(초안만) / off=완전 중지.
   // SWR로 로드 후 로컬 상태에 시드(전환은 로컬 갱신). kill-switch 키는 자동화 탭과 공유.
-  type KillMode = "auto" | "draft" | "off";
-  const { data: killApi, isLoading: killLoading } = useSWR<{ mode?: KillMode; disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch");
-  const [killMode, setKillMode] = useState<KillMode>("auto");
+  const { data: killApi, error: killError, isLoading: killLoading, isValidating: killValidating, mutate: mutateKill } = useSWR<{ mode?: BrainMode; disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
+  const [killMode, setKillMode] = useState<BrainMode>("auto");
   const [killEnvForced, setKillEnvForced] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
   const [killUpdatedAt, setKillUpdatedAt] = useState<string | null>(null);
@@ -280,9 +309,25 @@ export function AgentBrain() {
       setKillUpdatedAt(killApi.updated_at ?? null);
     }
   }, [killApi]);
+  const overview = useMemo(() => brainOverview({
+    examples: examplesApi?.data,
+    examplesError: Boolean(examplesError),
+    branches: ovBranchesApi?.data,
+    branchesError: Boolean(ovBranchesError),
+    jobs: ovJobsApi?.jobs,
+    jobsError: Boolean(ovJobsError),
+    handoffs: ovHandoffsApi,
+    handoffsError: Boolean(ovHandoffsError),
+    killSwitch: killApi,
+    killSwitchError: Boolean(killError),
+  }), [examplesApi, examplesError, ovBranchesApi, ovBranchesError, ovJobsApi, ovJobsError, ovHandoffsApi, ovHandoffsError, killApi, killError]);
+  const overviewRefreshing = examplesValidating || ovBranchesValidating || ovJobsValidating || ovHandoffsValidating || killValidating;
+  const loadOverview = useCallback(() => {
+    void Promise.all([mutateExamples(), mutateOvBranches(), mutateOvJobs(), mutateOvHandoffs(), mutateKill()]);
+  }, [mutateExamples, mutateOvBranches, mutateOvJobs, mutateOvHandoffs, mutateKill]);
   const killDisabled = killMode === "off";
 
-  const handleChangeKillMode = async (next: KillMode) => {
+  const handleChangeKillMode = async (next: BrainMode) => {
     if (killBusy || killEnvForced || next === killMode) return;
     const ok =
       next === "off"
@@ -304,7 +349,9 @@ export function AgentBrain() {
         return;
       }
       setKillMode(next);
-      setKillUpdatedAt(new Date().toISOString());
+      const updatedAt = new Date().toISOString();
+      setKillUpdatedAt(updatedAt);
+      void mutateKill({ mode: next, disabled: next === "off", env_forced: false, updated_at: updatedAt }, { revalidate: false });
       toast.success(
         next === "off"
           ? "AI 전역 응답을 중단했어요."
@@ -402,10 +449,19 @@ export function AgentBrain() {
   const kbItems = examples.filter((e) => e.category === kbCategory && !e.title.startsWith("__"));
 
   // AI 지식 현황 집계
-  const factsCount = examples.filter((e) => e.category === "facts" && !e.title.startsWith("__")).length;
-  const branchesFilled = ovBranches.filter((b) => (b.ai_facts ?? "").trim()).length;
-  const jobsPayFilled = ovJobs.filter((j) => (j.pay_info ?? "").trim()).length;
-  const payGapJobs = ovJobs.filter((j) => !(j.pay_info ?? "").trim());
+  const payGapJobs = overview.jobs.state === "ready" ? ovJobs.filter((j) => !(j.pay_info ?? "").trim()) : [];
+  const modeSummary = overview.mode.state === "ready" && overview.mode.value
+    ? MODE_LABEL[overview.mode.value]
+    : overview.mode.state === "loading" ? "확인 중" : "확인 실패";
+  const modeSummaryTone = overview.mode.state === "error" || overview.mode.value === "off"
+    ? "text-error-strong"
+    : overview.mode.value === "draft" ? "text-copilot-strong" : overview.mode.state === "ready" ? "text-success-strong" : "text-muted-foreground";
+  const coverageFailed = overview.branches.state === "error" || overview.jobs.state === "error";
+  const coverageLoading = overview.branches.state === "loading" || overview.jobs.state === "loading";
+  const knowledgeGapCount = overview.branches.state === "ready" && overview.jobs.state === "ready"
+    ? (overview.branches.total! - overview.branches.filled!) + (overview.jobs.total! - overview.jobs.filled!)
+    : null;
+  const knowledgeGapSummary = coverageFailed ? "확인 실패" : coverageLoading ? "확인 중" : `${knowledgeGapCount}곳`;
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -456,122 +512,125 @@ export function AgentBrain() {
 
   return (
     <PageShell>
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-brand-yellow rounded-2xl flex items-center justify-center shadow-sm">
-            <Brain size={24} className="text-foreground" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">에이전트 두뇌</h1>
-            {/* '여기서 바꾸면 바로 적용'은 과장이었다 — 탭마다 반영 시점이 다르다(말투·성격=저장 후 60초 이내,
-                지식·규칙=목록 편집 즉시, AI 모드=5초 이내). 단언 대신 각 탭 안내에 맡긴다. */}
-            <p className="text-[14px] text-muted-foreground">AI가 응대할 때 쓰는 말투·지식과 예외 처리 규칙을 관리합니다.</p>
-          </div>
-        </div>
-        {/* 이 두 버튼은 '말투·성격' 탭만 저장·초기화한다 — 모든 탭에서 보이면 지금 보고 있는 탭이
-            저장되는 줄 오해한다(지식·규칙은 각 항목에서 즉시 저장, 고급 설정은 미연동). 해당 탭에서만 노출. */}
-        {activeTab === "persona" && (
-        <div className="flex items-center gap-3">
-          <button
-            onClick={async () => {
-              // 편집 중인 말투·성격 설정을 한 번에 날리므로 확인을 받는다(저장 전이라 서버 반영은 아직 없음).
-              if (!(await confirm({
-                title: "기본 말투·성격으로 되돌릴까요?",
-                description: "편집 중인 역할·지시·어조·이모지 설정이 기본값으로 초기화됩니다. (저장하기 전이라 서버에는 아직 반영되지 않아요)",
-                confirmText: "초기화",
-                destructive: true,
-              }))) return;
-              setPersona(DEFAULT_PERSONA);
-              toast.info("기본 말투·성격으로 되돌렸어요. 저장해야 반영됩니다.");
-            }}
-            className="flex items-center gap-2 bg-card border border-border-strong text-gray-700 hover:bg-background px-4 py-2.5 rounded-2xl font-bold transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <RefreshCw size={16} /> 기본값으로 초기화
-          </button>
-          <Button variant="primary" size="lg" onClick={handleSave} isLoading={isSaving}>
-              {!isSaving && <Save size={16} />} {isSaving ? '저장 중...' : '말투·성격 저장'}
-            </Button>
-        </div>
-        )}
-      </div>
+      <h1 className="sr-only">에이전트 두뇌</h1>
 
-      <div className="flex gap-8">
+      <section aria-labelledby="brain-operations-heading" className="overflow-hidden rounded-2xl border border-border-strong bg-card shadow-sm">
+        <div className="flex items-start justify-between gap-4 px-5 py-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="brain-operations-heading" className="text-[14px] font-extrabold text-foreground">AI 운영 상태</h2>
+              <span className="rounded-full border border-border-strong bg-muted px-2 py-0.5 text-[12px] font-bold text-muted-foreground">60초마다 갱신</span>
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground">AI의 현재 동작, 사람 확인 대기, 지식 빈칸을 먼저 확인하세요.</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={loadOverview} isLoading={overviewRefreshing}>
+            {!overviewRefreshing && <RefreshCw size={14} />} 새로고침
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 border-t border-border-strong md:grid-cols-3">
+          <Link
+            href={brainTabHref("mode")}
+            scroll={false}
+            className="group flex min-h-[104px] items-start gap-3 border-b border-border-strong px-5 py-4 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:border-b-0 md:border-r"
+          >
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${overview.mode.value === "off" || overview.mode.state === "error" ? "bg-error-soft" : overview.mode.state === "loading" ? "bg-muted" : overview.mode.value === "draft" ? "bg-copilot-soft" : "bg-success-soft"}`}>
+              <Power size={17} className={modeSummaryTone} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[12px] font-bold text-muted-foreground">전역 응답 모드</div>
+              <div className={`mt-0.5 text-[18px] font-extrabold ${modeSummaryTone}`}>{modeSummary}</div>
+              <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-muted-foreground group-hover:text-foreground">모드·안전 설정 <ExternalLink size={11} /></div>
+            </div>
+          </Link>
+          <Link
+            href="/live?tab=intervention"
+            className="group flex min-h-[104px] items-start gap-3 border-b border-border-strong px-5 py-4 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:border-b-0 md:border-r"
+          >
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-copilot-soft"><AlertTriangle size={17} className="text-copilot-strong" /></div>
+            <div className="min-w-0">
+              <div className="text-[12px] font-bold text-muted-foreground">사람 확인 대기</div>
+              <div className={`mt-0.5 text-[18px] font-extrabold ${overview.handoffs.state === "error" ? "text-error-strong" : "text-foreground"}`}>{countMetricText(overview.handoffs, "건")}</div>
+              <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-muted-foreground group-hover:text-foreground">지원자 운영에서 처리 <ExternalLink size={11} /></div>
+            </div>
+          </Link>
+          <Link
+            href={brainTabHref("overview")}
+            scroll={false}
+            className="group flex min-h-[104px] items-start gap-3 px-5 py-4 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-warning-soft"><Database size={17} className="text-warning-strong" /></div>
+            <div className="min-w-0">
+              <div className="text-[12px] font-bold text-muted-foreground">지점·공고 지식 빈칸</div>
+              <div className={`mt-0.5 text-[18px] font-extrabold ${coverageFailed ? "text-error-strong" : (knowledgeGapCount ?? 0) > 0 ? "text-warning-strong" : "text-foreground"}`}>{knowledgeGapSummary}</div>
+              <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-muted-foreground group-hover:text-foreground">빈칸 위치 점검 <ExternalLink size={11} /></div>
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      <div className="flex gap-6">
         {/* Sidebar Nav */}
-        <div className="w-[240px] shrink-0 flex flex-col gap-2">
-          <button aria-selected={activeTab === "overview"} role="tab"
-            onClick={() => setActiveTab("overview")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <Layers size={18} className={activeTab === 'overview' ? 'text-warning-strong' : ''} /> AI 지식 현황
-          </button>
-          <button aria-selected={activeTab === "persona"} role="tab"
-            onClick={() => setActiveTab("persona")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'persona' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <MessageSquare size={18} className={activeTab === 'persona' ? 'text-brand-yellow' : ''} /> 말투·성격
-          </button>
-          <button aria-selected={activeTab === "knowledge"} role="tab"
-            onClick={() => setActiveTab("knowledge")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'knowledge' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <Database size={18} className={activeTab === 'knowledge' ? 'text-info' : ''} /> 사내 지식 베이스
-          </button>
-          <button aria-selected={activeTab === "rules"} role="tab"
-            onClick={() => setActiveTab("rules")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'rules' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <SlidersHorizontal size={18} className={activeTab === 'rules' ? 'text-success' : ''} /> 예외 처리 규칙
-          </button>
-          <button aria-selected={activeTab === "advanced"} role="tab"
-            onClick={() => setActiveTab("advanced")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'advanced' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <Settings2 size={18} className={activeTab === 'advanced' ? 'text-error-strong' : ''} /> 고급 설정
-          </button>
-          <button aria-selected={activeTab === "simulator"} role="tab"
-            onClick={() => setActiveTab("simulator")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'simulator' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <FlaskConical size={18} className={activeTab === 'simulator' ? 'text-copilot' : ''} /> 응대 미리보기
-          </button>
-          <button aria-selected={activeTab === "improve"} role="tab"
-            onClick={() => setActiveTab("improve")}
-            className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${activeTab === 'improve' ? 'bg-white border-2 border-foreground text-foreground shadow-sm' : 'border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong'}`}
-          >
-            <Lightbulb size={18} className={activeTab === 'improve' ? 'text-warning-strong' : ''} /> 🔁 개선 제안
-          </button>
+        <div role="tablist" aria-label="에이전트 두뇌 설정" className="flex w-[220px] shrink-0 flex-col gap-5">
+          {BRAIN_TAB_GROUPS.map((group) => (
+            <div key={group.label} role="presentation">
+              <div className="mb-1.5 px-3 text-[12px] font-extrabold tracking-[0.12em] text-muted-foreground">{group.label}</div>
+              <div className="flex flex-col gap-1">
+                {group.items.map((item) => {
+                  const selected = activeTab === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.id}
+                      id={`brain-tab-${item.id}`}
+                      href={brainTabHref(item.id)}
+                      scroll={false}
+                      role="tab"
+                      aria-selected={selected}
+                      aria-controls={`brain-panel-${item.id}`}
+                      className={`flex min-h-11 items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-[13px] font-bold outline-none transition-[background-color,border-color,color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${selected ? "border-foreground bg-card text-foreground shadow-sm" : "border-transparent text-muted-foreground hover:border-border-strong hover:bg-card hover:text-foreground"}`}
+                    >
+                      <Icon size={17} className={selected ? item.activeIcon : ""} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-card border border-border-strong rounded-2xl shadow-sm p-8">
+        <div id={`brain-panel-${activeTab}`} role="tabpanel" aria-labelledby={`brain-tab-${activeTab}`} tabIndex={0} className="min-w-0 flex-1 rounded-2xl border border-border-strong bg-card p-7 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {activeTab === 'overview' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="flex items-center justify-between mb-2">
+              <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Layers size={20} className="text-warning-strong" /> AI가 참고하는 사실 — 한눈에
                 </h2>
-                <Button variant="ghost" size="chip" onClick={loadOverview} isLoading={ovLoading} className="text-[13px]">
-                {!ovLoading && <RefreshCw size={14} />} 새로고침
-              </Button>
               </div>
               <p className="text-sm text-muted-foreground mb-6">옹봇은 응대할 때 <b>① 공통 운영정보 · ② 지점별 정보 · ③ 공고별 단가·정책</b> 세 곳의 사실만 인용합니다. 비어 있는 곳은 인용할 수 없어 매니저가 직접 답해야 하는 일이 늘어납니다. 빈칸을 채우면 그만큼 줄어요.</p>
 
               {/* 3계층 커버리지 카드 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <button onClick={() => setActiveTab("knowledge")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-info transition-colors">
+                <Link href={brainTabHref("knowledge")} scroll={false} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-info transition-colors">
                   <div className="flex items-center gap-2 text-info mb-2"><Database size={16} /><span className="text-[12px] font-bold">① 공통 운영정보</span></div>
-                  <div className="text-[26px] font-extrabold text-foreground">{factsCount}<span className="text-[13px] font-bold text-muted-foreground">개 항목</span></div>
+                  <div className={`font-extrabold ${overview.facts.state === "ready" ? "text-[26px] text-foreground" : overview.facts.state === "error" ? "text-[16px] text-error-strong" : "text-[16px] text-muted-foreground"}`}>
+                    {overview.facts.state === "ready" ? <>{overview.facts.value}<span className="ml-0.5 text-[13px] text-muted-foreground">개 항목</span></> : countMetricText(overview.facts, "개 항목")}
+                  </div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">두뇌 &gt; 사내 지식 베이스 <ExternalLink size={11} /></div>
-                </button>
+                </Link>
                 <button onClick={() => router.push("/branches")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-success transition-colors">
                   <div className="flex items-center gap-2 text-success mb-2"><Building2 size={16} /><span className="text-[12px] font-bold">② 지점별 정보</span></div>
-                  <div className="text-[26px] font-extrabold text-foreground">{branchesFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovBranches.length} 지점 작성</span></div>
+                  <div className={`font-extrabold ${overview.branches.state === "ready" ? "text-[26px] text-foreground" : overview.branches.state === "error" ? "text-[16px] text-error-strong" : "text-[16px] text-muted-foreground"}`}>
+                    {overview.branches.state === "ready" ? <>{overview.branches.filled}<span className="ml-0.5 text-[13px] text-muted-foreground">/{overview.branches.total} 지점 작성</span></> : overview.branches.state === "loading" ? "확인 중" : "확인 실패"}
+                  </div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">지점관리에서 편집 <ExternalLink size={11} /></div>
                 </button>
                 <button onClick={() => router.push("/jobs")} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-4 border border-border-strong rounded-2xl bg-card hover:border-warning transition-colors">
                   <div className="flex items-center gap-2 text-warning-strong mb-2"><Briefcase size={16} /><span className="text-[12px] font-bold">③ 공고별 단가·정책</span></div>
-                  <div className="text-[26px] font-extrabold text-foreground">{jobsPayFilled}<span className="text-[13px] font-bold text-muted-foreground">/{ovJobs.length} 공고 단가입력</span></div>
+                  <div className={`font-extrabold ${overview.jobs.state === "ready" ? "text-[26px] text-foreground" : overview.jobs.state === "error" ? "text-[16px] text-error-strong" : "text-[16px] text-muted-foreground"}`}>
+                    {overview.jobs.state === "ready" ? <>{overview.jobs.filled}<span className="ml-0.5 text-[13px] text-muted-foreground">/{overview.jobs.total} 공고 단가입력</span></> : overview.jobs.state === "loading" ? "확인 중" : "확인 실패"}
+                  </div>
                   <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1">공고 편집에서 입력 <ExternalLink size={11} /></div>
                 </button>
               </div>
@@ -585,7 +644,7 @@ export function AgentBrain() {
                       <div key={j.id} className="flex items-center justify-between gap-2 bg-card border border-warning-soft rounded-lg px-3 py-2">
                         <div className="min-w-0">
                           <span className="text-[13px] font-bold text-foreground">{j.title}</span>
-                          {j.branch && <span className="ml-2 text-[11px] font-bold text-muted-foreground">{j.branch}</span>}
+                          {j.branch && <span className="ml-2 text-[12px] font-bold text-muted-foreground">{j.branch}</span>}
                         </div>
                         <Button variant="primary" size="chip" className="shrink-0 px-2.5 bg-warning hover:bg-warning-strong text-white shadow-none focus-visible:ring-warning" onClick={() => router.push(`/jobs?edit=${j.id}`)}>단가 채우기</Button>
                       </div>
@@ -598,12 +657,14 @@ export function AgentBrain() {
               {/* 사람 확인 필요 분포(개선3) — 어떤 질문이 자주 매니저로 넘어가나 */}
               <div className="p-5 border border-border-strong rounded-2xl bg-card">
                 <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2 text-foreground text-[14px] font-bold"><TrendingUp size={16} className="text-copilot" /> 사람 확인 필요 사유 분포 (현재 {ovHandoffTotal}건 대기)</div>
+                  <div className="flex items-center gap-2 text-foreground text-[14px] font-bold"><TrendingUp size={16} className="text-copilot" /> 사람 확인 필요 사유 분포 (현재 {countMetricText(overview.handoffs, "건")})</div>
                   <button onClick={() => router.push("/live?tab=intervention")} className="relative after:absolute after:-inset-2.5 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[12px] font-bold text-copilot hover:underline flex items-center gap-1">사람 확인 필요 목록 열기 <ExternalLink size={11} /></button>
                 </div>
                 <p className="text-[12px] text-muted-foreground mb-4">사람 확인이 자주 필요한 분류는 위 ①②③ 사실을 채우면 건수가 줄어듭니다. (단가·정산 → 공고 단가, 계약·정책 → 공고 정책/지점 정보)</p>
-                {ovLoading ? (
+                {overview.handoffs.state === "loading" ? (
                   <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-2"><Loader2 size={15} className="animate-spin" /> 불러오는 중…</div>
+                ) : overview.handoffs.state === "error" ? (
+                  <div role="alert" className="flex items-center gap-2 rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[13px] font-bold text-error-strong"><AlertTriangle size={15} /> 분포를 확인하지 못했습니다. 상단 새로고침을 눌러 다시 확인하세요.</div>
                 ) : Object.keys(ovByCategory).length === 0 ? (
                   <div className="text-[13px] text-muted-foreground py-2">사람 확인이 필요한 건이 없어요.</div>
                 ) : (
@@ -629,9 +690,46 @@ export function AgentBrain() {
 
           {activeTab === 'persona' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-foreground mb-6 flex items-center gap-2">
-                <Sparkles size={20} className="text-brand-yellow" /> AI 말투·성격 정의
-              </h2>
+              <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                    <Sparkles size={20} className="text-warning-strong" /> AI 말투·성격 정의
+                  </h2>
+                  <p className="mt-1 text-[12px] text-muted-foreground">이 화면의 변경은 저장해야 실제 응대에 반영됩니다.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!personaLoaded}
+                    onClick={async () => {
+                      if (!(await confirm({
+                        title: "기본 말투·성격으로 되돌릴까요?",
+                        description: "편집 중인 역할·지시·어조·이모지 설정이 기본값으로 초기화됩니다. (저장하기 전이라 서버에는 아직 반영되지 않아요)",
+                        confirmText: "초기화",
+                        destructive: true,
+                      }))) return;
+                      setPersona(DEFAULT_PERSONA);
+                      toast.info("기본 말투·성격으로 되돌렸어요. 저장해야 반영됩니다.");
+                    }}
+                  >
+                    <RefreshCw size={15} /> 기본값으로 초기화
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={handleSave} isLoading={isSaving} disabled={!personaLoaded}>
+                    {!isSaving && <Save size={15} />} {isSaving ? "저장 중…" : "말투·성격 저장"}
+                  </Button>
+                </div>
+              </div>
+
+              {personaLoading && (
+                <div className="mb-4 flex items-center gap-2 rounded-xl border border-border-strong bg-background px-3 py-2 text-[12px] font-bold text-muted-foreground"><Loader2 size={14} className="animate-spin" /> 저장된 설정을 불러오는 중입니다.</div>
+              )}
+              {personaError && (
+                <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong"><AlertTriangle size={14} /> 저장된 말투·성격을 확인하지 못해 편집을 잠시 막았습니다.</div>
+                  <Button variant="secondary" size="toolbar" onClick={() => void mutatePersona()}>다시 시도</Button>
+                </div>
+              )}
 
               <div className="space-y-6">
                 <div>
@@ -660,16 +758,24 @@ export function AgentBrain() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-border-strong">
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-3">어조 (Tone & Manner)</label>
-                    <div className="flex flex-col gap-3">
+                    <div role="radiogroup" aria-label="어조" className="flex flex-col gap-2">
                       {TONE_OPTIONS.map((tone) => {
                         const selected = persona.tone === tone;
                         return (
-                          <label key={tone} className="flex items-center gap-3 cursor-pointer" onClick={() => personaLoaded && setPersonaField("tone", tone)}>
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selected ? 'border-brand-yellow' : 'border-gray-300'}`}>
-                              {selected && <div className="w-2.5 h-2.5 rounded-full bg-brand-yellow"></div>}
-                            </div>
+                          <button
+                            key={tone}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            disabled={!personaLoaded}
+                            onClick={() => setPersonaField("tone", tone)}
+                            className={`flex min-h-11 items-center gap-3 rounded-xl border px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${selected ? "border-warning bg-warning-soft" : "border-border-strong bg-card hover:bg-background"}`}
+                          >
+                            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${selected ? "border-warning" : "border-border-strong"}`}>
+                              {selected && <span className="h-2.5 w-2.5 rounded-full bg-warning" />}
+                            </span>
                             <span className={`text-sm font-medium ${selected ? 'text-foreground font-bold' : 'text-muted-foreground'}`}>{tone}</span>
-                          </label>
+                          </button>
                         );
                       })}
                     </div>
@@ -686,7 +792,7 @@ export function AgentBrain() {
                         disabled={!personaLoaded}
                         className="w-full accent-brand-yellow"
                       />
-                      <div className="flex justify-between text-[11px] font-bold text-muted-foreground mt-2">
+                      <div className="flex justify-between text-[12px] font-bold text-muted-foreground mt-2">
                         <span>사용 안 함</span>
                         <span>적당히</span>
                         <span>자주 사용</span>
@@ -704,9 +810,11 @@ export function AgentBrain() {
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Database size={20} className="text-info" /> 사내 지식 베이스
                 </h2>
-                <span className="text-[12px] font-bold bg-success-soft text-success-strong px-3 py-1 rounded-full">prompt_examples 연동됨</span>
+                <span className={`rounded-full px-3 py-1 text-[12px] font-bold ${kbFailed ? "bg-error-soft text-error-strong" : kbLoading ? "bg-muted text-muted-foreground" : "bg-success-soft text-success-strong"}`}>
+                  {kbFailed ? "불러오기 실패" : kbLoading ? "확인 중" : "DB 연동"}
+                </span>
               </div>
-              <p className="text-sm text-muted-foreground mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 아래 목록은 DB(prompt_examples)에서 실시간으로 불러옵니다.</p>
+              <p className="text-sm text-muted-foreground mb-6">옹봇이 지원자 응대에 사용하는 운영 정보·대화 예시·자동 발송 문구입니다. 저장된 항목은 60초 이내 실제 응대에 반영됩니다.</p>
 
               {/* 파일 업로드(RAG)는 백엔드가 없어 가짜 진행바·"벡터 인덱싱 중"까지 보여준 뒤 마지막에야
                   데모임을 알리는 화면이었다 — 매니저의 시간을 쓰게 하고 그 사이 학습된다고 믿게 만든다.
@@ -714,7 +822,7 @@ export function AgentBrain() {
               <div className="border border-border-strong bg-background rounded-2xl px-5 py-4 mb-8 flex items-start gap-3">
                 <UploadCloud size={20} className="text-muted-foreground shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-[14px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full align-middle">준비중</span></div>
+                  <div className="text-[14px] font-bold text-gray-700">파일 업로드로 학습시키는 기능은 아직 없어요 <span className="ml-1 text-[12px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full align-middle">준비중</span></div>
                   <div className="text-[13px] text-muted-foreground mt-0.5">옹봇이 참고하는 지식은 아래 목록에 직접 추가하세요 — 추가하면 1분 안에 응대에 반영돼요.</div>
                 </div>
               </div>
@@ -729,6 +837,7 @@ export function AgentBrain() {
                       <button aria-pressed={on}
                         key={c.key}
                         onClick={() => { setKbCategory(c.key); setKbForm(null); }}
+                        disabled={kbLoading || kbFailed}
                         className={`px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
                         {c.label} <span className={on ? "text-muted-foreground" : "text-muted-foreground"}>{count}</span>
@@ -737,10 +846,10 @@ export function AgentBrain() {
                   })}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="chip" className="px-3.5 py-2 text-[13px] rounded-2xl" onClick={handleKbSeed} isLoading={kbSeeding}>
+                  <Button variant="secondary" size="chip" className="px-3.5 py-2 text-[13px] rounded-2xl" onClick={handleKbSeed} isLoading={kbSeeding} disabled={kbLoading || kbFailed}>
                 {!kbSeeding && <Sprout size={15} />} 기본값 채우기
               </Button>
-                  <Button variant="primary" size="chip" className="px-3.5 py-2 text-[13px] rounded-2xl" onClick={openKbAdd}><Plus size={15} /> 새 항목</Button>
+                  <Button variant="primary" size="chip" className="px-3.5 py-2 text-[13px] rounded-2xl" onClick={openKbAdd} disabled={kbLoading || kbFailed}><Plus size={15} /> 새 항목</Button>
                 </div>
               </div>
 
@@ -762,7 +871,7 @@ export function AgentBrain() {
                         <div className="text-[14px] font-extrabold text-foreground flex items-center gap-2">
                           {kbForm.id === null ? <Plus size={16} /> : <Pencil size={16} />}
                           {kbForm.id === null ? "새 지식 항목" : "지식 항목 수정"}
-                          <span className="text-[11px] font-bold bg-info-soft text-info-strong px-1.5 py-0.5 rounded-full">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
+                          <span className="text-[12px] font-bold bg-info-soft text-info-strong px-1.5 py-0.5 rounded-full">{CATEGORY_LABEL[kbForm.category] ?? kbForm.category}</span>
                         </div>
                         <button aria-label="편집 창 닫기" onClick={() => setKbForm(null)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:text-gray-700 p-1 rounded-lg"><X size={18} /></button>
                       </div>
@@ -805,12 +914,18 @@ export function AgentBrain() {
                 {kbLoading && (
                   <div className="flex items-center gap-2 text-[13px] text-muted-foreground p-4"><Loader2 size={15} className="animate-spin" /> 불러오는 중...</div>
                 )}
-                {!kbLoading && kbItems.length === 0 && (
+                {kbFailed && (
+                  <div role="alert" className="flex items-center justify-between gap-3 rounded-2xl border border-error/30 bg-error-soft p-4">
+                    <div className="flex items-center gap-2 text-[13px] font-bold text-error-strong"><AlertTriangle size={15} /> 저장된 지식 항목을 확인하지 못했습니다.</div>
+                    <Button variant="secondary" size="toolbar" onClick={() => void mutateExamples()}>다시 시도</Button>
+                  </div>
+                )}
+                {!kbLoading && !kbFailed && kbItems.length === 0 && (
                   <div className="text-center text-[13px] text-muted-foreground border border-dashed border-border-strong rounded-2xl p-8">
                     이 분류에 등록된 항목이 없어요. <button onClick={openKbAdd} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-info-strong font-bold hover:underline">새 항목 추가</button> 또는 기본값 채우기를 눌러보세요.
                   </div>
                 )}
-                {kbItems.map((ex) => (
+                {!kbFailed && kbItems.map((ex) => (
                   <div key={ex.id} className="group flex items-start justify-between p-4 border border-border-strong rounded-2xl bg-card hover:border-gray-300 transition-colors">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg bg-background flex items-center justify-center text-gray-700 shrink-0">
@@ -834,9 +949,16 @@ export function AgentBrain() {
           {activeTab === 'rules' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-lg font-bold text-foreground mb-6 flex items-center gap-2">
-                <SlidersHorizontal size={20} className="text-success" /> 예외 처리 및 모를 때 대응 규칙
+                <SlidersHorizontal size={20} className="text-success" /> 사람 개입 규칙
               </h2>
               <p className="text-sm text-muted-foreground mb-6">옹봇이 <b>스스로 답하지 않고 매니저에게 넘기는</b> 실제 사유 분류입니다. 안전을 위해 항상 작동하며, 각 분류 옆 숫자는 <b>현재 사람 확인을 기다리는 건수</b>입니다. ‘정보 채우면 자동화 가능’ 항목은 위 ①②③ 사실을 채우면 매니저가 직접 답할 일이 줄어듭니다.</p>
+
+              {overview.handoffs.state === "error" && (
+                <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong"><AlertTriangle size={14} /> 현재 대기 건수를 확인하지 못했습니다.</div>
+                  <Button variant="secondary" size="toolbar" onClick={() => void mutateOvHandoffs()}>다시 시도</Button>
+                </div>
+              )}
 
               <div className="space-y-2.5">
                 {AGENT_CATEGORY_IDS.map((cid) => {
@@ -847,13 +969,19 @@ export function AgentBrain() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[14px] font-bold text-foreground">{cat.label}</span>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${TONE_BADGE[cat.tone]}`}>{TONE_LABEL[cat.tone]}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${TONE_BADGE[cat.tone]}`}>{TONE_LABEL[cat.tone]}</span>
                         </div>
-                        <div className="text-[13px] text-muted-foreground">↳ {cat.action}</div>
+                        <div className="text-[13px] text-muted-foreground">{cat.action}</div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <div className={`text-[18px] font-extrabold ${count > 0 ? "text-copilot" : "text-muted-foreground"}`}>{count}</div>
-                        <div className="text-[11px] font-bold text-muted-foreground">대기</div>
+                        {overview.handoffs.state === "ready" ? (
+                          <>
+                            <div className={`text-[18px] font-extrabold ${count > 0 ? "text-copilot" : "text-muted-foreground"}`}>{count}</div>
+                            <div className="text-[12px] font-bold text-muted-foreground">대기</div>
+                          </>
+                        ) : (
+                          <div className={`text-[12px] font-bold ${overview.handoffs.state === "error" ? "text-error-strong" : "text-muted-foreground"}`}>{overview.handoffs.state === "error" ? "확인 실패" : "확인 중"}</div>
+                        )}
                       </div>
                     </div>
                   );
@@ -866,25 +994,27 @@ export function AgentBrain() {
             </div>
           )}
 
-          {activeTab === 'advanced' && (
+          {activeTab === 'mode' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               {/* 전역 AI 응답 모드 (실데이터 연동) — 자동 응대 / 코파일럿(초안만) / 완전 중지 */}
-              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killDisabled ? 'bg-error-soft border-error/30' : killMode === 'draft' && !killEnvForced ? 'bg-copilot-soft border-copilot/30' : 'bg-card border-border-strong'}`}>
+              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killError || killDisabled ? 'bg-error-soft border-error/30' : killMode === 'draft' && !killEnvForced ? 'bg-copilot-soft border-copilot/30' : 'bg-card border-border-strong'}`}>
                 <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${killDisabled || killEnvForced ? 'bg-error-soft' : killMode === 'draft' ? 'bg-copilot-soft' : 'bg-success-soft'}`}>
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${killError || killDisabled || killEnvForced ? 'bg-error-soft' : killMode === 'draft' ? 'bg-copilot-soft' : 'bg-success-soft'}`}>
                     {killMode === 'draft' && !killEnvForced ? (
                       <Zap size={20} className="text-copilot-strong" />
                     ) : (
-                      <Power size={20} className={killDisabled || killEnvForced ? 'text-error-strong' : 'text-success'} />
+                      <Power size={20} className={killError || killDisabled || killEnvForced ? 'text-error-strong' : 'text-success'} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-[18px] font-extrabold text-foreground">AI 전역 응답</h2>
+                      <h2 className="text-[18px] font-extrabold text-foreground">응답 모드·안전</h2>
                       {killLoading ? (
-                        <span className="text-[11px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">확인 중…</span>
+                        <span className="text-[12px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">확인 중…</span>
+                      ) : killError ? (
+                        <span className="text-[12px] font-bold text-error-strong bg-error-soft px-2 py-0.5 rounded-full">확인 실패</span>
                       ) : (
-                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${killDisabled || killEnvForced ? 'text-error-strong bg-error-soft' : killMode === 'draft' ? 'text-copilot-strong bg-copilot-soft' : 'text-success-strong bg-success/25'}`}>
+                        <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${killDisabled || killEnvForced ? 'text-error-strong bg-error-soft' : killMode === 'draft' ? 'text-copilot-strong bg-copilot-soft' : 'text-success-strong bg-success/25'}`}>
                           {killEnvForced ? '중단됨 (환경변수)' : killDisabled ? '중단됨' : killMode === 'draft' ? '코파일럿' : '작동 중'}
                         </span>
                       )}
@@ -900,7 +1030,7 @@ export function AgentBrain() {
                         { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-copilot bg-copilot-soft ring-1 ring-copilot', dotCls: 'text-copilot-strong' },
                         { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-error bg-error-soft ring-1 ring-error', dotCls: 'text-error-strong' },
                       ]).map((opt) => {
-                        const active = killMode === opt.id && !killEnvForced;
+                        const active = !killLoading && !killError && killMode === opt.id && !killEnvForced;
                         return (
                           <button
                             key={opt.id}
@@ -908,9 +1038,9 @@ export function AgentBrain() {
                             role="radio"
                             aria-checked={active}
                             onClick={() => handleChangeKillMode(opt.id)}
-                            disabled={killLoading || killBusy || killEnvForced}
+                            disabled={killLoading || Boolean(killError) || killBusy || killEnvForced}
                             title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : opt.desc}
-                            className={`text-left rounded-2xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-border-strong bg-white hover:border-gray-300'}`}
+                            className={`text-left rounded-2xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-border-strong bg-card hover:border-foreground/30'}`}
                           >
                             <div className={`flex items-center gap-1.5 text-[13px] font-extrabold ${active ? opt.dotCls : 'text-gray-700'}`}>
                               {opt.icon} {opt.label}
@@ -932,6 +1062,12 @@ export function AgentBrain() {
                         <AlertTriangle size={13} /> 환경변수 AGENT_DISABLED=1 이 설정돼 있어, 이 설정과 무관하게 항상 중단됩니다.
                       </p>
                     )}
+                    {killError && (
+                      <div role="alert" className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-card px-3 py-2">
+                        <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong"><AlertTriangle size={13} /> 현재 모드를 확인하지 못해 변경을 막았습니다.</div>
+                        <Button variant="secondary" size="toolbar" onClick={() => void mutateKill()}>다시 시도</Button>
+                      </div>
+                    )}
                     {killBusy && (
                       <p className="text-[12px] font-bold text-muted-foreground mt-2 flex items-center gap-1.5">
                         <Loader2 size={12} className="animate-spin" /> 변경 중…
@@ -947,10 +1083,7 @@ export function AgentBrain() {
                     <Database size={20} className="text-copilot-strong" />
                   </div>
                   <div>
-                    <h2 className="text-[18px] font-extrabold text-foreground flex items-center gap-2">
-                      고급 설정
-                      <span className="text-[11px] font-bold text-warning-strong bg-yellow-100 px-1.5 py-0.5 rounded-full">준비중</span>
-                    </h2>
+                    <h2 className="text-[18px] font-extrabold text-foreground">현재 모델·개인정보</h2>
                     <p className="text-[13px] text-muted-foreground">지금 쓰는 AI 모델과 개인정보 처리 상태를 확인합니다.</p>
                   </div>
                 </div>
@@ -966,7 +1099,7 @@ export function AgentBrain() {
                     </p>
                   </div>
                   <div>
-                    <div className="text-[14px] font-bold text-gray-700 mb-1">개인정보 처리</div>
+                    <div className="mb-1 flex items-center gap-2 text-[14px] font-bold text-gray-700">개인정보 처리 <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-[12px] font-bold text-warning-strong">자동 마스킹 준비중</span></div>
                     <p className="text-[13px] text-muted-foreground leading-relaxed">
                       민감정보 자동 마스킹은 아직 준비 중이에요. 지원자가 주민등록번호·계좌번호를 보내면 매니저가 직접 확인해 주세요.
                     </p>
@@ -1135,14 +1268,14 @@ export function AgentBrain() {
                   );
                 })()}
 
-                <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+                <p className="text-[12px] text-muted-foreground mt-3 leading-relaxed">
                   * 추정 비용 = 토큰 × 모델 단가 (Sonnet 4.6 입력 $3 · 출력 $15 / Haiku 4.5 입력 $1 · 출력 $5 per 1M tokens, 캐시 읽기는 입력 단가의 10%로 계산). 월별 원화는 환율 1,500원 가정. 실제 청구액과 다를 수 있어요.
                 </p>
               </div>
 
               {/* R4-2 개선 제안 — 반영은 매니저 승인으로만 (자동 반영 금지) */}
               <h2 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
-                <Lightbulb size={20} className="text-warning-strong" /> 🔁 개선 제안
+                <Lightbulb size={20} className="text-warning-strong" /> 개선 제안
               </h2>
               <p className="text-sm text-muted-foreground mb-5">
                 최근 7일간 <b>매니저가 고쳐 보낸 AI 초안 · AI가 매니저에게 넘긴 사유 · 정보 부족 사례</b>에서 AI가 배울 거리를 찾아 제안합니다.
@@ -1165,8 +1298,8 @@ export function AgentBrain() {
                   {proposals.map((p, idx) => (
                     <div key={`${p.kind}-${p.title}-${idx}`} className="border border-border-strong rounded-2xl p-4 bg-card hover:border-gray-300 transition-colors">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
-                        <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${p.confidence === 'high' ? 'bg-success-soft text-success-strong border-success/25' : 'bg-background text-muted-foreground border-border-strong'}`}>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${IMPROVE_KIND_BADGE[p.kind]}`}>{IMPROVE_KIND_LABEL[p.kind]}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${p.confidence === 'high' ? 'bg-success-soft text-success-strong border-success/25' : 'bg-background text-muted-foreground border-border-strong'}`}>
                           {p.confidence === 'high' ? '확신 높음' : '확신 중간'}
                         </span>
                       </div>

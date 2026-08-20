@@ -17,8 +17,9 @@ import { gatherLiveJobLinks } from "@/lib/candidate-links";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const applicantId = Number(params.id);
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const applicantId = Number(routeParams.id);
   if (!Number.isFinite(applicantId)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }

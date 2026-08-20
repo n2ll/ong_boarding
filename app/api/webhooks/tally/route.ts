@@ -11,13 +11,19 @@
  *   env TALLY_SIGNING_SECRET 미설정 시 fail-closed(401). (cron-auth와 동일 방침)
  *
  * 매핑 실패 안전장치: /api/apply 필수 필드가 안 채워지면 리드를 버리지 않고
- * applicants에 직접 INSERT(스크리닝 전, source=homepage) + Slack 경고를 보낸다.
+ * 제출 원장을 원자적으로 선점한 뒤 최소 applicant를 저장하고 Slack 경고를 보낸다.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
+import { blocksTallyFallback, tallySubmissionUuid } from "@/lib/tally-webhook";
+import { applicationSubmissionPayloadDigest } from "@/lib/application-submission";
+import {
+  APPLICATION_INTERNAL_HEADER,
+  applicationInternalSignature,
+} from "@/lib/application-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +61,7 @@ function pick(fields: TallyField[], ...keywords: string[]): string {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.TALLY_SIGNING_SECRET;
+  const secret = process.env.TALLY_SIGNING_SECRET?.trim();
   const raw = await req.text();
 
   if (!secret) {
@@ -71,7 +77,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
-  let payload: { eventType?: string; data?: { fields?: TallyField[] } };
+  let payload: {
+    eventId?: string;
+    eventType?: string;
+    data?: {
+      responseId?: string;
+      submissionId?: string;
+      formId?: string;
+      fields?: TallyField[];
+    };
+  };
   try {
     payload = JSON.parse(raw);
   } catch {
@@ -105,7 +120,14 @@ export async function POST(req: NextRequest) {
   const similar = pick(fields, "유사한 일");
   const experience = [career, similar].filter(Boolean).join(" / ");
 
-  const applyBody = {
+  const submissionId = tallySubmissionUuid({
+    eventId: payload.eventId ?? null,
+    formId: payload.data?.formId ?? null,
+    responseId: payload.data?.responseId ?? null,
+    submissionId: payload.data?.submissionId ?? null,
+    rawPayload: raw,
+  });
+  const applicationForm = {
     name,
     birthDate,
     phone,
@@ -114,33 +136,59 @@ export async function POST(req: NextRequest) {
     licenseType,
     vehicleType,
     branch1: "미지정", // 홈페이지 폼엔 지점 질문 없음 — 매니저가 지정 (airtable-sync와 동일)
-    branch2: null,
+    branch2: "",
     workHours,
-    introduction: null,
-    experience: experience || null,
-    source: "homepage",
+    introduction: "",
+    experience,
     availableDate,
     selfOwnership,
     marketingConsent: false,
+  };
+  const requestFingerprint = await applicationSubmissionPayloadDigest({
+    ...applicationForm,
+    source: "homepage",
+    jobId: null,
+  });
+  const applyBody = {
+    ...applicationForm,
+    source: "homepage",
+    submissionId,
   };
 
   // 1차: 정식 지원 경로로 수렴 (접수 문자·자동 필터·지오코딩·중복 판정 재사용)
   try {
     const res = await fetch(`${req.nextUrl.origin}/api/apply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        [APPLICATION_INTERNAL_HEADER]: applicationInternalSignature({
+          submissionId,
+          requestFingerprint,
+          secret,
+        }),
+      },
       body: JSON.stringify(applyBody),
     });
     if (res.ok) {
       return NextResponse.json({ ok: true, via: "apply" });
     }
     const errJson = await res.json().catch(() => null);
-    console.error("[tally webhook] /api/apply 거절 — 직접 INSERT 폴백", errJson);
+    if (blocksTallyFallback(res.status, errJson)) {
+      const retryAfter = res.headers.get("Retry-After");
+      return NextResponse.json(
+        errJson ?? { error: "canonical apply admission unavailable" },
+        {
+          status: res.status,
+          ...(retryAfter ? { headers: { "Retry-After": retryAfter } } : {}),
+        },
+      );
+    }
+    console.error("[tally webhook] /api/apply 거절 — 원장 기반 폴백", errJson);
   } catch (e) {
-    console.error("[tally webhook] /api/apply 호출 실패 — 직접 INSERT 폴백", e);
+    console.error("[tally webhook] /api/apply 호출 실패 — 원장 기반 폴백", e);
   }
 
-  // 2차 폴백: 리드 유실 방지 — 최소 필드로 직접 INSERT + Slack 경고
+  // 2차 폴백: 리드 유실 방지 — 제출 원장 선점 + 최소 applicant 저장 + Slack 경고
   if (!phone || !/^\d{10,11}$/.test(phone)) {
     await sendSlackText(
       `⚠️ *Tally 인입 매핑 실패* — 전화번호를 찾지 못해 등록하지 못했어요.\n수신 질문: ${fields.map((f) => f.label).join(" | ").slice(0, 500)}`
@@ -149,37 +197,46 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
-  const { data: dup } = await supabase
-    .from("applicants")
-    .select("id")
-    .eq("phone", phone)
-    .limit(1)
-    .maybeSingle();
-  if (dup) {
-    return NextResponse.json({ ok: true, via: "duplicate-skip" });
-  }
-
-  const { error: insErr } = await supabase.from("applicants").insert({
-    name: name || "(이름 미상)",
-    phone,
-    birth_date: birthDate || "",
-    location: location || "",
-    own_vehicle: ownVehicle || "",
-    license_type: licenseType || "",
-    vehicle_type: vehicleType || "",
-    branch1: "미지정",
-    work_hours: workHours.join(", "),
-    experience: experience || null,
-    self_ownership: selfOwnership || "",
-    available_date: availableDate || null,
-    status: "스크리닝 전",
-    source: "homepage",
-    sido: sido || null,
-    sigungu: sigungu || null,
-  });
-  if (insErr) {
-    console.error("[tally webhook] 폴백 INSERT 실패", insErr);
+  const { data: fallbackRows, error: fallbackError } = await supabase.rpc(
+    "claim_tally_fallback_submission",
+    {
+      p_submission_id: submissionId,
+      p_request_fingerprint: requestFingerprint,
+      p_applicant: {
+        name: name || "(이름 미상)",
+        phone,
+        birth_date: birthDate || "",
+        location: location || "",
+        own_vehicle: ownVehicle || "",
+        license_type: licenseType || "",
+        vehicle_type: vehicleType || "",
+        branch1: "미지정",
+        work_hours: workHours.join(", "),
+        experience: experience || null,
+        self_ownership: selfOwnership || "",
+        available_date: availableDate || null,
+        sido: sido || null,
+        sigungu: sigungu || null,
+      },
+    },
+  );
+  if (fallbackError) {
+    console.error("[tally webhook] 폴백 원장 선점 실패", fallbackError);
+    if ((fallbackError as { code?: string }).code === "23505") {
+      return NextResponse.json(
+        { error: "같은 Tally 제출 키가 다른 지원 내용에 이미 사용되었습니다." },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: "등록 실패" }, { status: 500 });
+  }
+  const fallbackClaim = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
+  if (!fallbackClaim || typeof fallbackClaim.applicant_id !== "number") {
+    console.error("[tally webhook] 폴백 원장 결과 없음", fallbackRows);
+    return NextResponse.json({ error: "등록 실패" }, { status: 500 });
+  }
+  if (fallbackClaim.created !== true) {
+    return NextResponse.json({ ok: true, via: "duplicate-skip" });
   }
 
   await sendSlackText(

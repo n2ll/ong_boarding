@@ -15,8 +15,9 @@ import { createServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }

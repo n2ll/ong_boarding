@@ -2,9 +2,9 @@
  * POST /api/pool/[token]/notify — 마감된 공고 카드의 "다음 급구 때 먼저 알려주세요" 클릭.
  *
  * 놓친 지원자를 자산화하는 두 번째 수확 (확정 뉘앙스 금지 — 알림 요청은 '가능 의사 수집'일 뿐):
- *   1. availability 갱신 — '즉시가능'이 아니면 '이번주가능'으로 (강등 금지 규칙 동일)
- *   2. pool_events(notify_request / availability_set) 기록 — 다음 긴급 건의 우선 발송 목록 재료
- *   3. Slack 알림 — 매니저가 다음 웨이브 타깃으로 인지
+ *   1. pool_events(notify_request) 기록 — 다음 긴급 건의 우선 발송 목록 재료
+ *   2. Slack 알림 — 매니저가 다음 웨이브 타깃으로 인지
+ * 다음 기회 알림은 이번 주 근무 가능 응답이 아니므로 applicants.availability는 바꾸지 않는다.
  * 마감된 공고이므로 job_candidates는 연결하지 않는다(공고 보드 노이즈 방지).
  */
 
@@ -12,6 +12,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { sendSlackText } from "@/lib/slack";
+import { poolAvailabilityDecision } from "@/lib/pool-availability";
+import {
+  isPoolActionId,
+  poolActionReplayDecision,
+  poolDurableActionDecision,
+} from "@/lib/pool-durable-action";
 import {
   isExposed,
   normalizeRule,
@@ -24,8 +30,9 @@ export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
-  const token = params.token;
+export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
+  const routeParams = await params;
+  const token = routeParams.token;
   if (!UUID_RE.test(token)) {
     return NextResponse.json({ error: "invalid token" }, { status: 400 });
   }
@@ -34,6 +41,10 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const jobId = Number(body?.job_id);
   if (!Number.isFinite(jobId)) {
     return NextResponse.json({ error: "job_id 필수" }, { status: 400 });
+  }
+  const actionId = body?.action_id;
+  if (!isPoolActionId(actionId)) {
+    return NextResponse.json({ error: "요청 정보를 다시 확인해 주세요." }, { status: 400 });
   }
 
   const supabase = createServiceClient();
@@ -45,6 +56,30 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     .maybeSingle();
   if (!applicant) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  const { data: replayRow, error: replayError } = await supabase
+    .from("pool_events")
+    .select("applicant_id, job_id, event_type, meta")
+    .eq("action_key", actionId)
+    .maybeSingle();
+  const replay = poolActionReplayDecision(replayRow, replayError, {
+    applicantId: applicant.id as number,
+    jobId,
+    eventType: "notify_request",
+  });
+  if (replay === "retryable") {
+    console.error("[pool notify] replay lookup failed", replayError);
+    return NextResponse.json(
+      { error: "알림 요청을 확인하지 못했어요. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
+  }
+  if (replay === "conflict") {
+    return NextResponse.json({ error: "이미 다른 요청에 사용된 요청 정보예요." }, { status: 409 });
+  }
+  if (replay === "deduped") {
+    return NextResponse.json({ success: true, deduped: true });
   }
 
   // 대상 검증 — GET이 '마감됨' 카드로 노출하는 조건의 거울: active 공고이면서
@@ -104,40 +139,43 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     }
   }
 
-  // 멱등 — 이미 알림 요청한 공고면 재기록·Slack 재발송 없이 성공 반환
-  const { data: dup } = await supabase
-    .from("pool_events")
-    .select("id")
-    .eq("applicant_id", applicant.id)
-    .eq("job_id", jobId)
-    .eq("event_type", "notify_request")
-    .limit(1);
-  if (dup && dup.length > 0) {
+  // 알림 요청은 오늘·내일 근무 가능 응답이 아니다. 공통 계약이 null을 반환해야 하며,
+  // 이 엔드포인트에서는 전역 가용성을 변경하지 않는다.
+  const availabilityDecision = poolAvailabilityDecision(
+    applicant.availability as string | null,
+    "notify",
+  );
+  if (availabilityDecision) {
+    console.error("[pool notify] invalid availability decision ignored", availabilityDecision);
+  }
+
+  const { data: durableData, error: durableError } = await supabase.rpc(
+    "record_pool_notify_request",
+    {
+      p_job_id: jobId,
+      p_applicant_id: applicant.id as number,
+      p_action_key: actionId,
+    },
+  );
+  const durable = poolDurableActionDecision(durableData, durableError);
+  if (durable.kind === "retryable") {
+    console.error("[pool notify] atomic write failed", durableError ?? durableData);
+    return NextResponse.json(
+      { error: "알림 요청을 저장하지 못했어요. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
+  }
+  if (durable.kind === "unavailable") {
+    return NextResponse.json({ error: "확인할 수 없는 공고예요" }, { status: 400 });
+  }
+  if (durable.kind === "unchanged_closed") {
+    return NextResponse.json({ error: "이 요청의 이전 처리 결과가 유지되고 있어요." }, { status: 409 });
+  }
+  if (durable.kind === "deduped") {
     return NextResponse.json({ success: true, deduped: true });
   }
 
-  // 가용성 갱신 — 알림 요청도 '이번 주 일할 의사' 프록시 (강등 금지)
-  const prevAvailability = applicant.availability as string | null;
-  const nextAvailability = prevAvailability === "즉시가능" ? "즉시가능" : "이번주가능";
-  const { error: avErr } = await supabase
-    .from("applicants")
-    .update({ availability: nextAvailability, availability_updated_at: new Date().toISOString() })
-    .eq("id", applicant.id);
-  if (avErr) console.error("[pool notify] availability update failed", avErr);
-
-  const events: { applicant_id: number; job_id?: number; event_type: string; meta?: unknown }[] = [
-    { applicant_id: applicant.id as number, job_id: jobId, event_type: "notify_request" },
-  ];
-  if (prevAvailability !== nextAvailability) {
-    events.push({
-      applicant_id: applicant.id as number,
-      event_type: "availability_set",
-      meta: { from: prevAvailability, to: nextAvailability, source: "pull" },
-    });
-  }
-  const { error: evErr } = await supabase.from("pool_events").insert(events);
-  if (evErr) console.error("[pool notify] pool_events insert failed", evErr);
-
+  // durable write가 새로 완료된 요청만 외부 알림을 보낸다.
   await sendSlackText(
     `🔔 *다음 급구 우선 안내 요청* — ${applicant.name ?? "이름 미상"}님이 마감된 '${job.title}' 공고에서 다음 기회 알림을 요청했어요.\n다음 긴급 건 발송 시 우선 타깃입니다.`
   ).catch(() => false);

@@ -15,6 +15,10 @@ import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/l
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
 import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
 import { PageShell } from "@/components/ui/page-shell";
+import { jobCandidateBoardPolicy, jobOperationMeta, jobOperationsSummary, type JobOperationInput, type JobOperationTone } from "@/lib/admin/job-operations";
+import { remoteCollectionState } from "@/lib/admin/remote-data-state";
+import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
 
 interface JobRow {
   id: string;
@@ -29,6 +33,9 @@ interface JobRow {
   targetedExposure: boolean;
   candidates: number;
   newCandidates: number;
+  pausedCandidates: number;
+  reviewReady: number;
+  aiInProgress: number;
   confirmed: number;
   // 진행 중(exploration/screening/onboarding/active) 후보 수 — 마감 시 AI 응대가 멈추는 대상.
   inProgress: number;
@@ -62,6 +69,8 @@ interface ApiJob {
   counts: Record<string, number>;
   // 매니저 명시 확정(applicants.status='확정인력') 수 — 충원율 게이지의 분자.
   confirmed_count?: number;
+  // 온보딩·활동 단계이지만 아직 매니저 확정 전인 후보 수.
+  review_ready_count?: number;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
   interest_count?: number;
 }
@@ -167,7 +176,7 @@ function SlotKeysField({
         placeholder="상세 시간(선택) — 예: 월~금 07:00~12:00"
         className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 mt-2 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
       />
-      <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+      <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">
         상세 시간은 지원자 카드에 그대로 보이고 AI 안내에 쓰여요. <b className="text-muted-foreground">맞는 분 찾기는 위 칩</b>으로만 합니다 —
         칩을 비워두면 시간대로 걸러내지 않습니다.
       </p>
@@ -480,8 +489,8 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
                 className={`text-left p-3 rounded-2xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sel ? "border-foreground bg-white ring-1 ring-foreground" : "border-border-strong bg-card hover:border-gray-300"}`}
               >
                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{RECRUIT_MODE_META[m].label}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
-                <div className="text-[11px] text-warning-strong mt-1 leading-snug">{RECRUIT_MODE_META[m].aiNote}</div>
+                <div className="text-[12px] text-muted-foreground mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
+                <div className="text-[12px] text-warning-strong mt-1 leading-snug">{RECRUIT_MODE_META[m].aiNote}</div>
               </button>
             );
           })}
@@ -517,6 +526,9 @@ function toJobRow(j: ApiJob): JobRow {
     // "sent"는 agent_stage NULL의 집계 키(관심 표시·미발송 등 AI 응대 시작 전).
     // 키를 바꾸면 jobs/[id] GET·Recommendations 등 다른 소비처가 깨져 키는 유지하고 라벨만 정합.
     newCandidates: j.counts?.["sent"] ?? 0,
+    pausedCandidates: j.counts?.["paused"] ?? 0,
+    reviewReady: j.review_ready_count ?? 0,
+    aiInProgress: ["exploration", "screening"].reduce((a, s) => a + (j.counts?.[s] ?? 0), 0),
     // 충원율 분자 = 매니저 확정(status='확정인력')만. agent_stage='active'(자동 전이)는 확정이 아니다.
     // 보드의 '확정 슬롯 분포'(status==='확정인력')와 같은 소스라 두 지표가 어긋나지 않는다.
     confirmed: j.confirmed_count ?? 0,
@@ -531,6 +543,26 @@ function toJobRow(j: ApiJob): JobRow {
     interestCount: j.interest_count ?? 0,
   };
 }
+
+function toJobOperationInput(job: JobRow): JobOperationInput {
+  return {
+    effectivelyClosed: job.effectivelyClosed,
+    capacity: job.capacity,
+    confirmed: job.confirmed,
+    waiting: job.newCandidates,
+    paused: job.pausedCandidates,
+    reviewReady: job.reviewReady,
+    inProgress: job.aiInProgress,
+  };
+}
+
+const NEXT_ACTION_TONE: Record<JobOperationTone, string> = {
+  success: "border-success/25 bg-success-soft text-success-strong",
+  danger: "border-error/25 bg-error-soft text-error-strong",
+  warning: "border-warning-soft bg-warning-soft text-warning-strong",
+  info: "border-info/25 bg-info-soft text-info-strong",
+  muted: "border-border-strong bg-muted text-gray-700",
+};
 
 // 모집 기간(work_period) 배지 — 하루/단기=노랑, 정기=초록
 const PERIOD_BADGE: Record<string, string> = {
@@ -580,6 +612,14 @@ export function Jobs() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const confirm = useConfirm();
+  const [canDockDetail, setCanDockDetail] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${MANAGER_PANEL_DOCK_MIN_WIDTH}px)`);
+    const update = () => setCanDockDetail(shouldDockManagerPanels(window.innerWidth));
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [activeTab, setActiveTab] = useState('active');
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -657,8 +697,13 @@ export function Jobs() {
 
   // 공고별 지원자 보드
   const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; recruitMode: RecruitMode } | null>(null);
+  const candidateBoardRef = useRef<HTMLDivElement>(null);
+  const candidateBoardReturnFocusRef = useRef<HTMLElement | null>(null);
+  const candidateBoardWasOpenRef = useRef(false);
   const [candidates, setCandidates] = useState<JobCand[]>([]);
   const [candLoading, setCandLoading] = useState(false);
+  const [candLoaded, setCandLoaded] = useState(false);
+  const [candError, setCandError] = useState<string | null>(null);
   // 보드 정렬 — 추천순(즉시가능 → 거리 → 지원일) / 최신순(API 순서 = created_at desc).
   const [candSort, setCandSort] = useState<"recommended" | "recent">("recommended");
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
@@ -692,18 +737,63 @@ export function Jobs() {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
 
+  const closeCandidateBoard = useCallback(() => {
+    setCandPanel(null);
+    setConfirmSignal(null);
+    setSelectedApplicantId(null);
+  }, []);
+  const handleCandidateBoardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const focusables = Array.from(
+      candidateBoardRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+    const action = managerPanelKeyboardAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      activeIndex: focusables.findIndex((element) => element === document.activeElement),
+      focusableCount: focusables.length,
+    });
+    if (action === null) return;
+    event.preventDefault();
+    if (action === "close") closeCandidateBoard();
+    else if (action === "focus-first") focusables[0]?.focus();
+    else if (action === "focus-last") focusables[focusables.length - 1]?.focus();
+    else candidateBoardRef.current?.focus();
+  }, [closeCandidateBoard]);
+  useEffect(() => {
+    const isOpen = candPanel != null;
+    if (isOpen && !candidateBoardWasOpenRef.current) {
+      candidateBoardReturnFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      requestAnimationFrame(() => candidateBoardRef.current?.focus());
+    } else if (!isOpen && candidateBoardWasOpenRef.current) {
+      const returnTarget = candidateBoardReturnFocusRef.current;
+      requestAnimationFrame(() => returnTarget?.focus());
+    }
+    candidateBoardWasOpenRef.current = isOpen;
+  }, [candPanel]);
+
   const loadCandidates = useCallback(async (jobId: number) => {
     setCandLoading(true);
+    setCandError(null);
     try {
       const res = await fetch(`/api/admin/jobs/${jobId}/candidates`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json.error === "string" ? json.error : "지원자 목록을 불러오지 못했어요");
       setCandidates((json.candidates ?? []) as JobCand[]);
-    } catch {
-      toast.error("지원자 목록을 불러오지 못했어요");
+      setCandLoaded(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "지원자 목록을 불러오지 못했어요";
+      setCandError(message);
+      toast.error(message);
     } finally {
       setCandLoading(false);
     }
   }, []);
+
+  const candState = remoteCollectionState({ items: candLoaded ? candidates : undefined, error: candError });
 
   // 후보 단건 매니저 액션 (응대 정지/재개·부적합·단계 변경)
   const patchCandidate = async (cid: number, body: Record<string, unknown>, okMsg: string) => {
@@ -741,6 +831,26 @@ export function Jobs() {
     });
     if (!ok) return;
     await patchCandidate(c.id, { agent_stage: "exploration" }, "이 공고 후보로 되살렸어요");
+  };
+
+  const closeCandidate = async (c: JobCand, kind: CandidateClosureKind) => {
+    const action = candidateClosureAction(kind, c.applicants?.name ?? `#${c.applicant_id}`);
+    if (!(await confirm(action.confirm))) return;
+    await patchCandidate(c.id, action.mutation, action.successMessage);
+  };
+
+  const pauseCandidate = async (c: JobCand) => {
+    const name = c.applicants?.name ?? `#${c.applicant_id}`;
+    if (!(await confirm({
+      title: `${name}님의 AI 응대를 정지할까요?`,
+      description: "이 공고 대화의 AI 답변을 멈춥니다. 이후 답장은 매니저가 직접 확인해야 하며, 언제든 다시 재개할 수 있어요.",
+      confirmText: "응대 정지",
+    }))) return;
+    await patchCandidate(
+      c.id,
+      { agent_stage: "paused", paused_reason: "manager: 수동 전환" },
+      "AI 응대를 정지했어요. 이제 매니저가 직접 답장합니다.",
+    );
   };
 
   // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
@@ -794,6 +904,8 @@ export function Jobs() {
   const openCandidates = (job: JobRow) => {
     setCandPanel({ jobId: Number(job.id), title: job.title, recruitMode: job.recruitMode });
     setCandidates([]);
+    setCandLoaded(false);
+    setCandError(null);
     setConfirmSignal(null); // 이전 보드에서 남은 확정 신호가 이 보드의 카드에 붙지 않게
     loadCandidates(Number(job.id));
     // 마감시각이 지난 공고를 '진행 중' 스냅샷으로 들고 있으면 보드의 '확정' 버튼이 남는다 → 열 때 목록도 갱신.
@@ -951,8 +1063,13 @@ export function Jobs() {
     () => (jobsApi?.jobs ?? []).filter((j) => !isSystemJobTitle(j.title)).map(toJobRow),
     [jobsApi]
   );
+  const operationsSummary = useMemo(
+    () => jobOperationsSummary(jobs.map(toJobOperationInput)),
+    [jobs]
+  );
   // 마감(실질) 공고는 확정 대상에서 제외된다(지원자 상세의 확정 대상 판정과 동일) → 보드에서도 '확정' 버튼을 숨긴다.
   const boardJobClosed = candPanel ? jobs.find((j) => Number(j.id) === candPanel.jobId)?.effectivelyClosed ?? false : false;
+  const boardPolicy = jobCandidateBoardPolicy(boardJobClosed);
   // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
   const jobsFirstLoad = jobsLoading && !jobsApi;
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
@@ -1806,15 +1923,44 @@ export function Jobs() {
 
   return (
     <PageShell>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-strong bg-background px-4 py-2.5 text-[13px]">
+        <p className="font-semibold text-gray-700">
+          공고별 모집 현황과 지원자 진행, 충원 상태를 관리하는 곳입니다.
+        </p>
+        <Link
+          href="/pipeline"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 font-bold text-info-strong outline-none hover:bg-info-soft focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          전체 인재풀에서 사람 찾기 <ChevronRight size={14} />
+        </Link>
+      </div>
       {/* Stats Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         {[
-          { label: "전체 공고", value: jobs.length, unit: "건" },
-          { label: "진행 중인 공고", value: jobs.filter(j => !j.effectivelyClosed).length, unit: "건", highlight: true },
-          { label: "AI 자동 응대 공고", value: aiGlobalOn ? jobs.filter(j => !j.effectivelyClosed).length : 0, unit: "건", color: "text-info" },
-          { label: "응대 시작 전(관심·미발송)", value: jobs.reduce((a, j) => a + j.newCandidates, 0), unit: "명", color: "text-success" }
+          { label: "진행 중 공고", value: operationsSummary.openJobs, unit: "건", note: "현재 모집·응대 중" },
+          {
+            label: "남은 충원",
+            value: operationsSummary.remaining,
+            unit: "명",
+            highlight: operationsSummary.remaining > 0,
+            note: operationsSummary.unconfiguredCapacity > 0 ? `정원 미설정 ${operationsSummary.unconfiguredCapacity}건 별도` : "매니저 확정 기준",
+          },
+          {
+            label: "사람 확인 필요",
+            value: operationsSummary.attention,
+            unit: "명",
+            color: operationsSummary.attention > 0 ? "text-error-strong" : "text-foreground",
+            note: "수동 응대 · 응대 시작 전",
+          },
+          {
+            label: "후보 검토",
+            value: operationsSummary.reviewReady,
+            unit: "명",
+            color: "text-info-strong",
+            note: "스크리닝 완료 · 확정 전",
+          }
         ].map((stat, i) => (
-          <div key={i} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+          <div key={i} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex min-h-[118px] flex-col justify-between">
             <div className="text-[13px] font-bold text-muted-foreground mb-2">{stat.label}</div>
             <div className="flex items-baseline gap-1">
               {/* 데이터를 못 받았으면 숫자를 말하지 않는다 — "0건"과 "모름"은 다른 말이다.
@@ -1830,6 +1976,7 @@ export function Jobs() {
                 </>
               )}
             </div>
+            <div className="mt-2 text-[12px] font-semibold text-muted-foreground">{stat.note}</div>
           </div>
         ))}
       </div>
@@ -1904,7 +2051,7 @@ export function Jobs() {
               isLoading={previewLoading}
               title="테스트 지원자의 맞춤 공고 링크를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
             >
-              {!previewLoading && <Eye size={16} />} 지원자 화면
+              {!previewLoading && <Eye size={16} />} 지원자용 공고 미리보기
             </Button>
             <Button variant="brand" onClick={() => setAiModalOpen(true)}>
               <Wand2 size={16} /> 새 공고
@@ -1917,8 +2064,8 @@ export function Jobs() {
           <div>공고 정보</div>
           <div>지점 / 직무</div>
           <div>모집 기간</div>
-          <div>지원자 관리 (AI 현황)</div>
-          <div>상태</div>
+          <div>후보 흐름</div>
+          <div>상태 · 다음 할 일</div>
           <div className="text-right">관리</div>
         </div>
 
@@ -1941,7 +2088,9 @@ export function Jobs() {
               <div className="text-[14px] font-bold">공고를 불러오는 중…</div>
             </div>
           ) : filteredJobs.length > 0 ? (
-            filteredJobs.map(job => (
+            filteredJobs.map(job => {
+              const operation = jobOperationMeta(toJobOperationInput(job));
+              return (
               <div key={job.id} className="grid min-w-[1040px] grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -1949,20 +2098,20 @@ export function Jobs() {
                     <button
                       type="button"
                       onClick={() => openCandidates(job)}
-                      title="지원자 보드 열기 — 이 공고의 지원자를 확정·보류·부적합 처리합니다"
+                      title={job.effectivelyClosed ? "마감 공고의 후보 이력 보기" : "이 공고의 지원자 보드 열기 — 지원자를 확정·보류·부적합 처리합니다"}
                       className="text-left text-[16px] font-bold text-foreground truncate hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {job.title}
                     </button>
                     {job.workPeriod && PERIOD_BADGE[job.workPeriod] && (
-                      <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[12px] text-muted-foreground font-mono">{job.id}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
                     {job.targetedExposure && (
-                      <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold border bg-yellow-50 text-warning border-warning-soft" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[12px] font-bold border bg-yellow-50 text-warning border-warning-soft" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
                     )}
                   </div>
                   {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
@@ -1972,7 +2121,7 @@ export function Jobs() {
                     const done = job.confirmed >= job.capacity;
                     return (
                       <div className="mt-1 pr-2" title={`매니저 확정 ${job.confirmed}명 / 정원 ${job.capacity}명 (확정인력으로 지정된 후보 기준)`}>
-                        <div className="flex items-center justify-between text-[11px] font-bold mb-0.5">
+                        <div className="flex items-center justify-between text-[12px] font-bold mb-0.5">
                           <span className="text-muted-foreground">충원율</span>
                           <span className={done ? "text-success" : "text-gray-700"}>{job.confirmed}/{job.capacity}{done && " ✓"}</span>
                         </div>
@@ -1998,45 +2147,45 @@ export function Jobs() {
                   {!job.closesAt ? (
                     <div className="font-bold text-gray-800">상시</div>
                   ) : new Date(job.closesAt).getTime() <= Date.now() ? (
-                    <span className="w-fit px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-muted text-muted-foreground border border-border-strong">마감됨</span>
+                    <span className="w-fit px-1.5 py-0.5 rounded-full text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong">마감됨</span>
                   ) : (
                     <div className={`font-bold ${new Date(job.closesAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000 ? "text-warning" : "text-gray-800"}`}>{fmtCloses(job.closesAt)}</div>
                   )}
                 </div>
 
-                <div className="flex items-center gap-4">
-                  {/* 보드 진입 — 화살표를 상시 표시(예전엔 hover 때만 나타나 클릭 가능한지 알 수 없었다). */}
+                <div className="flex min-w-0 flex-col gap-2 pr-3">
                   <button
                     type="button"
                     onClick={() => openCandidates(job)}
-                    title="지원자 보드 열기 — 이 공고의 지원자를 확정·보류·부적합 처리합니다"
-                    className="flex flex-col items-start group/cand rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={job.effectivelyClosed ? "마감 공고의 후보 이력 보기" : "이 공고의 지원자 보드 열기 — 지원자를 확정·보류·부적합 처리합니다"}
+                    className="group/cand flex w-fit items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <div className="text-[13px] text-muted-foreground flex items-center gap-1 group-hover/cand:text-info-strong">총 지원자 <ChevronRight size={13} className="text-muted-foreground group-hover/cand:text-info-strong" /></div>
-                    <div className="text-[16px] font-extrabold text-foreground group-hover/cand:text-info-strong">{job.candidates}명 {job.newCandidates > 0 && <span className="text-[12px] font-bold text-warning-strong ml-1" title="관심 표시·미발송 등 AI 응대 시작 전">+{job.newCandidates}</span>}</div>
-                    {/* 관심 표시 인원 — 맞춤 공고 링크에서 '관심 있음'을 누른 사람. 클릭하면 후보 보드가 열린다. */}
-                    {job.interestCount > 0 && (
-                      <div className="flex items-center gap-1 mt-1">
-                        <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-success-soft text-success-strong border border-success/25" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
-                      </div>
-                    )}
+                    <span className="text-[12px] font-bold text-muted-foreground group-hover/cand:text-info-strong">전체 후보</span>
+                    <strong className="text-[16px] text-foreground group-hover/cand:text-info-strong">{job.candidates}명</strong>
+                    <ChevronRight size={14} className="text-muted-foreground group-hover/cand:text-info-strong" />
                   </button>
-                  <div className="w-px h-8 bg-gray-200"></div>
-                  <div className="flex flex-col gap-1">
-                    <div className="text-[12px] font-bold text-muted-foreground">AI 자동 스크리닝</div>
-                    {!aiGlobalOn ? (
-                      <Link href="/brain" title="에이전트 두뇌에서 전역 AI 상태를 관리하세요" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-error-soft text-error-strong border border-error-soft w-fit">
-                        <span className="w-1.5 h-1.5 rounded-full bg-error"></span> 전역 중지됨
-                      </Link>
-                    ) : !job.effectivelyClosed ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 w-fit">
-                        <span className="w-1.5 h-1.5 rounded-full bg-info"></span> 자동 응대 중
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong w-fit">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span> 중지
-                      </span>
+                  <div className="flex flex-wrap gap-1">
+                    {job.pausedCandidates > 0 && (
+                      <span className="rounded-full border border-error/25 bg-error-soft px-2 py-0.5 text-[12px] font-bold text-error-strong">수동 응대 {job.pausedCandidates}</span>
                     )}
+                    {job.newCandidates > 0 && (
+                      <span className="rounded-full border border-warning-soft bg-warning-soft px-2 py-0.5 text-[12px] font-bold text-warning-strong">시작 전 {job.newCandidates}</span>
+                    )}
+                    {job.reviewReady > 0 && (
+                      <span className="rounded-full border border-info/25 bg-info-soft px-2 py-0.5 text-[12px] font-bold text-info-strong" title="스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보">후보 검토 {job.reviewReady}</span>
+                    )}
+                    {job.aiInProgress > 0 && (
+                      <span className="rounded-full border border-border-strong bg-muted px-2 py-0.5 text-[12px] font-bold text-gray-700">AI 진행 {job.aiInProgress}</span>
+                    )}
+                    {job.interestCount > 0 && (
+                      <span className="rounded-full border border-success/25 bg-success-soft px-2 py-0.5 text-[12px] font-bold text-success-strong" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
+                    )}
+                    {job.candidates === 0 && <span className="text-[12px] font-semibold text-muted-foreground">연결된 후보 없음</span>}
+                  </div>
+                  <div className="text-[12px] font-semibold text-muted-foreground">
+                    {!aiGlobalOn ? (
+                      <Link href="/brain" className="rounded text-error-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">AI 전역 중지됨</Link>
+                    ) : job.effectivelyClosed ? "AI 응대 중지" : "AI 자동 응대 중"}
                   </div>
                 </div>
 
@@ -2052,7 +2201,7 @@ export function Jobs() {
                       <Pause size={12} className="fill-current" /> 마감됨
                     </span>
                   )}
-                  {!job.effectivelyClosed && job.capacity > 0 && job.confirmed >= job.capacity && (
+                  {!job.effectivelyClosed && operation.nextAction.tone === "success" && (
                     // 충원 완료(확정≥정원) — 바로 마감으로 잇는 권유. 기존 확인 모달(handleToggleClose)을 그대로 탄다.
                     <Button
                       size="chip"
@@ -2064,6 +2213,19 @@ export function Jobs() {
                     >
                       {statusBusyId !== job.id && <CheckCircle2 size={12} />} 충원 완료 — 마감하기
                     </Button>
+                  )}
+                  {!job.effectivelyClosed && operation.nextAction.tone !== "success" && (
+                    <button
+                      type="button"
+                      onClick={() => operation.remaining === null ? openEdit(job.id) : openCandidates(job)}
+                      className={`min-h-11 w-full max-w-[190px] rounded-xl border px-2.5 py-2 text-left outline-none transition-colors hover:brightness-[0.98] focus-visible:ring-2 focus-visible:ring-ring ${NEXT_ACTION_TONE[operation.nextAction.tone]}`}
+                      title={operation.nextAction.description}
+                    >
+                      <span className="flex items-center justify-between gap-1 text-[12px] font-extrabold">
+                        {operation.nextAction.label} <ChevronRight size={13} className="shrink-0" />
+                      </span>
+                      <span className="mt-0.5 block text-[12px] font-semibold leading-snug opacity-80">{operation.nextAction.description}</span>
+                    </button>
                   )}
                 </div>
 
@@ -2077,7 +2239,7 @@ export function Jobs() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-[170px] rounded-2xl border-border-strong">
-                        <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground">게시 채널 선택</DropdownMenuLabel>
+                        <DropdownMenuLabel className="text-[12px] font-bold text-muted-foreground">게시 채널 선택</DropdownMenuLabel>
                         {PUBLISH_CHANNELS.map((ch) => (
                           <DropdownMenuItem key={ch.source} onSelect={() => copyJobLink(job, ch.source)} className="text-[13px] font-semibold text-gray-700">
                             {ch.label}
@@ -2147,7 +2309,8 @@ export function Jobs() {
                   </DropdownMenu>
                 </div>
               </div>
-            ))
+              );
+            })
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
               <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
@@ -2255,9 +2418,9 @@ export function Jobs() {
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-[13px] font-bold text-warning-strong flex items-center gap-1.5">
                       <Sparkles size={14} /> {draftBody ? "채널별 공고 초안" : "채널별 공고 본문 — 직접 작성"}
-                      {aiSource === "mock" && <span className="text-[11px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">오프라인 템플릿</span>}
+                      {aiSource === "mock" && <span className="text-[12px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">오프라인 템플릿</span>}
                     </label>
-                    <span className="text-[11px] text-muted-foreground">탭별로 수정·복사할 수 있어요</span>
+                    <span className="text-[12px] text-muted-foreground">탭별로 수정·복사할 수 있어요</span>
                   </div>
                   {duplicatedFrom && (
                     <div className="mb-3 px-3 py-2 rounded-lg bg-error-soft border border-error/30 text-[12px] font-bold text-error-strong leading-relaxed">
@@ -2612,7 +2775,7 @@ export function Jobs() {
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 마감시각</label>
                     <input type="datetime-local" value={editForm.closesAt} min={nowLocalInput()} onChange={(e) => setEditForm({ ...editForm, closesAt: e.target.value })} className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
-                    <p className="text-[11px] text-muted-foreground mt-1">지나면 지원자 페이지에서 자동 마감</p>
+                    <p className="text-[12px] text-muted-foreground mt-1">지나면 지원자 페이지에서 자동 마감</p>
                   </div>
                 </div>
 
@@ -2822,7 +2985,7 @@ export function Jobs() {
                                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>
                                   {b === "pickup" ? "집결지만" : "가까운 곳 아무거나"}
                                 </div>
-                                <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                                <div className="text-[12px] text-muted-foreground mt-0.5 leading-snug">
                                   {b === "pickup"
                                     ? "매일 출근하는 곳 기준. 지원자가 보는 '집에서 약 N km'와 같아요."
                                     : "집결지·마지막 경유지 중 가까운 쪽. 대상이 더 넓어져요(기본)."}
@@ -2831,7 +2994,7 @@ export function Jobs() {
                             );
                           })}
                         </div>
-                        <p className="text-[11px] text-muted-foreground mt-1.5 leading-snug">
+                        <p className="text-[12px] text-muted-foreground mt-1.5 leading-snug">
                           노출 반경 규칙 · 거리 정렬 · &lsquo;대기자에게 안내&rsquo;의 15km 조건이 모두 이 기준을 씁니다.
                         </p>
                       </div>
@@ -2917,7 +3080,7 @@ export function Jobs() {
                       <div className="mt-2 px-3 py-2.5 rounded-lg bg-background border border-border-strong text-[12px] text-muted-foreground leading-relaxed whitespace-pre-line">
                         {closeNoticeBody(closeModal.job)}
                       </div>
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+                      <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
                     </>
                   )}
                 </div>
@@ -2965,7 +3128,7 @@ export function Jobs() {
               <div className="mt-3 px-3 py-2.5 rounded-lg bg-background border border-border-strong text-[12px] text-muted-foreground leading-relaxed whitespace-pre-line">
                 {NEW_JOB_NOTICE.replace("{공고명}", announceModal.smsTitle)}
               </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+              <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
               {/* 지정 노출로 좁힌 공고는 명단 밖 대기자에게 안내를 보내지 않는다 —
                   '먼저 안내드릴게요' 약속은 공고 무관이라, 이 수를 숨기면 약속이 조용히 깨진다. */}
               {(announceModal.dropped?.total ?? 0) > 0 && (
@@ -2996,8 +3159,14 @@ export function Jobs() {
       <AnimatePresence>
         {candPanel && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setCandPanel(null); setConfirmSignal(null); }} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
+            <motion.div aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeCandidateBoard} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
             <motion.div
+              ref={candidateBoardRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="job-candidate-board-title"
+              tabIndex={-1}
+              onKeyDown={handleCandidateBoardKeyDown}
               initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 26, stiffness: 220 }}
               className="fixed top-0 right-0 w-[480px] max-w-[92vw] h-full bg-glass-3 backdrop-blur-xl shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-40 flex flex-col border-l border-white"
@@ -3006,13 +3175,25 @@ export function Jobs() {
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-[12px] font-bold text-muted-foreground mb-1"><Users size={13} /> 공고별 지원자</div>
-                    <h2 className="text-[16px] font-extrabold text-foreground truncate">{candPanel.title}</h2>
-                    <div className="text-[12px] text-muted-foreground mt-0.5">{candidates.length}명 지원 · 미발송 {unsentCount}명</div>
+                    <h2 id="job-candidate-board-title" className="text-[16px] font-extrabold text-foreground truncate">{candPanel.title}</h2>
+                    <div className="text-[12px] text-muted-foreground mt-0.5">
+                      {candState === "loading" || (candState === "error" && !candLoaded)
+                        ? "지원 현황 —"
+                        : `${candidates.length}명 지원 · 미발송 ${unsentCount}명`}
+                    </div>
                   </div>
-                  <Button variant="ghost" size="icon" aria-label="지원자 보드 닫기" onClick={() => { setCandPanel(null); setConfirmSignal(null); }}><X size={20} /></Button>
+                  <Button variant="ghost" size="icon" aria-label="지원자 보드 닫기" onClick={closeCandidateBoard}><X size={20} /></Button>
                 </div>
-                <Button variant="secondary" onClick={openPicker} className="mt-3 w-full"><UserPlus size={15} /> 인재풀에서 후보 추가</Button>
-                {unsentCount > 0 && (
+                {boardPolicy.readOnly && (
+                  <div className="mt-3 rounded-xl border border-border-strong bg-muted px-3 py-2.5 text-[12px] font-bold text-gray-700">
+                    <div className="flex items-center gap-1.5"><PauseCircle size={14} /> {boardPolicy.label}</div>
+                    <div className="mt-0.5 text-[12px] font-semibold text-muted-foreground">후보 이력은 볼 수 있지만, 발송·단계 변경·확정은 공고를 다시 연 뒤 진행합니다.</div>
+                  </div>
+                )}
+                {boardPolicy.allowCandidateMutation && candState !== "error" && (
+                  <Button variant="secondary" onClick={openPicker} className="mt-3 w-full"><UserPlus size={15} /> 인재풀에서 후보 추가</Button>
+                )}
+                {boardPolicy.allowDispatch && candState !== "error" && unsentCount > 0 && (
                   <>
                     {/* 킬스위치 ON이어도 발송 자체는 막지 않는다 — 다만 답장에 AI가 응대하지 않음을 발송 전에 알린다. */}
                     {!aiGlobalOn && (
@@ -3027,37 +3208,52 @@ export function Jobs() {
                 )}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {candLoading && <div className="text-[13px] text-muted-foreground text-center py-8">불러오는 중…</div>}
-                {!candLoading && candidates.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">아직 지원자가 없어요</div>}
+                {candState === "loading" && <div className="text-[13px] text-muted-foreground text-center py-8">불러오는 중…</div>}
+                {candState === "error" && (
+                  <div role="alert" className="rounded-2xl border border-error/30 bg-error-soft p-4 text-error-strong">
+                    <div className="text-[14px] font-bold">이 공고의 지원자 목록을 불러오지 못했어요</div>
+                    <div className="mt-0.5 text-[12px]">지원자가 없는 상태가 아닙니다. 다시 불러온 뒤 후보 작업을 진행해 주세요.</div>
+                    <Button
+                      variant="ghost"
+                      size="chip"
+                      onClick={() => void loadCandidates(candPanel.jobId)}
+                      isLoading={candLoading}
+                      className="mt-3 border border-error/30 bg-card text-error-strong hover:bg-error-soft"
+                    >
+                      {!candLoading && <RefreshCw size={14} />} 다시 시도
+                    </Button>
+                  </div>
+                )}
+                {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">아직 지원자가 없어요</div>}
 
                 {!candLoading && candidates.length > 0 && (
                   <div className="bg-background border border-border-strong rounded-2xl p-3.5 space-y-3">
                     {/* 단계 분포 */}
                     <div>
-                      <div className="text-[11px] font-bold text-muted-foreground mb-1.5">진행 단계</div>
+                      <div className="text-[12px] font-bold text-muted-foreground mb-1.5">진행 단계</div>
                       <div className="flex flex-wrap gap-1.5">
                         {STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => (
-                          <span key={s} className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[s] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
+                          <span key={s} className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[s] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
                         ))}
                       </div>
                     </div>
                     {/* 채널 유입 */}
                     <div>
-                      <div className="text-[11px] font-bold text-muted-foreground mb-1.5">유입 채널</div>
+                      <div className="text-[12px] font-bold text-muted-foreground mb-1.5">유입 채널</div>
                       <div className="flex flex-wrap gap-1.5">
                         {Object.entries(channelCounts).sort((a, b) => b[1] - a[1]).map(([src, n]) => (
-                          <span key={src} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-border-strong text-gray-700">{sourceLabel(src)} {n}</span>
+                          <span key={src} className="text-[12px] font-bold px-2 py-0.5 rounded-full bg-white border border-border-strong text-gray-700">{sourceLabel(src)} {n}</span>
                         ))}
                       </div>
                     </div>
                     {/* 확정 슬롯 분포 — 슬롯은 비마트 배차 개념이라 internal 정기배송 라인은 표시하지 않는다. */}
                     {hasConfirmedSlot && candPanel?.recruitMode !== "internal" && (
                       <div>
-                        <div className="text-[11px] font-bold text-muted-foreground mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
+                        <div className="text-[12px] font-bold text-muted-foreground mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
                           {slotFill.map((s) => (
                             <div key={s.key} className={`text-center rounded-md py-1.5 ${s.count > 0 ? "bg-success-soft border border-success/25" : "bg-card border border-border-strong"}`}>
-                              <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
+                              <div className="text-[12px] font-bold text-muted-foreground">{s.label}</div>
                               <div className={`text-[14px] font-extrabold ${s.count > 0 ? "text-success" : "text-muted-foreground"}`}>{s.count}</div>
                             </div>
                           ))}
@@ -3070,7 +3266,7 @@ export function Jobs() {
                 {/* 정렬 토글 — 그룹 내 카드 순서에 적용. 추천순은 즉시가능·거리·지원일로 컨택 우선순위를 만든다. */}
                 {!candLoading && candidates.length > 0 && (
                   <div className="flex items-center gap-1.5 px-0.5">
-                    <span className="text-[11px] font-bold text-muted-foreground mr-0.5">정렬</span>
+                    <span className="text-[12px] font-bold text-muted-foreground mr-0.5">정렬</span>
                     <button aria-pressed={candSort === "recommended"}
                       onClick={() => setCandSort("recommended")}
                       title="즉시가능 → 공고와 가까운 순 → 지원일 최신순"
@@ -3091,8 +3287,8 @@ export function Jobs() {
                 {stageGroups.map((group) => (
                   <div key={group.stage} className="space-y-2">
                     <div className="flex items-center gap-2 px-0.5">
-                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[group.stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
-                      <span className="text-[11px] text-muted-foreground font-bold">{group.items.length}명</span>
+                      <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[group.stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
+                      <span className="text-[12px] text-muted-foreground font-bold">{group.items.length}명</span>
                       <div className="flex-1 h-px bg-muted" />
                     </div>
                     {group.items.map((c) => {
@@ -3129,7 +3325,7 @@ export function Jobs() {
                                     {a?.name ?? `#${c.applicant_id}`}
                                     {alreadyConfirmed && (
                                       <span
-                                        className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-success-soft text-success-strong border border-success/25"
+                                        className="text-[12px] font-bold px-1.5 py-0.5 rounded-full bg-success-soft text-success-strong border border-success/25"
                                         title="인력풀 상태가 '확정인력'이에요(다른 라인 확정도 포함). 이 공고 확정 여부는 카드를 눌러 상세에서 확인하세요."
                                       >
                                         확정인력
@@ -3137,15 +3333,15 @@ export function Jobs() {
                                     )}
                                   </div>
                                   <div className="text-[12px] text-muted-foreground truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-warning-strong font-bold">· 미발송</span>}</div>
-                                  {metaLine && <div className="text-[11px] text-muted-foreground truncate">{metaLine}</div>}
+                                  {metaLine && <div className="text-[12px] text-muted-foreground truncate">{metaLine}</div>}
                                 </div>
                               </div>
                               {/* 종료 카드는 결과(보류/공고부적합/중단)를 closed_reason으로 구분해 배지로 보여준다. */}
                               {stage && (
                                 isClosed ? (
-                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
+                                  <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
                                 ) : (
-                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${STAGE_COLOR[stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[stage] ?? stage}</span>
+                                  <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${STAGE_COLOR[stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[stage] ?? stage}</span>
                                 )
                               )}
                             </div>
@@ -3157,7 +3353,7 @@ export function Jobs() {
                               <Button variant="ghost" size="chip" aria-label="전화번호 복사" title="전화번호 복사" onClick={() => copyPhone(phone)} className="px-1"><Copy size={12} /></Button>
                             </div>
                           )}
-                          {isClosed ? (
+                          {boardPolicy.allowCandidateMutation && (isClosed ? (
                             <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-muted">
                               {/* 되돌리기 — 잘못 종료한 카드를 이 공고 후보로 복원(확인 모달). 인력풀은 건드리지 않는다. */}
                               <Button variant="ghost" size="chip" onClick={() => resumeCandidate(c)} isLoading={busy} className="text-info-strong hover:bg-info-soft hover:text-info-strong">
@@ -3169,7 +3365,7 @@ export function Jobs() {
                               {/* 확정 — 이 화면의 핵심 결과 액션. 지원자 상세를 열면서 확정 모달까지 바로 띄운다(공고를 시드해 오귀속 방지).
                                   확정 자체는 상세의 확정 모달에서 지점·시간대·시작일을 받아 처리된다(단일 경로 유지). */}
                               {alreadyConfirmed && (
-                                <span className="text-[11px] text-muted-foreground">이미 확정된 분 — 이 공고로 바꾸려면 상세에서 확정을 취소하고 다시 확정하세요</span>
+                                <span className="text-[12px] text-muted-foreground">이미 확정된 분 — 이 공고로 바꾸려면 상세에서 확정을 취소하고 다시 확정하세요</span>
                               )}
                               {!alreadyConfirmed && !boardJobClosed && (
                                 <Button variant="primary" size="chip" onClick={() => openConfirmFor(c.applicant_id, candPanel?.jobId ?? null)} disabled={busy} className="px-2.5 bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong" title="이 공고에 확정 — 확정 정보를 확인한 뒤 확정합니다">
@@ -3181,20 +3377,20 @@ export function Jobs() {
                                       {!busy && <Play size={12} />} 응대 재개
                                     </Button>
                               ) : (
-                                <Button variant="ghost" size="chip" onClick={() => patchCandidate(c.id, { agent_stage: "paused", paused_reason: "manager: 수동 전환" }, "AI 응대를 정지했어요. 이제 매니저가 직접 답장합니다.")} isLoading={busy}>
+                                <Button variant="ghost" size="chip" onClick={() => void pauseCandidate(c)} isLoading={busy}>
                                       {!busy && <Pause size={12} />} 응대 정지
                                     </Button>
                               )}
                               {/* 공고 단위 결과 — 둘 다 이 공고 후보만 닫고, 지원자는 인력풀에 유지된다(다른 공고엔 여전히 후보).
                                   인력풀 전체 제외는 지원자 상세의 '인력풀 제외'에서만. */}
-                              <Button variant="ghost" size="chip" onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 보류" }, "이 공고 보류했어요 (인력풀에는 유지)")} disabled={busy} className="ml-auto">
+                              <Button variant="ghost" size="chip" onClick={() => void closeCandidate(c, "hold")} disabled={busy} className="ml-auto">
                                     <PauseCircle size={12} /> 보류
                                   </Button>
-                              <Button variant="ghost" size="chip" onClick={() => patchCandidate(c.id, { agent_stage: "abort", closed_reason: "manager: 공고부적합" }, "이 공고 부적합 처리했어요 (인력풀에는 유지)")} disabled={busy} className="text-error-strong hover:bg-error-soft hover:text-error-strong">
+                              <Button variant="ghost" size="chip" onClick={() => void closeCandidate(c, "disqualify")} disabled={busy} className="text-error-strong hover:bg-error-soft hover:text-error-strong">
                                     <X size={12} /> 부적합
                                   </Button>
                             </div>
-                          )}
+                          ))}
                         </div>
                       );
                     })}
@@ -3225,6 +3421,7 @@ export function Jobs() {
                   type="text"
                   value={pickerQuery}
                   onChange={(e) => setPickerQuery(e.target.value)}
+                  aria-label="인재풀 후보 검색"
                   placeholder="이름, 연락처, 지점 검색"
                   className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full pl-9 pr-3 py-2.5 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
@@ -3248,7 +3445,7 @@ export function Jobs() {
                     <div className="min-w-0 flex-1">
                       <div className="text-[14px] font-bold text-foreground flex items-center gap-1.5">
                         {p.name ?? `#${p.id}`}
-                        {conflict && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning border border-warning-soft">다른 공고 진행 중</span>}
+                        {conflict && <span className="text-[12px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning border border-warning-soft">다른 공고 진행 중</span>}
                       </div>
                       <div className="text-[12px] text-muted-foreground truncate">{(p.source ? sourceLabel(p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
                     </div>
@@ -3273,7 +3470,7 @@ export function Jobs() {
         /* 후보 보드에서 열었을 때는 보드를 흐리지 않고 그 왼쪽에 나란히 붙인다 —
            후보를 하나씩 확인하며 확정/보류를 누르는 작업이라, 볼 때마다 보드가
            닫히거나 흐려지면 명단에서 자리를 잃는다. */
-        docked={candPanel != null}
+        docked={candPanel != null && canDockDetail}
         dockedClassName="right-[496px] top-4 bottom-4 w-[480px] z-50"
         onClose={() => { setSelectedApplicantId(null); setConfirmSignal(null); }}
         applicantId={selectedApplicantId}

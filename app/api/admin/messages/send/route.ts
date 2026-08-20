@@ -1,153 +1,354 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { resolveCandidateTarget } from "@/lib/agent/candidate-target";
 import { sendSms } from "@/lib/solapi";
-import { COPILOT_DRAFT_MARKER } from "@/lib/agent/kill-switch";
-
-// AI/시스템 자동 발송에 쓰는 sent_by 라벨 — 이 값들 이외는 모두 '매니저 수동 발송'으로 본다.
-// 매니저 발송이면 AI 응답 충돌을 막기 위해 자동으로 paused 단계로 전이한다.
-const AGENT_OR_SYSTEM_SENT_BY = new Set([
-  "agent",
-  "agent-practice",
-  "system-auto",
-  "danggeun-start",
-  "baemin-start",
-  "danggeun-practice-start",
-  "danggeun-recommend",
-]);
+import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety";
+import {
+  deliverManualMessage,
+  manualMessagePostprocessResult,
+  type ExistingManualMessageRequest,
+  type ManualMessageFingerprint,
+  validateManualMessageIdempotencyKey,
+} from "@/lib/manual-message-send";
+import { retryManualMessagePostprocess } from "@/lib/manual-message-recovery";
 
 export async function POST(req: NextRequest) {
+  let deliveryAtFailure: "not_attempted" | "sent" = "not_attempted";
+  let recordedAtFailure = false;
+  let messageAtFailure: Record<string, unknown> | null = null;
+  let deduplicatedAtFailure = false;
+  let pausedSkippedAtFailure: "ambiguous" | "changed" | null = null;
+  let pausedJobIdAtFailure: number | null = null;
   try {
-    const { applicant_id, phone, body, sent_by, draft_id, draft_was_edited, job_id } = await req.json();
+    const {
+      applicant_id,
+      phone,
+      body,
+      sent_by,
+      draft_id,
+      draft_was_edited,
+      job_id,
+      idempotency_key,
+    } = await req.json();
     // 매니저 답장의 공고 컨텍스트 — 스레드 job_id 필터·인계 큐 매칭이 어긋나지 않게 함께 저장.
     const jobId: number | null = typeof job_id === "number" && Number.isFinite(job_id) ? job_id : null;
+    const applicantId: number | null = typeof applicant_id === "number" && Number.isFinite(applicant_id)
+      ? applicant_id
+      : null;
+    const targetPhone = typeof phone === "string" ? phone.trim() : "";
+    const messageBody = typeof body === "string" ? body.trim() : "";
+    const sender = typeof sent_by === "string" && sent_by.trim() ? sent_by.trim() : "관리자";
 
-    if (!phone || !body) {
+    if (!targetPhone || !messageBody) {
       return NextResponse.json(
-        { error: "phone과 body는 필수입니다." },
+        { error: "phone과 body는 필수입니다.", delivery: "not_attempted", retryable: true },
         { status: 400 }
       );
     }
 
-    // 솔라피로 문자 발송
-    const result = await sendSms(phone, body);
-    if (!result.success) {
+    const safetyViolation = detectManualOutboundSafetyViolation(messageBody);
+    if (safetyViolation) {
       return NextResponse.json(
-        { error: "문자 발송 실패: " + result.error },
-        { status: 500 }
+        {
+          error: "개인정보 보호를 위해 신분증 이미지는 문자로 요청할 수 없습니다. 승인된 제출 방법을 안내해주세요.",
+          delivery: "not_attempted",
+          retryable: true,
+        },
+        { status: 400 }
       );
     }
 
-    // 진행 중 공고가 여러 개여서 AI 자동 응답 정지를 건너뛴 경우 — 클라가 매니저에게 알린다.
-    let pausedSkipped: "ambiguous" | null = null;
-    // **실제로 멈춘 공고 id.** null이면 아무것도 멈추지 않았다는 사실 그대로다 — 클라가 이걸 보고
-    // 'AI 꺼짐' 배지를 켠다. 예전엔 응답에 이 값이 없어, 관심만 누른 공고(진행 단계 없음) 탭에서
-    // 답장하면 멈춘 것이 없는데도 화면이 '수동 응대'로 바뀌어 매니저가 AI가 멈춘 줄 알았다.
-    let pausedJobId: number | null = null;
-
-    // messages 테이블에 저장
+    const validatedKey = validateManualMessageIdempotencyKey(idempotency_key);
+    if (!validatedKey.ok) {
+      return NextResponse.json(
+        {
+          error: validatedKey.reason === "required"
+            ? "발송 요청 키가 필요합니다. 화면을 새로고침한 뒤 다시 시도해주세요."
+            : "유효하지 않은 발송 요청 키입니다.",
+          delivery: "not_attempted",
+          retryable: true,
+        },
+        { status: 400 }
+      );
+    }
+    const idempotencyKey = validatedKey.key;
     const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .from("messages")
-      .insert({
-        applicant_id: applicant_id || null,
-        applicant_phone: phone,
-        direction: "outbound",
-        body,
-        status: "sent",
-        sent_by: sent_by || "관리자",
-        solapi_msg_id: result.messageId || null,
-        job_id: jobId,
-      })
-      .select()
-      .single();
+    const draftId = typeof draft_id === "string" && draft_id.trim() ? draft_id.trim() : null;
+    const draftWasEdited = draft_was_edited === true;
+    const requestFingerprint: ManualMessageFingerprint = {
+      applicantId,
+      phone: targetPhone,
+      body: messageBody,
+      jobId,
+      sentBy: sender,
+      draftId,
+      draftWasEdited,
+    };
 
-    if (error) {
-      console.error("[messages insert error]", error);
+    const delivery = await deliverManualMessage<Record<string, unknown>>({
+      key: idempotencyKey,
+      request: requestFingerprint,
+      claim: async () => {
+        const claim = await supabase
+          .from("manual_message_send_requests")
+          .insert({
+            idempotency_key: idempotencyKey,
+            applicant_id: applicantId,
+            applicant_phone: targetPhone,
+            body: messageBody,
+            job_id: jobId,
+            sent_by: sender,
+            draft_id: draftId,
+            draft_was_edited: draftWasEdited,
+            status: "sending",
+            provider_correlation_attached: true,
+            provider_reconcile_status: "pending",
+          })
+          .select("*")
+          .single();
+        if (!claim.error) return { kind: "claimed" as const };
+        if ((claim.error as { code?: string }).code !== "23505") {
+          console.error("[manual message outbox claim error]", claim.error);
+          return { kind: "error" as const };
+        }
+
+        const existing = await supabase
+          .from("manual_message_send_requests")
+          .select("*")
+          .eq("idempotency_key", idempotencyKey)
+          .maybeSingle();
+        if (existing.error || !existing.data) {
+          console.error("[manual message outbox replay lookup error]", existing.error);
+          // 충돌 행은 존재하지만 상태 조회가 실패했다. 불명확 상태로 고정해 재발송을 막는다.
+          const unknown: ExistingManualMessageRequest = {
+            applicant_id: applicantId,
+            applicant_phone: targetPhone,
+            body: messageBody,
+            job_id: jobId,
+            sent_by: sender,
+            draft_id: draftId,
+            draft_was_edited: draftWasEdited,
+            status: "unknown",
+            provider_message_id: null,
+          };
+          return { kind: "existing" as const, request: unknown };
+        }
+        return {
+          kind: "existing" as const,
+          request: existing.data as ExistingManualMessageRequest,
+        };
+      },
+      send: () => sendSms(
+        targetPhone,
+        messageBody,
+        undefined,
+        { clientRequestId: idempotencyKey }
+      ),
+      markUnknown: async (error) => {
+        const result = await supabase
+          .from("manual_message_send_requests")
+          .update({ status: "unknown", last_error: error, updated_at: new Date().toISOString() })
+          .eq("idempotency_key", idempotencyKey)
+          .eq("status", "sending");
+        if (result.error) console.error("[manual message outbox unknown error]", result.error);
+      },
+      markFailed: async (error) => {
+        const result = await supabase
+          .from("manual_message_send_requests")
+          .update({ status: "failed", last_error: error, updated_at: new Date().toISOString() })
+          .eq("idempotency_key", idempotencyKey)
+          .eq("status", "sending");
+        if (result.error) console.error("[manual message outbox failed error]", result.error);
+      },
+      markSent: async (providerMessageId) => {
+        const result = await supabase
+          .from("manual_message_send_requests")
+          .update({
+            status: "sent",
+            provider_message_id: providerMessageId,
+            sent_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            last_error: null,
+            provider_reconcile_status: "matched",
+            provider_reconciled_at: new Date().toISOString(),
+            provider_reconcile_last_error: null,
+          })
+          .eq("idempotency_key", idempotencyKey)
+          .eq("status", "sending")
+          .select("idempotency_key")
+          .maybeSingle();
+        if (result.error || !result.data) {
+          console.error("[manual message outbox sent error]", result.error);
+          return false;
+        }
+        return true;
+      },
+      record: async (providerMessageId) => {
+        const inserted = await supabase
+          .from("messages")
+          .insert({
+            applicant_id: applicantId,
+            applicant_phone: targetPhone,
+            direction: "outbound",
+            body: messageBody,
+            status: "sent",
+            sent_by: sender,
+            solapi_msg_id: providerMessageId,
+            job_id: jobId,
+            client_request_id: idempotencyKey,
+          })
+          .select("*")
+          .single();
+
+        let message = inserted.data as Record<string, unknown> | null;
+        if (inserted.error || !message) {
+          // INSERT 응답이 끊겼거나 replay unique 충돌이어도 이미 기록된 행을 복구한다.
+          const existing = await supabase
+            .from("messages")
+            .select("*")
+            .eq("client_request_id", idempotencyKey)
+            .maybeSingle();
+          if (existing.error || !existing.data) {
+            console.error("[manual message record error]", inserted.error, existing.error);
+            return null;
+          }
+          message = existing.data as Record<string, unknown>;
+        }
+
+        const recordedUpdate = await supabase
+          .from("manual_message_send_requests")
+          .update({
+            status: "recorded",
+            recorded_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            last_error: null,
+          })
+          .eq("idempotency_key", idempotencyKey)
+          .in("status", ["sent", "recorded"]);
+        if (recordedUpdate.error) {
+          // messages unique key가 최종 중복 방어이므로 실제 기록 성공은 그대로 반환한다.
+          console.error("[manual message outbox recorded error]", recordedUpdate.error);
+        }
+        return message;
+      },
+    });
+
+    if (delivery.delivery === "not_attempted") {
       return NextResponse.json(
-        { error: "메시지 저장 실패" },
-        { status: 500 }
+        {
+          success: false,
+          error: delivery.conflict
+            ? "같은 발송 요청 키를 다른 내용이나 처리 조건에 사용할 수 없습니다."
+            : "발송 요청을 안전하게 저장하지 못해 문자를 보내지 않았습니다.",
+          delivery: "not_attempted",
+          recorded: false,
+          retryable: delivery.retryable,
+          deduplicated: delivery.deduplicated,
+        },
+        { status: delivery.conflict ? 409 : 503 }
+      );
+    }
+    if (delivery.delivery === "unknown") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "이 문자의 발송 결과를 확인할 수 없어 자동 확인 대기 상태로 보관했습니다. 중복 발송을 막기 위해 같은 요청은 다시 보내지 않습니다.",
+          delivery: "unknown",
+          recorded: false,
+          retryable: false,
+          deduplicated: delivery.deduplicated,
+        },
+        { status: 202 }
+      );
+    }
+    if (delivery.delivery === "failed") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: delivery.providerError
+            ? `문자 발송 실패: ${delivery.providerError}`
+            : "이 발송 시도는 실패했습니다. 다시 보내려면 새 발송으로 시도해주세요.",
+          delivery: "failed",
+          recorded: false,
+          retryable: true,
+          deduplicated: delivery.deduplicated,
+        },
+        { status: delivery.deduplicated ? 409 : 502 }
       );
     }
 
-    // 코파일럿 초안 승인 여부 — 초안 reasoning의 마커로 판정.
-    // 코파일럿 모드에서는 발송 주체가 매니저(승인)여도 대화는 계속 'AI 초안 → 매니저 승인' 루프에
-    // 있어야 하므로 아래 자동 pause 전이를 건너뛴다(전이하면 다음 인입부터 초안이 안 생긴다).
-    let isCopilotDraftApproval = false;
-    if (draft_id) {
-      const { data: d } = await supabase
-        .from("message_drafts")
-        .select("reasoning")
-        .eq("id", draft_id)
-        .maybeSingle();
-      isCopilotDraftApproval = ((d?.reasoning as string | null) ?? "").startsWith(COPILOT_DRAFT_MARKER);
-    }
+    const data = delivery.message;
+    const recorded = delivery.recorded;
+    const deduplicated = delivery.deduplicated;
+    deliveryAtFailure = "sent";
+    recordedAtFailure = recorded;
+    messageAtFailure = data;
+    deduplicatedAtFailure = deduplicated;
 
-    // 매니저 수동 발송이면 AI 자동 응답을 끄기 위해 paused로 전이.
-    // 매니저와 AI가 같은 후보에게 동시에 응답하는 충돌 방지.
-    const isManagerSend = !AGENT_OR_SYSTEM_SENT_BY.has(sent_by ?? "") && !isCopilotDraftApproval;
-    if (isManagerSend && applicant_id) {
-      // 전이 대상 후보 — 공동 판정(lib/agent/candidate-target). 공고를 명시하면 그 공고만 보고,
-      // 명시하지 않았는데 진행 중 공고가 여러 개면 **아무 공고도 건드리지 않는다**(예전엔 최신 후보로 폴백해
-      // 엉뚱한 공고의 AI를 끄고, 이후 '재개'가 다른 공고를 보게 되어 400으로 실패했다).
-      // 발송 자체는 막지 않는다 — 매니저 답장이 나가는 게 우선이고, 자동 응답 정지만 건너뛴다.
-      const target = await resolveCandidateTarget(supabase, applicant_id, jobId, { want: "active" });
-      const jc = target.ok ? target.candidate : null;
-      if (!target.ok && target.reason === "ambiguous") {
-        pausedSkipped = "ambiguous";
-        console.warn("[messages/send] 진행 중 공고가 여러 개라 AI 정지를 건너뜀", {
-          applicant_id,
-          options: target.options.map((o) => o.job_id),
-        });
-      }
-      if (jc) {
-        const prevState = (jc.agent_state ?? {}) as Record<string, unknown>;
-        const prevMeta = (prevState.meta ?? {}) as Record<string, unknown>;
-        await supabase
-          .from("job_candidates")
-          .update({
-            agent_stage: "paused",
-            paused_reason: "매니저 직접 응답 — 자동 전환",
-            agent_state: {
-              ...prevState,
-              meta: {
-                ...prevMeta,
-                paused_from_stage: jc.agent_stage,
-                paused_at: new Date().toISOString(),
-                paused_by: "manager-send",
-              },
-            },
-          })
-          .eq("id", jc.id);
-        pausedJobId = (jc.job_id as number | null) ?? null;
-      }
+    // AI 중단·초안 처리는 outbox 행 잠금 아래 한 DB 트랜잭션에서만 커밋한다.
+    // 일시 DB 오류는 요청 안에서 세 번까지만 즉시 재시도하고, 이후에도 pending이면 cron이 이어받는다.
+    const postprocessRecovery = recorded
+      ? await retryManualMessagePostprocess(
+          async () => await supabase.rpc("complete_manual_message_postprocess", {
+            p_idempotency_key: idempotencyKey,
+          }),
+          manualMessagePostprocessResult
+        )
+      : {
+          result: manualMessagePostprocessResult(null),
+          attempts: 0,
+          lastError: null,
+        };
+    if (!postprocessRecovery.result.completed) {
+      console.error("[manual message postprocess pending]", {
+        idempotencyKey,
+        attempts: postprocessRecovery.attempts,
+        error: postprocessRecovery.lastError,
+      });
     }
+    const postprocess = postprocessRecovery.result;
+    const postprocessFailed = !recorded || !postprocess.completed;
+    const pausedSkipped = postprocess.completed ? postprocess.pausedSkipped : null;
+    const pausedJobId = postprocess.completed ? postprocess.pausedJobId : null;
+    pausedSkippedAtFailure = pausedSkipped;
+    pausedJobIdAtFailure = pausedJobId;
 
-    // 사용된 draft 표시
-    if (draft_id) {
-      await supabase
-        .from("message_drafts")
-        .update({
-          status: draft_was_edited ? "edited" : "used",
-          used_message_id: data.id,
-          resolved_at: new Date().toISOString(),
-        })
-        .eq("id", draft_id);
-    } else if (applicant_id) {
-      // draft_id 없이 매니저가 직접 입력한 경우 — 해당 지원자의 pending draft를 ignored 처리
-      await supabase
-        .from("message_drafts")
-        .update({
-          status: "ignored",
-          resolved_at: new Date().toISOString(),
-        })
-        .eq("applicant_id", applicant_id)
-        .in("status", ["pending", "need_info"]);
-    }
-
-    return NextResponse.json({ success: true, message: data, paused_skipped: pausedSkipped, paused_job_id: pausedJobId });
+    return NextResponse.json({
+      success: true,
+      delivery: "sent",
+      recorded,
+      retryable: false,
+      deduplicated,
+      message: data,
+      paused_skipped: pausedSkipped,
+      paused_job_id: pausedJobId,
+      ...(!recorded || postprocessFailed
+        ? {
+            ...(postprocessFailed ? { postprocess_failed: true } : {}),
+            warning: !recorded
+              ? "문자는 발송됐지만 대화 기록을 완료하지 못해 자동 복구 대기 상태로 보관했습니다. 같은 문자를 다시 보내지 말고 대화 상태를 확인해주세요."
+              : "문자는 발송됐지만 AI·초안 상태 처리를 완료하지 못해 자동 복구 대기 상태로 보관했습니다. 같은 문자를 다시 보내지 말고 현재 AI 상태를 확인해주세요.",
+          }
+        : {}),
+    });
   } catch (err) {
     console.error("[send message error]", err);
-    return NextResponse.json({ error: "서버 오류" }, { status: 500 });
+    if (deliveryAtFailure === "sent") {
+      return NextResponse.json({
+        success: true,
+        delivery: "sent",
+        recorded: recordedAtFailure,
+        retryable: false,
+        deduplicated: deduplicatedAtFailure,
+        postprocess_failed: true,
+        warning: "문자는 발송됐지만 후속 상태 처리를 완료하지 못해 자동 복구 대기 상태로 보관했습니다. 같은 문자를 다시 보내지 말고 대화 상태를 확인해주세요.",
+        message: messageAtFailure,
+        paused_skipped: pausedSkippedAtFailure,
+        paused_job_id: pausedJobIdAtFailure,
+      });
+    }
+    return NextResponse.json(
+      { error: "서버 오류", delivery: "not_attempted", retryable: true },
+      { status: 500 }
+    );
   }
 }

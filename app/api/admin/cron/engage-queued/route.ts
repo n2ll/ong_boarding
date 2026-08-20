@@ -5,10 +5,10 @@
  * 아침 9시(KST — vercel.json '0 0 * * *' UTC)에 자동 첫 문자를 발송한다.
  *
  * 발송 직전 전역 3단 모드·가드(수신거부/진행 중/중복/충원/마감)를 재검사한다 — 밤사이 변화 반영.
- *  - off  : 아무것도 안 하고 큐 유지 — 모드 복귀 후 다음 아침에 발송.
+ *  - off  : 새 발송 없이 큐 유지. 이미 sent인 outbox의 DB finalize만 복구한다.
  *  - draft: 코파일럿 — 인바운드가 없어 초안 불가 → 큐 클리어 + Slack으로 수동 컨택 유도.
- *  - auto : runInterestEngage 실행. 발송·스킵 시 engage_queued_at 클리어,
- *           발송 실패 건은 큐 유지 → 다음날 재시도.
+ *  - auto : runInterestEngage 실행. 공급자가 실패를 확정한 건만 다음 회차 새 action으로 재시도한다.
+ *           발송 결과가 불명확한 건은 claim을 유지하고 자동 재시도하지 않는다.
  *
  * 인증: Authorization: Bearer CRON_SECRET (requireCronAuth — 미설정 시 fail-closed).
  */
@@ -29,10 +29,6 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   const mode = await getAgentMode(supabase);
-  if (mode === "off") {
-    // off = 아무 발송 없음 — 큐를 건드리지 않고 유지한다(모드 복귀 시 다음 아침에 발송).
-    return NextResponse.json({ mode, processed: 0, note: "mode off — 큐 유지" });
-  }
 
   const { data: rows, error } = await supabase
     .from("job_candidates")
@@ -49,7 +45,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const counts = { engaged: 0, waitlist: 0, copilot: 0, skipped: 0, failed: 0 };
+  const counts = {
+    engaged: 0,
+    waitlist: 0,
+    recovered: 0,
+    copilot: 0,
+    skipped: 0,
+    failed: 0,
+    unknown: 0,
+  };
   const results: Array<{
     candidate_id: number;
     action: string;
@@ -85,11 +89,22 @@ export async function GET(req: NextRequest) {
       case "waitlist_sent":
         counts.waitlist++;
         break;
+      case "recovered":
+        counts.recovered++;
+        break;
       case "copilot_manual":
         counts.copilot++;
         break;
+      case "off":
+        // kill-switch는 새 발송만 막는다. runInterestEngage가 이 분기 전에 수행한
+        // sent finalize/unknown 가시화 외에는 큐와 집계를 그대로 유지한다.
+        break;
       case "send_failed":
         counts.failed++;
+        break;
+      case "send_unknown":
+      case "sent_unfinalized":
+        counts.unknown++;
         break;
       default:
         counts.skipped++;
@@ -98,7 +113,12 @@ export async function GET(req: NextRequest) {
       candidate_id: row.id as number,
       action: outcome.action,
       reason: outcome.action === "skipped" ? outcome.reason : undefined,
-      error: outcome.action === "send_failed" ? outcome.error : undefined,
+      error:
+        outcome.action === "send_failed"
+        || outcome.action === "send_unknown"
+        || outcome.action === "sent_unfinalized"
+          ? outcome.error
+          : undefined,
     });
     // 발송 간 간격 — SOLAPI 연속 호출 완화 (bulk-send와 동일)
     await new Promise((r) => setTimeout(r, 150));
@@ -106,15 +126,32 @@ export async function GET(req: NextRequest) {
 
   // Slack 요약 — 처리할 게 있었으면 결과를 알린다. 스킵·보류만 있어도 보내야 한다:
   // 전건 스킵이면 지원자는 관심을 눌렀는데 아무 문자도 못 받고 매니저는 그 사실조차 모르는 상태가 됐다.
-  if (counts.engaged + counts.waitlist + counts.copilot + counts.failed + counts.skipped + deferredSameApplicant > 0) {
+  if (
+    counts.engaged
+    + counts.waitlist
+    + counts.recovered
+    + counts.copilot
+    + counts.failed
+    + counts.unknown
+    + counts.skipped
+    + deferredSameApplicant
+    > 0
+  ) {
     const lines = ["🌅 *아침 자동 응대(관심 클릭 야간 큐) 처리 결과*"];
     if (counts.engaged > 0) lines.push(`- ⚡ AI 스크리닝 시작: ${counts.engaged}명`);
     if (counts.waitlist > 0) lines.push(`- 충원 완료 대기 안내 발송: ${counts.waitlist}명`);
+    if (counts.recovered > 0)
+      lines.push(`- ♻️ SMS 재발송 없이 기존 발송의 후보 기록 복구: ${counts.recovered}명`);
     if (counts.copilot > 0)
       lines.push(
         `- 🤖 코파일럿: 초안 불가(인바운드 없음) ${counts.copilot}명 — 관심 큐에서 [빠른 컨택]으로 수동 진행해주세요.`
       );
-    if (counts.failed > 0) lines.push(`- ⚠️ 발송 실패(내일 재시도): ${counts.failed}명`);
+    if (counts.failed > 0)
+      lines.push(`- ⚠️ 공급자가 확인한 발송 실패(내일 새 요청으로 재시도): ${counts.failed}명`);
+    if (counts.unknown > 0)
+      lines.push(
+        `- ⚠️ 발송 결과/후보 기록 확인 필요: ${counts.unknown}명 — 중복 방지를 위해 자동 재시도하지 않아요. 발송 내역을 수동 확인해주세요.`
+      );
     if (counts.skipped > 0) lines.push(`- 가드로 건너뜀: ${counts.skipped}건 (진행 중·중복·수신거부 등 — 대개 정상이에요)`);
     if (deferredSameApplicant > 0)
       lines.push(

@@ -3,8 +3,8 @@
  *
  * 하는 일 (확정 뉘앙스 금지 — 관심 표시는 '가능 의사 수집'일 뿐, 배정·확정은 매니저):
  *   1. job_candidates upsert — 매니저 파이프라인/공고 보드에 후보로 노출 (발송은 dispatch에서)
- *   2. availability 갱신 — '즉시가능'이 아니면 '이번주가능'으로 (강한 신호를 약한 신호로 강등하지 않음)
- *   3. pool_events(interest_click / availability_set) 기록 — 신선도·신뢰 점수 근거
+ *   2. 명시적인 오늘·내일 가능 응답일 때만 availability를 '즉시가능'으로 갱신
+ *   3. pool_events(interest_click, 필요한 경우 availability_set) 기록 — 신선도·신뢰 점수 근거
  *   4. 자동 응대(auto-engage) — 전역 3단 모드 준수(off=발송 없음 / draft=수동 유도 / auto=첫 문자
  *      발송 + screening 진입). 야간(KST 21~08시) 클릭은 engage_queued_at에 예약만 하고
  *      아침 9시 cron(/api/admin/cron/engage-queued)이 발송한다. 로직은 lib/agent/engage.ts.
@@ -12,13 +12,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase";
 import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { sendSlackText } from "@/lib/slack";
+import {
+  isPoolActionId,
+  poolActionReplayDecision,
+  poolDurableActionDecision,
+  poolInterestEngageIntentDecision,
+  poolInterestEngageIntentFor,
+  shouldCompletePoolInterestEngageIntent,
+} from "@/lib/pool-durable-action";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { getAgentMode } from "@/lib/agent/kill-switch";
 import {
-  ensureExposureIncludeForLinked,
   isExposed,
   normalizeRule,
   fetchOverridesForApplicant,
@@ -27,17 +35,199 @@ import {
 } from "@/lib/exposure";
 import {
   engageOutcomeLabel,
-  hasEngageMessage,
   isNightKst,
+  recoverInterestEngage,
   runInterestEngage,
+  type EngageOutcome,
 } from "@/lib/agent/engage";
 
 export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
-  const token = params.token;
+type InterestIntentResume =
+  | { kind: "completed"; outcome: string }
+  | { kind: "retryable"; error: string }
+  | { kind: "conflict"; error: string };
+
+function interestOutcomeKey(outcome: EngageOutcome): string {
+  return outcome.action === "skipped"
+    ? `skipped:${outcome.reason}`
+    : outcome.action;
+}
+
+function interestSlackBase(params: {
+  applicantName: string | null;
+  jobTitle: string;
+  immediate: boolean;
+}): string {
+  return params.immediate
+    ? `⚡ *오늘·내일부터 가능* — ${params.applicantName ?? "이름 미상"}님이 '${params.jobTitle}' 공고에서 오늘이나 내일부터 일할 수 있다고 답했어요.\n근무 확정은 아니며, 파이프라인에서 확인 후 연락해주세요.`
+    : `💡 *맞춤 공고 관심 표시* — ${params.applicantName ?? "이름 미상"}님이 '${params.jobTitle}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`;
+}
+
+async function resumeInterestEngageIntent(params: {
+  supabase: SupabaseClient;
+  actionKey: string;
+  applicantId: number;
+  applicantName: string | null;
+  jobId: number;
+  jobTitle?: string;
+  immediate: boolean;
+  allowHistoricalMissing: boolean;
+}): Promise<InterestIntentResume> {
+  const { data: intentRow, error: intentError } = await params.supabase
+    .from("pool_interest_engage_intents")
+    .select("applicant_id, job_id, intent, queue_created, status, outcome")
+    .eq("action_key", params.actionKey)
+    .maybeSingle();
+  const intent = poolInterestEngageIntentDecision(intentRow, intentError, {
+    applicantId: params.applicantId,
+    jobId: params.jobId,
+  });
+
+  if (intent.kind === "retryable") {
+    console.error("[pool interest] durable engage intent lookup failed", intentError ?? intentRow);
+    return { kind: "retryable", error: "자동응대 처리 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요." };
+  }
+  if (intent.kind === "conflict") {
+    return { kind: "conflict", error: "이미 다른 요청에 사용된 자동응대 정보예요." };
+  }
+  if (intent.kind === "completed") {
+    return { kind: "completed", outcome: intent.outcome };
+  }
+  if (intent.kind === "missing") {
+    if (!params.allowHistoricalMissing) {
+      return { kind: "retryable", error: "자동응대 요청을 저장하지 못했어요. 잠시 후 다시 시도해 주세요." };
+    }
+    // 새 의도 원장 도입 전 action은 기존 outbox가 있을 때만 finalize/불명 상태를 복구한다.
+    // 최초 모드·시간대 근거가 없으므로 새 SMS를 추측 발송하지 않는다.
+    const historicalRecovery = await recoverInterestEngage({
+      supabase: params.supabase,
+      jobId: params.jobId,
+      applicantId: params.applicantId,
+      actionKey: params.actionKey,
+    });
+    if (historicalRecovery?.action === "sent_unfinalized") {
+      return { kind: "retryable", error: "문자 기록 복구를 마치지 못했어요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { kind: "completed", outcome: historicalRecovery?.action ?? "none" };
+  }
+
+  let outcome: EngageOutcome | null = null;
+  let outcomeKey = "";
+  let engageNote = "";
+
+  if (intent.intent === "auto_queue") {
+    outcomeKey = intent.queueCreated ? "queued" : "queue_skipped";
+    engageNote = intent.queueCreated
+      ? "🌙 야간 클릭 — 아침 자동응대 예약이 저장됐어요. 발송 직전 전역 모드와 후보 상태를 다시 확인합니다."
+      : "이미 진행 중인 후보 — 야간 자동응대 예약을 추가하지 않았어요.";
+  } else if (intent.intent === "off") {
+    outcome = { action: "off" };
+  } else if (intent.intent === "draft") {
+    outcome = await runInterestEngage({
+      supabase: params.supabase,
+      jobId: params.jobId,
+      applicantId: params.applicantId,
+      mode: "draft",
+      source: "interest_click",
+      actionKey: params.actionKey,
+    });
+  } else {
+    const recovery = await recoverInterestEngage({
+      supabase: params.supabase,
+      jobId: params.jobId,
+      applicantId: params.applicantId,
+      actionKey: params.actionKey,
+    });
+    if (recovery) {
+      outcome = recovery;
+    } else {
+      const currentMode = await getAgentMode(params.supabase);
+      if (currentMode === "auto" && isNightKst()) {
+        // 주간 요청 복구가 야간까지 늦어졌다면 SMS를 보내지 않고 원장+후보 큐를 원자 전환한다.
+        const { data: deferred, error: deferError } = await params.supabase.rpc(
+          "defer_pool_interest_engage_intent",
+          {
+            p_action_key: params.actionKey,
+            p_applicant_id: params.applicantId,
+            p_job_id: params.jobId,
+          },
+        );
+        if (deferError || (deferred !== "queued" && deferred !== "not_queued")) {
+          console.error("[pool interest] engage intent night deferral failed", deferError ?? deferred);
+          return { kind: "retryable", error: "야간 자동응대 예약을 저장하지 못했어요. 잠시 후 다시 시도해 주세요." };
+        }
+        outcomeKey = deferred === "queued" ? "queued" : "queue_skipped";
+        engageNote = deferred === "queued"
+          ? "🌙 처리 재개 시각이 야간이라 SMS 대신 아침 자동응대 예약을 저장했어요."
+          : "후보 상태가 이미 변경되어 야간 자동응대 예약을 추가하지 않았어요.";
+      } else {
+        outcome = await runInterestEngage({
+          supabase: params.supabase,
+          jobId: params.jobId,
+          applicantId: params.applicantId,
+          mode: currentMode,
+          source: "interest_click",
+          actionKey: params.actionKey,
+        });
+      }
+    }
+  }
+
+  if (outcome) {
+    outcomeKey = interestOutcomeKey(outcome);
+    engageNote = engageOutcomeLabel(outcome);
+    if (!shouldCompletePoolInterestEngageIntent(outcome)) {
+      if (outcome.action === "sent_unfinalized") {
+        const title = params.jobTitle ?? "해당";
+        const baseSlack = interestSlackBase({
+          applicantName: params.applicantName,
+          jobTitle: title,
+          immediate: params.immediate,
+        });
+        await sendSlackText(`${baseSlack}\n${engageNote}`).catch(() => false);
+      }
+      return { kind: "retryable", error: "자동응대 처리가 진행 중이에요. 잠시 후 다시 시도해 주세요." };
+    }
+  }
+
+  let jobTitle = params.jobTitle;
+  if (!jobTitle) {
+    const { data: titleRow } = await params.supabase
+      .from("jobs")
+      .select("title")
+      .eq("id", params.jobId)
+      .maybeSingle();
+    jobTitle = typeof titleRow?.title === "string" ? titleRow.title : "해당";
+  }
+  const baseSlack = interestSlackBase({
+    applicantName: params.applicantName,
+    jobTitle,
+    immediate: params.immediate,
+  });
+  await sendSlackText(engageNote ? `${baseSlack}\n${engageNote}` : baseSlack).catch(() => false);
+
+  const { data: completion, error: completionError } = await params.supabase.rpc(
+    "complete_pool_interest_engage_intent",
+    {
+      p_action_key: params.actionKey,
+      p_applicant_id: params.applicantId,
+      p_job_id: params.jobId,
+      p_outcome: outcomeKey,
+    },
+  );
+  if (completionError || (completion !== "recorded" && completion !== "deduped")) {
+    console.error("[pool interest] engage intent completion failed", completionError ?? completion);
+    return { kind: "retryable", error: "자동응대 처리 결과를 저장하지 못했어요. 잠시 후 다시 시도해 주세요." };
+  }
+  return { kind: "completed", outcome: outcomeKey };
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
+  const routeParams = await params;
+  const token = routeParams.token;
   if (!UUID_RE.test(token)) {
     return NextResponse.json({ error: "invalid token" }, { status: 400 });
   }
@@ -47,7 +237,11 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (!Number.isFinite(jobId)) {
     return NextResponse.json({ error: "job_id 필수" }, { status: 400 });
   }
-  // '바로(내일부터) 시작 가능' 후속 버튼 — 관심 표시보다 강한 가용성 신호.
+  const actionId = body?.action_id;
+  if (!isPoolActionId(actionId)) {
+    return NextResponse.json({ error: "요청 정보를 다시 확인해 주세요." }, { status: 400 });
+  }
+  // '오늘이나 내일부터 가능' 후속 버튼 — 관심 표시보다 강한 가용성 신호.
   // 여전히 '가능 의사 수집'일 뿐 확정 아님 (확정 뉘앙스 금지).
   const immediate = body?.immediate === true;
 
@@ -60,6 +254,52 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     .maybeSingle();
   if (!applicant) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  // 완료된 동일 요청은 공고의 현재 모집 상태보다 먼저 확인한다. 응답 유실 뒤 공고가
+  // 마감되어도 같은 action_id 재시도는 성공으로 복구되어야 한다.
+  const { data: replayRow, error: replayError } = await supabase
+    .from("pool_events")
+    .select("applicant_id, job_id, event_type, meta")
+    .eq("action_key", actionId)
+    .maybeSingle();
+  const replay = poolActionReplayDecision(replayRow, replayError, {
+    applicantId: applicant.id as number,
+    jobId,
+    eventType: "interest_click",
+    immediate,
+  });
+  if (replay === "retryable") {
+    console.error("[pool interest] replay lookup failed", replayError);
+    return NextResponse.json(
+      { error: "관심 요청을 확인하지 못했어요. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
+  }
+  if (replay === "conflict") {
+    return NextResponse.json({ error: "이미 다른 요청에 사용된 요청 정보예요." }, { status: 409 });
+  }
+  if (replay === "deduped") {
+    const resumed = await resumeInterestEngageIntent({
+      supabase,
+      actionKey: actionId,
+      applicantId: applicant.id as number,
+      applicantName: applicant.name as string | null,
+      jobId,
+      immediate,
+      allowHistoricalMissing: true,
+    });
+    if (resumed.kind === "retryable") {
+      return NextResponse.json({ error: resumed.error }, { status: 503 });
+    }
+    if (resumed.kind === "conflict") {
+      return NextResponse.json({ error: resumed.error }, { status: 409 });
+    }
+    return NextResponse.json({
+      success: true,
+      deduped: true,
+      engage_recovery: resumed.outcome,
+    });
   }
 
   const { data: job } = await supabase
@@ -110,123 +350,57 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     }
   }
 
-  // 1) 후보 연결 (이미 있으면 무시 — 중복 클릭 안전)
-  const { error: jcErr } = await supabase
-    .from("job_candidates")
-    .upsert([{ job_id: jobId, applicant_id: applicant.id }], {
-      onConflict: "job_id,applicant_id",
-      ignoreDuplicates: true,
-    });
-  if (jcErr) {
-    console.error("[pool interest] jc upsert failed", jcErr);
-    return NextResponse.json({ error: "처리 실패" }, { status: 500 });
-  }
+  const mode = await getAgentMode(supabase);
+  const engageIntent = poolInterestEngageIntentFor(mode, isNightKst());
 
-  // 1a) 지정 노출 공고면 이 분을 노출 명단에 남긴다 — 뒤에 AI 대화로 규칙 축(시간대·차량)이 바뀌어도
-  //     방금 관심을 표시한 공고가 본인 링크에서 사라지지 않게(M1b 불변식과 같은 공식).
-  //     기존 exclude 행은 보존되므로 매니저가 일부러 뺀 사람을 되살리지 않는다. 실패해도 관심 표시는 유지.
-  try {
-    await ensureExposureIncludeForLinked(supabase, jobId, [applicant.id as number]);
-  } catch (e) {
-    console.error("[pool interest] exposure include for linked failed (non-fatal)", e);
-  }
-
-  // 1b) 재관심 재부상 — 관심 처리 큐는 agent_stage IS NULL + contacted_at IS NULL로 잡는다.
-  // 매니저가 이미 [컨택 완료](contacted_at 기록)나 [보류](abort)한 뒤 지원자가 다시 관심을 누르면
-  // ignoreDuplicates 때문에 기존 행이 그대로 남아 큐에서 안 보인다. 휴면 상태(stage NULL 또는 abort)인
-  // 후보만 contacted_at를 비우고 abort를 해제해 재부상시킨다. 진행 중(screening/exploration/active)
-  // 후보는 이미 파이프라인에서 처리 중이므로 건드리지 않는다.
-  const { error: resurfaceErr } = await supabase
-    .from("job_candidates")
-    .update({
-      contacted_at: null,
-      agent_stage: null,
-    })
-    .eq("job_id", jobId)
-    .eq("applicant_id", applicant.id)
-    .or("agent_stage.is.null,agent_stage.eq.abort");
-  if (resurfaceErr) console.error("[pool interest] resurface failed", resurfaceErr);
-
-  // 2) 가용성 갱신 — 관심 클릭은 '이번 주 일할 의사', '바로 가능' 버튼은 '즉시 투입 가능' 프록시
-  const prevAvailability = applicant.availability as string | null;
-  const nextAvailability = immediate
-    ? "즉시가능"
-    : prevAvailability === "즉시가능"
-      ? "즉시가능"
-      : "이번주가능";
-  const { error: avErr } = await supabase
-    .from("applicants")
-    .update({ availability: nextAvailability, availability_updated_at: new Date().toISOString() })
-    .eq("id", applicant.id);
-  if (avErr) console.error("[pool interest] availability update failed", avErr);
-
-  // 3) 이벤트 기록 (non-fatal)
-  const events: { applicant_id: number; job_id?: number; event_type: string; meta?: unknown }[] = [
+  // 후보 연결·휴면 후보 재부상·명시 가용성·이벤트·후속 자동응대 의도를 한 트랜잭션으로 저장한다.
+  // auto_queue는 이 RPC 안에서 engage_queued_at까지 설정하므로 커밋 직후 런타임이 종료돼도 예약이 남는다.
+  const { data: durableData, error: durableError } = await supabase.rpc(
+    "record_pool_interest_with_engage_intent",
     {
-      applicant_id: applicant.id as number,
-      job_id: jobId,
-      event_type: "interest_click",
-      meta: immediate ? { immediate: true } : undefined,
+      p_job_id: jobId,
+      p_applicant_id: applicant.id as number,
+      p_immediate: immediate,
+      p_action_key: actionId,
+      p_engage_intent: engageIntent,
     },
-  ];
-  if (prevAvailability !== nextAvailability) {
-    events.push({
-      applicant_id: applicant.id as number,
-      event_type: "availability_set",
-      meta: { from: prevAvailability, to: nextAvailability, source: "pull", immediate },
-    });
+  );
+  const durable = poolDurableActionDecision(durableData, durableError);
+  if (durable.kind === "retryable") {
+    console.error("[pool interest] atomic write failed", durableError ?? durableData);
+    return NextResponse.json(
+      { error: "관심을 저장하지 못했어요. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
   }
-  const { error: evErr } = await supabase.from("pool_events").insert(events);
-  if (evErr) console.error("[pool interest] pool_events insert failed", evErr);
-
-  // 4) 자동 응대(auto-engage) — 실패해도 관심 표시(1~3)는 성공 처리, 부가 동작이다 (non-fatal).
-  //    가드·발송·기록은 runInterestEngage(lib/agent/engage.ts)가 담당.
-  let engageNote = "";
-  try {
-    const mode = await getAgentMode(supabase);
-    if (mode === "auto" && isNightKst()) {
-      // 야간(KST 21~08시) 클릭 — 즉시 발송 대신 예약. 아침 9시 cron이 가드 재검사 후 발송.
-      if (await hasEngageMessage(supabase, jobId, applicant.id as number)) {
-        engageNote = "이미 이 공고 안내 문자를 받은 후보 — 중복 발송 방지로 생략.";
-      } else {
-        const { data: queued, error: qErr } = await supabase
-          .from("job_candidates")
-          .update({ engage_queued_at: new Date().toISOString() })
-          .eq("job_id", jobId)
-          .eq("applicant_id", applicant.id)
-          .is("agent_stage", null) // 진행 중 후보에겐 예약하지 않는다
-          .select("id");
-        if (qErr) {
-          console.error(
-            "[pool interest] engage queue failed (docs/migrations/2026-07-jc-engage-queued.sql 적용 확인)",
-            qErr
-          );
-        } else if ((queued?.length ?? 0) > 0) {
-          engageNote = "🌙 야간 클릭 — 내일 아침 9시(KST) AI 첫 문자 발송 예약됨.";
-        } else {
-          engageNote = "이미 진행 중인 후보 — 자동 발송 생략.";
-        }
-      }
-    } else if (mode !== "off") {
-      // 주간 auto 즉시 발송 / draft는 시간대와 무관하게 수동 유도(초안 불가 — 인바운드 없음)
-      const outcome = await runInterestEngage({
-        supabase,
-        jobId,
-        applicantId: applicant.id as number,
-        mode,
-        source: "interest_click",
-      });
-      engageNote = engageOutcomeLabel(outcome);
-    }
-  } catch (e) {
-    console.error("[pool interest] auto-engage failed (non-fatal)", e);
+  if (durable.kind === "unavailable") {
+    return NextResponse.json({ error: "모집이 마감된 공고예요" }, { status: 400 });
   }
-
-  // 5) 매니저 알림 (non-fatal) — 자동 응대 결과 병기
-  const baseSlack = immediate
-    ? `⚡ *바로 시작 가능* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 "바로 시작 가능"이라고 답했어요.\n우선 컨택 후보입니다 — 파이프라인에서 확인해주세요.`
-    : `💡 *맞춤 공고 관심 표시* — ${applicant.name ?? "이름 미상"}님이 '${job.title}' 공고에 관심을 표시했어요.\n파이프라인/공고 보드에서 확인 후 컨택해주세요.`;
-  await sendSlackText(engageNote ? `${baseSlack}\n${engageNote}` : baseSlack).catch(() => false);
-
-  return NextResponse.json({ success: true });
+  if (durable.kind === "unchanged_closed") {
+    return NextResponse.json(
+      { error: "이 공고의 이전 처리 결과가 유지되어 검토 목록에 다시 추가하지 않았어요." },
+      { status: 409 },
+    );
+  }
+  const resumed = await resumeInterestEngageIntent({
+    supabase,
+    actionKey: actionId,
+    applicantId: applicant.id as number,
+    applicantName: applicant.name as string | null,
+    jobId,
+    jobTitle: job.title as string,
+    immediate,
+    allowHistoricalMissing: durable.kind === "deduped",
+  });
+  if (resumed.kind === "retryable") {
+    return NextResponse.json({ error: resumed.error }, { status: 503 });
+  }
+  if (resumed.kind === "conflict") {
+    return NextResponse.json({ error: resumed.error }, { status: 409 });
+  }
+  return NextResponse.json({
+    success: true,
+    deduped: durable.kind === "deduped",
+    engage_recovery: resumed.outcome,
+  });
 }

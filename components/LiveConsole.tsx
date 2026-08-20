@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
 import { TextareaField } from "./ui/field";
+import { Inbox } from "./Inbox";
 
 /**
  * 대화창과 오른쪽 상세는 **대화를 누르기 전엔 렌더되지 않는다**(아래 `activeChat &&`).
@@ -46,6 +47,11 @@ const ApplicantDetailContent = dynamic(
 import { getBrowserClient } from "@/lib/supabase";
 import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
 import { Button } from "@/components/ui/button";
+import { nextQueueApplicantId } from "@/lib/admin/nav";
+import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
+import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+
+type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
 interface Applicant {
   id: number;
@@ -219,15 +225,50 @@ function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBad
   return { label: chat.status, cls: "bg-background text-muted-foreground border border-border-strong" };
 }
 
+function QueueLoadingState({ label }: { label: string }) {
+  return <div className="p-4 text-center text-[13px] text-muted-foreground">{label}을 불러오는 중…</div>;
+}
+
+function QueueErrorState({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="m-3 rounded-2xl border border-error/30 bg-error-soft p-3 text-error-strong">
+      <div className="text-[13px] font-bold">{label}을 불러오지 못했어요</div>
+      <div className="mt-0.5 text-[12px]">0건이 아닙니다. 다시 불러와 확인해 주세요.</div>
+      <Button variant="ghost" size="chip" onClick={onRetry} className="mt-2 border border-error/30 bg-card text-error-strong hover:bg-error-soft">
+        다시 시도
+      </Button>
+    </div>
+  );
+}
+
+function QueueMetric({ state, value, unit }: { state: RemoteCollectionState; value: number; unit: string }) {
+  if (state === "loading" || state === "error") {
+    return <div className="mt-0.5 text-[20px] font-extrabold leading-tight text-muted-foreground/50" title={state === "error" ? "불러오지 못했어요" : "불러오는 중"}>—</div>;
+  }
+  return (
+    <div className="mt-0.5 text-[20px] font-extrabold leading-tight text-foreground">
+      {value}<span className="ml-0.5 text-[12px] font-bold text-muted-foreground">{unit}</span>
+    </div>
+  );
+}
+
 export function LiveConsole() {
-  // 탭 ↔ URL(?tab=confirm|intervention) 양방향 동기화.
+  // 탭 ↔ URL(?tab=confirm|intervention|inbox) 양방향 동기화.
   // 딥링크(사이드바 '확정할 지원자'·대시보드 CTA)로 들어와도 탭이 열리고, 탭을 바꾸면 URL도 따라가
   // 새로고침·공유가 보던 화면과 일치한다.
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const urlTab: "all" | "intervention" | "confirm" =
-    tabParam === "confirm" || tabParam === "intervention" ? tabParam : "all";
-  const [activeTab, setActiveTabState] = useState<"all" | "intervention" | "confirm">(urlTab);
+  const urlTab: OperationsTab =
+    tabParam === "confirm" || tabParam === "intervention" || tabParam === "inbox" ? tabParam : "all";
+  const [activeTab, setActiveTabState] = useState<OperationsTab>(urlTab);
+  const [canDockDetail, setCanDockDetail] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${MANAGER_PANEL_DOCK_MIN_WIDTH}px)`);
+    const update = () => setCanDockDetail(shouldDockManagerPanels(window.innerWidth));
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   // URL → 상태: 사이드바 '확정할 지원자'·대시보드 CTA처럼 쿼리만 바뀌는 이동에도 탭이 따라간다
   // (쿼리 변경은 리마운트가 아니라 re-render라 useState 초기값만으로는 반영되지 않는다).
   useEffect(() => {
@@ -236,13 +277,38 @@ export function LiveConsole() {
   // 상태 → URL: router.replace는 RSC 왕복을 유발해 (a) 응답까지 탭이 안 바뀌고 (b) 그 요청이 실패하면
   // 전체 페이지 리로드로 폴백해 작성 중인 문자 초안·편집이 날아간다. 탭은 즉시 바꾸고 URL만 얕게 맞춘다
   // (Next 14는 history.replaceState를 패치해 useSearchParams도 함께 갱신한다.)
-  const setActiveTab = useCallback((t: "all" | "intervention" | "confirm") => {
+  const setActiveTab = useCallback((t: OperationsTab) => {
     setActiveTabState(t);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", t === "all" ? "/live" : `/live?tab=${t}`);
     }
   }, []);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const detailPanelRef = useRef<HTMLDivElement>(null);
+  const detailReturnFocusRef = useRef<HTMLElement | null>(null);
+  const detailWasModalOpenRef = useRef(false);
+  const handleDetailPanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (canDockDetail) return;
+    const focusables = Array.from(
+      detailPanelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+    const action = managerPanelKeyboardAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      activeIndex: focusables.findIndex((element) => element === document.activeElement),
+      focusableCount: focusables.length,
+    });
+    if (action === null) return;
+    event.preventDefault();
+    if (action === "close") setSelectedChatId(null);
+    else if (action === "focus-first") focusables[0]?.focus();
+    else if (action === "focus-last") focusables[focusables.length - 1]?.focus();
+    else detailPanelRef.current?.focus();
+  }, [canDockDetail]);
+  const previousHandoffIdsRef = useRef<number[]>([]);
+  const previousConfirmIdsRef = useRef<number[]>([]);
   const [search, setSearch] = useState("");
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
@@ -285,7 +351,8 @@ export function LiveConsole() {
   // 갱신되니 화면은 살아 있어 보이고, 새로 답장한 사람만 안 뜬다. 다른 창을 갔다 와도
   // 갱신되지 않는다(전역 revalidateOnFocus: false). 백스톱으로 60초를 둔다 —
   // 위 scope=live로 응답이 22KB(gzip)로 줄어서 이제 이 주기를 감당할 수 있다(예전 95KB).
-  const { data: appsData, isLoading: appsLoading, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[]; previews?: Record<number, LastMessagePreview> }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
+  const { data: appsData, error: appsError, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[]; previews?: Record<number, LastMessagePreview> }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
+  const appsState = remoteCollectionState({ items: appsData?.data, error: appsError });
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
   // 공고 탭이 풀린다.
@@ -320,7 +387,7 @@ export function LiveConsole() {
       }),
     [appsData, previewById]
   );
-  const loadingList = appsLoading && chats.length === 0;
+  const loadingList = appsState === "loading" && chats.length === 0;
 
   // 미답 판정(A2): '마지막 메시지가 inbound(지원자 답장)' 기준. 대시보드 답장 큐와 같은 규칙.
   const isUnanswered = useCallback(
@@ -348,12 +415,17 @@ export function LiveConsole() {
   // 인계 큐도 SWR로 캐시.
   // 인계 큐도 broadcast 하나에 의존하고 있었다 — 사람이 직접 답해야 하는 대화가 새로
   // 들어와도 화면을 열어둔 매니저에게는 안 떴다. 응답이 1KB대라 60초 폴링 비용이 없다.
-  const { data: handoffsData, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs", { refreshInterval: 60_000 });
+  const { data: handoffsData, error: handoffsError, mutate: mutateHandoffs } = useSWR<{ handoffs?: Handoff[] }>("/api/admin/agent/handoffs", { refreshInterval: 60_000 });
   const handoffs = useMemo(() => handoffsData?.handoffs ?? [], [handoffsData]);
+  const handoffsState = remoteCollectionState({ items: handoffsData?.handoffs, error: handoffsError });
 
   // 확정 대기 큐(온보딩 완료·미확정) SWR.
-  const { data: confirmData, mutate: mutateConfirm } = useSWR<{ pending?: ConfirmPending[] }>("/api/admin/confirm/pending");
+  const { data: confirmData, error: confirmError, mutate: mutateConfirm } = useSWR<{ pending?: ConfirmPending[] }>("/api/admin/confirm/pending");
   const confirmPending = useMemo(() => confirmData?.pending ?? [], [confirmData]);
+  const confirmState = remoteCollectionState({ items: confirmData?.pending, error: confirmError });
+  // 탭 숫자는 가벼운 전역 알림 집계를 재사용하고, 문자 본문은 분류 탭을 열 때만 불러온다.
+  const { data: operationsNotices, mutate: mutateOperationsNotices } = useSWR<{ counts?: { inbox?: number } }>("/api/admin/notifications");
+  const inboxCount = operationsNotices?.counts?.inbox ?? 0;
 
   // 전역 킬스위치 상태 — 꺼져 있으면 목록 상단 경고 배너 + 스레드 배지·입력창 동작이 바뀐다.
   // env_forced(AGENT_DISABLED=1)도 토글과 무관하게 항상 중단이므로 함께 '전역 중지'로 취급.
@@ -479,6 +551,20 @@ export function LiveConsole() {
     (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
     null;
 
+  const detailModalOpen = activeChat != null && !canDockDetail;
+  useEffect(() => {
+    if (detailModalOpen && !detailWasModalOpenRef.current) {
+      detailReturnFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      requestAnimationFrame(() => detailPanelRef.current?.focus());
+    } else if (!detailModalOpen && detailWasModalOpenRef.current) {
+      const returnTarget = detailReturnFocusRef.current;
+      requestAnimationFrame(() => returnTarget?.focus());
+    }
+    detailWasModalOpenRef.current = detailModalOpen;
+  }, [detailModalOpen]);
+
   // 인계 큐: 카테고리 필터 적용(이미 오래된 순으로 서버 정렬됨)
   const visibleHandoffs = handoffCat === "all" ? handoffs : handoffs.filter((h) => h.category === handoffCat);
   // **한 사람 = 한 카드** — 공고를 여러 개 동시에 열면 한 분이 공고 수만큼 카드로 불어난다(같은 사람에게
@@ -493,6 +579,26 @@ export function LiveConsole() {
     }
     return Array.from(byApplicant.values());
   }, [visibleHandoffs]);
+  const handoffApplicantIds = useMemo(() => handoffGroups.map((items) => items[0].applicant_id), [handoffGroups]);
+  const confirmApplicantIds = useMemo(() => confirmPending.map((item) => item.applicant_id), [confirmPending]);
+
+  // 방금 처리한 대상이 큐에서 빠지면 다음 대상을 이어서 연다. 큐 밖에서 검색해 연 상세는
+  // 자동으로 바꾸지 않아, 매니저가 보고 있던 맥락을 보존한다.
+  useEffect(() => {
+    if (activeTab === "intervention") {
+      const nextId = nextQueueApplicantId(previousHandoffIdsRef.current, handoffApplicantIds, selectedChatId);
+      if (nextId !== selectedChatId) setSelectedChatId(nextId);
+    }
+    previousHandoffIdsRef.current = handoffApplicantIds;
+  }, [activeTab, handoffApplicantIds, selectedChatId]);
+
+  useEffect(() => {
+    if (activeTab === "confirm") {
+      const nextId = nextQueueApplicantId(previousConfirmIdsRef.current, confirmApplicantIds, selectedChatId);
+      if (nextId !== selectedChatId) setSelectedChatId(nextId);
+    }
+    previousConfirmIdsRef.current = confirmApplicantIds;
+  }, [activeTab, confirmApplicantIds, selectedChatId]);
   // 카테고리 칩에 쓸 집계
   const catCounts = handoffs.reduce<Record<string, number>>((acc, h) => {
     acc[h.category] = (acc[h.category] ?? 0) + 1;
@@ -721,8 +827,35 @@ export function LiveConsole() {
       });
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
+  const openApplicantFromInbox = useCallback(async (applicantId: number, tab: "all" | "intervention") => {
+    setActiveTab(tab);
+    await Promise.all([mutateApps(), mutateHandoffs()]);
+    setSelectedChatId(applicantId);
+  }, [mutateApps, mutateHandoffs, setActiveTab]);
+
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-card lg:flex-row">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      <div className="shrink-0 border-b border-border-strong bg-card px-4 py-3 lg:px-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-[14px] font-extrabold text-foreground">오늘 처리할 지원자 업무</h1>
+            <div className="mt-0.5 text-[12px] text-muted-foreground">큐를 바꿔도 선택한 지원자와 대화 맥락을 이어서 확인할 수 있어요.</div>
+          </div>
+          <div role="tablist" aria-label="지원자 운영 작업 큐" className="flex min-w-0 flex-wrap gap-1.5">
+            <button id="operations-tab-all" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "all"} onClick={() => setActiveTab("all")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "all" ? "bg-foreground text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-muted"}`}>전체 대화 <span className="ml-1 opacity-70">{appsState === "loading" || appsState === "error" ? "—" : chats.length}</span></button>
+            <button id="operations-tab-intervention" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "intervention"} onClick={() => setActiveTab("intervention")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "intervention" ? "bg-error text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-error-soft"}`}>사람 확인 필요 <span className="ml-1 opacity-70">{handoffsState === "loading" || handoffsState === "error" ? "—" : handoffApplicantIds.length}</span></button>
+            <button id="operations-tab-confirm" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "confirm"} onClick={() => setActiveTab("confirm")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "confirm" ? "bg-success-strong text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-success-soft"}`}>확정 검토 <span className="ml-1 opacity-70">{confirmState === "loading" || confirmState === "error" ? "—" : confirmPending.length}</span></button>
+            <button id="operations-tab-inbox" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "inbox"} onClick={() => setActiveTab("inbox")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "inbox" ? "bg-brand-yellow text-foreground" : "border border-border-strong bg-card text-gray-700 hover:bg-yellow-50"}`}>분류 필요 <span className="ml-1 opacity-70">{inboxCount}</span></button>
+          </div>
+        </div>
+      </div>
+
+      {activeTab === "inbox" ? (
+        <div id="operations-panel" role="tabpanel" aria-labelledby="operations-tab-inbox" className="flex min-h-0 flex-1">
+          <Inbox embedded onOpenApplicant={openApplicantFromInbox} onQueueChanged={() => { void mutateOperationsNotices(); }} />
+        </div>
+      ) : (
+      <div id="operations-panel" role="tabpanel" aria-labelledby={`operations-tab-${activeTab}`} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card lg:flex-row">
       {/* Left Sidebar */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[320px] lg:border-b-0 lg:border-r">
         {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
@@ -746,28 +879,31 @@ export function LiveConsole() {
             </span>
           </div>
         )}
+        {appsState === "error" && (
+          <QueueErrorState label="지원자 대화 목록" onRetry={() => void mutateApps()} />
+        )}
         <div className="p-5 border-b border-border-strong bg-card flex flex-col gap-3">
           {/* 배경 갱신 표시 — 데이터가 있는데 새로 불러오는 중이면 '갱신 중'(전체 스켈레톤 대신 비침투적 힌트). */}
           {appsValidating && !loadingList && chats.length > 0 && (
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground">
               <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> 최신 데이터로 갱신 중…
             </div>
           )}
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
-          </div>
-          {/* 탭 라벨이 길어져(사람 확인 필요) 320px 사이드바에서 한 줄에 안 들어갈 수 있어 wrap 허용 */}
-          <div className="flex gap-1.5 flex-wrap">
-            <button aria-selected={activeTab === "all"} role="tab" onClick={() => setActiveTab("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "all" ? "bg-foreground text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>전체 <span className="opacity-60 ml-1">{chats.length}</span></button>
-            <button aria-selected={activeTab === "intervention"} role="tab" onClick={() => setActiveTab("intervention")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "intervention" ? "bg-error text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>사람 확인 필요 <span className="opacity-60 ml-1">{handoffs.length}</span></button>
-            <button aria-selected={activeTab === "confirm"} role="tab" onClick={() => setActiveTab("confirm")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all ${activeTab === "confirm" ? "bg-success-strong text-white" : "bg-card border border-border-strong text-muted-foreground"}`}>확정 대기 <span className="opacity-60 ml-1">{confirmPending.length}</span></button>
-          </div>
+          {activeTab === "all" && (
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" aria-label="대화 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
+            </div>
+          )}
           {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(내가 답할 차례→AI→상대 답 기다림)로 대체(간소화).
               '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
               사람 확인 필요 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
           {activeTab === "all" ? (
-            unansweredCount > 0 ? (
+            appsState === "loading" ? (
+              <div className="text-[12px] font-semibold text-muted-foreground">답할 대화를 확인하는 중…</div>
+            ) : appsState === "error" ? (
+              <div className="text-[12px] font-semibold text-error-strong">답할 대화 수를 확인할 수 없어요</div>
+            ) : unansweredCount > 0 ? (
               <div className="text-[12px] font-bold text-error flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-error" />
                 지금 답할 대화 {unansweredCount}건 — 목록 맨 위에 있어요
@@ -775,7 +911,7 @@ export function LiveConsole() {
             ) : (
               <div className="text-[12px] font-semibold text-success">답할 대화 없음 — 모두 응대했어요 👍</div>
             )
-          ) : activeTab === "intervention" ? (
+          ) : activeTab === "intervention" && handoffsState === "ready" ? (
             <div className="flex gap-1 flex-wrap">
               {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
                   한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
@@ -802,7 +938,10 @@ export function LiveConsole() {
         {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
-            {handoffGroups.length === 0 && <div className="text-[13px] text-muted-foreground p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
+            {handoffsState === "loading" && <QueueLoadingState label="사람 확인 필요 목록" />}
+            {handoffsState === "error" && <QueueErrorState label="사람 확인 필요 목록" onRetry={() => void mutateHandoffs()} />}
+            {handoffsState === "empty" && <div className="text-[13px] text-muted-foreground p-4 text-center">사람이 확인할 대화가 없어요. AI가 답하기 어려운 대화가 생기면 여기로 넘어옵니다.</div>}
+            {handoffsState === "ready" && handoffGroups.length === 0 && <div className="text-[13px] text-muted-foreground p-4 text-center">선택한 사유에 해당하는 대화가 없어요.</div>}
             {handoffGroups.map((items) => {
               const head = items[0];
               const multi = items.length > 1;
@@ -826,7 +965,7 @@ export function LiveConsole() {
                       <span className="truncate text-[14px] font-bold text-foreground">{head.applicant_name}</span>
                       {multi && (
                         <span
-                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-error-soft text-error-strong"
+                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[12px] font-bold bg-error-soft text-error-strong"
                           title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
                           공고 {items.length}건
@@ -856,20 +995,20 @@ export function LiveConsole() {
                       >
                         <button onClick={() => selectHandoff(h)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[12px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
                             {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
                             {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
                                 공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
-                            <span className="text-[11px] font-bold text-gray-700 truncate" title={h.job_title}>
+                            <span className="text-[12px] font-bold text-gray-700 truncate" title={h.job_title}>
                               {h.is_system_job ? h.job_title : (h.branch && h.branch.trim()) || h.job_title}
                             </span>
-                            {multi && <span className={`shrink-0 text-[11px] font-bold ${ageStyle(h.age_days)}`}>{h.age_days === 0 ? "오늘" : `${h.age_days}일`}</span>}
+                            {multi && <span className={`shrink-0 text-[12px] font-bold ${ageStyle(h.age_days)}`}>{h.age_days === 0 ? "오늘" : `${h.age_days}일`}</span>}
                           </div>
                           {h.reason && <div className="text-[12px] text-gray-700 line-clamp-2 leading-snug">{h.reason}</div>}
                         </button>
                         <div className="flex items-start justify-between gap-2 px-2.5 pb-2 pt-0.5">
                           {/* AI가 적어둔 '다음 행동'이 말줄임 뒤에 숨지 않게 두 줄까지 편다 */}
-                          <span className="text-[11px] font-bold text-muted-foreground line-clamp-2 leading-snug">→ {h.suggested_action}</span>
+                          <span className="text-[12px] font-bold text-muted-foreground line-clamp-2 leading-snug">→ {h.suggested_action}</span>
                           <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                             {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
                             {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
@@ -892,19 +1031,21 @@ export function LiveConsole() {
           </div>
         ) : activeTab === "confirm" ? (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
-            {confirmPending.length === 0 && <div className="text-[13px] text-muted-foreground p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
+            {confirmState === "loading" && <QueueLoadingState label="확정 검토 목록" />}
+            {confirmState === "error" && <QueueErrorState label="확정 검토 목록" onRetry={() => void mutateConfirm()} />}
+            {confirmState === "empty" && <div className="text-[13px] text-muted-foreground p-4 text-center">확정 대기 중인 지원자가 없어요</div>}
             {confirmPending.map((p) => {
               const selected = selectedChatId === p.applicant_id;
               return (
                 <div key={p.applicant_id} className={`rounded-2xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
                   <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
-                      {p.baemin_id && <span className="text-[11px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
+                      <span className="px-2 py-0.5 rounded-full text-[12px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
+                      {p.baemin_id && <span className="text-[12px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
                     </div>
                     <div className="text-[14px] font-bold text-foreground mb-0.5 flex items-center gap-1.5">
                       {p.name}
-                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
+                      {p.branch && <span className="px-1.5 py-0.5 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{p.branch}</span>}
                     </div>
                     <div className="text-[12px] text-gray-700 leading-snug line-clamp-2">
                       {p.job_title ?? "공고 미지정"}{p.pickup_address ? ` · ${p.pickup_address}` : ""}
@@ -914,7 +1055,7 @@ export function LiveConsole() {
                       확정 후 콘텐츠라 여기서 보내면 지원자에게 확정 통보로 읽힌다. 그래서 발송 버튼을 두지 않고
                       '확정'만 남긴다. 확정하면 이 큐에서 빠지고, 후속 안내는 지원자 상세의 '확정 후속 안내'에서 보낸다. */}
                   <div className="flex items-center justify-end gap-1.5 px-3.5 pb-2.5 pt-0.5 flex-wrap">
-                    <span className="mr-auto text-[11px] text-muted-foreground">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
+                    <span className="mr-auto text-[12px] text-muted-foreground">확정하면 만남장소·첫날 안내를 보낼 수 있어요</span>
                     <Button size="chip" variant="primary" onClick={() => openConfirmFor(p)} title="확정 — 대상 공고·시작일·지점을 확인하고 확정합니다" className="px-2.5 bg-success-strong hover:bg-success-strong text-white shadow-none focus-visible:ring-success-strong">확정</Button>
                   </div>
                 </div>
@@ -940,7 +1081,7 @@ export function LiveConsole() {
               ))}
             </>
           )}
-          {!loadingList && visibleChats.length === 0 && (
+          {(appsState === "empty" || appsState === "ready") && visibleChats.length === 0 && (
             <div className="text-[13px] text-muted-foreground p-4 text-center">
               {search.trim()
                 ? "검색 결과가 없어요 — 이름·전화번호를 확인해주세요"
@@ -970,7 +1111,7 @@ export function LiveConsole() {
                       <div className="text-[14px] font-bold text-foreground">{chat.name}</div>
                     </div>
                   </div>
-                  <div className={`text-[11px] font-semibold ${intervention ? "text-error" : "text-muted-foreground"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
+                  <div className={`text-[12px] font-semibold ${intervention ? "text-error" : "text-muted-foreground"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
                 </div>
                 {pv?.body ? (
                   <div className="text-[13px] line-clamp-1 mb-2">
@@ -982,10 +1123,10 @@ export function LiveConsole() {
                 )}
                 {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-full text-[11px] font-bold shrink-0 ${turn.cls}`}>
+                  <span className={`px-2 py-1 rounded-full text-[12px] font-bold shrink-0 ${turn.cls}`}>
                     {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
                   </span>
-                  {metaLine && <span className="text-[11px] text-muted-foreground truncate">{metaLine}</span>}
+                  {metaLine && <span className="text-[12px] text-muted-foreground truncate">{metaLine}</span>}
                 </div>
               </button>
             );
@@ -1000,10 +1141,10 @@ export function LiveConsole() {
           <div className="min-h-[60px] shrink-0 bg-card border-b border-border-strong px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-lg font-bold text-foreground">{activeChat.name} <span className="text-[16px] text-muted-foreground">지원자</span></div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {activeChat.source && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
-              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
-              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-full text-[11px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info-strong"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
-              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-yellow-50 text-warning-strong border border-yellow-200">{activeChat.status}</span>
+              {activeChat.source && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
+              {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
+              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-full text-[12px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info-strong"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
+              <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-yellow-50 text-warning-strong border border-yellow-200">{activeChat.status}</span>
             </div>
           </div>
 
@@ -1011,7 +1152,7 @@ export function LiveConsole() {
               공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
           {activeJobs.length > 1 && (
             <div className="shrink-0 bg-card border-b border-border-strong px-6 py-2 flex items-center gap-2 overflow-x-auto">
-              <span className="text-[11px] font-bold text-muted-foreground shrink-0">
+              <span className="text-[12px] font-bold text-muted-foreground shrink-0">
                 붙어 있는 공고 {activeJobs.length}건 · 탭 전환
                 {activeJobs.some((j) => j.agent_stage == null) && (
                   <span className="ml-1 font-medium">(관심만 누른 자리 포함)</span>
@@ -1041,7 +1182,7 @@ export function LiveConsole() {
                   >
                     {label}
                     <span
-                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                      className={`text-[12px] font-bold px-1.5 py-0.5 rounded-full ${
                         interestOnly
                           ? selected ? "bg-yellow-700 text-white" : "bg-yellow-50 text-warning-strong"
                           : paused
@@ -1082,19 +1223,21 @@ export function LiveConsole() {
             <div className="text-sm font-bold text-muted-foreground mb-4">지금 응대 현황</div>
             <div className="grid grid-cols-3 gap-2 mb-4">
               <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
-                <div className="text-[11px] font-bold text-muted-foreground">지금 답할 차례</div>
-                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{unansweredCount}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">건</span></div>
+                <div className="text-[12px] font-bold text-muted-foreground">지금 답할 차례</div>
+                <QueueMetric state={appsState} value={unansweredCount} unit="건" />
               </div>
               <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
-                <div className="text-[11px] font-bold text-muted-foreground">사람 확인 필요</div>
-                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{handoffGroups.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
+                <div className="text-[12px] font-bold text-muted-foreground">사람 확인 필요</div>
+                <QueueMetric state={handoffsState} value={handoffGroups.length} unit="명" />
               </div>
               <div className="rounded-2xl border border-border-strong bg-card px-3 py-3">
-                <div className="text-[11px] font-bold text-muted-foreground">확정 대기</div>
-                <div className="text-[20px] font-extrabold text-foreground leading-tight mt-0.5">{confirmPending.length}<span className="text-[12px] font-bold text-muted-foreground ml-0.5">명</span></div>
+                <div className="text-[12px] font-bold text-muted-foreground">확정 대기</div>
+                <QueueMetric state={confirmState} value={confirmPending.length} unit="명" />
               </div>
             </div>
             {(() => {
+              if (appsState === "loading") return <div className="text-[13px] text-muted-foreground">답을 기다리는 대화를 확인하는 중…</div>;
+              if (appsState === "error") return <div className="text-[13px] text-error-strong">답을 기다리는 대화를 확인할 수 없어요.</div>;
               // 가장 오래 기다린 미답 대화 — 명단은 이미 손안에 있다(visibleChats + previewById).
               const waiting = chats
                 .filter((c) => previewById[c.id]?.direction === "inbound")
@@ -1121,7 +1264,36 @@ export function LiveConsole() {
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
       {activeChat && (
-        <div className="w-[340px] shrink-0 bg-card border-l border-border-strong flex flex-col">
+        <>
+        {!canDockDetail && (
+          <button
+            type="button"
+            aria-label="지원자 상세 닫기"
+            onClick={() => setSelectedChatId(null)}
+            className="fixed inset-0 z-40 bg-scrim"
+          />
+        )}
+        <div
+          ref={detailPanelRef}
+          role={canDockDetail ? "complementary" : "dialog"}
+          aria-modal={canDockDetail ? undefined : true}
+          aria-label={`${activeChat.name} 지원자 상세`}
+          tabIndex={-1}
+          onKeyDown={handleDetailPanelKeyDown}
+          className={canDockDetail
+            ? "relative flex w-[340px] shrink-0 flex-col border-l border-border-strong bg-card"
+            : "fixed inset-y-4 right-4 z-50 flex w-[340px] max-w-[calc(100vw-2rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-border-strong bg-card shadow-xl"}
+        >
+          {!canDockDetail && (
+            <button
+              type="button"
+              aria-label="지원자 상세 닫기"
+              onClick={() => setSelectedChatId(null)}
+              className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong bg-card text-muted-foreground shadow-sm outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X size={17} />
+            </button>
+          )}
           {/* key에 selectedJobId를 넣지 않는다 — 그 값은 /active-jobs 응답이 온 뒤 비동기로 채워져
               패널을 한 번 더 리마운트시킨다. 큐에서 확정 모달을 열었을 때 그 리마운트가 모달 state를
               날려 '버튼이 씹힌 것처럼' 보이던 경합의 원인이었다. jobId는 prop으로 반응적으로 읽힌다. */}
@@ -1135,6 +1307,7 @@ export function LiveConsole() {
             onAutoOpenConfirmConsumed={() => setConfirmSignal(null)}
           />
         </div>
+        </>
       )}
 
         {/* 처리 완료 모달 — 결과 3택 + 한 줄 메모. 통화 결과가 타임라인(pool_events)에 남아
@@ -1215,7 +1388,7 @@ export function LiveConsole() {
                 placeholder={promoteLoading ? "불러오는 중…" : promoteField === "pay_info" ? "예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" : "예: 프리랜서(3.3%) 계약, 4대보험 미적용 · 본인 명의 정산"}
                 className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
               />
-              <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
+              <div className="text-[12px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 공고에 넣을 표준 문구로 다듬어 저장하세요.</div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
               <Button size="chip" variant="ghost" className="px-4 py-2 text-[14px] rounded-lg" onClick={() => setPromote(null)} disabled={promoteSaving}>취소</Button>
@@ -1261,7 +1434,7 @@ export function LiveConsole() {
                   className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none disabled:bg-background"
                 />
               </div>
-              <div className="text-[11px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
+              <div className="text-[12px] text-muted-foreground">매니저가 직접 보낸 마지막 답변을 미리 채웠어요. 표준 문구로 다듬어 저장하세요.</div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-strong">
               <Button size="chip" variant="ghost" className="px-4 py-2 text-[14px] rounded-lg" onClick={() => setKb(null)} disabled={kbSaving}>취소</Button>
@@ -1270,6 +1443,8 @@ export function LiveConsole() {
         </Modal>
       )}
 
+      </div>
+      )}
     </div>
   );
 }

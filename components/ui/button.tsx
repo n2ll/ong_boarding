@@ -83,8 +83,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { className, variant, size, asChild = false, isLoading = false, disabled, children, ...props },
   ref,
 ) {
-  const Comp = asChild ? Slot : "button";
-
   if (process.env.NODE_ENV !== "production" && size === "icon") {
     if (!props["aria-label"] && !props.title) {
       // eslint-disable-next-line no-console
@@ -95,20 +93,36 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     }
   }
 
+  const resolvedClassName = cn(buttonVariants({ variant, size, className }));
+
+  if (asChild) {
+    return (
+      <Slot
+        ref={ref}
+        data-slot="button"
+        className={resolvedClassName}
+        aria-busy={isLoading || undefined}
+        {...props}
+      >
+        {children}
+      </Slot>
+    );
+  }
+
   return (
-    <Comp
+    <button
       ref={ref}
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
-      disabled={asChild ? undefined : isLoading || disabled}
+      className={resolvedClassName}
+      disabled={isLoading || disabled}
       aria-busy={isLoading || undefined}
       {...props}
     >
-      {isLoading && !asChild && (
+      {isLoading && (
         <Loader2 aria-hidden="true" className="size-4 animate-spin" />
       )}
       {children}
-    </Comp>
+    </button>
   );
 });
 

@@ -7,6 +7,7 @@ import {
   CandidateForScoring,
   ScoredCandidate,
 } from "@/lib/scoring";
+import { recommendationExcludedStatusFilter } from "@/lib/recommendation-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -89,11 +90,11 @@ export async function POST(req: NextRequest) {
     // 3) 후보 풀: applicants(활성) + legacy_applicants
     const supabase = createServiceClient();
 
-    // applicants(B마트) 중 status가 '확정'/'부적합'이 아니면 모두 풀에 포함
+    // 사람 단위로 인력풀에서 빠진 상태만 제외한다. 확정인력도 멀티잡 후보로 재활용할 수 있다.
     let activeQuery = supabase
       .from("applicants")
       .select("id, name, phone, lat, lng, own_vehicle, created_at, sigungu, location, status, birth_date, airtable_record_id, airtable_raw, last_message_at")
-      .not("status", "in", "(확정,부적합)")
+      .not("status", "in", recommendationExcludedStatusFilter())
       .not("lat", "is", null);
     if (body.sourceFilter) {
       activeQuery = activeQuery.eq("source", body.sourceFilter);

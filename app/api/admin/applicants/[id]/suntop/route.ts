@@ -15,8 +15,9 @@ import { createServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   if (!Number.isFinite(id)) return NextResponse.json({ error: "invalid id" }, { status: 400 });
 
   let body: { stage?: string; client?: string; line?: string; note?: string; scheduled_at?: string } = {};
@@ -52,8 +53,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ ok: true, stage, event: data });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   const eventId = Number(req.nextUrl.searchParams.get("event_id"));
   if (!Number.isFinite(id) || !Number.isFinite(eventId)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });

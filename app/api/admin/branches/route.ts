@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { branchCreateValues } from "@/lib/admin/branch-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      name?: string;
-      sort_order?: number;
-      active?: boolean;
-      client_id?: number | null;
-    };
-    const name = (body.name || "").trim();
+    const body = (await req.json()) as Record<string, unknown>;
+    const values = branchCreateValues(body);
+    const name = values.name;
     if (!name) {
       return NextResponse.json(
         { error: "지점 이름을 입력해주세요." },
@@ -41,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServiceClient();
 
-    let sort_order = body.sort_order;
+    let sort_order = typeof body.sort_order === "number" ? body.sort_order : undefined;
     if (typeof sort_order !== "number") {
       const { data: maxRow } = await supabase
         .from("branches")
@@ -55,12 +52,10 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase
       .from("branches")
       .insert({
-        name,
+        ...values,
         sort_order,
-        active: body.active ?? true,
-        client_id: typeof body.client_id === "number" ? body.client_id : null,
       })
-      .select("id, name, sort_order, active, client_id")
+      .select("id, name, sort_order, active, client_id, slot_capacity, ai_facts")
       .single();
 
     if (error) {

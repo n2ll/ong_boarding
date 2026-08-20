@@ -31,6 +31,7 @@ import { screeningStage } from "./stages/screening";
 import { activeStage } from "./stages/active";
 import { recordUsage, toMessageTokens, type UsagePurpose } from "./usage";
 import { getAgentMode, COPILOT_DRAFT_MARKER, type AgentMode } from "./kill-switch";
+import { detectAutomatedOutboundSafetyViolation } from "./outbound-safety";
 import type {
   AgentState,
   ApplicantContext,
@@ -82,25 +83,6 @@ export interface RunAgentResult {
   auto_sent_messages?: number;
   reasoning?: string;
   error?: string;
-}
-
-// 확정 뉘앙스 금지 — 발송 직전 결정적 백스톱. AI 응답에 근무 확정/배정/출근 지시성 문구가
-// 있으면 발송하지 않고 pause로 전환해 매니저 검토 큐로 넘긴다. (프롬프트 규칙의 코드 가드)
-// 고정밀 패턴만 — "확정은 매니저가", "확정되면", "시작일" 등 정상 설명 문구는 걸리지 않도록.
-const CONFIRMATION_NUANCE_PATTERNS: RegExp[] = [
-  /근무\s*(?:가|이|를)?\s*확정/,               // 근무 확정
-  /확정\s*(?:됐|되었|되셨|완료)/,               // 확정됐습니다 (조건형 '확정되면'은 제외)
-  /배정\s*(?:이|을|가)?\s*(?:완료|됐|되었|드렸|해\s*드)/, // 배정 완료/됐어요
-  /(?:내일|모레|다음\s*주|이번\s*주)\s*부터\s*(?:출근|근무|나오)/, // 내일부터 출근
-  /(?:근무|출근)\s*시작\s*(?:하시면|하세요|합니다)/,  // 근무 시작하시면 됩니다 ('시작일'은 제외)
-  /합격\s*(?:하셨|입니다|이에요|이십니다)/,     // 합격하셨습니다
-];
-function detectConfirmationNuance(text: string): string | null {
-  for (const re of CONFIRMATION_NUANCE_PATTERNS) {
-    const m = re.exec(text);
-    if (m) return m[0];
-  }
-  return null;
 }
 
 // 전이 판단을 사람이 읽을 한 줄 라벨로 — auto_sent reasoning 보관과 코파일럿 초안 요약에 공용.
@@ -416,16 +398,17 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     result.transition = crossHit.transition;
   }
 
-  // 확정 뉘앙스 금지 결정적 가드 — AI가 확정/배정/출근 지시 문구를 만들면 발송하지 않고
-  // pause로 전환(매니저 인계 큐 + Slack). stay/advance 무관하게 우선 적용.
-  // draft 모드에서도 동일 검사 — 걸리면 초안을 need_info로 강등해 매니저 수정을 유도한다.
-  const nuanceHit = result.reply_text ? detectConfirmationNuance(result.reply_text) : null;
-  if (nuanceHit) {
-    console.warn(`[router] 확정 뉘앙스 감지 → 발송 보류 + pause: "${nuanceHit}"`);
+  // 자동 발송 안전 결정적 가드 — 확정·배정·출근 지시뿐 아니라 신분증 이미지 문자 요청과
+  // 확정 전 필수 앱·교육 요구도 막는다. draft도 need_info로 내려 매니저가 검토하게 한다.
+  const safetyHit = result.reply_text
+    ? detectAutomatedOutboundSafetyViolation(result.reply_text)
+    : null;
+  if (safetyHit) {
+    console.warn(`[router] 자동 발송 안전 위반 감지 → 발송 보류 + pause: ${safetyHit.kind} "${safetyHit.match}"`);
     result.transition = {
       kind: "pause",
-      reason: `확정 뉘앙스 문구 감지("${nuanceHit}") — 발송 보류, 매니저 확인 필요`,
-      suggestedAction: "AI가 확정/배정/출근 지시 뉘앙스 문구를 생성해 자동 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
+      reason: `자동 발송 안전 위반(${safetyHit.kind}: "${safetyHit.match}") — 발송 보류, 매니저 확인 필요`,
+      suggestedAction: "자동 응답이 확정 전 안내 또는 개인정보 안전 규칙을 위반해 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
     };
   }
 
@@ -458,13 +441,13 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             inbound_message_id,
             draft_text: result.reply_text,
             reasoning: `${headerParts.join(" ")}\n${result.reasoning ?? ""}`,
-            // 확정 뉘앙스가 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
-            missing_info: nuanceHit
-              ? `확정 뉘앙스 문구 감지("${nuanceHit}") — 확정은 매니저가 합니다. 내용 수정 후 발송하세요.`
+            // 안전 가드에 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
+            missing_info: safetyHit
+              ? `자동 발송 안전 위반(${safetyHit.kind}: "${safetyHit.match}") — 내용 수정 후 발송하세요.`
               : crossHit
                 ? `다른 공고 응대 백스톱(${crossHit.why}) — ${crossHit.transition.kind === "pause" ? crossHit.transition.reason : "현재 공고 진행 보류"}`
                 : null,
-            status: nuanceHit || crossHit ? "need_info" : "pending",
+            status: safetyHit || crossHit ? "need_info" : "pending",
           });
           if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
           else draftCreated = true;

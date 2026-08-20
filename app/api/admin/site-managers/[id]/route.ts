@@ -18,10 +18,11 @@ interface PatchBody {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = Number(params.id);
+    const routeParams = await params;
+    const id = Number(routeParams.id);
     if (!Number.isFinite(id)) {
       return NextResponse.json({ error: "잘못된 id" }, { status: 400 });
     }
@@ -86,10 +87,11 @@ export async function PATCH(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = Number(params.id);
+    const routeParams = await params;
+    const id = Number(routeParams.id);
     if (!Number.isFinite(id)) {
       return NextResponse.json({ error: "잘못된 id" }, { status: 400 });
     }

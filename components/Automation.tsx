@@ -1,17 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import useSWR from "swr";
-import { CheckCircle2, Users, Briefcase, Activity, Play, Power, Inbox } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Users, Briefcase, Activity, Play, Power, Inbox, RotateCw } from "lucide-react";
 import { toast } from "sonner";
-
-interface AutoStats {
-  aiDisabled: boolean;
-  screening: number;
-  confirmed: number;
-  waiting: number;
-  inbox: number;
-  activeJobs: number;
-  loading: boolean;
-}
+import { automationOverview, type AutomationAiMetric, type AutomationMetric } from "@/lib/admin/automation-view";
+import { saveAutomationConfig } from "@/lib/admin/automation-config-action";
 
 interface RuleDef {
   id: string;
@@ -31,47 +24,76 @@ interface RuleResult {
   detail: string;
 }
 
+function metricValue(metric: AutomationMetric | AutomationAiMetric, suffix = "") {
+  if (metric.state === "loading") return "확인 중";
+  if (metric.state === "error") return "확인 실패";
+  return typeof metric.value === "number" ? `${metric.value}${suffix}` : metric.value;
+}
+
 export function Automation() {
   // 자동 점검 규칙 (실동작) — 정의는 SWR로, 설정은 로컬에서 편집/저장하므로 첫 로드 시 시드.
-  const { data: rulesApi } = useSWR<{ rules?: RuleDef[]; config?: Record<string, RuleConfig> }>("/api/admin/automation/rules");
+  const {
+    data: rulesApi,
+    error: rulesError,
+    isLoading: rulesLoading,
+    isValidating: rulesValidating,
+    mutate: mutateRules,
+  } = useSWR<{ rules?: RuleDef[]; config?: Record<string, RuleConfig> }>("/api/admin/automation/rules", { revalidateOnFocus: false });
   const ruleDefs = useMemo(() => rulesApi?.rules ?? [], [rulesApi]);
   const [ruleConfig, setRuleConfig] = useState<Record<string, RuleConfig>>({});
+  const [persistedRuleConfig, setPersistedRuleConfig] = useState<Record<string, RuleConfig>>({});
   const [ruleResults, setRuleResults] = useState<Record<string, RuleResult>>({});
   const [ruleRunning, setRuleRunning] = useState(false);
   const [ruleRanAt, setRuleRanAt] = useState<string | null>(null);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configSaveState, setConfigSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
-    if (rulesApi?.config) setRuleConfig(rulesApi.config);
+    if (rulesApi?.config) {
+      setRuleConfig(rulesApi.config);
+      setPersistedRuleConfig(rulesApi.config);
+    }
   }, [rulesApi]);
 
   const persistConfig = async (next: Record<string, RuleConfig>) => {
-    try {
-      await fetch("/api/admin/automation/rules", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: next }),
-      });
-    } catch {
-      toast.error("규칙 저장에 실패했어요");
+    setConfigSaving(true);
+    setConfigSaveState("saving");
+    const result = await saveAutomationConfig(next);
+    setConfigSaving(false);
+    if (!result.ok) {
+      setConfigSaveState("error");
+      toast.error(result.error);
+      return false;
     }
+    setRuleConfig(result.config);
+    setPersistedRuleConfig(result.config);
+    setConfigSaveState("saved");
+    return true;
   };
 
-  const toggleRule = (id: string) => {
+  const toggleRule = async (id: string) => {
+    if (configSaving) return;
+    const previous = ruleConfig;
     const next = { ...ruleConfig, [id]: { ...ruleConfig[id], enabled: !ruleConfig[id]?.enabled } };
     setRuleConfig(next);
-    persistConfig(next);
+    if (!(await persistConfig(next))) setRuleConfig(previous);
   };
 
   const setThreshold = (id: string, value: number) => {
     const next = { ...ruleConfig, [id]: { ...ruleConfig[id], threshold: Math.max(0, value) } };
     setRuleConfig(next);
+    setConfigSaveState("idle");
+  };
+
+  const saveThreshold = async () => {
+    if (!(await persistConfig(ruleConfig))) setRuleConfig(persistedRuleConfig);
   };
 
   const runEvaluate = async () => {
     if (ruleRunning) return;
     setRuleRunning(true);
     try {
-      await persistConfig(ruleConfig); // 최신 임계값 반영 후 평가
+      if (!(await persistConfig(ruleConfig))) return; // 최신 임계값 저장 실패 시 이전 기준으로 점검하지 않는다.
       const res = await fetch("/api/admin/automation/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,80 +124,179 @@ export function Automation() {
   // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
   // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
   // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
-  const { data: appsRes, isLoading: appsLoading } = useSWR<{ data?: { status: string }[] }>("/api/admin/applicants?scope=rollup");
-  const { data: killRes } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
-  const { data: inboxRes } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending");
-  const { data: activeJobsRes } = useSWR<{ jobs?: { title: string }[] }>("/api/admin/jobs?status=active");
-  const stats = useMemo<AutoStats>(() => {
-    const apps = appsRes?.data ?? [];
-    const by = (s: string) => apps.filter((a) => a.status === s).length;
-    return {
-      aiDisabled: !!killRes?.disabled || !!killRes?.env_forced,
-      screening: by("스크리닝 중"),
-      confirmed: by("확정인력"),
-      waiting: by("대기자"),
-      inbox: (inboxRes?.data ?? []).length,
-      activeJobs: (activeJobsRes?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")).length,
-      loading: appsLoading && (appsRes?.data?.length ?? 0) === 0,
-    };
-  }, [appsRes, killRes, inboxRes, activeJobsRes, appsLoading]);
+  const {
+    data: appsRes,
+    error: appsError,
+    isValidating: appsValidating,
+    mutate: mutateApps,
+  } = useSWR<{ data?: { status: string }[] }>("/api/admin/applicants?scope=rollup", { refreshInterval: 60_000 });
+  const {
+    data: killRes,
+    error: killError,
+    isValidating: killValidating,
+    mutate: mutateKill,
+  } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
+  const {
+    data: inboxRes,
+    error: inboxError,
+    isValidating: inboxValidating,
+    mutate: mutateInbox,
+  } = useSWR<{ data?: unknown[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
+  const {
+    data: activeJobsRes,
+    error: activeJobsError,
+    isValidating: activeJobsValidating,
+    mutate: mutateActiveJobs,
+  } = useSWR<{ jobs?: { title: string }[] }>("/api/admin/jobs?status=active", { refreshInterval: 60_000 });
+  const stats = useMemo(() => automationOverview({
+    applicants: appsRes?.data,
+    applicantsError: Boolean(appsError),
+    killSwitch: killRes,
+    killSwitchError: Boolean(killError),
+    inbox: inboxRes?.data,
+    inboxError: Boolean(inboxError),
+    activeJobs: activeJobsRes?.jobs,
+    activeJobsError: Boolean(activeJobsError),
+  }), [appsRes, appsError, killRes, killError, inboxRes, inboxError, activeJobsRes, activeJobsError]);
+
+  const hasOverviewError = Object.values(stats).some((metric) => metric.state === "error");
+  const overviewRefreshing = appsValidating || killValidating || inboxValidating || activeJobsValidating;
+  const refreshOverview = () => {
+    void Promise.all([mutateApps(), mutateKill(), mutateInbox(), mutateActiveJobs()]);
+  };
 
   const kpis = [
     {
       label: "AI 자동응답",
-      value: stats.loading ? "…" : stats.aiDisabled ? "중단됨" : "작동 중",
+      value: metricValue(stats.ai),
       icon: Power,
-      tone: stats.aiDisabled ? "text-error" : "text-success",
-      live: !stats.aiDisabled,
+      tone: stats.ai.state === "error" || stats.ai.disabled ? "text-error" : stats.ai.state === "ready" ? "text-success" : "text-muted-foreground",
+      live: stats.ai.state === "ready" && stats.ai.disabled === false,
+      href: "/brain",
+      action: "에이전트 설정",
     },
-    { label: "스크리닝 진행 중", value: stats.loading ? "…" : `${stats.screening}명`, icon: Activity, tone: "text-warning-strong" },
-    { label: "확정 인력", value: stats.loading ? "…" : `${stats.confirmed}명`, icon: CheckCircle2, tone: "text-info" },
-    { label: "대기자", value: stats.loading ? "…" : `${stats.waiting}명`, icon: Users, tone: "text-muted-foreground" },
-    { label: "분류 대기 문자함", value: stats.loading ? "…" : `${stats.inbox}건`, icon: Inbox, tone: stats.inbox > 0 ? "text-error" : "text-muted-foreground" },
-    { label: "진행 중 공고", value: stats.loading ? "…" : `${stats.activeJobs}건`, icon: Briefcase, tone: "text-foreground" },
+    { label: "스크리닝 진행 중", value: metricValue(stats.screening, "명"), icon: Activity, tone: stats.screening.state === "error" ? "text-error" : "text-warning-strong", href: "/live", action: "라이브 보기" },
+    { label: "확정 인력", value: metricValue(stats.confirmed, "명"), icon: CheckCircle2, tone: stats.confirmed.state === "error" ? "text-error" : "text-info", href: "/pipeline?status=확정인력", action: "인력풀 보기" },
+    { label: "대기자", value: metricValue(stats.waiting, "명"), icon: Users, tone: stats.waiting.state === "error" ? "text-error" : "text-muted-foreground", href: "/pipeline?status=대기자", action: "대기자 보기" },
+    { label: "분류 필요한 문자", value: metricValue(stats.inbox, "건"), icon: Inbox, tone: stats.inbox.state === "error" || (stats.inbox.value ?? 0) > 0 ? "text-error" : "text-muted-foreground", href: "/live?tab=inbox", action: "문자 분류" },
+    { label: "진행 중 공고", value: metricValue(stats.activeJobs, "건"), icon: Briefcase, tone: stats.activeJobs.state === "error" ? "text-error" : "text-foreground", href: "/jobs", action: "공고 운영" },
   ];
 
   return (
     // 워크벤치 명문화: bg-background 바닥 위에 밴드가 bg-card 표면으로 놓인다.
-    <div className="flex flex-col h-full min-h-0 bg-background">
-      {/* 실시간 자동화 현황 (실데이터) */}
+    <div className="flex min-h-full flex-col bg-background">
+      {/* 자동화 운영 현황 (실데이터) */}
       <div className="shrink-0 bg-card border-b border-border-strong px-8 py-4">
-        <div className="flex items-center gap-2 mb-2.5">
-          <span className="text-[12px] font-extrabold tracking-wide text-foreground">실시간 자동화 현황</span>
-          <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full">실시간 집계</span>
+        <div className="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-[13px] font-extrabold tracking-wide text-foreground">자동화 운영 상태</h1>
+              <span className="rounded-full border border-border-strong bg-muted px-2 py-0.5 text-[12px] font-bold text-muted-foreground">60초마다 갱신</span>
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground">상태를 확인하고, 조치가 필요한 업무 화면으로 바로 이동하세요.</p>
+          </div>
+          <button
+            type="button"
+            onClick={refreshOverview}
+            disabled={overviewRefreshing}
+            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-card px-3 text-[12px] font-bold text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+          >
+            <RotateCw size={14} className={overviewRefreshing ? "animate-spin" : ""} />
+            {overviewRefreshing ? "확인 중" : "새로고침"}
+          </button>
         </div>
+        {hasOverviewError && (
+          <div role="alert" className="mb-3 flex items-center gap-2 rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[12px] font-bold text-error-strong">
+            <AlertTriangle size={15} className="shrink-0" />
+            일부 상태를 확인하지 못했습니다. 실패한 항목은 숫자로 표시하지 않습니다.
+          </div>
+        )}
+        {stats.ai.disabled === true && (
+          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
+            <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong">
+              <AlertTriangle size={15} className="shrink-0" />
+              AI 자동응답이 중단되어 있습니다. 지원자 응대가 쌓이기 전에 설정을 확인하세요.
+            </div>
+            <Link href="/brain" className="shrink-0 rounded-lg px-2 py-1.5 text-[12px] font-extrabold text-error-strong outline-none hover:bg-error/10 focus-visible:ring-2 focus-visible:ring-ring">
+              설정 확인
+            </Link>
+          </div>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {kpis.map((k, i) => (
-            <div key={i} className="border border-border-strong rounded-2xl px-3.5 py-2.5 bg-surface-raised">
+          {kpis.map((k) => (
+            <Link
+              key={k.label}
+              href={k.href}
+              aria-label={`${k.label} ${k.value} · ${k.action}`}
+              className="group min-w-0 rounded-2xl border border-border-strong bg-surface-raised px-3.5 py-2.5 outline-none transition-[border-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground mb-1">
                 <k.icon size={13} className={k.tone} /> {k.label}
               </div>
-              <div className={`text-[18px] font-extrabold tracking-tight flex items-center gap-1.5 ${k.tone}`}>
-                {k.value}
+              <div className={`flex items-center gap-1.5 text-[18px] font-extrabold tracking-tight ${k.tone}`}>
+                <span className="truncate">{k.value}</span>
                 {k.live && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
               </div>
-            </div>
+              <div className="mt-1.5 flex items-center gap-1 text-[12px] font-bold text-muted-foreground transition-colors group-hover:text-foreground">
+                {k.action} <ArrowRight size={11} />
+              </div>
+            </Link>
           ))}
         </div>
       </div>
 
       {/* 자동 점검 규칙 (실동작) */}
       <div className="shrink-0 bg-card border-b border-border-strong px-8 py-4">
-        <div className="flex items-center justify-between mb-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</span>
-            <span className="text-[11px] font-bold text-success-strong bg-success-soft border border-success/25 px-1.5 py-0.5 rounded-full" title="점검을 실행하면 실제로 검사하고, 조치 필요 항목은 슬랙으로 알립니다">실제 점검 · 알림</span>
-            {ruleRanAt && <span className="text-[11px] text-muted-foreground">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
+        <div className="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-[13px] font-extrabold tracking-wide text-foreground">자동 점검 규칙</h2>
+              <span className="rounded-full border border-success/25 bg-success-soft px-2 py-0.5 text-[12px] font-bold text-success-strong">실제 데이터 점검</span>
+              {ruleRanAt && <span className="text-[12px] text-muted-foreground">최근 점검: {new Date(ruleRanAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
+              {configSaveState !== "idle" && (
+                <span
+                  role="status"
+                  className={`text-[12px] font-bold ${configSaveState === "error" ? "text-error" : configSaveState === "saved" ? "text-success-strong" : "text-muted-foreground"}`}
+                >
+                  {configSaveState === "saving" ? "설정 저장 중…" : configSaveState === "saved" ? "설정 저장됨" : "설정 저장 실패"}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground">점검에서 조치 필요 항목이 발견되면 Slack 알림을 1회 전송합니다.</p>
           </div>
           <button
             onClick={runEvaluate}
-            disabled={ruleRunning}
+            disabled={ruleRunning || configSaving || rulesLoading || Boolean(rulesError) || ruleDefs.length === 0}
             className="min-h-11 flex items-center gap-1.5 bg-foreground hover:bg-gray-800 text-white px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
             <Play size={13} /> {ruleRunning ? "점검 중…" : "지금 점검 실행"}
           </button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {rulesError && (
+          <div role="alert" className="flex min-h-[112px] items-center justify-between gap-4 rounded-2xl border border-error/30 bg-error-soft px-4 py-3">
+            <div>
+              <div className="flex items-center gap-2 text-[13px] font-extrabold text-error-strong"><AlertTriangle size={15} /> 규칙을 불러오지 못했습니다</div>
+              <p className="mt-1 text-[12px] text-error-strong/80">점검과 설정 변경을 잠시 중단했습니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void mutateRules()}
+              disabled={rulesValidating}
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-error/30 bg-card px-3 text-[12px] font-bold text-error-strong outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <RotateCw size={14} className={rulesValidating ? "animate-spin" : ""} /> 다시 시도
+            </button>
+          </div>
+        )}
+        {rulesLoading && !rulesError && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="자동 점검 규칙 불러오는 중">
+            {[0, 1, 2, 3].map((item) => <div key={item} className="h-[112px] animate-pulse rounded-2xl border border-border bg-muted/60" />)}
+          </div>
+        )}
+        {!rulesLoading && !rulesError && ruleDefs.length === 0 && (
+          <div className="flex min-h-[112px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-background text-[12px] font-bold text-muted-foreground">사용 가능한 점검 규칙이 없습니다.</div>
+        )}
+        {!rulesLoading && !rulesError && ruleDefs.length > 0 && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {ruleDefs.map((rule) => {
             const cfg = ruleConfig[rule.id] ?? { enabled: false };
             const result = ruleResults[rule.id];
@@ -184,11 +305,12 @@ export function Automation() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-bold text-foreground truncate">{rule.label}</div>
-                    <div className="text-[11px] text-muted-foreground leading-tight mt-0.5 line-clamp-2">{rule.desc}</div>
+                    <div className="text-[12px] text-muted-foreground leading-tight mt-0.5 line-clamp-2">{rule.desc}</div>
                   </div>
-                  <button type="button" aria-label={`${rule.label} 규칙 켜기`} aria-checked={cfg.enabled} role="switch"
-                    onClick={() => toggleRule(rule.id)}
-                    className={`after:absolute after:-inset-3 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-success" : "bg-switch-background"}`}
+                  <button type="button" aria-label={`${rule.label} 규칙 ${cfg.enabled ? "끄기" : "켜기"}`} aria-checked={cfg.enabled} aria-busy={configSaving} role="switch"
+                    onClick={() => void toggleRule(rule.id)}
+                    disabled={configSaving}
+                    className={`after:absolute after:-inset-3 after:content-[''] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 w-9 h-5 rounded-full transition-colors relative disabled:cursor-wait disabled:opacity-60 ${cfg.enabled ? "bg-success" : "bg-switch-background"}`}
                     title={cfg.enabled ? "켜짐" : "꺼짐"}
                   >
                     <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${cfg.enabled ? "left-[18px]" : "left-0.5"}`} />
@@ -196,35 +318,35 @@ export function Automation() {
                 </div>
                 <div className="flex items-center justify-between mt-2 gap-2">
                   {rule.hasThreshold ? (
-                    <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                    <label className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground">
                       기준
                       <input
                         type="number"
                         min={0}
                         value={cfg.threshold ?? rule.defaultThreshold ?? 0}
                         onChange={(e) => setThreshold(rule.id, Number(e.target.value))}
-                        onBlur={() => persistConfig(ruleConfig)}
-                        disabled={!cfg.enabled}
-                        className="w-14 border border-border-strong rounded-2xl px-2 py-1 text-[12px] text-foreground outline-none focus:border-info disabled:bg-muted"
+                        onBlur={() => void saveThreshold()}
+                        disabled={!cfg.enabled || configSaving}
+                        className="h-9 w-16 rounded-lg border border-border-strong bg-input-background px-2 text-[12px] text-foreground outline-none focus:border-info focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted"
                       />
                       {rule.unit}
                     </label>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
+                    <span className="text-[12px] text-muted-foreground" title="숫자 기준 없이 조건 충족 여부만 검사하는 규칙">기준값 없음</span>
                   )}
                   {result ? (
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-error-soft text-error-strong border border-error/30" : "bg-success-soft text-success-strong border border-success/25"}`}>
+                    <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${result.triggered ? "bg-error-soft text-error-strong border border-error/30" : "bg-success-soft text-success-strong border border-success/25"}`}>
                       {result.triggered ? "조치 필요" : "정상"}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground font-bold">미점검</span>
+                    <span className="text-[12px] text-muted-foreground font-bold">미점검</span>
                   )}
                 </div>
-                {result && <div className="text-[11px] text-muted-foreground mt-1.5">{result.detail}</div>}
+                {result && <div className="text-[12px] text-muted-foreground mt-1.5">{result.detail}</div>}
               </div>
             );
           })}
-        </div>
+        </div>}
       </div>
     </div>
   );

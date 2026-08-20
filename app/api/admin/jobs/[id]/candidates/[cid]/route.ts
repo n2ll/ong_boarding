@@ -20,9 +20,10 @@ const ALLOWED_STAGES = ["exploration", "screening", "onboarding", "active", "pau
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string; cid: string } }
+  { params }: { params: Promise<{ id: string; cid: string }> }
 ) {
-  const cid = Number(params.cid);
+  const routeParams = await params;
+  const cid = Number(routeParams.cid);
   if (!Number.isFinite(cid)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
@@ -49,9 +50,10 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; cid: string } }
+  { params }: { params: Promise<{ id: string; cid: string }> }
 ) {
-  const cid = Number(params.cid);
+  const routeParams = await params;
+  const cid = Number(routeParams.cid);
   if (!Number.isFinite(cid)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
@@ -104,7 +106,7 @@ export async function PATCH(
         update.closed_reason = "manager: abort";
       }
       // 진행 포인터만 정리 — current_job_id가 이 공고를 가리키고 있었다면 해제.
-      const jobId = Number(params.id);
+      const jobId = Number(routeParams.id);
       if (Number.isFinite(jobId)) {
         await supabase
           .from("applicants")

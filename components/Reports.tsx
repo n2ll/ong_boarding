@@ -1,242 +1,427 @@
-import { useState, useMemo } from "react";
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
-import { PageShell } from "@/components/ui/page-shell";
-import { Button } from "@/components/ui/button";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from "recharts";
-import { Download, TrendingUp, Users, Brain, CheckCircle, Coins } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Brain,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardCheck,
+  Coins,
+  Download,
+  RefreshCw,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
+import { Slottable } from "@radix-ui/react-slot";
 
-interface ApplicantRow {
-  status: string;
-  created_at: string | null;
-  // Airtable 일괄 임포트분 식별용 — 있으면 유입 시점이 임포트 시각이라 시계열을 오염시킨다.
-  airtable_record_id?: string | null;
+import { Button } from "@/components/ui/button";
+import { PageShell } from "@/components/ui/page-shell";
+import {
+  reportOverview,
+  type ReportApplicantRow,
+  type ReportOverview,
+  type ReportRange,
+  type ReportStageKey,
+  type ReportUsageRow,
+} from "@/lib/admin/report-overview";
+
+const RANGES: ReportRange[] = ["이번 주", "이번 달", "올해"];
+
+const STAGE_LABELS: Record<ReportStageKey, string> = {
+  received: "스크리닝 전",
+  screening: "스크리닝 중",
+  review: "스크리닝 완료",
+  confirmed: "매니저 확정",
+  other: "대기·종료·기타",
+};
+
+const SOURCE_LABELS = {
+  applicants: "지원자 집계",
+  usage: "비용 집계",
+} as const;
+
+interface KpiCardProps {
+  icon: typeof Users;
+  label: string;
+  value: number;
+  unit: string;
+  description: string;
+  href: string;
+  action: string;
+  emphasis?: boolean;
 }
 
-interface UsageRow {
-  total_cost_krw: number | null;
+function KpiCard({ icon: Icon, label, value, unit, description, href, action, emphasis = false }: KpiCardProps) {
+  return (
+    <article className={`flex min-h-[190px] flex-col rounded-3xl border p-5 shadow-sm ${emphasis ? "border-warning/35 bg-brand-muted" : "border-border-strong bg-card"}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className={`flex size-10 items-center justify-center rounded-2xl ${emphasis ? "bg-brand-yellow text-foreground" : "bg-muted text-foreground"}`}>
+          <Icon aria-hidden="true" size={20} />
+        </div>
+        {emphasis ? (
+          <span className="rounded-full border border-warning/30 bg-card px-2.5 py-1 text-xs font-extrabold text-warning-strong">
+            우선 검토
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-4 text-sm font-bold text-muted-foreground">{label}</p>
+      <p className="mt-1 text-[28px] font-extrabold tracking-tight text-foreground">
+        {value.toLocaleString()}
+        <span className="ml-1 text-sm font-semibold text-muted-foreground">{unit}</span>
+      </p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+      <Link
+        href={href}
+        className="mt-auto inline-flex min-h-11 items-center gap-1 self-start rounded-xl pt-3 text-sm font-extrabold text-foreground outline-none hover:underline hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {action}
+        <ArrowRight aria-hidden="true" size={15} />
+      </Link>
+    </article>
+  );
 }
 
-function lastSixMonths(): { key: string; name: string }[] {
-  const out: { key: string; name: string }[] = [];
-  const now = new Date();
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, name: `${d.getMonth() + 1}월` });
-  }
-  return out;
+function ReportLoading() {
+  return (
+    <div role="status" aria-live="polite" aria-label="리포트 데이터를 불러오는 중" className="space-y-6">
+      <span className="sr-only">지원자와 비용 데이터를 불러오고 있습니다.</span>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="h-[190px] animate-pulse rounded-3xl border border-border-strong bg-card p-5 motion-reduce:animate-none">
+            <div className="size-10 rounded-2xl bg-muted" />
+            <div className="mt-5 h-4 w-24 rounded bg-muted" />
+            <div className="mt-3 h-8 w-20 rounded bg-muted" />
+            <div className="mt-4 h-4 w-3/4 rounded bg-muted" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+        <div className="h-[410px] animate-pulse rounded-3xl border border-border-strong bg-card motion-reduce:animate-none" />
+        <div className="h-[410px] animate-pulse rounded-3xl border border-border-strong bg-card motion-reduce:animate-none" />
+      </div>
+    </div>
+  );
 }
 
-function inRange(created_at: string | null, range: string): boolean {
-  if (!created_at) return false;
-  const d = new Date(created_at);
-  if (Number.isNaN(d.getTime())) return false;
-  const now = new Date();
-  if (range === "올해") return d.getFullYear() === now.getFullYear();
-  if (range === "이번 달") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-  if (range === "이번 주") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // 월요일 시작
-    return d >= start;
-  }
-  return true;
+function percentOf(value: number, total: number): string {
+  return total === 0 ? "0%" : `${Math.round((value / total) * 100)}%`;
 }
 
 export function Reports() {
-  const [dateRange, setDateRange] = useState("올해");
-  // applicants는 여러 탭과 동일 키라 SWR이 dedup·캐시; usage도 캐시.
-  // scope=rollup — 이 화면은 지원자를 나열하지 않고 숫자만 그린다. 이름·전화·주소를 받지 않는
-  // 10컬럼 응답(gzip 85KB → 16KB)이고, 조립 조회 3개도 서버가 건너뛴다.
-  // 리포트·슬롯보드·지점·자동화가 **같은 키**를 써야 SWR dedup이 유지된다.
-  const { data: appsRes } = useSWR<{ data?: ApplicantRow[] }>("/api/admin/applicants?scope=rollup");
-  const { data: usageRes } = useSWR<{ data?: UsageRow[] }>("/api/admin/usage");
-  const apps = useMemo(() => appsRes?.data ?? [], [appsRes]);
-  const usage = useMemo(() => usageRes?.data ?? [], [usageRes]);
+  const [dateRange, setDateRange] = useState<ReportRange>("올해");
+  const now = useMemo(() => new Date(), []);
+  const {
+    data: applicantsResponse,
+    error: applicantsError,
+    isValidating: applicantsValidating,
+    mutate: mutateApplicants,
+  } = useSWR<{ data?: ReportApplicantRow[] }>("/api/admin/applicants?scope=rollup");
+  const {
+    data: usageResponse,
+    error: usageError,
+    isValidating: usageValidating,
+    mutate: mutateUsage,
+  } = useSWR<{ data?: ReportUsageRow[] }>("/api/admin/usage");
 
-  // Airtable 일괄 임포트분(airtable_record_id 보유)은 created_at이 실제 제출일이 아니라 임포트 시각이라
-  // created_at 기반 집계를 오염시킨다(임포트 ~390명이 전원 특정 월에 몰림) → 시계열/기간 집계에서 제외.
-  const liveApps = useMemo(() => apps.filter((a) => !a.airtable_record_id), [apps]);
+  const overview = useMemo(() => reportOverview({
+    applicants: applicantsResponse?.data,
+    usage: usageResponse?.data,
+    errors: { applicants: applicantsError, usage: usageError },
+    range: dateRange,
+    now,
+  }), [applicantsError, applicantsResponse, dateRange, now, usageError, usageResponse]);
 
-  // 기간(dateRange) 집계는 created_at을 기준으로 필터하므로 임포트분(liveApps)을 먼저 제외해야
-  // '올해/이번 달'에 임포트 시각이 몰려 지원서 접수가 가짜로 급증하는 것을 막는다.
-  const rangedApps = useMemo(() => liveApps.filter((a) => inRange(a.created_at, dateRange)), [liveApps, dateRange]);
+  const retry = useCallback(async () => {
+    await Promise.all([mutateApplicants(), mutateUsage()]);
+  }, [mutateApplicants, mutateUsage]);
 
-  const stats = useMemo(() => {
-    const by = (s: string) => rangedApps.filter((a) => a.status === s).length;
-    const cost = usage.reduce((acc, u) => acc + (u.total_cost_krw ?? 0), 0);
-    return { total: rangedApps.length, passed: by("확정인력"), screening: by("스크리닝 중") + by("스크리닝 완료"), cost };
-  }, [rangedApps, usage]);
-
-  const funnel = useMemo(() => {
-    const by = (s: string) => rangedApps.filter((a) => a.status === s).length;
-    const passed = by("확정인력");
-    const screening = by("스크리닝 중") + by("스크리닝 완료");
-    return [
-      { step: "지원서 접수", count: rangedApps.length },
-      { step: "AI 스크리닝", count: screening + passed },
-      { step: "스크리닝 완료", count: by("스크리닝 완료") + passed },
-      { step: "최종 합격", count: passed },
-    ];
-  }, [rangedApps]);
-
-  // 추이 차트는 dateRange와 무관하게 항상 최근 6개월로 표시.
-  // created_at 기반 시계열이라 임포트분(liveApps로 제외)을 빼야 실제 월별 유입을 반영한다.
-  const trend = useMemo(() => {
-    const months = lastSixMonths();
-    return months.map((m) => {
-      const inMonth = liveApps.filter((a) => (a.created_at ?? "").slice(0, 7) === m.key);
-      return { name: m.name, 지원자: inMonth.length, 합격자: inMonth.filter((a) => a.status === "확정인력").length };
-    });
-  }, [liveApps]);
-
-  const handleDownload = () => {
+  const handleDownload = useCallback(() => {
+    if (overview.state !== "ready") return;
     const rows: (string | number)[][] = [
-      ["리포트 기간", dateRange],
+      ["지원자 등록 기간", `${dateRange} (한국시간)`],
+      ["지원자 집계 기준", "등록 시각 · 일괄 임포트 제외"],
+      ["비용 집계 기간", "최근 30일"],
       [],
       ["항목", "값"],
-      ["총 지원자(명)", stats.total],
-      ["확정 인력(명)", stats.passed],
-      ["스크리닝 진행 중(명)", stats.screening],
-      ["최근 30일 누적 비용(원)", Math.round(stats.cost)],
+      ["기간 내 등록 지원자(명)", overview.total],
+      ["스크리닝 중(명)", overview.screening],
+      ["스크리닝 완료(명)", overview.reviewReady],
+      ["매니저 확정(명)", overview.confirmed],
+      ["최근 30일 누적 비용(원)", Math.round(overview.costLast30Days)],
+      ["제외한 일괄 임포트(명)", overview.excludedImports],
       [],
-      ["채용 단계", "인원"],
-      ...funnel.map((f) => [f.step, f.count] as (string | number)[]),
+      ["현재 상태", "인원"],
+      ...overview.stages.map((stage) => [STAGE_LABELS[stage.key], stage.count] as (string | number)[]),
     ];
-    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `리포트_${dateRange}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    const escapeCell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const csv = rows.map((row) => row.map(escapeCell).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `리포트_${dateRange}_${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
     URL.revokeObjectURL(url);
-    toast.success("리포트를 CSV로 내보냈어요.");
-  };
+    toast.success("현재 기준의 리포트를 CSV로 내보냈어요.");
+  }, [dateRange, overview]);
+
+  const refreshing = applicantsValidating || usageValidating;
 
   return (
     <PageShell>
-      {/* 제목은 탑바가 정본 — 기간·다운로드 액션만 우측 정렬로 남긴다 */}
-      <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex items-center bg-card border border-border-strong rounded-2xl px-2 py-1 shadow-sm">
-            {['이번 주', '이번 달', '올해'].map(range => (
-              <button 
-                key={range}
-                onClick={() => setDateRange(range)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${dateRange === range ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-gray-700'}`}
-              >
-                {range}
-              </button>
-            ))}
+      <section aria-labelledby="report-scope-heading" className="rounded-3xl border border-border-strong bg-card p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2 text-sm font-extrabold text-warning-strong">
+              <CalendarDays aria-hidden="true" size={17} />
+              운영 지표 기준
+            </div>
+            <h1 id="report-scope-heading" className="mt-2 text-xl font-extrabold tracking-tight text-foreground sm:text-2xl">
+              등록 흐름과 매니저 검토 대상을 함께 봅니다
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              지원자 수는 선택한 등록 기간의 유효한 등록 시각을 기준으로 집계하고, 일괄 임포트는 제외합니다. 비용은 선택 기간과 별개로 최근 30일 기준입니다.
+            </p>
           </div>
-          <Button variant="secondary" onClick={handleDownload}>
-            <Download size={16} /> 리포트 다운로드
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div>
+              <p id="report-range-label" className="mb-1.5 text-xs font-extrabold text-muted-foreground">지원자 등록 기간 · 한국시간</p>
+              <div role="group" aria-labelledby="report-range-label" className="inline-flex rounded-2xl border border-border-strong bg-background p-1">
+                {RANGES.map((range) => (
+                  <Button
+                    key={range}
+                    type="button"
+                    size="sm"
+                    variant={dateRange === range ? "brand" : "ghost"}
+                    aria-pressed={dateRange === range}
+                    onClick={() => setDateRange(range)}
+                    className="shadow-none"
+                  >
+                    {range}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <Button type="button" variant="secondary" onClick={handleDownload} disabled={overview.state !== "ready"}>
+              <Download aria-hidden="true" size={16} />
+              CSV 다운로드
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {overview.state === "error" ? (
+        <section role="alert" className="flex flex-col gap-4 rounded-3xl border border-error/30 bg-error-soft p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 shrink-0 text-error-strong" size={20} />
+            <div>
+              <h2 className="text-base font-extrabold text-error-strong">리포트를 완성하지 못했습니다</h2>
+              <p className="mt-1 text-sm leading-6 text-error-strong">
+                {overview.failed.map((source) => SOURCE_LABELS[source]).join(", ")}을 불러오지 못했습니다. 일부 숫자를 0으로 대신 표시하지 않았습니다.
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="secondary" onClick={retry} isLoading={refreshing}>
+            <RefreshCw aria-hidden="true" size={16} />
+            다시 불러오기
           </Button>
-      </div>
+        </section>
+      ) : overview.state === "loading" ? (
+        <ReportLoading />
+      ) : (
+        <ReadyReport dateRange={dateRange} overview={overview} />
+      )}
+    </PageShell>
+  );
+}
 
-      {/* Overview Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-2xl bg-success-soft flex items-center justify-center">
-              <Users size={20} className="text-success-strong" />
-            </div>
+function ReadyReport({ dateRange, overview }: { dateRange: ReportRange; overview: Extract<ReportOverview, { state: "ready" }> }) {
+  const trendData = overview.trend.map((month) => ({
+    name: month.month.replace("-", "."),
+    지원자: month.applicants,
+    "매니저 확정": month.confirmed,
+  }));
+  const stageData = overview.stages.map((stage) => ({
+    key: stage.key,
+    name: STAGE_LABELS[stage.key],
+    인원: stage.count,
+  }));
+
+  return (
+    <>
+      <section aria-labelledby="report-kpi-heading">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 id="report-kpi-heading" className="text-lg font-extrabold text-foreground">지금 판단할 인원</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{dateRange} 등록 {overview.total.toLocaleString()}명을 현재 상태로 나눈 값입니다.</p>
           </div>
-          <div className="text-[13px] font-bold text-muted-foreground mb-1">총 지원자 수</div>
-          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.total.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
+          {overview.excludedImports > 0 ? (
+            <span className="rounded-full border border-border-strong bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground">
+              일괄 임포트 {overview.excludedImports.toLocaleString()}명 제외
+            </span>
+          ) : null}
         </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            icon={ClipboardCheck}
+            label="스크리닝 완료"
+            value={overview.reviewReady}
+            unit="명"
+            description={`매니저 판단을 기다리는 현재 인원 · 전체의 ${percentOf(overview.reviewReady, overview.total)}`}
+            href="/pipeline?status=스크리닝%20완료"
+            action="인재풀 전체 검토 대상"
+            emphasis
+          />
+          <KpiCard
+            icon={Brain}
+            label="스크리닝 중"
+            value={overview.screening}
+            unit="명"
+            description={`AI가 정보를 확인 중인 현재 인원 · 전체의 ${percentOf(overview.screening, overview.total)}`}
+            href="/pipeline?status=스크리닝%20중"
+            action="인재풀 전체 진행 인원"
+          />
+          <KpiCard
+            icon={CheckCircle2}
+            label="매니저 확정"
+            value={overview.confirmed}
+            unit="명"
+            description={`매니저가 직접 확정한 현재 인원 · 전체의 ${percentOf(overview.confirmed, overview.total)}`}
+            href="/pipeline?status=확정인력"
+            action="인재풀 전체 확정 인원"
+          />
+          <KpiCard
+            icon={Users}
+            label="기간 내 등록 지원자"
+            value={overview.total}
+            unit="명"
+            description={`${dateRange} 등록 시각 기준 · 일괄 임포트 제외`}
+            href="/pipeline"
+            action="전체 인재풀 열기"
+          />
+        </div>
+      </section>
 
-        <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-2xl bg-info-soft flex items-center justify-center">
-              <CheckCircle size={20} className="text-info-strong" />
-            </div>
+      {overview.total === 0 ? (
+        <section role="status" className="flex flex-col gap-4 rounded-3xl border border-border-strong bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-extrabold text-foreground">{dateRange} 등록된 지원자가 없습니다</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">데이터 조회는 완료됐으며, 일괄 임포트는 이 집계에서 제외됩니다. 지원자 유입 경로가 열려 있는지 공고에서 확인할 수 있습니다.</p>
           </div>
-          <div className="text-[13px] font-bold text-muted-foreground mb-1">확정 인력</div>
-          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.passed.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
-        </div>
+          <Button asChild variant="secondary">
+            <Slottable>
+              <Link href="/jobs">채용공고 확인</Link>
+            </Slottable>
+          </Button>
+        </section>
+      ) : null}
 
-        <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-2xl bg-yellow-50 flex items-center justify-center">
-              <Coins size={20} className="text-warning-strong" />
-            </div>
+      <section aria-labelledby="report-cost-heading" className="grid grid-cols-1 gap-5 rounded-3xl border border-border-strong bg-card p-5 shadow-sm sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="flex items-start gap-4">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-warning-soft text-warning-strong">
+            <Coins aria-hidden="true" size={21} />
           </div>
-          <div className="text-[13px] font-bold text-muted-foreground mb-1">최근 30일 누적 비용</div>
-          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{Math.round(stats.cost).toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">원</span></div>
-        </div>
-
-        <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-          <div className="flex justify-between items-start mb-4">
-            <div className="w-10 h-10 rounded-2xl bg-yellow-100 flex items-center justify-center">
-              <Brain size={20} className="text-warning-strong" />
-            </div>
+          <div>
+            <p className="text-sm font-bold text-muted-foreground">최근 30일 누적 비용</p>
+            <h2 id="report-cost-heading" className="mt-1 text-[28px] font-extrabold tracking-tight text-foreground">
+              {Math.round(overview.costLast30Days).toLocaleString()}
+              <span className="ml-1 text-sm font-semibold text-muted-foreground">원</span>
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">AI와 메시지 사용 비용의 합계입니다. 위의 지원자 접수 기간 선택에는 영향을 받지 않습니다.</p>
           </div>
-          <div className="text-[13px] font-bold text-muted-foreground mb-1">스크리닝 진행 중</div>
-          <div className="text-[26px] font-extrabold tracking-tight text-foreground">{stats.screening.toLocaleString()}<span className="text-sm font-medium text-muted-foreground ml-1">명</span></div>
         </div>
-      </div>
+        <Button asChild variant="secondary">
+          <Slottable>
+            <Link href="/brain">AI 운영 현황 보기</Link>
+          </Slottable>
+        </Button>
+      </section>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        {/* Sourcing Trend Chart */}
-        <div className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-foreground mb-1">월별 지원자 및 합격자 추이</h3>
-          <p className="text-[12px] text-muted-foreground mb-5">실시간 인입 기준(일괄 임포트 제외)</p>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
-              <AreaChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs key="defs-reports">
-                  <linearGradient key="grad-app" id="colorApplicants" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0}/>
+      <section aria-label="지원자 흐름 차트" className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+        <article className="rounded-3xl border border-border-strong bg-card p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-extrabold text-foreground">최근 6개월 지원자 등록 추이</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">선택 기간과 무관한 월별 등록 시각 기준입니다. 확정선은 각 월 등록자 중 현재 매니저 확정 상태인 인원이며, 일괄 임포트는 제외합니다.</p>
+          <div className="mt-5 h-[300px]" role="img" aria-label="최근 6개월 지원자 등록 인원과 그중 현재 매니저 확정 상태인 인원의 추이">
+            <ResponsiveContainer width="100%" height="100%" minHeight={180} minWidth={1}>
+              <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="reportsApplicants" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
                   </linearGradient>
-                  <linearGradient key="grad-hire" id="colorHires" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0}/>
+                  <linearGradient id="reportsConfirmed" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.24} />
+                    <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid key="grid" strokeDasharray="3 3" vertical={false} stroke="var(--border-strong)" />
-                <XAxis key="xaxis" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} dy={10} />
-                <YAxis key="yaxis" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-strong)" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
                 <RechartsTooltip
-                  key="tooltip"
-                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-strong)', background: 'var(--surface-raised)', boxShadow: 'var(--shadow-md)' }}
-                  labelStyle={{ fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '4px' }}
+                  contentStyle={{ borderRadius: 12, border: "1px solid var(--border-strong)", background: "var(--surface-raised)", boxShadow: "var(--shadow-md)" }}
+                  labelStyle={{ fontWeight: 700, color: "var(--foreground)", marginBottom: 4 }}
                 />
-                <Legend key="legend" iconType="circle" wrapperStyle={{ fontSize: '13px', paddingTop: '20px' }} />
-                <Area key="area-applicants" type="monotone" dataKey="지원자" stroke="var(--chart-1)" strokeWidth={2} fillOpacity={1} fill="url(#colorApplicants)" />
-                <Area key="area-hires" type="monotone" dataKey="합격자" stroke="var(--chart-2)" strokeWidth={2} fillOpacity={1} fill="url(#colorHires)" />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 13, paddingTop: 20 }} />
+                <Area type="monotone" dataKey="지원자" stroke="var(--chart-1)" strokeWidth={2} fill="url(#reportsApplicants)" />
+                <Area type="monotone" dataKey="매니저 확정" stroke="var(--chart-2)" strokeWidth={2} fill="url(#reportsConfirmed)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
+          <table className="sr-only">
+            <caption>최근 6개월 지원자 등록 인원과 그중 현재 매니저 확정 상태인 인원</caption>
+            <thead><tr><th>월</th><th>지원자</th><th>매니저 확정</th></tr></thead>
+            <tbody>{overview.trend.map((month) => <tr key={month.month}><th>{month.month}</th><td>{month.applicants}</td><td>{month.confirmed}</td></tr>)}</tbody>
+          </table>
+        </article>
 
-        {/* Funnel Chart */}
-        <div className="bg-card border border-border-strong rounded-2xl p-6 shadow-sm">
-          <h3 className="text-[16px] font-bold text-foreground mb-6">채용 단계별 전환율</h3>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%" minHeight={140} minWidth={1}>
-              <BarChart data={funnel} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
-                <CartesianGrid key="grid" strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--border-strong)" />
-                <XAxis key="xaxis" type="number" hide />
-                <YAxis key="yaxis" dataKey="step" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--foreground)', fontWeight: 600 }} width={110} />
+        <article className="rounded-3xl border border-border-strong bg-card p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-extrabold text-foreground">현재 단계 구성</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{dateRange} 등록 {overview.total.toLocaleString()}명의 현재 상태 스냅샷입니다. 전환율이나 과거 이동 이력이 아닙니다.</p>
+          <div className="mt-5 h-[300px]" role="img" aria-label={`${dateRange} 등록 지원자의 현재 단계별 인원`}>
+            <ResponsiveContainer width="100%" height="100%" minHeight={180} minWidth={1}>
+              <BarChart data={stageData} layout="vertical" margin={{ top: 0, right: 22, left: 18, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border-strong)" />
+                <XAxis type="number" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
+                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} width={102} tick={{ fontSize: 12, fill: "var(--foreground)", fontWeight: 600 }} />
                 <RechartsTooltip
-                  key="tooltip"
-                  cursor={{ fill: 'var(--muted)' }}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border-strong)', background: 'var(--surface-raised)', boxShadow: 'var(--shadow-md)' }}
+                  cursor={{ fill: "var(--muted)" }}
+                  contentStyle={{ borderRadius: 12, border: "1px solid var(--border-strong)", background: "var(--surface-raised)", boxShadow: "var(--shadow-md)" }}
                 />
-                {/* 단계에 순서가 있으므로 categorical이 아니라 단일 hue ordinal 램프를 쓴다 */}
-                <Bar key="bar" dataKey="count" fill="var(--chart-step-4)" radius={[0, 6, 6, 0]} barSize={28}>
-                  {funnel.map((entry, index) => (
-                    <Cell key={`reports-cell-${index}`} fill={`var(--chart-step-${Math.min(index + 1, 4)})`} />
+                <Bar dataKey="인원" radius={[0, 6, 6, 0]} barSize={24}>
+                  {stageData.map((stage, index) => (
+                    <Cell
+                      key={stage.key}
+                      fill={stage.key === "other" ? "var(--muted-foreground)" : `var(--chart-step-${index + 1})`}
+                    />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      </div>
-    </PageShell>
+          <table className="sr-only">
+            <caption>{dateRange} 등록 지원자의 현재 단계별 인원</caption>
+            <thead><tr><th>현재 단계</th><th>인원</th></tr></thead>
+            <tbody>{overview.stages.map((stage) => <tr key={stage.key}><th>{STAGE_LABELS[stage.key]}</th><td>{stage.count}</td></tr>)}</tbody>
+          </table>
+        </article>
+      </section>
+    </>
   );
 }

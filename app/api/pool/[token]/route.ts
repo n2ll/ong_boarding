@@ -28,8 +28,9 @@ export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function GET(_req: NextRequest, { params }: { params: { token: string } }) {
-  const token = params.token;
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
+  const routeParams = await params;
+  const token = routeParams.token;
   if (!UUID_RE.test(token)) {
     return NextResponse.json({ error: "invalid token" }, { status: 400 });
   }

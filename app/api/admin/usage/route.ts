@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { usageWindowKst } from "@/lib/admin/usage-window";
 
 export const dynamic = "force-dynamic";
 
@@ -47,12 +48,14 @@ interface MonthCost {
 export async function GET() {
   try {
     const supabase = createServiceClient();
+    const usageWindow = usageWindowKst(new Date(), 30);
 
     const { data, error } = await supabase
       .from("usage_daily_cost")
       .select("day, ai_cost_krw, sms_cost_krw, total_cost_krw, ai_call_count, sms_count, lms_count, mms_count, alimtalk_count")
-      .order("day", { ascending: false })
-      .limit(30);
+      .gte("day", usageWindow.start)
+      .lte("day", usageWindow.end)
+      .order("day", { ascending: false });
 
     if (error) {
       console.error("[usage fetch error]", error);

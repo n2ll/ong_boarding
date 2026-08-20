@@ -1,7 +1,5 @@
-"use client";
-
-import { Clients } from "@/components/Clients";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <Clients />;
+  redirect("/shippers");
 }

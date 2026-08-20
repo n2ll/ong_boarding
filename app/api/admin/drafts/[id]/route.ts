@@ -7,9 +7,10 @@ type DraftAction = "ignored" | "used" | "edited";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const routeParams = await params;
     const body = (await req.json()) as {
       action: DraftAction;
       used_message_id?: string;
@@ -25,7 +26,7 @@ export async function PATCH(
         used_message_id: body.used_message_id || null,
         resolved_at: new Date().toISOString(),
       })
-      .eq("id", params.id)
+      .eq("id", routeParams.id)
       .select()
       .single();
     if (error) {

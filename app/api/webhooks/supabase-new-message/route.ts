@@ -40,6 +40,7 @@ import { pickCandidateForInbound, handleAmbiguousInbound, describeRoute } from "
 import { sendSms } from "@/lib/solapi";
 import { sendSlackText } from "@/lib/slack";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
+import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { recordUsage, toMessageTokens } from "@/lib/agent/usage";
 
 // (참고) baemin은 폼 작성 후에 job_candidates를 생성하므로 ensureBaeminSystemJob을 여기서 호출 안 함.
@@ -599,7 +600,13 @@ async function processInbound(
         "",
         `괜찮으시면 다른 업무가 생겼을 때 연락드려도 될까요? "네"라고만 답장 주시면 등록해 둘게요 😊`,
       ].join("\n");
-      sendBody = storedStart ? fillTemplate(storedStart, { 이름: nameFill }) : suspendedFallback;
+      const filledStored = storedStart ? fillTemplate(storedStart, { 이름: nameFill }) : null;
+      const resolved = resolveAutomatedOutboundText(filledStored, suspendedFallback);
+      if (!resolved) {
+        console.error("[supabase-webhook] unsafe baemin suspended message blocked");
+        return { ok: true, classification: "pending", reason: "unsafe automated message", triage };
+      }
+      sendBody = resolved;
       sentByLabel = "system-baemin-suspended";
     } else {
       const baseUrl =
@@ -619,9 +626,15 @@ async function processInbound(
         "",
         "작성 완료되시면 영업일 기준 1~2일 내 안내드리겠습니다.",
       ].join("\n");
-      sendBody = stored
+      const filledStored = stored
         ? fillTemplate(stored, { 이름: nameForFill, 지원폼주소: applyUrl })
-        : fallback;
+        : null;
+      const resolved = resolveAutomatedOutboundText(filledStored, fallback);
+      if (!resolved) {
+        console.error("[supabase-webhook] unsafe baemin invite message blocked");
+        return { ok: true, classification: "pending", reason: "unsafe automated message", triage };
+      }
+      sendBody = resolved;
       sentByLabel = "system-baemin-invite";
     }
 

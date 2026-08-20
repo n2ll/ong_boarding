@@ -3,8 +3,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Search, ChevronDown, ChevronRight, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox, AlertCircle } from "lucide-react";
 import { useBranchScope } from "@/lib/branch-scope";
+import { nextSearchDialogFocusIndex } from "@/lib/admin/search-dialog";
+import { topbarCollectionState } from "@/lib/admin/topbar-state";
 import { Button } from "@/components/ui/button";
 
 interface TopbarProps {
@@ -28,12 +30,32 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   // 검색
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [searchAttempt, setSearchAttempt] = useState(0);
   const [results, setResults] = useState<{ applicants: ApplicantHit[]; jobs: JobHit[] }>({ applicants: [], jobs: [] });
-
-
 
   const branchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const searchDialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  const openSearch = useCallback(() => {
+    if (!searchOpen) {
+      returnFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    }
+    setSearchOpen(true);
+  }, [searchOpen]);
+
+  const closeSearch = useCallback(() => {
+    const returnTarget = returnFocusRef.current;
+    setSearchOpen(false);
+    setQuery("");
+    setResults({ applicants: [], jobs: [] });
+    setSearchError(false);
+    requestAnimationFrame(() => returnTarget?.focus());
+  }, []);
 
   // 스크롤 에지 — 콘텐츠가 유리 밑을 지나가기 시작하면 그림자를 한 단 올려 분리감을 준다.
   // (Apple scroll edge effect의 최소 구현 — 유리 자체는 정지, 그림자만 변한다)
@@ -52,13 +74,13 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setSearchOpen(true);
+        openSearch();
       }
-      if (e.key === "Escape") setSearchOpen(false);
+      if (e.key === "Escape" && searchOpen) closeSearch();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [closeSearch, openSearch, searchOpen]);
 
   // 외부 클릭 시 드롭다운 닫기
   useEffect(() => {
@@ -71,11 +93,12 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   }, []);
 
   // 지점 목록 — 다른 화면도 같은 키로 부르므로 useSWR로 캐시를 공유한다(중복 호출 제거).
-  const { data: branchRes } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const { data: branchRes, error: branchError, mutate: mutateBranches } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
   const branches = useMemo(() => (branchRes?.data ?? []).filter((b) => b.active), [branchRes]);
+  const branchState = topbarCollectionState({ items: branchRes?.data, error: branchError });
 
   // 알림 — 사이드바 배지와 같은 키. useSWR로 묶어 같은 요청이 두 번 나가지 않게 한다.
-  const { data: notiRes, isLoading: notifLoading, mutate: mutateNotices } = useSWR<{ items?: Notice[] }>(
+  const { data: notiRes, error: notifError, isLoading: notifLoading, mutate: mutateNotices } = useSWR<{ items?: Notice[] }>(
     "/api/admin/notifications",
     { refreshInterval: 60_000 }
   );
@@ -84,6 +107,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     const rank = { red: 0, amber: 1, slate: 2 } as const;
     return [...(notiRes?.items ?? [])].sort((a, b) => rank[a.tone] - rank[b.tone]);
   }, [notiRes]);
+  const noticeState = topbarCollectionState({ items: notiRes?.items, error: notifError });
   const loadNotices = useCallback(() => { void mutateNotices(); }, [mutateNotices]);
 
   // 검색 디바운스
@@ -92,27 +116,49 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     if (!q) {
       setResults({ applicants: [], jobs: [] });
       setSearching(false);
+      setSearchError(false);
       return;
     }
     setSearching(true);
+    setSearchError(false);
+    const controller = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/search?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/admin/search?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error("search failed");
         const json = await res.json();
         setResults({ applicants: json.applicants ?? [], jobs: json.jobs ?? [] });
-      } catch {
-        setResults({ applicants: [], jobs: [] });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSearchError(true);
       } finally {
-        setSearching(false);
+        if (!controller.signal.aborted) setSearching(false);
       }
     }, 250);
-    return () => clearTimeout(t);
-  }, [query]);
+    return () => {
+      clearTimeout(t);
+      controller.abort();
+    };
+  }, [query, searchAttempt]);
 
-  const closeSearch = () => {
-    setSearchOpen(false);
-    setQuery("");
-    setResults({ applicants: [], jobs: [] });
+  const trapSearchFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const focusables = Array.from(
+      searchDialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+    const currentIndex = focusables.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = nextSearchDialogFocusIndex(
+      currentIndex,
+      focusables.length,
+      event.shiftKey ? "backward" : "forward",
+    );
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    focusables[nextIndex]?.focus();
   };
 
   const goApplicant = (a: ApplicantHit) => {
@@ -152,12 +198,13 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
 
         {/* Search Button — 좁은 화면에서는 감춘다(⌘K로 계속 열 수 있다) */}
         <button
-          onClick={() => setSearchOpen(true)}
+          onClick={openSearch}
+          aria-haspopup="dialog"
           className="hidden items-center gap-2 bg-muted hover:bg-muted border border-transparent rounded-md min-h-11 py-[9px] px-[13px] w-[300px] min-w-[150px] shrink cursor-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
         >
           <Search size={17} className="text-muted-foreground" />
           <span className="flex-1 text-left text-sm text-muted-foreground">지원자·공고 검색</span>
-          <span className="text-[11px] font-bold text-muted-foreground bg-white border border-border-strong rounded-md px-1.5 py-0.5 tracking-wide">
+          <span className="text-xs font-bold text-muted-foreground bg-white border border-border-strong rounded-md px-1.5 py-0.5 tracking-wide">
             ⌘K
           </span>
         </button>
@@ -181,17 +228,31 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
 
           {branchOpen && (
             <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-glass-xl p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
-              <div className="text-[11px] font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
+              <div className="text-xs font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
                 className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-muted ${!scopeBranch ? "bg-muted font-bold text-gray-800" : "bg-transparent font-medium text-gray-700 hover:bg-muted"}`}
               >
                 전체 지점 {!scopeBranch && <Check size={14} className="text-warning-strong" />}
               </button>
-              {branches.length === 0 && (
+              {branchState === "loading" && (
+                <div role="status" className="flex items-center gap-2 px-3 py-3 text-[13px] font-bold text-muted-foreground">
+                  <Loader2 size={14} className="animate-spin" /> 지점 불러오는 중
+                </div>
+              )}
+              {branchState === "error" && (
+                <div role="alert" className="m-1 rounded-xl border border-error/25 bg-error-soft p-3 text-xs font-bold text-error-strong">
+                  <div className="flex items-start gap-2"><AlertCircle size={14} className="mt-0.5 shrink-0" /> 지점 목록을 불러오지 못했어요.</div>
+                  <Button variant="secondary" size="sm" className="mt-2 w-full" onClick={() => void mutateBranches()}>다시 시도</Button>
+                </div>
+              )}
+              {branchState === "empty" && (
                 <div className="px-3 py-2 text-[13px] text-muted-foreground">등록된 지점이 없어요.</div>
               )}
-              {branches.map((b) => (
+              {branchState === "ready" && branches.length === 0 && (
+                <div className="px-3 py-2 text-[13px] text-muted-foreground">운영 중인 지점이 없어요.</div>
+              )}
+              {branchState === "ready" && branches.map((b) => (
                 <button
                   key={b.id}
                   onClick={() => pickBranch(b.name)}
@@ -217,7 +278,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           >
             <Bell size={19} className="text-gray-700" />
             {notices.length > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-[11px] font-extrabold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-xs font-extrabold flex items-center justify-center">
                 {notices.length}
               </span>
             )}
@@ -235,11 +296,21 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                 </button>
               </div>
               <div className="max-h-[360px] overflow-y-auto scrollbar-custom">
-                {notices.length === 0 ? (
+                {noticeState === "loading" ? (
+                  <div role="status" className="flex items-center justify-center gap-2 px-4 py-10 text-[13px] font-bold text-muted-foreground">
+                    <Loader2 size={16} className="animate-spin" /> 알림 불러오는 중
+                  </div>
+                ) : noticeState === "error" ? (
+                  <div role="alert" className="flex flex-col items-center px-4 py-8 text-center">
+                    <AlertCircle size={24} className="mb-2 text-error-strong" />
+                    <div className="text-[13px] font-bold text-error-strong">알림을 불러오지 못했어요</div>
+                    <Button variant="secondary" size="sm" className="mt-3" onClick={loadNotices}>다시 시도</Button>
+                  </div>
+                ) : notices.length === 0 ? (
                   <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-muted-foreground">
                     <Check size={26} className="text-success mb-2" />
                     <div className="text-[13px] font-bold text-gray-700">새 알림이 없어요</div>
-                    <div className="text-[12px] mt-0.5">분류 대기 문자함, 사람 확인이 필요한 대화, AI 중단이 생기면 표시됩니다.</div>
+                    <div className="text-[12px] mt-0.5">분류가 필요한 문자, 사람 확인이 필요한 대화, AI 중단이 생기면 표시됩니다.</div>
                   </div>
                 ) : (
                   // 한 줄 요약만 — 설명문은 대시보드 '오늘의 할 일' 몫(같은 말을 두 번 하지 않는다)
@@ -289,14 +360,21 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
       {searchOpen && (
         <div className="fixed inset-0 bg-scrim z-50 flex items-start justify-center pt-[10vh] px-4 backdrop-blur-[3px]" onClick={closeSearch}>
           <div
+            ref={searchDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="global-search-title"
             className="bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass w-full max-w-[640px] rounded-2xl shadow-glass-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={trapSearchFocus}
           >
+            <h2 id="global-search-title" className="sr-only">지원자·공고 검색</h2>
             <div className="flex items-center gap-3 px-5 py-4 border-b border-border-strong">
               <Search size={22} className="text-muted-foreground" />
               <input
                 autoFocus
                 type="text"
+                aria-label="검색어"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="지원자 이름·연락처 또는 공고 제목을 검색"
@@ -310,14 +388,20 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                 ESC
               </button>
             </div>
-            <div className="p-3 bg-background max-h-[50vh] overflow-y-auto scrollbar-custom">
+            <div aria-live="polite" className="p-3 bg-background max-h-[50vh] overflow-y-auto scrollbar-custom">
               {!query.trim() && (
                 <div className="text-center py-10 text-muted-foreground">
                   <div className="text-[13px] font-bold text-muted-foreground">지원자·공고를 검색하세요</div>
                   <div className="text-[12px] mt-1">이름, 휴대폰 번호, 공고 제목으로 찾을 수 있어요.</div>
                 </div>
               )}
-              {query.trim() && !searching && !hasResults && (
+              {query.trim() && !searching && searchError && (
+                <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
+                  <div className="text-[13px] font-bold text-error-strong">검색 결과를 불러오지 못했어요</div>
+                  <Button variant="secondary" size="sm" onClick={() => setSearchAttempt((attempt) => attempt + 1)}>다시 시도</Button>
+                </div>
+              )}
+              {query.trim() && !searching && !searchError && !hasResults && (
                 <div className="text-center py-10 text-muted-foreground">
                   <div className="text-[13px] font-bold text-muted-foreground">‘{query.trim()}’ 검색 결과가 없어요</div>
                 </div>

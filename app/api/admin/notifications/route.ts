@@ -77,9 +77,9 @@ export async function GET() {
     items.push({
       id: "inbox",
       tone: "amber",
-      title: `분류 대기 문자함 ${inboxCount}건`,
-      desc: "어떤 지원자와도 매칭되지 않은 인입 메시지가 쌓였어요.",
-      path: "/inbox",
+      title: `분류가 필요한 문자 ${inboxCount}건`,
+      desc: "지원자나 기존 계약자 문의 등으로 정리해야 하는 인입 메시지가 있어요.",
+      path: "/live?tab=inbox",
     });
   }
   if (interventions > 0) {

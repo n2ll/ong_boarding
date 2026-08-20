@@ -14,6 +14,11 @@ import { getSystemMessage, fillTemplate } from "./system-messages";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { mergeAgentState } from "./checklist";
 import {
+  buildSafePreconfirmationOnboardingGuide,
+  detectAutomatedOutboundSafetyViolation,
+  PRECONFIRMATION_ONBOARDING_TEMPLATE,
+} from "./outbound-safety";
+import {
   buildGeneralCollectedSummary,
   buildGeneralHandoffText,
   buildGeneralScreeningAnnouncement,
@@ -178,7 +183,10 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             : general
               ? buildGeneralScreeningAnnouncement(applicant_name)
               : buildScreeningAnnouncement(applicant_name);
-          if (await isAlreadySentRecently(announceText)) {
+          const safetyViolation = detectAutomatedOutboundSafetyViolation(announceText);
+          if (safetyViolation) {
+            criticalSendFailure = `SCREENING_ANNOUNCE 안전 위반(${safetyViolation.kind}: ${safetyViolation.match})`;
+          } else if (await isAlreadySentRecently(announceText)) {
             // 이미 발송됨 — 중복 방지
           } else {
           const r = await maybeSendNotification(
@@ -276,7 +284,10 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             const handoffText = storedHandoff
               ? fillTemplate(storedHandoff, { 이름: applicant_name ?? "지원자" })
               : buildGeneralHandoffText(applicant_name);
-            if (await isAlreadySentRecently(handoffText)) {
+            const safetyViolation = detectAutomatedOutboundSafetyViolation(handoffText);
+            if (safetyViolation) {
+              criticalSendFailure = `GENERAL_HANDOFF 안전 위반(${safetyViolation.kind}: ${safetyViolation.match})`;
+            } else if (await isAlreadySentRecently(handoffText)) {
               // 이미 발송됨 — 중복 방지
             } else {
               const r = await maybeSendNotification(
@@ -380,14 +391,17 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           const deadline = roundDeadlineToHour(new Date(Date.now() + 24 * 60 * 60 * 1000));
           const deadlineStr = formatDeadlineKST(deadline);
           const storedGuide = await getSystemMessage(supabase, "onboarding_guide");
-          const baseGuide = storedGuide
+          const filledStoredGuide = storedGuide
             ? fillTemplate(storedGuide, { 이름: applicant_name ?? "지원자", 마감시각: deadlineStr })
-            : buildOnboardingGuideText(applicant_name);
-          // 본문에 {{마감시각}} placeholder가 없거나 치환 후에도 deadlineStr이 보이지 않으면 끝에 자동 부착.
-          const guideText = baseGuide.includes(deadlineStr)
-            ? baseGuide
-            : `${baseGuide}\n\n⏰ ${deadlineStr}까지 배민 커넥트 아이디를 반드시 회신해주세요.`;
-          if (await isAlreadySentRecently(guideText)) {
+            : null;
+          const guideText = buildSafePreconfirmationOnboardingGuide(
+            filledStoredGuide,
+            buildOnboardingGuideText(applicant_name),
+            deadlineStr
+          );
+          if (!guideText) {
+            criticalSendFailure = "GUIDE 안전 검증 실패 — 선택 안내·비확정 고지 필요";
+          } else if (await isAlreadySentRecently(guideText)) {
             // 이미 발송됨 — 중복 방지
           } else {
           const r2 = await maybeSendNotification(
@@ -598,19 +612,12 @@ export function buildScreeningAnnouncement(name: string | null): string {
   ].join("\n");
 }
 
-export function buildOnboardingGuideText(_name: string | null): string {
-  // 인사말 없이 바로 본문으로 시작 — 직전 AI 응답("그럼 온보딩 절차로 안내 드릴게요")이 인사 역할을 대신함
-  return [
-    "업무 진행을 위한 앱설치 및 요청사항을 전달드립니다. 영상교육 수료 후, 회신 부탁드립니다.",
-    "",
-    "1. 배민 커넥트 앱 설치 후 가입",
-    "2. 앱 가입 시 안전보건교육 영상(2시간) 필수 시청 필요",
-    "3. 가입 및 교육 수료 후 마이페이지 > 내 정보에서 '아이디' 확인 후, 아이디 회신 부탁드립니다.",
-    "",
-    "[참고 자료]",
-    "가입 가이드: https://www.youtube.com/watch?v=bMM112zT7JY",
-    "사용법 가이드: https://www.youtube.com/watch?v=5547PR3fzRs",
-  ].join("\n");
+export function buildOnboardingGuideText(name: string | null): string {
+  return `${PRECONFIRMATION_ONBOARDING_TEMPLATE.replace("#{이름}", name ?? "지원자")}
+
+[참고 자료]
+가입 가이드: https://www.youtube.com/watch?v=bMM112zT7JY
+사용법 가이드: https://www.youtube.com/watch?v=5547PR3fzRs`;
 }
 
 // 비마트(배민커넥트) 실시간 배차 라인용 첫날 규칙.

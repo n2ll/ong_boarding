@@ -7,10 +7,11 @@ export const dynamic = "force-dynamic";
 // PUT /api/admin/prompt-examples/[id]  body: { title?, body?, sort_order? }
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt(params.id);
+    const routeParams = await params;
+    const id = parseInt(routeParams.id);
     if (isNaN(id)) {
       return NextResponse.json({ error: "잘못된 id" }, { status: 400 });
     }
@@ -49,10 +50,11 @@ export async function PUT(
 // DELETE /api/admin/prompt-examples/[id]
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt(params.id);
+    const routeParams = await params;
+    const id = parseInt(routeParams.id);
     if (isNaN(id)) {
       return NextResponse.json({ error: "잘못된 id" }, { status: 400 });
     }

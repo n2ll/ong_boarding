@@ -5,10 +5,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { applicantId: string } }
+  { params }: { params: Promise<{ applicantId: string }> }
 ) {
   try {
-    const applicantId = parseInt(params.applicantId);
+    const routeParams = await params;
+    const applicantId = parseInt(routeParams.applicantId);
     if (isNaN(applicantId)) {
       return NextResponse.json(
         { error: "유효하지 않은 ID" },

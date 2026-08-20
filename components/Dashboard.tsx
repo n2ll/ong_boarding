@@ -1,4 +1,4 @@
-import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, ChevronDown, MapPin } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, ChevronDown, MapPin, AlertTriangle, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -12,6 +12,7 @@ import { ReplyQueueCard } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
 import { PageShell } from "@/components/ui/page-shell";
 import { Button } from "@/components/ui/button";
+import { remoteSourcesState } from "@/lib/admin/remote-data-state";
 
 interface UrgentItem {
   id: string;
@@ -57,22 +58,42 @@ export function Dashboard() {
   // (gzip 67KB → 29KB, 랜딩 화면 + 60초 폴링이라 절감이 반복된다). ReplyQueueCard와
   // **반드시 같은 키**여야 한다 — 키가 갈라지면 그쪽이 기본 응답을 또 받고, 답장 큐의
   // mutate()가 이 화면 통계를 같이 갱신하는 동작(같은 캐시)도 깨진다.
-  const { data: appsRes, isLoading, error: appsError } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
-  const { data: inboxRes } = useSWR<{ data?: { created_at?: string | null }[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
+  const { data: appsRes, isLoading, error: appsError, mutate: mutateApps } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
+  const { data: inboxRes, error: inboxError, mutate: mutateInbox } = useSWR<{ data?: { created_at?: string | null }[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
-  const { data: notiRes } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null } }>("/api/admin/notifications");
+  const { data: notiRes, error: notiError, mutate: mutateNoti } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null } }>("/api/admin/notifications");
   // 확정 대기 큐(스크리닝 완료·미확정) — 사이드바 배지·LiveConsole '확정 대기' 탭과 동일 소스. '오늘의 할 일'에 합류(주제 C1 발견성).
-  const { data: confirmRes } = useSWR<{ total?: number; pending?: { created_at?: string | null }[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
+  const { data: confirmRes, error: confirmError, mutate: mutateConfirm } = useSWR<{ total?: number; pending?: { created_at?: string | null }[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
-  const { data: sosRes } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
+  const { data: sosRes, error: sosError, mutate: mutateSos } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
   const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
-  const { data: interestRes } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
+  const { data: interestRes, error: interestError, mutate: mutateInterest } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
   const { data: killRes } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  const urgentSourcesState = remoteSourcesState({
+    applicants: { data: appsRes?.data, error: appsError },
+    inbox: { data: inboxRes?.data, error: inboxError },
+    notifications: { data: notiRes?.counts, error: notiError },
+    confirmations: { data: confirmRes, error: confirmError },
+    sos: { data: sosRes?.open, error: sosError },
+    interest: { data: interestRes, error: interestError },
+  });
+  const urgentSourceLabels: Record<string, string> = {
+    applicants: "답장 대기",
+    inbox: "문자 분류",
+    notifications: "사람 확인 필요",
+    confirmations: "확정 검토",
+    sos: "긴급 건",
+    interest: "관심 표시",
+  };
+  const retryUrgentSources = () => {
+    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest()]);
+  };
   const rawApps = appsRes?.data ?? [];
+  const hasAppsSnapshot = appsRes?.data !== undefined;
   const inboxCount = inboxRes?.data?.length ?? 0;
   // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
   const showSkeleton = isLoading && rawApps.length === 0;
@@ -265,16 +286,16 @@ export function Dashboard() {
           return t && (!min || t < min) ? t : min;
         }, null)
       ) ?? notiCounts?.inbox_oldest_days ?? null;
-      u.push({ id: "inbox", tone: esc("amber", oldest), title: `분류 대기 문자함 ${inboxCount}건${suffix(oldest)}`, desc: "어느 지원자의 문자인지 분류가 필요한 수신 문자가 있어요.", cta: "분류하러 가기", path: "/inbox" });
+      u.push({ id: "inbox", tone: esc("amber", oldest), title: `분류가 필요한 문자 ${inboxCount}건${suffix(oldest)}`, desc: "지원자·기존 계약자 문의·기타 메시지로 정리해야 하는 수신 문자가 있어요.", cta: "지원자 운영에서 분류", path: "/live?tab=inbox" });
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
       const oldest = notiCounts?.interventions_oldest_days ?? null;
       // 목적 탭으로 딥링크 — 예전엔 둘 다 '전체' 탭으로 떨어져 매니저가 탭을 다시 찾아야 했다.
-      u.push({ id: "live", tone: esc("amber", oldest), title: `사람 확인 필요 ${notiCounts!.interventions}건${suffix(oldest)}`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "실시간 응대로", path: "/live?tab=intervention" });
+      u.push({ id: "live", tone: esc("amber", oldest), title: `사람 확인 필요 ${notiCounts!.interventions}건${suffix(oldest)}`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "지원자 운영으로", path: "/live?tab=intervention" });
     }
     if (confirmPendingCount > 0) {
       const oldest = days(confirmRes?.pending?.[0]?.created_at ?? null); // 라우트가 오래된 순 정렬
-      u.push({ id: "confirm-pending", tone: esc("amber", oldest), title: `확정 대기 ${confirmPendingCount}명${suffix(oldest)}`, desc: "스크리닝을 마친 인력이에요. 확정하고 만남장소·첫날 규칙을 발송하세요.", cta: "확정 대기로", path: "/live?tab=confirm" });
+      u.push({ id: "confirm-pending", tone: esc("amber", oldest), title: `확정 검토 ${confirmPendingCount}명${suffix(oldest)}`, desc: "스크리닝을 마친 인력이에요. 매니저가 투입 여부와 조건을 검토해야 합니다.", cta: "확정 검토로", path: "/live?tab=confirm" });
     }
     if (poolReplies > 0) {
       const oldest = replyCounts.oldestDays ?? null;
@@ -339,7 +360,7 @@ export function Dashboard() {
                   <span className="text-white/30">|</span>
                   {/* 운영 모드 한 줄 — 지금 AI가 답하고 있는지(자동/코파일럿/완전 중지)를 상시 표시 */}
                   <span
-                    title="AI 응답 모드 — 변경은 실시간 응대 화면 상단 배너 또는 에이전트 두뇌에서"
+                    title="AI 응답 모드 — 변경은 지원자 운영 화면 상단 배너 또는 에이전트 두뇌에서"
                     className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[12px] font-semibold ${aiMode.cls}`}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${aiMode.dot}`}></span>
@@ -373,7 +394,8 @@ export function Dashboard() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
-              {urgent.length > 0 && <span className="bg-error text-white text-[11px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
+              {urgentSourcesState.state === "ready" && urgent.length > 0 && <span className="bg-error text-white text-[12px] px-2 py-0.5 rounded-full font-bold">{urgent.length}</span>}
+              {urgentSourcesState.state !== "ready" && <span className="rounded-full border border-border-strong bg-muted px-2 py-0.5 text-[12px] font-bold text-muted-foreground">{urgentSourcesState.state === "error" ? "일부 확인 불가" : "확인 중"}</span>}
             </h2>
             {/* 트리아지 단일 진입 — 알림 패널과 같은 문법(붉은 것 우선). 목록을 읽고 고르는 대신
                 버튼 하나로 가장 급한 화면에 착지한다. */}
@@ -394,15 +416,33 @@ export function Dashboard() {
           </div>
 
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto [&>*]:shrink-0">
-            {urgent.length === 0 && (
+            {urgentSourcesState.state === "loading" && (
+              <div className="flex items-center gap-2 rounded-2xl border border-border-strong bg-background p-4 text-[13px] font-semibold text-muted-foreground">
+                <RefreshCw size={15} className="animate-spin" /> 업무 큐를 모두 확인하는 중이에요…
+              </div>
+            )}
+            {urgentSourcesState.state === "error" && (
+              <div role="alert" className="rounded-2xl border border-error/30 bg-error-soft p-4 text-error-strong">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[14px] font-bold"><AlertTriangle size={15} /> 일부 업무 큐를 확인하지 못했어요</div>
+                    <div className="mt-1 text-[12px]">확인 불가: {urgentSourcesState.failed.map((source) => urgentSourceLabels[source] ?? source).join(" · ")}. 긴급 항목이 0건이라는 뜻이 아닙니다.</div>
+                  </div>
+                  <Button variant="ghost" size="chip" onClick={retryUrgentSources} className="border border-error/30 bg-card text-error-strong hover:bg-error-soft">
+                    <RefreshCw size={14} /> 다시 시도
+                  </Button>
+                </div>
+              </div>
+            )}
+            {urgentSourcesState.state === "ready" && urgent.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
                 <CheckCircle2 size={28} className="text-success mb-2" />
                 <div className="text-[13px] font-bold text-gray-700">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-muted-foreground">분류 대기 문자함, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
+                <div className="text-[12px] mt-0.5 text-muted-foreground">분류가 필요한 문자, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
                 <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
                   {[
                     { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },
-                    { label: "실시간 응대 보기", path: "/live" },
+                    { label: "지원자 운영 열기", path: "/live" },
                   ].map((s) => (
                     <button
                       key={s.path}
@@ -462,14 +502,17 @@ export function Dashboard() {
         <button
           onClick={() => setMetricsOpen((v) => !v)}
           aria-expanded={metricsOpen}
+          disabled={!hasAppsSnapshot}
           className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
             <span className="text-[13px] text-muted-foreground">
-              총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
-              <span className="text-muted-foreground"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
-              <span className="text-muted-foreground"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명
+              {hasAppsSnapshot ? (
+                <>총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
+                  <span className="text-muted-foreground"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
+                  <span className="text-muted-foreground"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명</>
+              ) : "지원자 지표를 확인할 수 없어요"}
             </span>
           </div>
           <span className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground shrink-0">
@@ -512,7 +555,7 @@ export function Dashboard() {
                     <div className="text-[12px] text-muted-foreground mt-0.5">새로 들어온 지원자의 일별 흐름 · 실시간 인입 기준(일괄 임포트 제외)</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-bold text-muted-foreground">최근 7일 합계</div>
+                    <div className="text-[12px] font-bold text-muted-foreground">최근 7일 합계</div>
                     <div className="text-[20px] font-extrabold text-foreground leading-none tracking-tight mt-0.5">{trend7Sum}<span className="text-[12px] text-muted-foreground font-bold ml-0.5">명</span></div>
                   </div>
                 </div>
@@ -543,7 +586,7 @@ export function Dashboard() {
               <div className="border border-border-strong rounded-lg p-5 flex flex-col">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-info" /> 스크리닝 · 온보딩 현황</h3>
-                  <button onClick={() => router.push('/live')} className="text-[12px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">응대로</button>
+                  <button onClick={() => router.push('/live')} className="text-[12px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">지원자 운영으로</button>
                 </div>
 
                 {/* 단계별 — 라벨은 실무 언어, 뜻은 툴팁으로 */}
@@ -555,8 +598,8 @@ export function Dashboard() {
                     { label: "활동 중", value: flow.active, color: "text-success-strong", bg: "bg-success-soft", hint: "온보딩을 마치고 실제 근무 중인 단계" },
                   ].map((s) => (
                     <div key={s.label} className={`rounded-2xl px-3 py-2 ${s.bg}`} title={s.hint}>
-                      <div className="text-[11px] font-bold text-muted-foreground">{s.label}</div>
-                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[11px] text-muted-foreground ml-0.5">건</span></div>
+                      <div className="text-[12px] font-bold text-muted-foreground">{s.label}</div>
+                      <div className={`text-[18px] font-extrabold tracking-tight ${s.color}`}>{s.value}<span className="text-[12px] text-muted-foreground ml-0.5">건</span></div>
                     </div>
                   ))}
                 </div>
@@ -611,7 +654,7 @@ export function Dashboard() {
                     <div className="w-[92px] shrink-0 flex items-center justify-end gap-1.5">
                       <span className="text-[12px] font-bold text-foreground">{f.pctTotal}%</span>
                       {f.conv !== null && (
-                        <span className="text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">전환 {f.conv}%</span>
+                        <span className="text-[12px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">전환 {f.conv}%</span>
                       )}
                     </div>
                   </div>

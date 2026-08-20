@@ -21,6 +21,7 @@ import { sendSms } from "@/lib/solapi";
 import { buildVenueGuideText, buildFirstDayRules, buildOngoingAppGuide } from "@/lib/agent/transitions";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { isGeneralLineJob } from "@/lib/agent/general-line";
+import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +151,14 @@ export async function POST(req: NextRequest) {
           meeting_time: (meeting_time as string) || null,
         });
       }
+    }
+
+    const safetyViolation = detectManualOutboundSafetyViolation(text);
+    if (safetyViolation) {
+      return NextResponse.json(
+        { error: "신분증·면허증 이미지는 문자로 요청할 수 없습니다. 승인된 제출 방법을 별도로 안내해주세요." },
+        { status: 400 },
+      );
     }
 
     const sentBy = SENT_BY[kind];

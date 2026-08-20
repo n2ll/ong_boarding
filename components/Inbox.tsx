@@ -4,6 +4,7 @@ import { RefreshCw, Phone, Check, Ban, Loader2, MessageSquareWarning, ArrowRight
 import { toast } from "sonner";
 import { useConfirm } from "./ConfirmDialog";
 import { PageShell } from "./ui/page-shell";
+import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 
 interface PendingMessage {
   id: string;
@@ -26,10 +27,16 @@ function formatTime(iso: string): string {
 
 interface ActiveJob { id: number; title: string; recruit_mode: string | null; status: string | null; closes_at: string | null; }
 
-export function Inbox() {
-  const { data, isLoading, isValidating, mutate } = useSWR<{ data?: PendingMessage[] }>("/api/admin/inbox/pending");
+interface InboxProps {
+  embedded?: boolean;
+  onOpenApplicant?: (applicantId: number, tab: "all" | "intervention") => void;
+  onQueueChanged?: () => void;
+}
+
+export function Inbox({ embedded = false, onOpenApplicant, onQueueChanged }: InboxProps = {}) {
+  const { data, error, isValidating, mutate } = useSWR<{ data?: PendingMessage[] }>("/api/admin/inbox/pending");
   const messages = data?.data ?? [];
-  const loading = isLoading && messages.length === 0;
+  const messagesState = remoteCollectionState({ items: data?.data, error });
   const [busyId, setBusyId] = useState<string | null>(null);
   const confirm = useConfirm();
 
@@ -57,6 +64,7 @@ export function Inbox() {
       toast.success("분류를 되돌렸어요.");
       // 서버가 pending으로 복구했으니 목록을 재검증해 카드를 되살린다.
       void mutate();
+      onQueueChanged?.();
     } catch {
       toast.error("되돌리기에 실패했어요");
     }
@@ -72,13 +80,13 @@ export function Inbox() {
     if (action === "baemin") {
       if (!(await confirm({
         title: `${msg.applicant_phone} — 배민 커넥트로 등록할까요?`,
-        description: "지원자로 등록하고 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 실시간 응대에서 내용을 확인한 뒤 직접 보내요.",
+        description: "지원자로 등록하고 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 지원자 운영에서 내용을 확인한 뒤 직접 보내요.",
         confirmText: "등록",
       }))) return;
     } else if (action === "job") {
       if (!(await confirm({
         title: `${msg.applicant_phone} — '${opts?.jobLabel ?? "선택 공고"}'로 등록할까요?`,
-        description: "이 공고 지원자로 등록하고 라인에 맞는 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 실시간 응대에서 내용을 확인한 뒤 직접 보내요.",
+        description: "이 공고 지원자로 등록하고 라인에 맞는 AI 첫 응답 초안을 만듭니다. 문자는 자동으로 나가지 않고, 지원자 운영에서 내용을 확인한 뒤 직접 보내요.",
         confirmText: "등록",
       }))) return;
     } else if (action === "ongmanaging") {
@@ -117,12 +125,20 @@ export function Inbox() {
         // 다음 행동을 반드시 지정한다(무응답 방치 방지). 초안과 인계는 함께 발생할 수 있으므로
         // 둘 다 알린다 — 초안만 알리면 'AI가 멈춰서 재개가 필요하다'는 사실이 묻힌다.
         const next = json.draft_created
-          ? "AI 첫 응답 초안을 실시간 응대에서 확인하고 보내세요."
-          : "AI 초안이 만들어지지 않았어요 — 실시간 응대에서 직접 답해주세요.";
+          ? "AI 첫 응답 초안을 지원자 운영에서 확인하고 보내세요."
+          : "AI 초안이 만들어지지 않았어요 — 지원자 운영에서 직접 답해주세요.";
         const handoff = json.handed_off
-          ? " AI 자동 응대는 멈춤 상태예요(실시간 응대 › 사람 확인 필요) — 보낸 뒤 필요하면 AI를 재개하세요."
+          ? " AI 자동 응대는 멈춤 상태예요(지원자 운영 › 사람 확인 필요) — 보낸 뒤 필요하면 AI를 재개하세요."
           : "";
-        toast.success(`${where}로 등록했어요. ${next}${handoff}`, { duration: 10000 });
+        toast.success(`${where}로 등록했어요. ${next}${handoff}`, {
+          duration: 10000,
+          action: json.applicant_id && onOpenApplicant
+            ? {
+                label: "대화 열기",
+                onClick: () => onOpenApplicant(Number(json.applicant_id), json.handed_off ? "intervention" : "all"),
+              }
+            : undefined,
+        });
       } else if (action === "ongmanaging") {
         // 단순 마킹이라 되돌리기 가능(지원자 등록과 달리 생성물이 없다).
         toast.success("기존 계약자 문의로 분류했어요.", { action: { label: "실행취소", onClick: () => void undoClassify(msg) } });
@@ -140,6 +156,7 @@ export function Inbox() {
         }),
         { revalidate: false }
       );
+      onQueueChanged?.();
     } catch {
       toast.error("분류에 실패했어요");
     } finally {
@@ -148,11 +165,14 @@ export function Inbox() {
   };
 
   return (
-    <PageShell>
+    <PageShell className={embedded ? "min-h-0 flex-1 overflow-y-auto bg-muted p-6 lg:p-8" : undefined}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-          <MessageSquareWarning size={16} className="text-warning-strong" />
-          처리 대기 <b className="text-foreground">{messages.length}</b>건
+        <div>
+          <div className="flex items-center gap-2 text-[14px] font-bold text-foreground">
+            <MessageSquareWarning size={17} className="text-warning-strong" />
+            분류가 필요한 문자 <span className="text-warning-strong">{messagesState === "loading" || messagesState === "error" ? "—" : `${messages.length}건`}</span>
+          </div>
+          <p className="mt-1 text-[12px] text-muted-foreground">지원자로 등록하거나 기존 계약자 문의·기타 메시지로 정리합니다.</p>
         </div>
         <button
           onClick={() => mutate()}
@@ -162,13 +182,31 @@ export function Inbox() {
         </button>
       </div>
 
-      {loading && (
+      {messagesState === "loading" && (
         <div className="flex items-center gap-2 text-[13px] text-muted-foreground py-10">
           <Loader2 size={16} className="animate-spin" /> 불러오는 중…
         </div>
       )}
 
-      {!loading && messages.length === 0 && (
+      {messagesState === "error" && (
+        <div role="alert" className="rounded-2xl border border-error/30 bg-error-soft p-4 text-error-strong">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[14px] font-bold">분류 대기 문자를 불러오지 못했어요</div>
+              <div className="mt-0.5 text-[12px]">모두 처리된 상태가 아닙니다. 목록을 다시 확인해 주세요.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void mutate()}
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-error/30 bg-card px-3 text-[12px] font-bold text-error-strong outline-none hover:bg-error-soft focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <RefreshCw size={14} className={isValidating ? "animate-spin" : ""} /> 다시 시도
+            </button>
+          </div>
+        </div>
+      )}
+
+      {messagesState === "empty" && (
         <div className="flex flex-col items-center justify-center text-center py-20 text-muted-foreground">
           <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mb-4">
             <Check size={30} className="text-success" />
@@ -198,7 +236,7 @@ export function Inbox() {
                     // 경과일 배지 — 절대 날짜만 있으면 "오래됐다"는 사실이 눈에 안 들어온다.
                     const d = Math.max(0, Math.floor((Date.now() - new Date(msg.created_at).getTime()) / 86400000));
                     return d >= 1 ? (
-                      <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${d >= 7 ? "bg-error-soft text-error-strong" : "bg-muted text-gray-700"}`}>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold ${d >= 7 ? "bg-error-soft text-error-strong" : "bg-muted text-gray-700"}`}>
                         {d}일 경과
                       </span>
                     ) : null;

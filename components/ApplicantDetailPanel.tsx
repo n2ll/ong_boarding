@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import {
   X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle, ChevronDown,
-  Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap, RotateCcw,
+  Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap, RotateCcw, CircleAlert,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -14,6 +14,8 @@ import { isLiveLinkResolved } from "@/lib/candidate-links";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
 import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
+import { applicantAttentionMeta, applicantConfirmationAction } from "@/lib/admin/applicant-detail";
+import { normalizedBlacklistReason } from "@/lib/admin/blacklist-action";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -231,7 +233,7 @@ function ChecklistRow({ label, done }: { label: string; done: boolean }) {
 function InfoCell({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-bold text-muted-foreground">{label}</span>
+      <span className="text-[12px] font-bold text-muted-foreground">{label}</span>
       <span className="text-[13px] font-semibold text-foreground">{value || "-"}</span>
     </div>
   );
@@ -268,13 +270,13 @@ function KeyCell({ label, value, empty = "미입력", sub, title, action }: {
 }) {
   return (
     <div className="flex flex-col gap-0.5 min-w-0" title={title}>
-      <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">{label}{action}</span>
+      <span className="text-[12px] font-bold text-muted-foreground flex items-center gap-1">{label}{action}</span>
       {value ? (
         <span className="text-[13px] font-semibold text-foreground truncate">{value}</span>
       ) : (
         <span className="text-[13px] font-medium text-muted-foreground">{empty}</span>
       )}
-      {sub && <span className="text-[11px] text-muted-foreground">{sub}</span>}
+      {sub && <span className="text-[12px] text-muted-foreground">{sub}</span>}
     </div>
   );
 }
@@ -316,6 +318,7 @@ export function ApplicantDetailContent({
   focusJobId: focusJobIdProp,
   onFocusJobChange,
   variant = "panel",
+  onOpenChat,
   onChanged,
   detail: externalDetail,
   reload: externalReload,
@@ -329,6 +332,8 @@ export function ApplicantDetailContent({
   focusJobId?: number | null;
   onFocusJobChange?: (jobId: number | null) => void;
   variant?: "panel" | "drawer";
+  /** 드로어 상세에서 사람이 직접 답해야 할 때 대화 탭으로 바로 전환한다. */
+  onOpenChat?: () => void;
   onChanged?: () => void;
   detail?: Detail | null;
   reload?: () => void;
@@ -388,6 +393,9 @@ export function ApplicantDetailContent({
   const [confirmSendAppGuide, setConfirmSendAppGuide] = useState(false);
   // 인력풀 제외(=status 부적합) 확인 모달 — 모든 공고에서 빠지는 파괴적 액션이라 확인을 받는다.
   const [excludeOpen, setExcludeOpen] = useState(false);
+  const [blacklistOpen, setBlacklistOpen] = useState(false);
+  const [blacklistReason, setBlacklistReason] = useState("");
+  const [blacklistReasonError, setBlacklistReasonError] = useState(false);
   // 접이식 섹션 열림 상태 — undefined면 데이터 기반 기본값(진행 중 공고·status)을 따른다. 세션 내 유지.
   const [sectionOpen, setSectionOpen] = useState<Partial<Record<"jobs" | "profile" | "manage", boolean>>>({});
   // 선탑(동승) 기록 폼 — 프리보딩 자산 원장(pool_events) 수동 기록. stage: 'scheduled'(예정) | 'done'(완료).
@@ -564,25 +572,45 @@ export function ApplicantDetailContent({
         setBusy(false);
       }
     } else {
-      const reason = window.prompt("재채용 블랙리스트 등록 — 사유 (노무 이슈·커뮤니케이션 핏 등)", "");
-      if (reason === null) return; // 취소
-      setBusy(true);
-      try {
-        const res = await fetch(`/api/admin/blacklist`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone, name: a.name, reason }),
-        });
-        if (!res.ok) {
-          toast.error("등록에 실패했어요");
-          return;
-        }
-        toast.success("블랙리스트에 등록했어요 — 콜드 발송에서 제외됩니다");
-        await reload();
-        onChanged?.();
-      } finally {
-        setBusy(false);
+      setBlacklistReason("");
+      setBlacklistReasonError(false);
+      setBlacklistOpen(true);
+    }
+  };
+
+  const commitBlacklist = async () => {
+    if (busy) return;
+    const phone = a.phone;
+    const reason = normalizedBlacklistReason(blacklistReason);
+    if (!phone) {
+      toast.error("전화번호가 없어 블랙리스트 처리할 수 없어요");
+      return;
+    }
+    if (!reason) {
+      setBlacklistReasonError(true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/blacklist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, name: a.name, reason }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error || "등록에 실패했어요");
+        return;
       }
+      setBlacklistOpen(false);
+      toast.success("블랙리스트에 등록했어요 — 콜드 발송에서 제외됩니다");
+      await reload();
+      onChanged?.();
+    } catch {
+      toast.error("등록에 실패했어요");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -615,6 +643,8 @@ export function ApplicantDetailContent({
   const confirmableCands = cands.filter(
     (c) => !c.job_effectively_closed && !isSystemJobTitle(c.job_title ?? "")
   );
+  const attentionMeta = applicantAttentionMeta(focusCand?.agent_stage ?? null, focusCand?.paused_reason ?? null);
+  const confirmationAction = applicantConfirmationAction(a.status, confirmableCands.length);
   // 선택된 대상 공고의 대화가 중단(abort) 상태인지 — 확정은 허용하되 매니저가 알고 누르게 한다.
   const confirmTargetAborted =
     (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.agent_stage === "abort";
@@ -826,10 +856,10 @@ export function ApplicantDetailContent({
     }
   };
 
-  // 관심 공고 배지 클릭 → 대기 안내 문구 클립보드 복사 (확정 뉘앙스 금지 — '먼저 안내' 수준).
+  // 관심 공고 배지 클릭 → 사실 상태만 전달하는 검토 안내 문구 복사.
   const copyInterestReply = async (ij: RecontactInterestJob) => {
     const jobTitle = (ij.title ?? "").trim() || `공고 #${ij.job_id}`;
-    const text = `[옹고잉] ${a.name}님, '${jobTitle}' 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요!`;
+    const text = `[옹고잉] ${a.name}님, '${jobTitle}' 관심이 전달됐어요. 매니저 검토 목록에 표시되며, 진행 여부는 검토 후 별도로 안내드릴게요.`;
     try {
       await navigator.clipboard.writeText(text);
       toast.success("대기 안내 문구를 복사했어요. 스레드에 붙여넣어 발송하세요.");
@@ -928,11 +958,30 @@ export function ApplicantDetailContent({
           <button
             onClick={toggleBlacklist}
             disabled={busy}
-            className="px-2 py-1 rounded-full text-[11px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className="px-2 py-1 rounded-full text-[12px] font-bold border border-border-strong text-muted-foreground hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
           >
             {detail.blacklisted ? "블랙리스트 해제" : "블랙리스트 등록"}
           </button>
         </div>
+
+        {attentionMeta && (
+          <div className="flex items-start gap-2.5 rounded-2xl border border-error/30 bg-error-soft p-3.5 text-error-strong">
+            <CircleAlert size={17} className="mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-extrabold">{attentionMeta.label}</p>
+              <p className="mt-0.5 text-[12px] font-medium leading-relaxed">{attentionMeta.description}</p>
+            </div>
+            {onOpenChat && (
+              <button
+                type="button"
+                onClick={onOpenChat}
+                className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg border border-error/30 bg-white px-2.5 text-[12px] font-bold outline-none hover:bg-error-soft focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <MessageSquare size={13} /> 대화 확인
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 옹매니징 연동 — 전화 매칭된 계약 배송원의 차종·라인·정산 요약(개인정보·금액 미반입) */}
         {detail.ongmanaging && (
@@ -947,7 +996,7 @@ export function ApplicantDetailContent({
             {detail.ongmanaging.lines.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {detail.ongmanaging.lines.map((l, i) => (
-                  <span key={i} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-success/25 text-success-strong">
+                  <span key={i} className="text-[12px] font-bold px-2 py-0.5 rounded-full bg-white border border-success/25 text-success-strong">
                     {l.lineName}{l.clientName ? ` · ${l.clientName}` : ""}
                   </span>
                 ))}
@@ -964,19 +1013,19 @@ export function ApplicantDetailContent({
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-3 gap-y-2">
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-bold text-muted-foreground">마지막 발송</span>
+                <span className="text-[12px] font-bold text-muted-foreground">마지막 발송</span>
                 <span className="text-[13px] font-semibold text-foreground" title={recontact.last_ping_at ?? undefined}>
                   {recontact.last_ping_at ? relTime(recontact.last_ping_at) : "없음"}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-bold text-muted-foreground">링크 열람</span>
+                <span className="text-[12px] font-bold text-muted-foreground">링크 열람</span>
                 <span className="text-[13px] font-semibold text-foreground" title={recontact.last_link_view_at ?? undefined}>
                   {recontact.last_link_view_at ? relTime(recontact.last_link_view_at) : "미열람"}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-bold text-muted-foreground">마지막 답장</span>
+                <span className="text-[12px] font-bold text-muted-foreground">마지막 메시지</span>
                 <span className="text-[13px] font-semibold text-foreground" title={a.last_message_at ?? undefined}>
                   {a.last_message_at ? relTime(a.last_message_at) : "없음"}
                 </span>
@@ -984,7 +1033,7 @@ export function ApplicantDetailContent({
             </div>
             {recontact.interest_jobs.length > 0 && (
               <div>
-                <span className="text-[11px] font-bold text-muted-foreground">관심 클릭 공고 · 클릭 시 대기 안내 문구 복사</span>
+                <span className="text-[12px] font-bold text-muted-foreground">관심 클릭 공고 · 클릭 시 대기 안내 문구 복사</span>
                 <div className="flex gap-1.5 flex-wrap mt-1.5">
                   {recontact.interest_jobs.map((ij) => (
                     <button
@@ -1033,7 +1082,7 @@ export function ApplicantDetailContent({
                   onClick={clearAvailableSlots}
                   disabled={clearingSlots}
                   title="대화·입력으로 채워진 시간대를 지웁니다. 지우면 지원 당시 폼 값으로 판정하고, 이후 대화에서 다시 확인될 수 있어요."
-                  className="text-[11px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+                  className="text-[12px] font-bold text-error-strong hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
                 >
                   지우기
                 </button>
@@ -1084,10 +1133,21 @@ export function ApplicantDetailContent({
           >
             <MessageSquare size={14} /> 맞춤 공고 링크
           </button>
-          {a.status === "확정인력" ? (
-            <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-card border border-warning text-warning-strong hover:bg-yellow-50 py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> 확정 취소</button>
+          {confirmationAction.intent === "undo" ? (
+            <button onClick={doUnconfirm} disabled={busy} title="투입 확정을 취소하고 대상 공고 결속·확정 필드를 해제합니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-card border border-warning text-warning-strong hover:bg-yellow-50 py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><RotateCcw size={14} /> {confirmationAction.label}</button>
           ) : (
-            <button onClick={() => openConfirm()} disabled={busy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 bg-foreground hover:bg-gray-800 text-white py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-50"><UserCheck size={14} /> 확정</button>
+            <button
+              onClick={() => openConfirm()}
+              disabled={busy || confirmationAction.disabled}
+              title={confirmationAction.disabled ? "채용공고에서 이 지원자를 진행 중 공고의 후보로 추가한 뒤 확정할 수 있어요" : "공고·시작일·근무 조건을 확인하고 확정합니다"}
+              className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 border py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:cursor-not-allowed ${
+                confirmationAction.disabled
+                  ? "border-border-strong bg-muted text-muted-foreground"
+                  : "border-foreground bg-foreground text-white hover:bg-gray-800 disabled:opacity-50"
+              }`}
+            >
+              <UserCheck size={14} /> {confirmationAction.label}
+            </button>
           )}
           <button onClick={() => setExcludeOpen(true)} disabled={busy} title="인력풀에서 제외 — 모든 공고에서 빠집니다" className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 bg-card border border-error text-error-strong py-2 rounded-2xl text-[13px] font-bold hover:bg-error-soft disabled:opacity-50 flex items-center gap-1.5"><Ban size={14} /></button>
         </div>
@@ -1146,9 +1206,9 @@ export function ApplicantDetailContent({
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {selectable && isFocus && (
-                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-foreground text-white">표시 중</span>
+                          <span className="text-[12px] font-bold px-1.5 py-0.5 rounded-full bg-foreground text-white">표시 중</span>
                         )}
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-copilot-soft text-copilot-strong">
+                        <span className="text-[12px] font-bold px-2 py-0.5 rounded-full bg-copilot-soft text-copilot-strong">
                           {/* 단계가 비어 있으면 '관심만 누른 상태' — '-'로 두면 매니저가 이유를 알 수 없다. */}
                           {STAGE_LABEL[c.agent_stage ?? ""] ?? c.agent_stage ?? "관심"}
                         </span>
@@ -1209,15 +1269,15 @@ export function ApplicantDetailContent({
           onToggle={() => toggleSection("profile", profileOpen)}
         >
           <div className="flex items-center justify-between gap-2 mb-3">
-            <span className="text-[11px] font-bold text-muted-foreground">문자 수신</span>
+            <span className="text-[12px] font-bold text-muted-foreground">문자 수신</span>
             {a.sms_opt_out_at ? (
               <div className="flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
+                <span className="px-2 py-0.5 rounded-full text-[12px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
                 <button
                   onClick={toggleOptOut}
                   disabled={busy}
                   title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="px-2 py-0.5 rounded-full text-[11px] font-bold text-gray-700 bg-card hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="px-2 py-0.5 rounded-full text-[12px] font-bold text-gray-700 bg-card hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
                 </button>
@@ -1227,7 +1287,7 @@ export function ApplicantDetailContent({
                 onClick={toggleOptOut}
                 disabled={busy}
                 title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="px-2 py-0.5 rounded-full text-[12px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 수신거부 등록
               </button>
@@ -1263,34 +1323,34 @@ export function ApplicantDetailContent({
                 {/* **발송 대상 공고를 이름으로 밝힌다** — 이 발송은 '표시 중' 공고가 아니라 확정 결속
                     (current_job_id)을 따른다. 공고 6~7개가 동시에 열리면 매니저는 표시 중 공고를 보고
                     발송을 누르게 되고, 미리보기 본문의 주소만으로는 대상이 다른 것을 알아채기 어렵다. */}
-                <p className="text-[11px] text-success-strong mt-1.5">
+                <p className="text-[12px] text-success-strong mt-1.5">
                   발송 대상 공고: <b>{followupCand ? (isSystemJobTitle(followupCand.job_title ?? "") ? "공고 미지정 (슬롯 단위 라인)" : followupCand.job_title) : "미지정"}</b>
                 </p>
                 {confirmedJobId != null && focusCand && confirmedJobId !== focusCand.job_id && (
-                  <p className="text-[11px] font-bold text-warning-strong mt-0.5 leading-relaxed">
+                  <p className="text-[12px] font-bold text-warning-strong mt-0.5 leading-relaxed">
                     표시 중 공고와 달라요 — 다른 공고로 보내려면 그 공고로 다시 확정해야 해요.
                   </p>
                 )}
                 {/* 만남장소가 왜 안 눌리는지/왜 문안이 안 채워지는지 그 자리에서 알려준다(발송 후 400으로만 알게 되던 문제). */}
                 {venueHardBlock ? (
-                  <p className="text-[11px] text-warning-strong mt-1.5 leading-relaxed">만남장소 발송 불가 — {venueHardBlock}</p>
+                  <p className="text-[12px] text-warning-strong mt-1.5 leading-relaxed">만남장소 발송 불가 — {venueHardBlock}</p>
                 ) : venueWarn ? (
-                  <p className="text-[11px] text-warning-strong mt-1.5 leading-relaxed">{venueWarn}</p>
+                  <p className="text-[12px] text-warning-strong mt-1.5 leading-relaxed">{venueWarn}</p>
                 ) : (
-                  <p className="text-[11px] text-muted-foreground mt-1.5">신입에게 만남장소·첫날 규칙을 발송하세요. 내용은 발송 전 미리보기에서 수정할 수 있어요.</p>
+                  <p className="text-[12px] text-muted-foreground mt-1.5">신입에게 만남장소·첫날 규칙을 발송하세요. 내용은 발송 전 미리보기에서 수정할 수 있어요.</p>
                 )}
               </div>
             )}
             {/* 확정 슬롯(비마트 전용) + 마지막 메시지 시점. internal 라인은 슬롯 개념이 없어 시각만 표시. */}
             {detailInternal ? (
               <div className="flex items-center justify-end">
-                <span className="flex items-center gap-1 text-[11px] text-muted-foreground" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
+                <span className="flex items-center gap-1 text-[12px] text-muted-foreground" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
               </div>
             ) : (
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-muted-foreground">확정 슬롯</span>
-                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
+                  <span className="text-[12px] font-bold text-muted-foreground">확정 슬롯</span>
+                  <span className="flex items-center gap-1 text-[12px] text-muted-foreground" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
                 </div>
                 <div className="flex gap-1.5 flex-wrap mt-1.5">
                   {SLOTS.map((s) => {
@@ -1307,7 +1367,7 @@ export function ApplicantDetailContent({
               {/* 확정 지점 — 등록 지점 드롭다운. 지점 개념 라인·등록 지점 있을 때만(internal·미보유 숨김). */}
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-bold text-muted-foreground">확정 지점</span>
+                  <span className="text-[12px] font-bold text-muted-foreground">확정 지점</span>
                   <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                     <option value="">미지정</option>
                     {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -1316,18 +1376,18 @@ export function ApplicantDetailContent({
                 </label>
               )}
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">근무 시작일</span>
+                <span className="text-[12px] font-bold text-muted-foreground">근무 시작일</span>
                 <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
               </label>
               {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
               {!detailInternal && (
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-bold text-muted-foreground">배민 커넥트 ID</span>
+                  <span className="text-[12px] font-bold text-muted-foreground">배민 커넥트 ID</span>
                   <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
               )}
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">온보딩 통화</span>
+                <span className="text-[12px] font-bold text-muted-foreground">온보딩 통화</span>
                 <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background">
                   <option value="">미지정</option>
                   {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
@@ -1335,7 +1395,7 @@ export function ApplicantDetailContent({
                 </select>
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground" title="지금 일할 수 있는 상태인지 — 값이 같아도 재확인하면 확인 시점이 갱신돼요">
+                <span className="text-[12px] font-bold text-muted-foreground" title="지금 일할 수 있는 상태인지 — 값이 같아도 재확인하면 확인 시점이 갱신돼요">
                   가용성
                   {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
                 </span>
@@ -1349,7 +1409,7 @@ export function ApplicantDetailContent({
             {/* 선탑(동승) 이력 — 예정→완료 2단계 원장. 완료 기록 시 배지 + 새 공고 안내 S그룹(최우선). */}
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
+                <span className="text-[12px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
                 {!suntopFormOpen ? (
                   <div className="flex items-center gap-2">
                     <button onClick={() => openSuntopForm("scheduled")} className="text-[12px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">+ 예정</button>
@@ -1360,7 +1420,7 @@ export function ApplicantDetailContent({
                 )}
               </div>
               {/* 3단계 진행 표시 — 예정 → 완료 → 투입(status='확정인력') */}
-              <div className="flex items-center gap-1 mt-1.5 text-[11px] font-bold">
+              <div className="flex items-center gap-1 mt-1.5 text-[12px] font-bold">
                 {([["예정", !!detail.suntop?.scheduled], ["완료", !!detail.suntop?.done], ["투입", a.status === "확정인력"]] as [string, boolean][]).map(([label, on], i) => (
                   <span key={label} className="flex items-center gap-1">
                     {i > 0 && <span className="text-muted-foreground">→</span>}
@@ -1386,7 +1446,7 @@ export function ApplicantDetailContent({
               )}
               {suntopFormOpen && (
                 <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-background border border-border-strong">
-                  <div className="text-[11px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
+                  <div className="text-[12px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                     <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
@@ -1450,7 +1510,7 @@ export function ApplicantDetailContent({
 
           {/* 확정 대상 공고 — 비마감·비시스템 후보(서버 검증과 동일 기준). 중단된 대화도 확정 가능하되 표시한다. */}
           <div>
-            <span className="text-[11px] font-bold text-muted-foreground">확정 공고</span>
+            <span className="text-[12px] font-bold text-muted-foreground">확정 공고</span>
             {confirmableCands.length === 0 ? (
               <p className="text-[12px] text-error mt-1.5 leading-relaxed">
                 확정할 수 있는 공고가 없어요 — 연결된 공고가 마감됐거나 아직 어떤 공고에도 후보로 없어요.
@@ -1460,7 +1520,7 @@ export function ApplicantDetailContent({
               <div className="mt-1.5 px-3 py-2 rounded-lg bg-success-soft border border-success/25 text-[13px] font-bold text-success-strong flex items-center gap-1.5 flex-wrap">
                 {confirmableCands[0].job_title ?? `공고 #${confirmableCands[0].job_id}`}
                 {confirmableCands[0].agent_stage === "abort" && (
-                  <span className="text-[11px] font-bold text-warning-strong bg-yellow-50 border border-yellow-200 rounded px-1.5 py-0.5">중단된 대화</span>
+                  <span className="text-[12px] font-bold text-warning-strong bg-yellow-50 border border-yellow-200 rounded px-1.5 py-0.5">중단된 대화</span>
                 )}
               </div>
             ) : (
@@ -1473,14 +1533,14 @@ export function ApplicantDetailContent({
                     className={`px-2.5 py-1.5 rounded-md text-[12px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${confirmJobId === c.job_id ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}
                   >
                     {c.job_title ?? `공고 #${c.job_id}`}
-                    {c.agent_stage === "abort" && <span className="ml-1 text-[11px] text-warning-strong">중단</span>}
+                    {c.agent_stage === "abort" && <span className="ml-1 text-[12px] text-warning-strong">중단</span>}
                   </button>
                 ))}
               </div>
             )}
             {/* 중단된 대화로도 확정은 되지만(서버 수락), 매니저가 모르고 누르지 않게 한 줄로 알린다. */}
             {confirmTargetAborted && (
-              <p className="text-[11px] text-warning-strong mt-1.5 leading-relaxed">
+              <p className="text-[12px] text-warning-strong mt-1.5 leading-relaxed">
                 이 공고 대화는 중단(abort) 상태예요. 그래도 이 공고로 확정하면 충원율·라인 경험은 정상 반영돼요.
               </p>
             )}
@@ -1488,13 +1548,13 @@ export function ApplicantDetailContent({
 
           <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-muted-foreground">근무 시작일</span>
+              <span className="text-[12px] font-bold text-muted-foreground">근무 시작일</span>
               <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
             </label>
             {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). 지점 개념 라인·등록 지점 있을 때만. */}
             {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">확정 지점(선택)</span>
+                <span className="text-[12px] font-bold text-muted-foreground">확정 지점(선택)</span>
                 <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">미지정</option>
                   {confirmBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -1507,7 +1567,7 @@ export function ApplicantDetailContent({
           {/* 확정 슬롯 — 시간대 슬롯 개념이 있는 라인(배민/비마트)만. internal 정기배송 라인은 숨김. */}
           {!confirmTargetInternal && (
             <div>
-              <span className="text-[11px] font-bold text-muted-foreground">확정 슬롯 (복수 선택 가능)</span>
+              <span className="text-[12px] font-bold text-muted-foreground">확정 슬롯 (복수 선택 가능)</span>
               <div className="flex gap-1.5 flex-wrap mt-1.5">
                 {SLOTS.map((s) => {
                   const on = confirmSlots.includes(s);
@@ -1537,7 +1597,7 @@ export function ApplicantDetailContent({
             <input type="checkbox" checked={confirmSendAppGuide} onChange={(e) => setConfirmSendAppGuide(e.target.checked)} className="accent-success-strong w-4 h-4 mt-0.5" />
             <span className="text-[13px] text-gray-700 leading-snug">
               확정 후 <b>옹고잉 앱 설치·가이드 안내</b> 문자 보내기
-              <span className="block text-[11px] text-muted-foreground">문구는 에이전트 두뇌 탭 &lsquo;ongoing_app_guide&rsquo;에서 편집 — 설정 전이면 자리표시 문구가 나가니 주의</span>
+              <span className="block text-[12px] text-muted-foreground">문구는 에이전트 두뇌 탭 &lsquo;ongoing_app_guide&rsquo;에서 편집 — 설정 전이면 자리표시 문구가 나가니 주의</span>
             </span>
           </label>
 
@@ -1545,6 +1605,59 @@ export function ApplicantDetailContent({
             <AlertDialogCancel className="rounded-2xl" disabled={busy}>취소</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy || confirmJobId == null} className="rounded-2xl">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} 확정
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={blacklistOpen}
+        onOpenChange={(open) => {
+          if (busy) return;
+          setBlacklistOpen(open);
+          if (!open) setBlacklistReasonError(false);
+        }}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{a.name}님을 재채용 블랙리스트에 등록</AlertDialogTitle>
+            <AlertDialogDescription>
+              이 지원자는 콜드 캠페인과 재채용 대상에서 제외됩니다. 운영상 확인 가능한 사유를 남겨야 나중에 안전하게 검토·해제할 수 있어요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="blacklist-reason" className="block text-[13px] font-bold text-foreground">
+              등록 사유 <span className="text-error-strong">*</span>
+            </label>
+            <textarea
+              id="blacklist-reason"
+              value={blacklistReason}
+              onChange={(event) => {
+                setBlacklistReason(event.target.value);
+                if (event.target.value.trim()) setBlacklistReasonError(false);
+              }}
+              aria-invalid={blacklistReasonError || undefined}
+              aria-describedby={blacklistReasonError ? "blacklist-reason-error" : "blacklist-reason-help"}
+              className="min-h-[96px] w-full resize-y rounded-2xl border border-border-strong bg-input-background px-3 py-2.5 text-[14px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="예: 반복적인 연락 두절, 현장 안전 규정 위반"
+            />
+            {blacklistReasonError ? (
+              <p id="blacklist-reason-error" role="alert" className="text-[12px] font-bold text-error-strong">등록 사유를 입력해주세요.</p>
+            ) : (
+              <p id="blacklist-reason-help" className="text-[12px] text-muted-foreground">민감정보 대신 운영 판단에 필요한 사실만 적어주세요.</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-2xl" disabled={busy}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void commitBlacklist();
+              }}
+              disabled={busy}
+              className="rounded-2xl bg-error hover:bg-error-strong"
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />} 블랙리스트 등록
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1611,6 +1724,9 @@ export function ApplicantDetailPanel({
   onAutoOpenConfirmConsumed?: () => void;
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
   const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
   // 표시 기준 공고를 드로어가 들고 있는다 — 상세 탭에서 공고를 바꾼 뒤 '대화 내역'으로 넘어가면
   // 예전엔 부르는 화면이 준 jobId로 되돌아가, 매니저가 보고 있는 공고와 **다른 공고로 답장**이 적재됐다.
@@ -1639,6 +1755,49 @@ export function ApplicantDetailPanel({
     if (isOpen) setTab(initialTab);
   }, [isOpen, applicantId, initialTab]);
 
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      returnFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      requestAnimationFrame(() => panelRef.current?.focus());
+    } else if (!isOpen && wasOpenRef.current) {
+      const returnTarget = returnFocusRef.current;
+      requestAnimationFrame(() => returnTarget?.focus());
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (docked) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusables = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+    if (focusables.length === 0) {
+      event.preventDefault();
+      panelRef.current?.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }, [docked, onClose]);
+
   if (!isOpen || applicantId == null) return null;
 
   const a = detail?.applicant;
@@ -1649,11 +1808,17 @@ export function ApplicantDetailPanel({
       {/* 스플릿 뷰에서는 스크림을 깔지 않는다 — 목록을 계속 만질 수 있어야 한다. */}
       {!docked && (
         <AnimatePresence>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
+          <motion.div aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
         </AnimatePresence>
       )}
       <AnimatePresence>
         <motion.div
+          ref={panelRef}
+          role={docked ? "complementary" : "dialog"}
+          aria-modal={docked ? undefined : true}
+          aria-labelledby="applicant-detail-panel-title"
+          tabIndex={-1}
+          onKeyDown={handlePanelKeyDown}
           initial={{ x: "100%" }}
           animate={{ x: 0 }}
           exit={{ x: "100%" }}
@@ -1671,7 +1836,7 @@ export function ApplicantDetailPanel({
               <div className="w-12 h-12 rounded-2xl bg-muted text-gray-700 flex items-center justify-center font-bold text-[18px] shadow-inner">{a?.name?.charAt(0) ?? "?"}</div>
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <h2 className="text-[20px] font-extrabold text-foreground">{a?.name ?? "지원자"}</h2>
+                  <h2 id="applicant-detail-panel-title" className="text-[20px] font-extrabold text-foreground">{a?.name ?? "지원자"}</h2>
                   {age && <span className="text-[12px] font-medium text-muted-foreground bg-white px-2 py-0.5 rounded-full border border-border-strong">{age}세</span>}
                   {a && <span className="text-[12px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#A8A29E"}1A`, color: STATUS_TEXT_COLORS[a.status] ?? "#44403C" }}>{a.status}</span>}
                 </div>
@@ -1708,6 +1873,7 @@ export function ApplicantDetailPanel({
                 focusJobId={focusJobId}
                 onFocusJobChange={setFocusJobId}
                 variant="drawer"
+                onOpenChat={() => setTab("chat")}
                 detail={detail}
                 reload={() => { reload(); onChanged?.(); }}
                 onChanged={onChanged}

@@ -21,11 +21,19 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { randomUUID } from "crypto";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
 import type { GeoJob } from "../geo";
+import {
+  deliverPoolEngageMessage,
+  poolEngageClaimDecision,
+  poolEngageFinalizeSucceeded,
+  poolEngageRecoveryDecision,
+} from "../pool-engage-claim";
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
+import { resolveAutomatedOutboundText } from "./outbound-safety";
 import {
   isExposed,
   normalizeRule,
@@ -64,13 +72,20 @@ export type EngageSkipReason =
   | "no_phone"
   | "opt_out"
   | "job_conflict"
-  | "already_engaged";
+  | "already_engaged"
+  | "engage_claimed"
+  | "claim_unavailable"
+  | "claim_retryable"
+  | "unsafe_message";
 
 export type EngageOutcome =
   | { action: "off" }
   | { action: "copilot_manual" }
   | { action: "skipped"; reason: EngageSkipReason }
   | { action: "send_failed"; error?: string }
+  | { action: "send_unknown"; error?: string }
+  | { action: "sent_unfinalized"; error?: string }
+  | { action: "recovered"; messageKind: "screening" | "waitlist" }
   | { action: "waitlist_sent" }
   | { action: "engaged" };
 
@@ -149,28 +164,44 @@ async function isJobFullyStaffed(
   return confirmed >= capacity;
 }
 
-async function recordEngageMessage(
-  supabase: SupabaseClient,
-  args: { applicantId: number; phone: string; jobId: number; text: string; messageId: string | null }
-): Promise<void> {
-  const { error } = await supabase.from("messages").insert({
-    applicant_id: args.applicantId,
-    applicant_phone: args.phone,
-    direction: "outbound",
-    body: args.text,
-    status: "sent",
-    sent_by: ENGAGE_SENT_BY,
-    solapi_msg_id: args.messageId,
-    message_type: "sms",
-    job_id: args.jobId,
+/** 기존 outbox만 조회·복구한다. null일 때만 호출자가 새 claim을 시도할 수 있다. */
+export async function recoverInterestEngage(params: {
+  supabase: SupabaseClient;
+  jobId: number;
+  applicantId: number;
+  actionKey?: string;
+}): Promise<EngageOutcome | null> {
+  const { data, error } = await params.supabase.rpc("reconcile_pool_engage", {
+    p_action_key: params.actionKey ?? null,
+    p_applicant_id: params.applicantId,
+    p_job_id: params.jobId,
   });
-  if (error) console.error("[engage] messages insert failed", error);
+  const recovery = poolEngageRecoveryDecision(data, error);
+  if (recovery.kind === "none") return null;
+  if (recovery.kind === "failed") {
+    return { action: "send_failed", error: "provider_declared_failure" };
+  }
+  if (recovery.kind === "recovered") {
+    return { action: "recovered", messageKind: recovery.messageKind };
+  }
+  if (recovery.kind === "sent_unfinalized") {
+    return { action: "sent_unfinalized", error: "finalization_failed" };
+  }
+  if (recovery.kind === "blocked") {
+    return {
+      action: "send_unknown",
+      error: `provider_${recovery.status}`,
+    };
+  }
+  console.error("[engage] outbox reconciliation failed", error ?? data);
+  return { action: "send_unknown", error: "recovery_state_unknown" };
 }
 
 /**
  * 관심 클릭 자동 응대 1건 실행 — 가드 통과 시 첫 문자(또는 충원 완료 대기 안내) 발송.
- * 종결(발송/스킵/코파일럿) 시 engage_queued_at을 클리어한다.
- * 발송 실패와 off는 클리어하지 않는다 — 야간 큐 건은 다음날 아침 cron이 재시도.
+ * 정상 발송·종결 가드는 engage_queued_at을 지우고, 다른 공고 진행/claim 오류는 후속 확인을 위해 유지한다.
+ * 공급자가 실패를 확정한 건은 큐를 유지해 새 action으로 재시도한다. 결과 불명 건도 큐는
+ * 유지하지만 DB claim이 재발송을 막으며, 매니저가 공급자 내역을 확인해야 한다.
  */
 export async function runInterestEngage(params: {
   supabase: SupabaseClient;
@@ -180,8 +211,20 @@ export async function runInterestEngage(params: {
   mode?: AgentMode;
   /** pool_events.meta.source — 'interest_click' | 'engage_queued_cron' */
   source: string;
+  /** 풀 클릭 action_id. cron은 실행 건마다 새 키를 만들며 실패가 확정된 건만 다음 회차 재시도한다. */
+  actionKey?: string;
 }): Promise<EngageOutcome> {
   const { supabase, jobId, applicantId, source } = params;
+
+  // 이미 공급자 성공이 저장된 건은 kill-switch/공고 상태보다 먼저 DB finalize만 복구한다.
+  // sending/unknown도 여기서 보이게 반환해 새 action/SMS 경계를 넘지 않는다.
+  const recovery = await recoverInterestEngage({
+    supabase,
+    jobId,
+    applicantId,
+  });
+  if (recovery) return recovery;
+
   const mode = params.mode ?? (await getAgentMode(supabase));
   if (mode === "off") return { action: "off" };
 
@@ -248,7 +291,8 @@ export async function runInterestEngage(params: {
   }
   // 정책: 한 사람 = 하나의 '진행 중' 공고 (dispatch와 동일)
   if (applicant.current_job_id && applicant.current_job_id !== jobId) {
-    await clearQueueFlag(supabase, jc.id);
+    // 야간 큐는 유지한다. 기존 흐름이 정상 종료되어 current_job_id가 풀리면 다음 회차에
+    // 새 DB claim을 시도할 수 있고, 그전에는 claim/current_job 가드가 중복 발송을 막는다.
     return { action: "skipped", reason: "job_conflict" };
   }
   // 이 공고로 이미 자동 안내(첫 문자·대기 안내)를 보냈으면 중복 발송 금지
@@ -259,72 +303,86 @@ export async function runInterestEngage(params: {
 
   const name = applicant.name?.trim() || "고객";
   const capacity = typeof job.capacity === "number" && job.capacity > 0 ? job.capacity : 1;
+  const waitlist = await isJobFullyStaffed(supabase, jobId, capacity);
+  let text: string | null;
+  if (waitlist) {
+    const waitlistFallback = WAITLIST_NOTICE(name, smsJobTitle(job.title));
+    text = resolveAutomatedOutboundText(null, waitlistFallback);
+  } else {
+    const stored = (await getSystemMessage(supabase, "interest_engage"))?.trim();
+    const cleanTitle = smsJobTitle(job.title);
+    const fallback = FALLBACK_ENGAGE(name, cleanTitle);
+    const filledStored = stored
+      ? fillTemplate(stored, { 이름: name, 공고명: cleanTitle })
+      : null;
+    text = resolveAutomatedOutboundText(filledStored, fallback);
+  }
+  if (!text) return { action: "skipped", reason: "unsafe_message" };
 
-  // ─── 충원 완료 → 투명한 대기 안내 1통 (스크리닝 시작 안 함, 확정 뉘앙스 없음) ───
-  if (await isJobFullyStaffed(supabase, jobId, capacity)) {
-    const text = WAITLIST_NOTICE(name, smsJobTitle(job.title));
-    const send = await sendSms(applicant.phone, text);
-    if (!send.success) {
-      console.error("[engage] waitlist SMS fail", applicantId, send.error);
-      return { action: "send_failed", error: send.error };
+  const actionKey = params.actionKey ?? randomUUID();
+  const delivery = await deliverPoolEngageMessage({
+    claim: async () => {
+      const { data, error } = await supabase.rpc("claim_pool_engage", {
+        p_job_id: jobId,
+        p_applicant_id: applicantId,
+        p_action_key: actionKey,
+        p_applicant_phone: applicant.phone,
+        p_message_body: text,
+        p_message_kind: waitlist ? "waitlist" : "screening",
+        p_source: source,
+      });
+      if (error) console.error("[engage] applicant-level claim failed", error);
+      return poolEngageClaimDecision(data, error);
+    },
+    send: () => sendSms(applicant.phone!, text!),
+    markProviderResult: async (result, providerMessageId, errorText) => {
+      const { data, error } = await supabase.rpc("record_pool_engage_provider_result", {
+        p_action_key: actionKey,
+        p_result: result,
+        p_provider_message_id: providerMessageId,
+        p_error: errorText,
+      });
+      if (error || (data !== "recorded" && data !== "deduped")) {
+        console.error("[engage] provider result persistence failed", error ?? data);
+        return false;
+      }
+      return true;
+    },
+    finalize: async () => {
+      const { data, error } = await supabase.rpc("finalize_pool_engage", {
+        p_action_key: actionKey,
+      });
+      if (!poolEngageFinalizeSucceeded(data, error)) {
+        console.error("[engage] sent message finalization failed", error ?? data);
+        return false;
+      }
+      return true;
+    },
+  });
+
+  if (delivery.kind === "not_sent") {
+    if (delivery.reason === "job_conflict") {
+      return { action: "skipped", reason: "job_conflict" };
     }
-    await recordEngageMessage(supabase, {
-      applicantId,
-      phone: applicant.phone,
-      jobId,
-      text,
-      messageId: send.messageId ?? null,
-    });
-    const { error: evErr } = await supabase.from("pool_events").insert({
-      applicant_id: applicantId,
-      job_id: jobId,
-      event_type: "waitlist_notice",
-      meta: { source },
-    });
-    if (evErr) console.error("[engage] pool_events waitlist_notice failed", evErr);
-    await clearQueueFlag(supabase, jc.id);
-    return { action: "waitlist_sent" };
+    if (delivery.reason === "already_claimed") {
+      return { action: "skipped", reason: "engage_claimed" };
+    }
+    if (delivery.reason === "unavailable") {
+      await clearQueueFlag(supabase, jc.id);
+      return { action: "skipped", reason: "claim_unavailable" };
+    }
+    return { action: "skipped", reason: "claim_retryable" };
   }
-
-  // ─── 스크리닝 시작 — 첫 질문 문자 발송 ───
-  const stored = (await getSystemMessage(supabase, "interest_engage"))?.trim();
-  const cleanTitle = smsJobTitle(job.title);
-  const text = stored
-    ? fillTemplate(stored, { 이름: name, 공고명: cleanTitle })
-    : FALLBACK_ENGAGE(name, cleanTitle);
-  const send = await sendSms(applicant.phone, text);
-  if (!send.success) {
-    console.error("[engage] engage SMS fail", applicantId, send.error);
-    return { action: "send_failed", error: send.error };
+  if (delivery.kind === "provider_failed") {
+    return { action: "send_failed", error: "provider_declared_failure" };
   }
-
-  // 발송 성공 후 상태 갱신 — dispatch 패턴과 동일 축(sent_at·agent_stage·current_job_id·messages)
-  const { error: jcErr } = await supabase
-    .from("job_candidates")
-    .update({ sent_at: new Date().toISOString(), agent_stage: "screening" })
-    .eq("id", jc.id);
-  if (jcErr) console.error("[engage] jc update failed", jcErr);
-  await clearQueueFlag(supabase, jc.id);
-  const { error: aErr } = await supabase
-    .from("applicants")
-    .update({ current_job_id: jobId })
-    .eq("id", applicantId);
-  if (aErr) console.error("[engage] current_job_id update failed", aErr);
-  await recordEngageMessage(supabase, {
-    applicantId,
-    phone: applicant.phone,
-    jobId,
-    text,
-    messageId: send.messageId ?? null,
-  });
-  const { error: evErr } = await supabase.from("pool_events").insert({
-    applicant_id: applicantId,
-    job_id: jobId,
-    event_type: "auto_engage",
-    meta: { source },
-  });
-  if (evErr) console.error("[engage] pool_events auto_engage failed", evErr);
-  return { action: "engaged" };
+  if (delivery.kind === "provider_unknown" || delivery.kind === "claim_state_unknown") {
+    return { action: "send_unknown", error: delivery.kind };
+  }
+  if (!delivery.finalized) {
+    return { action: "sent_unfinalized", error: "finalization_failed" };
+  }
+  return waitlist ? { action: "waitlist_sent" } : { action: "engaged" };
 }
 
 /** pickJobForCampaignReply 선택 근거 — pool_events meta·로그용. */
@@ -506,7 +564,13 @@ export function engageOutcomeLabel(outcome: EngageOutcome): string {
     case "copilot_manual":
       return "🤖 코파일럿 모드 — 인바운드가 없어 초안 생성 불가. 관심 큐에서 [빠른 컨택]으로 수동 진행해주세요.";
     case "send_failed":
-      return "⚠️ AI 첫 문자 발송 실패 — 수동 컨택 필요.";
+      return "⚠️ 공급자가 문자 발송 실패를 확인했어요 — 자동 확정은 없으며 새 요청으로 재시도하거나 수동 확인이 필요합니다.";
+    case "send_unknown":
+      return "⚠️ 문자 발송 결과를 확인할 수 없어 중복 방지를 위해 자동 재시도하지 않았어요 — 발송 내역을 확인해 주세요.";
+    case "sent_unfinalized":
+      return "⚠️ 문자 발송은 접수됐지만 후보 상태 기록을 마치지 못했어요 — 다시 보내지 말고 매니저가 확인해 주세요.";
+    case "recovered":
+      return recoveryLabel(outcome.messageKind);
     case "skipped":
       switch (outcome.reason) {
         case "already_in_progress":
@@ -516,7 +580,15 @@ export function engageOutcomeLabel(outcome: EngageOutcome): string {
         case "opt_out":
           return "수신거부 지원자 — 자동 발송 생략.";
         case "job_conflict":
-          return "다른 공고 진행 중 — 자동 발송 생략(수동 확인 필요).";
+          return "다른 공고 응대가 먼저 진행 중이라 이 공고 문자는 보내지 않았어요 — 근무 확정은 아니며 수동 확인이 필요합니다.";
+        case "engage_claimed":
+          return "다른 자동응대 요청이 먼저 처리 중이라 이 공고 문자는 보내지 않았어요 — 근무 확정은 아니며 수동 확인이 필요합니다.";
+        case "claim_retryable":
+          return "자동응대 선점 상태를 확인하지 못해 문자를 보내지 않았어요 — 중복 방지를 위해 수동 확인이 필요합니다.";
+        case "claim_unavailable":
+          return "발송 직전 공고·후보 상태가 달라져 문자를 보내지 않았어요 — 근무 확정은 아니며 수동 확인이 필요합니다.";
+        case "unsafe_message":
+          return "자동 안내 문구의 안전 기준을 충족하지 않아 문자를 보내지 않았어요 — 매니저가 문구를 확인해 주세요.";
         case "no_phone":
           return "전화번호 없음 — 자동 발송 불가.";
         default:
@@ -526,4 +598,10 @@ export function engageOutcomeLabel(outcome: EngageOutcome): string {
     default:
       return "";
   }
+}
+
+function recoveryLabel(messageKind: "screening" | "waitlist"): string {
+  return messageKind === "waitlist"
+    ? "기존 대기 안내 발송을 다시 보내지 않고 기록만 복구했어요 — 근무 확정은 아니며 매니저 확인이 필요합니다."
+    : "기존 첫 문자 발송을 다시 보내지 않고 후보 기록만 복구했어요 — 근무 확정은 아니며 매니저 확인이 필요합니다.";
 }

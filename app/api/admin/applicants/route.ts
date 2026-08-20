@@ -5,6 +5,7 @@ import { sendSms } from "@/lib/solapi";
 import { ensureDanggeunSystemJob } from "@/lib/agent/danggeun-job";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
+import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { gatherLiveJobLinks } from "@/lib/candidate-links";
 import { gatherMessagePreviews, RECENT_MANUAL_MS } from "@/lib/message-preview";
 
@@ -34,19 +35,19 @@ function validConfirmedSlot(v: unknown): boolean {
 // 목록(요약) 응답 컬럼. 무거운 자유텍스트(introduction/screening/note/memo/churn_reason)는
 // 목록에서 쓰이지 않으므로 제외해 페이로드를 줄인다. 전체 행은 상세 엔드포인트(/[id])에서 제공.
 const LIST_COLUMNS = [
-  // 아래 11개를 2026-08-14에 걷어냈다 — 목록 소비처 8곳(대시보드·파이프라인·리포트·
+  // 아래 10개를 2026-08-14에 걷어냈다 — 목록 소비처 8곳(대시보드·파이프라인·리포트·
   // 슬롯보드·답장큐·지점·자동화·공고탭 피커) 전수 대조에서 참조 0건이었다:
   //   license_type · self_ownership · kakao_channel_friend · available_date · filter_pass
-  //   bname · sort_order · branch2 · churned_at · start_date · availability_updated_at
+  //   bname · sort_order · branch2 · churned_at · start_date
   // 헷갈리기 쉬운 것 — SlotBoard의 sort_order는 '지점'의 것이고, Jobs의 start_date는
   // '공고'의 것이다. Pipeline의 churned_at은 주석에만 나오고,
-  // availability_updated_at은 CardData에 담기만 하고 읽는 곳이 없었다(그 필드도 함께 지웠다).
+  // availability_updated_at은 2026-08-19 인재풀 행에서 가용성 신선도를 함께 보여주며 다시 사용한다.
   // 지원자 상세 패널은 별도 상세 GET을 쓰므로 이 목록과 무관하다.
   "id", "created_at", "name", "birth_date", "phone", "location",
   "own_vehicle", "vehicle_type",
   "branch1", "work_hours", "experience", "status", "branch", "source", "last_message_at", "confirmed_slot", "confirmed_branch", "current_branch", "baemin_id", "guide_sent", "onboarding_call_status", "sigungu", "sido", "lat", "lng", "geo_precision",
   // 파일럿 축 — 가용성 필터·수신거부 표시·임포트 구분에 필수 (없으면 UI 필터가 조용히 0명이 된다)
-  "availability", "sms_opt_out_at", "airtable_record_id",
+  "availability", "availability_updated_at", "sms_opt_out_at", "airtable_record_id",
   // 재컨택 선별 정확도 — 발송가능 판정(맞춤링크 토큰)·원지원 신선도 정렬/코호트 필터
   "access_token", "applied_at",
   // 답장 큐 공고별 필터 — 진행 중 공고 포인터
@@ -429,11 +430,17 @@ export async function POST(req: NextRequest) {
       try {
         const startMsg = (await getSystemMessage(supabase, "danggeun_start"))?.trim();
         if (startMsg) {
-          const filled = fillTemplate(startMsg, {
+          const filledStored = fillTemplate(startMsg, {
             이름: data.name ?? "",
             지점: data.branch ?? data.branch1 ?? "",
             시간대: shortWorkHours(data.work_hours ?? null),
           });
+          const fallback = `${data.name || "지원자"}님, 지원 등록 감사합니다. 몇 가지 정보를 확인한 뒤 매니저가 별도로 안내드리겠습니다. 현재는 근무 확정 상태가 아닙니다.`;
+          const filled = resolveAutomatedOutboundText(filledStored, fallback);
+          if (!filled) {
+            console.error("[applicants POST] unsafe danggeun start text blocked");
+            throw new Error("unsafe automated start message");
+          }
           let messageId: string | null = null;
           if (source === "danggeun") {
             const r = await sendSms(data.phone, filled);

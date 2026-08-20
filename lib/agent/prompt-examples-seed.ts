@@ -160,11 +160,11 @@ export const PROMPT_EXAMPLES_SEED: SeedExample[] = [
     category: "system_message",
     sort_order: 40,
     title: "onboarding_guide",
-    body: `업무 진행을 위한 앱설치 및 요청사항을 전달드립니다. 영상교육 수료 후, 회신 부탁드립니다.
+    body: `{{이름}}님, 아래 내용은 희망하실 경우 미리 준비하실 수 있는 선택 안내입니다. 앱 설치·교육·아이디 회신은 채용이나 근무 배정 확정을 의미하지 않습니다.
 
-1. 배민 커넥트 앱 설치 후 가입
-2. 앱 가입 시 안전보건교육 영상(2시간) 필수 시청 필요
-3. 가입 및 교육 수료 후 마이페이지 > 내 정보에서 '아이디' 확인 후, 아이디 회신 부탁드립니다.
+1. 배민 커넥트 앱 설치 후 가입(선택)
+2. 안전보건교육 영상(2시간) 미리 시청(선택)
+3. 준비하신 경우 마이페이지 > 내 정보에서 앱 아이디 회신
 
 [참고 자료]
 가입 가이드: https://www.youtube.com/watch?v=bMM112zT7JY
@@ -174,11 +174,8 @@ export const PROMPT_EXAMPLES_SEED: SeedExample[] = [
     category: "system_message",
     sort_order: 45,
     title: "onboarding_reminder",
-    body: `{{이름}}님, 아직 배민 커넥트 아이디 회신이 확인되지 않습니다.
-
-진행을 위해 마이페이지 > 내 정보에서 아이디 확인 후 회신 부탁드립니다.
-
-* 회신이 없을 경우 진행이 자동 중단될 수 있습니다.`,
+    body: `{{이름}}님, 앱 설치·교육·아이디 회신은 선택 사항이며 채용이나 근무 배정 확정을 의미하지 않습니다.
+사전 준비를 선택하셨고 완료하셨다면 앱 아이디를 회신해주세요. 아직 준비하지 않으셨다면 나중에 하셔도 괜찮습니다.`,
   },
   {
     category: "system_message",

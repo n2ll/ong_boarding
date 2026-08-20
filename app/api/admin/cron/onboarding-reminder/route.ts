@@ -24,6 +24,10 @@ import { sendSms } from "@/lib/solapi";
 import { sendSlackOnboardingHandoff, sendSlackPausedAlert } from "@/lib/slack";
 import { fillTemplate, getSystemMessage } from "@/lib/agent/system-messages";
 import { mergeAgentState, isComplete } from "@/lib/agent/checklist";
+import {
+  PRECONFIRMATION_ONBOARDING_REMINDER_TEMPLATE,
+  resolvePreconfirmationGuideText,
+} from "@/lib/agent/outbound-safety";
 import type { AgentState } from "@/lib/agent/types";
 
 export const dynamic = "force-dynamic";
@@ -32,13 +36,7 @@ const DEADLINE_MS = 24 * 60 * 60 * 1000;       // 가이드 발송 후 리마인
 const HANDOFF_DELAY_MS = 3 * 60 * 60 * 1000;   // 리마인더 발송 후 매니저 인계 슬랙까지 대기
 
 const FALLBACK_BODY = (name: string) =>
-  [
-    `${name}님, 아직 배민 커넥트 아이디 회신이 확인되지 않습니다.`,
-    "",
-    "진행을 위해 마이페이지 > 내 정보에서 아이디 확인 후 회신 부탁드립니다.",
-    "",
-    "* 회신이 없을 경우 진행이 자동 중단될 수 있습니다.",
-  ].join("\n");
+  PRECONFIRMATION_ONBOARDING_REMINDER_TEMPLATE.replace("#{이름}", name);
 
 export async function GET(req: NextRequest) {
   // 인증 — Bearer CRON_SECRET만 허용(위조 가능한 user-agent 검사 제거, 미설정 시 fail-closed)
@@ -137,7 +135,17 @@ export async function GET(req: NextRequest) {
 
       const stored = (await getSystemMessage(supabase, "onboarding_reminder"))?.trim();
       const name = applicant.name ?? "지원자";
-      const body = stored ? fillTemplate(stored, { 이름: name }) : FALLBACK_BODY(name);
+      const storedBody = stored ? fillTemplate(stored, { 이름: name }) : null;
+      const body = resolvePreconfirmationGuideText(storedBody, FALLBACK_BODY(name));
+      if (!body) {
+        results.push({
+          candidate_id: row.id as number,
+          stage: "reminder",
+          success: false,
+          error: "안전 검증 실패 — 선택 안내·비확정 고지 필요",
+        });
+        continue;
+      }
 
       const send = await sendSms(applicant.phone, body);
       if (!send.success) {

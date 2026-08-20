@@ -2,7 +2,7 @@
  * 데이터 정합성 점검·재백필 (5-a, 안전·무중단).
  *
  * - GET  : 현재 정합성 리포트(컬럼 변경 없음).
- * - POST : jobs.branch_id/client_id, branches.client_id 누락분을 이름 매칭으로 재백필.
+ * - POST : jobs.branch_id/client_id 누락분을 유일하게 확인되는 관계로만 재백필.
  *
  * 파괴적 작업(레거시 컬럼 삭제)은 하지 않는다.
  */
@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { safeDataIntegrityBackfillPlan } from "@/lib/admin/data-integrity-backfill";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ interface Report {
   jobs_total: number;
   jobs_linked: number; // branch_id 있음
   jobs_backfillable: number; // branch_id 없지만 branch 이름이 지점과 매칭됨 → 자동 연결 가능
+  jobs_client_backfillable: number; // branch_id가 가리키는 지점의 화주사가 명확함 → 자동 연결 가능
   jobs_unmatched: number; // branch 문자열이 어떤 지점과도 매칭 안 됨(수동 확인 필요)
   jobs_missing_client: number; // branch_id 있는데 client_id 없음
   branches_total: number;
@@ -46,17 +48,15 @@ async function loadRows(supabase: SupabaseClient) {
 }
 
 function computeReport(jobs: JobRow[], branches: BranchRow[]): Report {
-  const byName = new Map<string, BranchRow>();
-  for (const b of branches) byName.set(b.name.trim(), b);
+  const plan = safeDataIntegrityBackfillPlan(jobs, branches);
+  const backfillableIds = new Set(plan.jobBranches.map((item) => item.jobId));
 
-  let backfillable = 0;
   let unmatched = 0;
   let missingClient = 0;
   for (const j of jobs) {
     if (j.branch_id == null) {
       const name = (j.branch ?? "").trim();
-      if (name && byName.has(name)) backfillable++;
-      else if (name) unmatched++;
+      if (name && !backfillableIds.has(j.id)) unmatched++;
     } else if (j.client_id == null) {
       missingClient++;
     }
@@ -65,7 +65,8 @@ function computeReport(jobs: JobRow[], branches: BranchRow[]): Report {
   return {
     jobs_total: jobs.length,
     jobs_linked: jobs.filter((j) => j.branch_id != null).length,
-    jobs_backfillable: backfillable,
+    jobs_backfillable: plan.jobBranches.length,
+    jobs_client_backfillable: plan.jobClients.length,
     jobs_unmatched: unmatched,
     jobs_missing_client: missingClient,
     branches_total: branches.length,
@@ -82,64 +83,37 @@ export async function GET() {
 export async function POST() {
   const supabase = createServiceClient();
   const { jobs, branches } = await loadRows(supabase);
-
-  const byName = new Map<string, BranchRow>();
-  for (const b of branches) byName.set(b.name.trim(), b);
-  const byId = new Map<number, BranchRow>();
-  for (const b of branches) byId.set(b.id, b);
-
-  // 기본 화주사(가장 먼저 생성된 client) — branches.client_id 누락분 귀속용
-  const { data: firstClient } = await supabase
-    .from("clients")
-    .select("id")
-    .order("id", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const defaultClientId = (firstClient?.id as number | undefined) ?? null;
+  const plan = safeDataIntegrityBackfillPlan(jobs, branches);
 
   let jobsBranchFixed = 0;
   let jobsClientFixed = 0;
-  let branchesClientFixed = 0;
 
-  // 1) branches.client_id 누락 → 기본 화주사로 귀속
-  if (defaultClientId != null) {
-    for (const b of branches) {
-      if (b.client_id == null) {
-        const { error } = await supabase.from("branches").update({ client_id: defaultClientId }).eq("id", b.id);
-        if (!error) {
-          b.client_id = defaultClientId; // 후속 job client 백필에 반영
-          branchesClientFixed++;
-        }
-      }
-    }
+  // 지점 소유 화주사는 이름만으로 추론하지 않는다. 유일한 지점 이름과 이미 확정된 지점 소유만 사용한다.
+  for (const item of plan.jobBranches) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ branch_id: item.branchId, client_id: item.clientId })
+      .eq("id", item.jobId)
+      .is("branch_id", null)
+      .select("id")
+      .maybeSingle();
+    if (!error && data) jobsBranchFixed++;
   }
-
-  // 2) jobs.branch_id 누락 → 이름 매칭으로 연결, 동시에 client_id도 채움
-  for (const j of jobs) {
-    if (j.branch_id == null) {
-      const name = (j.branch ?? "").trim();
-      const match = name ? byName.get(name) : undefined;
-      if (match) {
-        const { error } = await supabase
-          .from("jobs")
-          .update({ branch_id: match.id, client_id: match.client_id })
-          .eq("id", j.id);
-        if (!error) jobsBranchFixed++;
-      }
-    } else if (j.client_id == null) {
-      // 3) branch_id는 있는데 client_id 누락 → 지점의 화주사로 채움
-      const b = byId.get(j.branch_id);
-      if (b?.client_id != null) {
-        const { error } = await supabase.from("jobs").update({ client_id: b.client_id }).eq("id", j.id);
-        if (!error) jobsClientFixed++;
-      }
-    }
+  for (const item of plan.jobClients) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ client_id: item.clientId })
+      .eq("id", item.jobId)
+      .is("client_id", null)
+      .select("id")
+      .maybeSingle();
+    if (!error && data) jobsClientFixed++;
   }
 
   // 갱신 후 리포트 재계산
   const { jobs: jobs2, branches: branches2 } = await loadRows(supabase);
   return NextResponse.json({
-    fixed: { jobs_branch: jobsBranchFixed, jobs_client: jobsClientFixed, branches_client: branchesClientFixed },
+    fixed: { jobs_branch: jobsBranchFixed, jobs_client: jobsClientFixed, branches_client: 0 },
     report: computeReport(jobs2, branches2),
   });
 }

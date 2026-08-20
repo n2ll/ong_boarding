@@ -10,8 +10,9 @@ import { createServiceClient } from "@/lib/supabase";
 import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const jobId = Number(params.id);
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const jobId = Number(routeParams.id);
   if (!Number.isFinite(jobId)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
@@ -64,8 +65,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ candidates });
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const jobId = Number(params.id);
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params;
+  const jobId = Number(routeParams.id);
   if (!Number.isFinite(jobId)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }

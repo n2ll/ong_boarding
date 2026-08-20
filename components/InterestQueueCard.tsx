@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { motion } from "motion/react";
 import { Heart, Zap, Phone, Loader2, ExternalLink, Check, XCircle, Send, X } from "lucide-react";
@@ -7,6 +7,11 @@ import { useConfirm } from "./ConfirmDialog";
 import { Modal } from "./ui/modal";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { Button } from "@/components/ui/button";
+import {
+  manualMessageClientResolution,
+  nextManualMessageAttempt,
+  type ManualMessageAttempt,
+} from "@/lib/manual-message-send";
 
 /**
  * 관심 표시 처리 대기 카드 (내부 매니저용).
@@ -160,6 +165,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
   const [quick, setQuick] = useState<QueueItem | null>(null);
   const [quickBody, setQuickBody] = useState("");
   const [quickSending, setQuickSending] = useState(false);
+  const quickSendAttemptRef = useRef<ManualMessageAttempt | null>(null);
 
   const openQuick = (it: QueueItem) => {
     setQuick(it);
@@ -178,17 +184,49 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
       toast.error("보낼 문구가 비어 있어요.");
       return;
     }
+    const attempt = nextManualMessageAttempt(
+      quickSendAttemptRef.current,
+      {
+        applicantId: quick.applicant_id,
+        phone: quick.phone,
+        body,
+        jobId: quick.job_id,
+        sentBy: "manager",
+        draftId: null,
+        draftWasEdited: false,
+      },
+      () => crypto.randomUUID()
+    );
+    quickSendAttemptRef.current = attempt;
     setQuickSending(true);
     try {
       const sendRes = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: quick.applicant_id, phone: quick.phone, body, sent_by: "manager" }),
+        body: JSON.stringify({
+          applicant_id: quick.applicant_id,
+          phone: quick.phone,
+          body,
+          sent_by: "manager",
+          job_id: quick.job_id,
+          idempotency_key: attempt.key,
+        }),
       });
       const sendJson = await sendRes.json().catch(() => ({}));
-      if (!sendRes.ok) {
-        toast.error(sendJson.error || "문자 발송에 실패했어요");
+      const resolution = manualMessageClientResolution(sendJson, sendRes.ok);
+      if (resolution.rotateKey) quickSendAttemptRef.current = null;
+      if (!resolution.continueAfterSend) {
+        if (resolution.kind === "unknown") {
+          toast.warning(sendJson.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+        } else {
+          toast.error(sendJson.error || "문자 발송에 실패했어요");
+        }
         return;
+      }
+      if (typeof sendJson.warning === "string") {
+        toast.warning(sendJson.warning);
+      } else if (resolution.kind === "sent_unrecorded") {
+        toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. 같은 문자를 다시 보내지 마세요.");
       }
       // 발송은 이미 성공한 시점 — contacted 처리 실패가 '발송 실패'로 오표시되지 않게 분리 처리.
       try {
@@ -209,7 +247,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
       setQuick(null);
       await mutate();
     } catch {
-      toast.error("문자 발송에 실패했어요");
+      toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
       setQuickSending(false);
     }

@@ -1,7 +1,5 @@
-"use client";
-
-import { Inbox } from "@/components/Inbox";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <Inbox />;
+  redirect("/live?tab=inbox");
 }

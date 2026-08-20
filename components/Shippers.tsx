@@ -1,10 +1,21 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { Building2, Search, ChevronRight, ChevronDown, Loader2, Truck, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ExternalLink,
+  RefreshCw,
+  Search,
+  Truck,
+  Users,
+} from "lucide-react";
 import { jsonFetcher } from "@/lib/swr";
+import { masterRegistryOverview } from "@/lib/admin/shipper-operations";
 import { PageShell } from "./ui/page-shell";
+import { Button } from "./ui/button";
+import { controlBase } from "./ui/field";
 import { Clients } from "./Clients";
 
 interface Line {
@@ -14,6 +25,7 @@ interface Line {
   startDate: string | null;
   endDate: string | null;
 }
+
 interface ClientMaster {
   id: string;
   name: string;
@@ -21,157 +33,166 @@ interface ClientMaster {
   workerCount: number;
   lines: Line[];
 }
-interface Resp {
+
+interface MasterResponse {
   configured: boolean;
   clients: ClientMaster[];
 }
 
 export function Shippers() {
-  const { data, error, isLoading } = useSWR<Resp>(
-    "/api/admin/ongmanaging/clients-master",
-    jsonFetcher
-  );
-  const [q, setQ] = useState("");
+  const {
+    data,
+    error,
+    isValidating,
+    mutate,
+  } = useSWR<MasterResponse>("/api/admin/ongmanaging/clients-master", jsonFetcher);
+  const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const clients = data?.clients ?? [];
+  const masterClients = data?.clients;
+  const master = masterRegistryOverview({
+    clients: masterClients,
+    configured: data?.configured,
+    error,
+  });
+  const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
   const filtered = useMemo(
-    () => clients.filter((c) => c.name.toLowerCase().includes(q.trim().toLowerCase())),
-    [clients, q]
+    () => (masterClients ?? []).filter((client) => client.name.toLocaleLowerCase("ko-KR").includes(normalizedQuery)),
+    [masterClients, normalizedQuery],
   );
-  const totalLines = clients.reduce((s, c) => s + c.lineCount, 0);
-  const totalWorkers = clients.reduce((s, c) => s + c.workerCount, 0);
 
   return (
-    <PageShell className="max-w-4xl w-full">
-      <div>
-        <h1 className="text-[20px] font-extrabold text-foreground flex items-center gap-2">
-          <Building2 size={20} /> 화주사
-        </h1>
-        <p className="text-[13px] text-muted-foreground mt-1">
-          공고에 쓰는 화주사를 관리하고, 계약 원본(옹매니징)의 배송라인·운행 인원을 함께 확인합니다.
-        </p>
-      </div>
+    <PageShell className="mx-auto w-full max-w-6xl">
+      <h1 className="sr-only">화주사</h1>
 
-      {/* 화주사 화면이 둘(여기 = 계약 원본 현황 / 설정 › 화주사 관리 = 공고용 목록)이라 어디가 원본인지
-          헷갈렸다 → 한 화면으로 합친다. 위=공고에 쓰는 목록(편집·동기화), 아래=계약 원본(읽기 전용). */}
-      <section className="space-y-2">
-        <div>
-          <h2 className="text-[16px] font-extrabold text-foreground">공고에 쓰는 화주사</h2>
-          <p className="text-[13px] text-muted-foreground mt-0.5">
-            공고를 등록할 때 고르는 목록이에요. 계약 원본에 있는 화주사를 여기로 가져오려면 <b>‘옹매니징 동기화’</b>를 누르세요.
-          </p>
-        </div>
-        <div className="rounded-2xl border border-border-strong bg-card shadow-sm p-4">
-          <Clients embedded />
-        </div>
-      </section>
+      <Clients />
 
-      <section className="space-y-2">
-        <div>
-          <h2 className="text-[16px] font-extrabold text-foreground">계약 원본 (옹매니징)</h2>
-          <p className="text-[13px] text-muted-foreground mt-0.5">
-            계약·배송라인의 원본 시스템에서 그대로 읽어옵니다(여기서는 수정할 수 없어요).
-            ‘운행 인원’은 그 라인에서 실제 운행 중인 인원으로, 이 콘솔의 <b>확정</b>과는 다른 값이에요.
-          </p>
-        </div>
-
-      {error && (
-        <div className="px-4 py-3 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-semibold text-error-strong">
-          화주사 정보를 불러오지 못했어요.
-        </div>
-      )}
-
-      {!error && data && !data.configured && (
-        <div className="px-4 py-3 rounded-2xl bg-muted border border-border-strong text-[13px] font-semibold text-muted-foreground">
-          계약 원본(옹매니징)에 연결되지 않아 배송라인·운행 인원을 표시할 수 없어요. 위 목록은 정상 사용할 수 있어요.
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="flex items-center gap-2 text-[13px] font-bold text-muted-foreground">
-          <Loader2 size={16} className="animate-spin" /> 불러오는 중…
-        </div>
-      )}
-
-      {data?.configured && (
-        <>
-          <div className="flex flex-wrap gap-2 text-[13px] font-bold text-gray-700">
-            <span className="px-3 py-1.5 rounded-lg bg-info-soft text-info-strong">화주사 {clients.length}</span>
-            <span className="px-3 py-1.5 rounded-lg bg-success-soft text-success-strong">배송라인 {totalLines}</span>
-            <span className="px-3 py-1.5 rounded-lg bg-yellow-50 text-warning-strong">운행 인원 {totalWorkers}</span>
+      <section aria-labelledby="contract-master-heading" className="rounded-2xl border border-dashed border-border-strong bg-surface/60 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <div className="mb-2 flex items-center gap-2 text-[12px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+              <ExternalLink aria-hidden="true" size={14} /> 외부 원본 · 읽기 전용
+            </div>
+            <h2 id="contract-master-heading" className="text-[16px] font-extrabold text-foreground">옹매니징 계약 원본</h2>
+            <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+              계약·배송라인 현황을 그대로 조회합니다. 운행 인원은 원본 시스템의 값이며, 이 콘솔의 인력 확정과는 다른 기준입니다.
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void mutate()}
+            isLoading={isValidating}
+          >
+            {!isValidating && <RefreshCw aria-hidden="true" />} {isValidating ? "새로고침 중" : "새로고침"}
+          </Button>
+        </div>
 
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="화주사 검색"
-              className="min-h-11 w-full pl-9 pr-4 py-2.5 rounded-2xl border border-border-strong text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background"
-            />
+        {master.state === "loading" && (
+          <div className="mt-5 grid gap-3 sm:grid-cols-3" aria-label="계약 원본 불러오는 중">
+            {[0, 1, 2].map((item) => <div key={item} className="h-16 animate-pulse rounded-xl bg-muted motion-reduce:animate-none" />)}
           </div>
+        )}
 
-          <div className="space-y-2">
-            {filtered.length === 0 && (
-              <div className="text-[13px] text-muted-foreground py-6 text-center">화주사가 없어요.</div>
-            )}
-            {filtered.map((c) => {
-              const open = openId === c.id;
-              return (
-                <div key={c.id} className="rounded-2xl border border-border-strong bg-card shadow-sm overflow-hidden">
-                  <button
-                    onClick={() => setOpenId(open ? null : c.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {open ? (
-                      <ChevronDown size={16} className="text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronRight size={16} className="text-muted-foreground shrink-0" />
-                    )}
-                    <span className="flex-1 font-bold text-[14px] text-foreground">{c.name}</span>
-                    <span className="flex items-center gap-1 text-[12px] font-bold text-success-strong">
-                      <Truck size={13} /> {c.lineCount}
-                    </span>
-                    <span className="flex items-center gap-1 text-[12px] font-bold text-warning-strong">
-                      <Users size={13} /> {c.workerCount}
-                    </span>
-                  </button>
+        {master.state === "error" && (
+          <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-error/25 bg-error-soft px-4 py-3">
+            <div className="flex min-w-0 items-start gap-2 text-[12px] font-bold text-error-strong">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+              <span>계약 원본을 불러오지 못했습니다. 운영 화주사 목록에는 영향을 주지 않습니다.</span>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => void mutate()}>다시 시도</Button>
+          </div>
+        )}
 
-                  {open && (
-                    <div className="border-t border-muted px-4 py-3 bg-surface-raised">
-                      {c.lines.length === 0 ? (
-                        <div className="text-[13px] text-muted-foreground">등록된 배송라인이 없어요.</div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {c.lines.map((l, i) => (
-                            <div
-                              key={i}
-                              className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-gray-700"
-                            >
-                              <span className="font-bold text-success-strong">{l.lineName}</span>
-                              {l.workDays && <span className="text-muted-foreground">근무 {l.workDays}</span>}
-                              {l.guaranteedDeliveries != null && (
-                                <span className="text-muted-foreground">보장 {l.guaranteedDeliveries}건</span>
-                              )}
-                              {l.startDate && (
-                                <span className="text-muted-foreground">
-                                  {l.startDate}
-                                  {l.endDate ? ` ~ ${l.endDate}` : " ~"}
-                                </span>
-                              )}
-                            </div>
-                          ))}
+        {master.state === "unconfigured" && (
+          <div className="mt-5 rounded-xl border border-border-strong bg-muted px-4 py-3 text-[12px] font-bold text-muted-foreground">
+            옹매니징 연결이 설정되지 않아 계약 원본을 표시할 수 없습니다. 위 운영 목록은 정상적으로 사용할 수 있습니다.
+          </div>
+        )}
+
+        {master.state === "empty" && (
+          <div className="mt-5 rounded-xl border border-dashed border-border-strong bg-card px-4 py-8 text-center">
+            <div className="text-[13px] font-extrabold text-foreground">원본에 등록된 화주사가 없습니다</div>
+            <p className="mt-1 text-[12px] text-muted-foreground">옹매니징에서 계약 화주사를 등록한 뒤 새로고침해주세요.</p>
+          </div>
+        )}
+
+        {master.state === "ready" && (
+          <div className="mt-5 space-y-4">
+            <div className="grid grid-cols-3 divide-x divide-border-strong rounded-xl border border-border-strong bg-card py-3 shadow-xs">
+              <div className="px-3 text-center"><div className="tabular-nums text-[18px] font-extrabold text-foreground">{master.clients}</div><div className="text-xs font-bold text-muted-foreground">화주사</div></div>
+              <div className="px-3 text-center"><div className="tabular-nums text-[18px] font-extrabold text-foreground">{master.lines}</div><div className="text-xs font-bold text-muted-foreground">배송라인</div></div>
+              <div className="px-3 text-center"><div className="tabular-nums text-[18px] font-extrabold text-foreground">{master.workers}</div><div className="text-xs font-bold text-muted-foreground">운행 인원</div></div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="relative block w-full sm:w-[280px]">
+                <span className="sr-only">원본 화주사 검색</span>
+                <Search aria-hidden="true" size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="원본 화주사 검색"
+                  className={`${controlBase} min-h-11 py-2.5 pl-10`}
+                />
+              </label>
+              <span className="text-xs font-bold text-muted-foreground">{filtered.length}곳 표시</span>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border-strong bg-card px-4 py-8 text-center text-[12px] text-muted-foreground">
+                ‘{query.trim()}’에 맞는 원본 화주사가 없습니다.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border-strong bg-card">
+                {filtered.map((client) => {
+                  const open = openId === client.id;
+                  const detailsId = `master-client-${client.id}-lines`;
+                  return (
+                    <article key={client.id} className="border-b border-border last:border-b-0">
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        aria-controls={detailsId}
+                        onClick={() => setOpenId(open ? null : client.id)}
+                        className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      >
+                        <span className="flex min-w-0 items-center gap-2 font-extrabold text-foreground">
+                          <ChevronDown aria-hidden="true" size={15} className={`shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} />
+                          <span className="truncate">{client.name}</span>
+                        </span>
+                        <span className="flex items-center gap-1 text-xs font-bold text-foreground"><Truck aria-hidden="true" size={13} className="text-muted-foreground" /> {client.lineCount}</span>
+                        <span className="flex items-center gap-1 text-xs font-bold text-foreground"><Users aria-hidden="true" size={13} className="text-muted-foreground" /> {client.workerCount}</span>
+                      </button>
+
+                      {open && (
+                        <div id={detailsId} className="border-t border-border bg-background/55 px-4 py-4 sm:pl-10">
+                          {client.lines.length === 0 ? (
+                            <p className="text-[12px] text-muted-foreground">등록된 배송라인이 없습니다.</p>
+                          ) : (
+                            <ul className="grid gap-2 lg:grid-cols-2">
+                              {client.lines.map((line, index) => (
+                                <li key={`${line.lineName}-${index}`} className="rounded-xl border border-border-strong bg-card px-3 py-2.5">
+                                  <div className="text-[12px] font-extrabold text-foreground">{line.lineName}</div>
+                                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs font-medium text-muted-foreground">
+                                    {line.workDays && <span>근무 {line.workDays}</span>}
+                                    {line.guaranteedDeliveries != null && <span>보장 {line.guaranteedDeliveries}건</span>}
+                                    {line.startDate && <span>{line.startDate}{line.endDate ? ` ~ ${line.endDate}` : " ~"}</span>}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </div>
                       )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </>
-      )}
+        )}
       </section>
     </PageShell>
   );

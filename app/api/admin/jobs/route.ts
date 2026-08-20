@@ -12,6 +12,7 @@ import { isSystemJobTitle, isJobEffectivelyClosed, describeDbConstraintError, no
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
+import { isReviewReadyCandidate } from "@/lib/admin/job-operations";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -57,6 +58,7 @@ export async function GET(req: NextRequest) {
   );
   const stageCounts: Record<number, Record<string, number>> = {};
   const confirmedCounts: Record<number, number> = {};
+  const reviewReadyCounts: Record<number, number> = {};
   if (jobIds.length > 0) {
     const { data: cands } = await supabase
       .from("job_candidates")
@@ -70,6 +72,11 @@ export async function GET(req: NextRequest) {
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
       const rel = (c as { applicants?: { status?: string | null; current_job_id?: number | null } | { status?: string | null; current_job_id?: number | null }[] | null }).applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
+      // 스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보 — 공고 목록의 '후보 검토' 큐.
+      // agent_stage='active'도 자동 전이일 수 있으므로 확정으로 간주하지 않는다.
+      if (isReviewReadyCandidate(stage, a?.status ?? null)) {
+        reviewReadyCounts[jid] = (reviewReadyCounts[jid] ?? 0) + 1;
+      }
       // 확정 계상 가드: 마감 공고 링크·이탈(abort) 링크는 제외 + **확정이 이 공고에 결속됐을 때만**.
       // 확정은 사람 단위(applicants.status)라, 공고가 여럿이면 다른 라인 확정자가 이 공고에 링크만 있어도
       // (예: 맞춤 공고 링크에서 관심 클릭) 충원율이 올라가 '충원 완료 — 마감하기'가 오탐된다.
@@ -111,6 +118,7 @@ export async function GET(req: NextRequest) {
     ...j,
     counts: stageCounts[j.id] ?? {},
     confirmed_count: confirmedCounts[j.id] ?? 0,
+    review_ready_count: reviewReadyCounts[j.id] ?? 0,
     interest_count: interestCounts[j.id] ?? 0,
   }));
 

@@ -8,7 +8,7 @@
  * ⚠️ 비지원자 발송의 법적 근거는 실운영 전 검토 필요. 어드민 미들웨어 인증.
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   computeReengagementCandidates,
   importActiveCandidates,
@@ -16,6 +16,7 @@ import {
   REENGAGEMENT_OFFER_TEMPLATE,
   REENGAGEMENT_OPTIN_TEMPLATE,
 } from "@/lib/reengagement";
+import { reengagementCandidateKey, selectedReengagementCandidates } from "@/lib/reengagement-selection";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -38,6 +39,7 @@ export async function GET() {
       excludedBlacklist: summary.excludedBlacklist,
       excludedApplicants: summary.excludedApplicants,
       activeCandidates: summary.activeCandidates.map((c) => ({
+        key: reengagementCandidateKey(c.phone),
         name: c.name,
         phoneMasked: maskPhone(c.phone),
         sources: c.sources,
@@ -53,7 +55,7 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   // 킬스위치 하드 게이트 — OFF면 편입(개인정보 반입) 자체를 하지 않는다.
   if (!(await isReengagementEnabled())) {
     return NextResponse.json({
@@ -63,13 +65,24 @@ export async function POST() {
     });
   }
   try {
+    const body = await req.json().catch(() => null);
+    const candidateKeys = Array.isArray(body?.candidateKeys)
+      ? body.candidateKeys.filter((key: unknown): key is string => typeof key === "string")
+      : [];
+    if (candidateKeys.length === 0) {
+      return NextResponse.json({ error: "편입할 후보를 1명 이상 선택해주세요." }, { status: 400 });
+    }
     const summary = await computeReengagementCandidates();
-    const imported = await importActiveCandidates(summary.activeCandidates);
+    const selected = selectedReengagementCandidates(summary.activeCandidates, candidateKeys);
+    if (selected.length === 0) {
+      return NextResponse.json({ error: "선택한 후보를 다시 확인해주세요. 발굴 결과가 갱신되었을 수 있어요." }, { status: 409 });
+    }
+    const imported = await importActiveCandidates(selected);
     return NextResponse.json({
       enabled: true,
       imported,
-      candidates: summary.activeCount,
-      note: `활동 후보 ${imported}명 편입 완료(status='스크리닝 전'). 발송은 발송 플로에서 매니저가 진행.`,
+      requested: selected.length,
+      note: `선택한 활동 후보 ${selected.length}명 중 ${imported}명을 인력풀에 편입했습니다. 문자는 발송하지 않았습니다.`,
     });
   } catch (e) {
     console.error("[reengagement POST] failed", e);

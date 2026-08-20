@@ -6,6 +6,18 @@ import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
 import { useConfirm } from "./ConfirmDialog";
+import {
+  detectManualOutboundSafetyViolation,
+  PRECONFIRMATION_ONBOARDING_TEMPLATE,
+  PRIVACY_SAFE_ID_DOCUMENT_TEMPLATE,
+} from "@/lib/agent/outbound-safety";
+import {
+  manualMessageClientResolution,
+  manualMessagePauseOutcome,
+  nextManualMessageAttempt,
+  type ManualMessageAttempt,
+} from "@/lib/manual-message-send";
+import { conversationMessagesView } from "@/lib/conversation-thread-view";
 
 interface PendingDraft {
   id: string;
@@ -22,6 +34,7 @@ interface ApiMessage {
   created_at: string;
   sent_by?: string | null;
   job_id?: number | null;
+  status?: string | null;
 }
 
 interface JobLabel {
@@ -155,8 +168,8 @@ const QUICK_TEMPLATES: { label: string; text: string }[] = [
   { label: "관심 대기 안내", text: `[옹고잉] #{이름}님, '#{공고명}' 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요!` },
   { label: "맞춤 공고 링크 안내", text: `#{이름}님, 지금 모집 중인 공고를 본인 전용 페이지에서 모아 보실 수 있어요. 편하실 때 확인해보세요!\n#{맞춤링크}` },
   { label: "스크리닝 확인", text: `#{이름}님, 몇 가지만 확인 부탁드릴게요!\n- 배송에 쓰실 자차를 보유하고 계신가요?\n- 본인 명의로 정산 받으시는 데 문제 없으실까요?\n- 공휴일에도 업무 가능하실까요?` },
-  { label: "온보딩 절차", text: `#{이름}님, 업무 진행을 위한 안내드릴게요. 영상 교육 수료 후 회신 부탁드립니다.\n1. 배민 커넥트 앱 설치 후 가입\n2. 가입 시 안전보건교육 영상(2시간) 시청\n3. 교육 수료 후 앱 아이디 회신` },
-  { label: "서류 요청", text: `#{이름}님, 지원 감사합니다. 진행을 위해 신분증 사진 1장 회신 부탁드립니다.` },
+  { label: "사전 준비(선택)", text: PRECONFIRMATION_ONBOARDING_TEMPLATE },
+  { label: "신분증 보호 안내", text: PRIVACY_SAFE_ID_DOCUMENT_TEMPLATE },
   { label: "감사 인사", text: `#{이름}님, 문의 주셔서 감사합니다. 추가로 궁금하신 점 있으면 편하게 말씀해주세요.` },
 ];
 
@@ -183,6 +196,7 @@ export function ConversationThread({
   const [jobsMap, setJobsMap] = useState<Record<number, JobLabel>>({});
   const [agentStage, setAgentStage] = useState<string | null>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [messagesLoadError, setMessagesLoadError] = useState(false);
   const [sending, setSending] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [pendingDraft, setPendingDraft] = useState<PendingDraft | null>(null);
@@ -191,6 +205,9 @@ export function ConversationThread({
   const [optOutBusy, setOptOutBusy] = useState(false);
   const confirm = useConfirm();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 응답 유실 뒤 같은 본문을 다시 눌러도 서버가 같은 선점 행을 조회하도록 키를 유지한다.
+  const manualSendAttemptRef = useRef<ManualMessageAttempt | null>(null);
+  const draftSendAttemptRef = useRef<ManualMessageAttempt | null>(null);
 
   const jobQS = jobId != null ? `?job_id=${jobId}` : "";
 
@@ -199,10 +216,14 @@ export function ConversationThread({
 
   const loadMessages = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!opts?.silent) setLoadingMsgs(true);
+      if (!opts?.silent) {
+        setLoadingMsgs(true);
+        setMessagesLoadError(false);
+      }
       try {
         const res = await fetch(`/api/admin/messages/${applicantId}${jobQS}`);
         const json = await res.json();
+        if (!res.ok) throw new Error(typeof json.error === "string" ? json.error : "message fetch failed");
         setMessages((json.messages ?? []) as ApiMessage[]);
         setEvents((json.events ?? []) as PoolEvent[]);
         setAccessToken((json.access_token as string | null) ?? null);
@@ -221,8 +242,12 @@ export function ConversationThread({
           seededDraftIdRef.current = d?.id ?? null;
           setDraftText(d?.draft_text ?? "");
         }
+        setMessagesLoadError(false);
       } catch {
-        if (!opts?.silent) toast.error("대화 내역을 불러오지 못했어요");
+        if (!opts?.silent) {
+          setMessagesLoadError(true);
+          toast.error("대화 내역을 불러오지 못했어요");
+        }
       } finally {
         if (!opts?.silent) setLoadingMsgs(false);
       }
@@ -294,6 +319,11 @@ export function ConversationThread({
     const at = new Date(a.kind === "msg" ? a.msg.created_at : a.ev.created_at).getTime();
     const bt = new Date(b.kind === "msg" ? b.msg.created_at : b.ev.created_at).getTime();
     return at - bt; // 안정 정렬 — 동시각이면 메시지가 이벤트보다 먼저
+  });
+  const messagesView = conversationMessagesView({
+    loading: loadingMsgs,
+    error: messagesLoadError,
+    itemCount: timeline.length,
   });
 
   // 빠른 템플릿 변수 치환 — #{이름}/#{공고명}/#{지점}/#{맞춤링크}(bulk-send 문법 통일).
@@ -368,34 +398,63 @@ export function ConversationThread({
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
     }
+    if (detectManualOutboundSafetyViolation(inputValue.trim())) {
+      toast.error("신분증 사진은 문자로 요청할 수 없어요. '신분증 보호 안내' 문구를 사용해주세요.");
+      return;
+    }
+    const body = inputValue.trim();
+    const attempt = nextManualMessageAttempt(
+      manualSendAttemptRef.current,
+      { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
+      () => crypto.randomUUID()
+    );
+    manualSendAttemptRef.current = attempt;
     setSending(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자", job_id: jobId ?? undefined }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, idempotency_key: attempt.key }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error || "문자 발송에 실패했어요");
+      const json = await res.json().catch(() => ({}));
+      const resolution = manualMessageClientResolution(json, res.ok);
+      if (resolution.rotateKey) manualSendAttemptRef.current = null;
+      if (resolution.clearComposer) setInputValue("");
+      if (!resolution.continueAfterSend) {
+        if (resolution.kind === "unknown") {
+          toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+          await loadMessages({ silent: true });
+        } else {
+          toast.error(json.error || "문자 발송에 실패했어요");
+        }
         return;
       }
-      toast.success("문자(SMS)를 발송했어요");
-      setInputValue("");
+      if (typeof json.warning === "string") {
+        toast.warning(json.warning);
+      } else if (resolution.kind === "sent_unrecorded") {
+        toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+      } else if (json.deduplicated) {
+        toast.success("이미 처리된 발송을 확인했어요. 문자를 중복 발송하지 않았습니다.");
+      } else {
+        toast.success("문자(SMS)를 발송했어요");
+      }
       await loadMessages({ silent: true });
       // **서버가 실제로 멈춘 것만 배지에 반영한다.** 낙관 갱신은 거짓 표시를 만든다 —
       // 관심만 누른 공고(진행 단계 없음) 탭에서 답장하면 멈출 후보가 아예 없는데도 '수동 응대'로 바뀌어,
       // 매니저는 AI가 멈춘 줄 알고 손을 떼지만 다른 공고의 AI는 계속 돌아 이중 응답이 된다.
-      if (json.paused_job_id != null) {
+      const pauseOutcome = manualMessagePauseOutcome(json);
+      if (pauseOutcome.kind === "paused") {
         setAgentStage("paused");
-      } else if (json.paused_skipped === "ambiguous") {
+      } else if (pauseOutcome.kind === "ambiguous") {
         toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요 — 필요하면 공고를 고르고 'AI 끄기'를 눌러 주세요.");
-      } else {
+      } else if (pauseOutcome.kind === "changed") {
+        toast.warning("발송 요청 뒤 AI 상태가 바뀌어 자동 응대를 다시 끄지 않았어요. 현재 AI 토글 상태를 확인해주세요.");
+      } else if (pauseOutcome.kind === "none") {
         toast.info("이 공고에는 멈출 AI 응대가 없어 그대로예요 — 다른 공고에서 AI가 돌고 있다면 그 탭에서 꺼 주세요.");
       }
       onChanged?.();
     } catch {
-      toast.error("문자 발송에 실패했어요");
+      toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
       setSending(false);
     }
@@ -408,19 +467,42 @@ export function ConversationThread({
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
     }
+    if (detectManualOutboundSafetyViolation(inputValue.trim())) {
+      toast.error("신분증 사진은 문자로 요청할 수 없어요. '신분증 보호 안내' 문구를 사용해주세요.");
+      return;
+    }
+    const body = inputValue.trim();
+    const attempt = nextManualMessageAttempt(
+      manualSendAttemptRef.current,
+      { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
+      () => crypto.randomUUID()
+    );
+    manualSendAttemptRef.current = attempt;
     setSending(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body: inputValue.trim(), sent_by: "관리자", job_id: jobId ?? undefined }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, idempotency_key: attempt.key }),
       });
       const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error || "문자 발송에 실패했어요");
+      const resolution = manualMessageClientResolution(json, res.ok);
+      if (resolution.rotateKey) manualSendAttemptRef.current = null;
+      if (resolution.clearComposer) setInputValue("");
+      if (!resolution.continueAfterSend) {
+        if (resolution.kind === "unknown") {
+          toast.warning(json.error || "발송 결과를 확인할 수 없어 AI를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+          await loadMessages({ silent: true });
+        } else {
+          toast.error(json.error || "문자 발송에 실패했어요");
+        }
         return;
       }
-      setInputValue("");
+      if (typeof json.warning === "string") {
+        toast.warning(json.warning);
+      } else if (resolution.kind === "sent_unrecorded") {
+        toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. AI 재개 결과도 별도로 확인해주세요.");
+      }
       // 발송은 이미 성공한 시점 — 재개의 네트워크 예외가 바깥 catch의 "발송 실패"로 오표시되지 않게 분리
       try {
         const resumeRes = await fetch("/api/admin/agent/resume", {
@@ -441,7 +523,7 @@ export function ConversationThread({
       await loadMessages({ silent: true });
       onChanged?.();
     } catch {
-      toast.error("문자 발송에 실패했어요");
+      toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
       setSending(false);
     }
@@ -458,6 +540,25 @@ export function ConversationThread({
       toast.error("초안 내용이 비어 있어요. 직접 입력 후 발송해주세요.");
       return;
     }
+    if (detectManualOutboundSafetyViolation(body)) {
+      toast.error("신분증 사진은 문자로 요청할 수 없어요. 안전한 제출 방법 안내로 수정해주세요.");
+      return;
+    }
+    const draftWasEdited = body !== (pendingDraft.draft_text ?? "");
+    const attempt = nextManualMessageAttempt(
+      draftSendAttemptRef.current,
+      {
+        applicantId,
+        phone,
+        body,
+        jobId,
+        sentBy: "관리자",
+        draftId: pendingDraft.id,
+        draftWasEdited,
+      },
+      () => crypto.randomUUID()
+    );
+    draftSendAttemptRef.current = attempt;
     setDraftBusy(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
@@ -470,24 +571,45 @@ export function ConversationThread({
           sent_by: "관리자",
           job_id: jobId ?? undefined,
           draft_id: pendingDraft.id,
-          draft_was_edited: body !== (pendingDraft.draft_text ?? ""),
+          draft_was_edited: draftWasEdited,
+          idempotency_key: attempt.key,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error || "발송에 실패했어요");
+      const json = await res.json().catch(() => ({}));
+      const resolution = manualMessageClientResolution(json, res.ok);
+      if (resolution.rotateKey) draftSendAttemptRef.current = null;
+      if (!resolution.continueAfterSend) {
+        if (resolution.kind === "unknown") {
+          toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 초안을 다시 보내지 말고 대화 내역을 확인해주세요.");
+          await loadMessages({ silent: true });
+        } else {
+          toast.error(json.error || "발송에 실패했어요");
+        }
         return;
       }
-      toast.success("AI 초안을 검수해 발송했어요.");
-      // 코파일럿 초안 승인은 서버가 pause 전이를 건너뛴다(초안 루프 유지) — UI 상태도 맞춘다.
-      const wasCopilot = (pendingDraft.reasoning ?? "").startsWith(COPILOT_MARKER);
+      if (typeof json.warning === "string") {
+        toast.warning(json.warning);
+      } else if (resolution.kind === "sent_unrecorded") {
+        toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. 같은 초안을 다시 보내지 마세요.");
+      } else if (json.deduplicated) {
+        toast.success("이미 처리된 초안 발송을 확인했어요. 중복 발송하지 않았습니다.");
+      } else {
+        toast.success("AI 초안을 검수해 발송했어요.");
+      }
+      const pauseOutcome = manualMessagePauseOutcome(json);
       setPendingDraft(null);
       setDraftText("");
       await loadMessages({ silent: true });
-      if (!wasCopilot) setAgentStage("paused");
+      if (pauseOutcome.kind === "paused") {
+        setAgentStage("paused");
+      } else if (pauseOutcome.kind === "ambiguous") {
+        toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요. 공고를 고른 뒤 AI 토글을 확인해주세요.");
+      } else if (pauseOutcome.kind === "changed") {
+        toast.warning("발송 요청 뒤 AI 상태가 바뀌어 자동 응대를 다시 끄지 않았어요. 현재 AI 토글 상태를 확인해주세요.");
+      }
       onChanged?.();
     } catch {
-      toast.error("발송에 실패했어요");
+      toast.error("서버 응답을 확인하지 못했어요. 같은 초안으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
       setDraftBusy(false);
     }
@@ -609,7 +731,13 @@ export function ConversationThread({
           <div className="flex items-center gap-2">
             <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
               <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
-              <Switch checked={isAiEnabled} onCheckedChange={handleToggleAi} disabled={!hasActiveFlow} className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error" />
+              <Switch
+                checked={isAiEnabled}
+                onCheckedChange={handleToggleAi}
+                disabled={!hasActiveFlow}
+                aria-label={isAiEnabled ? "AI 자동 응대 끄기" : "AI 자동 응대 켜기"}
+                className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error"
+              />
             </div>
             {isAiEnabled && (
               <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
@@ -620,10 +748,22 @@ export function ConversationThread({
 
       {/* 메시지 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
-        {loadingMsgs && <div className="text-[13px] text-muted-foreground text-center py-8">대화 내역 불러오는 중…</div>}
-        {!loadingMsgs && timeline.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">아직 주고받은 메시지가 없어요</div>}
+        {messagesView === "loading" && <div className="text-[13px] text-muted-foreground text-center py-8">대화 내역 불러오는 중…</div>}
+        {messagesView === "error" && (
+          <div role="alert" className="mx-auto flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-error/30 bg-error-soft px-5 py-4 text-center">
+            <div className="text-[13px] font-bold text-error-strong">대화 내역을 불러오지 못했어요.</div>
+            <button
+              type="button"
+              onClick={() => void loadMessages()}
+              className="min-h-10 rounded-xl border border-error/30 bg-card px-4 text-[12px] font-bold text-error-strong outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              다시 시도
+            </button>
+          </div>
+        )}
+        {messagesView === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">아직 주고받은 메시지가 없어요</div>}
 
-        {timeline.map((item, idx) => {
+        {messagesView === "ready" && timeline.map((item, idx) => {
           const createdAt = item.kind === "msg" ? item.msg.created_at : item.ev.created_at;
           // 일자 구분선 — 이전 항목(메시지·이벤트)과 날짜가 바뀌는 지점마다 삽입 (첫 항목 포함)
           const prevItem = idx > 0 ? timeline[idx - 1] : null;
@@ -636,10 +776,10 @@ export function ConversationThread({
             return (
               <Fragment key={`ev-${ev.id}`}>
                 {showDateDivider && (
-                  <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
+                  <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[12px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className="bg-gray-200 text-muted-foreground text-[11px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className="bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, jobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>
@@ -650,24 +790,28 @@ export function ConversationThread({
           const msg = item.msg;
           const isInbound = msg.direction === "inbound";
           const sender = isInbound ? "user" : "ai";
+          const outboundFailed = !isInbound && msg.status === "failed";
+          const outboundUncertain = !isInbound && (msg.status === "sending" || msg.status === "unknown");
           return (
             <Fragment key={msg.id}>
             {showDateDivider && (
-              <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[11px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(msg.created_at)}</div></div>
+              <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[12px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(msg.created_at)}</div></div>
             )}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.2) }} data-msg-id={msg.id} className={`flex gap-3 ${sender === "user" ? "justify-end" : "justify-start"}`}>
               {sender === "ai" && <div className="w-9 h-9 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={18} className="text-foreground" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
                 {sender === "ai" && <span className="text-[12px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
                 {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
-                  <span className="text-[11px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
+                  <span className="text-[12px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
                     {jobChipLabel(jobsMap[msg.job_id]!)}
                   </span>
                 )}
-                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : "bg-card border border-border-strong text-gray-800 rounded-tl-sm"}`}>
+                <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : outboundFailed ? "bg-error-soft border border-error/30 text-error-strong rounded-tl-sm" : outboundUncertain ? "bg-warning-soft border border-warning/35 text-gray-800 rounded-tl-sm" : "bg-card border border-border-strong text-gray-800 rounded-tl-sm"}`}>
                   {msg.body}
                 </div>
-                <span className="text-[11px] text-muted-foreground mx-1">{fmtTime(msg.created_at)}</span>
+                <span className={`text-[12px] mx-1 ${outboundFailed ? "font-bold text-error-strong" : outboundUncertain ? "font-bold text-warning-strong" : "text-muted-foreground"}`}>
+                  {outboundFailed ? "발송 실패 · " : outboundUncertain ? "발송 결과 확인 필요 · " : ""}{fmtTime(msg.created_at)}
+                </span>
               </div>
             </motion.div>
             </Fragment>
@@ -683,10 +827,10 @@ export function ConversationThread({
               <div className="flex items-center gap-2 text-[13px] font-extrabold text-copilot-strong">
                 <Wand2 size={16} /> {isCopilotDraft ? "⚡ 코파일럿 초안" : "옹봇이 제안한 답변 초안"}
                 {pendingDraft.status === "need_info" && (
-                  <span className="text-[11px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-full">정보 부족 · 매니저 확인</span>
+                  <span className="text-[12px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-full">정보 부족 · 매니저 확인</span>
                 )}
               </div>
-              <span className="text-[11px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
+              <span className="text-[12px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
             </div>
             {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
               <div className="mb-2.5 text-[12px] text-warning-strong bg-card border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
@@ -734,6 +878,7 @@ export function ConversationThread({
           <div className="flex items-end gap-3">
             <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
+                aria-label="지원자에게 보낼 문자"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSendMessage(); } }}
@@ -746,10 +891,10 @@ export function ConversationThread({
                   <span className={isLMS ? "text-error" : "text-info"}>{isLMS ? "LMS" : "SMS"}</span>
                   <span className="text-muted-foreground">{currentBytes} bytes</span>
                 </div>
-                <span className="text-[11px] text-muted-foreground">⌘+Enter 발송</span>
+                <span className="text-[12px] text-muted-foreground">⌘+Enter 발송</span>
               </div>
             </div>
-            <button onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-lg bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
+            <button aria-label="문자 발송" onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-lg bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
             {isPaused && (
               <button
                 onClick={handleSendAndResume}

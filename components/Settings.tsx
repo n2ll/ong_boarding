@@ -1,15 +1,17 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import useSWR from "swr";
-import { Save, Bell, Lock, User, Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, MapPin, Shield, ToggleRight, RefreshCw } from "lucide-react";
+import { Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, MapPin, Users, ToggleRight, RefreshCw, Settings2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Branches } from "./Branches";
 import { Team } from "./Team";
 import { useConfirm } from "./ConfirmDialog";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Input } from "./ui/input";
 import { PageShell } from "./ui/page-shell";
+import { settingsSectionFromLocation, settingsSectionHref, type SettingsSection } from "@/lib/admin/settings-navigation";
 
 interface Integration {
   key: string;
@@ -34,52 +36,50 @@ function SettingsTab({
   icon: Icon,
   label,
   active,
-  onClick,
-  badge,
+  href,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
-  onClick: () => void;
-  badge?: string;
+  href: string;
 }) {
   return (
-    <button
+    <Link
+      href={href}
       role="tab"
       aria-selected={active}
-      onClick={onClick}
+      aria-controls="settings-panel"
       className={`flex items-center gap-3 min-h-11 px-4 py-3 rounded-2xl text-sm font-bold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         active
-          ? "bg-white border-2 border-foreground text-foreground shadow-sm"
-          : "border-2 border-transparent text-muted-foreground hover:bg-white hover:border-border-strong"
+          ? "bg-card border-2 border-foreground text-foreground shadow-sm"
+          : "border-2 border-transparent text-muted-foreground hover:bg-card hover:border-border-strong"
       }`}
     >
       <Icon size={18} /> {label}
-      {badge && (
-        <span className="ml-auto text-[11px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
-          {badge}
-        </span>
-      )}
-    </button>
+    </Link>
   );
 }
 
 export function Settings() {
-  // 실동작인 '외부 연동' 탭을 기본으로 승격 — 프로필/알림/보안은 인증 도입 전 미리보기.
-  const [activeTab, setActiveTab] = useState("integrations");
-  // /settings#branches|#team|#switches 딥링크 — 다른 화면·공고 폼에서 해당 서브탭으로 바로 진입.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const activeTab = settingsSectionFromLocation(
+    searchParams.toString(),
+    typeof window === "undefined" ? "" : window.location.hash,
+  );
+  // 기존 # 딥링크를 새 query 계약으로 조용히 이관한다.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const h = window.location.hash;
-    // #clients는 화주사 화면을 /shippers로 합치면서 옮겨갔다 — 기존 링크·북마크를 깨지 않게 리다이렉트.
     if (h === "#clients") {
-      window.location.replace("/shippers");
+      router.replace("/shippers");
       return;
     }
-    if (h === "#branches" || h === "#team" || h === "#switches") setActiveTab(h.slice(1));
-  }, []);
+    const legacy = settingsSectionFromLocation("", h);
+    if (h && legacy !== "integrations") router.replace(settingsSectionHref(legacy));
+  }, [router]);
   // 외부 연동 탭을 열 때만 조회(조건부 key), 이후엔 SWR 캐시로 즉시 표시.
-  const { data: intData, isLoading: intLoading } = useSWR<{ data?: Integration[] }>(
+  const { data: intData, error: intError, isLoading: intLoading, isValidating: intValidating, mutate: mutateIntegrations } = useSWR<{ data?: Integration[] }>(
     activeTab === "integrations" ? "/api/admin/settings/integrations" : null
   );
   const integrations = intData?.data ?? [];
@@ -119,111 +119,44 @@ export function Settings() {
 
   return (
     <PageShell>
-      {/* 페이지 전체에 '준비중' 배너·배지를 달면, 실제로 동작하는 화주사·지점·팀·외부연동까지
-          미완성으로 오해된다(채용·확정 전 반드시 세팅해야 하는 것들이 여기 있다).
-          준비중 표시는 실제 미완성 탭(프로필·알림·보안)에만 붙인다. */}
-      <div>
-        <h1 className="text-2xl font-extrabold text-foreground tracking-tight mb-1">설정</h1>
-        <p className="text-[14px] text-muted-foreground">지점·팀과 외부 연동을 관리합니다. 화주사는 ‘화주사’ 화면에서 관리해요. (프로필·알림·보안은 준비 중)</p>
+      <div className="rounded-2xl border border-border-strong bg-card px-5 py-4 shadow-sm">
+        <h1 className="sr-only">설정</h1>
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand-muted"><Settings2 size={20} className="text-warning-strong" /></span>
+          <div>
+            <h2 className="text-[16px] font-extrabold text-foreground">운영에 실제로 쓰는 설정만 모았습니다</h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">연동 상태, 지점 정보, 현장 담당자, 위험 기능을 관리합니다. 계정·비밀번호는 인증 체계 도입 전까지 제공하지 않습니다.</p>
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+      <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
         {/* Sidebar Nav */}
-        <div role="tablist" aria-orientation="vertical" aria-label="설정 영역" className="flex w-full shrink-0 flex-col gap-2 lg:w-[240px]">
+        <div role="tablist" aria-orientation="vertical" aria-label="설정 영역" className="grid w-full shrink-0 grid-cols-2 gap-2 lg:flex lg:w-[220px] lg:flex-col">
           {([
-            { key: "profile", icon: User, label: "프로필 설정", badge: "준비중" },
-            { key: "notifications", icon: Bell, label: "알림 설정", badge: "준비중" },
-            { key: "security", icon: Lock, label: "보안 및 인증", badge: "준비중" },
             { key: "integrations", icon: LinkIcon, label: "외부 연동" },
             { key: "branches", icon: MapPin, label: "지점 관리" },
-            { key: "team", icon: Shield, label: "팀 · 권한" },
+            { key: "team", icon: Users, label: "현장 담당자" },
             { key: "switches", icon: ToggleRight, label: "기능 스위치" },
-          ] as { key: string; icon: LucideIcon; label: string; badge?: string }[]).map((t) => (
+          ] as { key: SettingsSection; icon: LucideIcon; label: string }[]).map((t) => (
             <SettingsTab
               key={t.key}
               icon={t.icon}
               label={t.label}
-              badge={t.badge}
               active={activeTab === t.key}
-              onClick={() => setActiveTab(t.key)}
+              href={settingsSectionHref(t.key)}
             />
           ))}
         </div>
 
         {/* Content Area */}
         {(activeTab === 'branches' || activeTab === 'team') ? (
-          <div className="flex-1 min-w-0">
+          <div id="settings-panel" role="tabpanel" className="flex-1 min-w-0">
             {activeTab === 'branches' && <Branches embedded />}
             {activeTab === 'team' && <Team embedded />}
           </div>
         ) : (
-        <div className="flex-1 bg-card border border-border-strong rounded-2xl shadow-sm p-8">
-          {activeTab === 'profile' && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-foreground mb-6 border-b border-border-strong pb-4">기본 정보</h2>
-              
-              <div className="space-y-6 max-w-md">
-                <Input label="이름" type="text" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
-                <Input label="이메일 (로그인 ID)" type="email" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
-                <Input label="연락처" type="tel" disabled placeholder="인증 도입 후 표시됩니다" className="bg-background text-muted-foreground cursor-not-allowed" />
-
-                <div className="pt-6">
-                  <Button variant="primary" disabled>
-                    <Save size={16} /> 변경사항 저장
-                  </Button>
-                  <p className="text-[12px] text-muted-foreground mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'notifications' && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-foreground mb-2 border-b border-border-strong pb-4">알림 설정</h2>
-              {/* 토글이 눈으로는 켜지는데 저장되지 않는 '거짓 어포던스'였다 — 켜둔 줄 알고 알림을 기다리게 된다.
-                  저장 경로가 생길 때까지 비활성 + 사유 명시. 실제 운영 알림은 Slack 웹훅으로 나간다. */}
-              <p className="text-[13px] text-warning-strong bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-6">
-                아직 저장되지 않는 화면이에요(계정 알림 설정 준비 중). 지금 운영 알림은 Slack으로 받고 있어요.
-              </p>
-              <div className="space-y-6 max-w-2xl opacity-60">
-                <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
-                  <div>
-                    <div className="text-[14px] font-bold text-foreground mb-1">AI 응대 실패 (Human Takeover) 알림</div>
-                    <div className="text-[13px] text-muted-foreground">AI가 답변하지 못하거나 지원자가 매니저 연결을 요청할 때 즉시 알림을 받습니다.</div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-not-allowed">
-                    <input type="checkbox" defaultChecked disabled className="sr-only peer" />
-                    <div className="w-11 h-6 bg-switch-background peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
-                  </label>
-                </div>
-                <div className="flex items-center justify-between p-4 border border-border-strong rounded-2xl">
-                  <div>
-                    <div className="text-[14px] font-bold text-foreground mb-1">신규 지원자 발생 알림</div>
-                    <div className="text-[13px] text-muted-foreground">새로운 지원서가 접수되었을 때 데일리 리포트 형태로 알림을 받습니다.</div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-not-allowed">
-                    <input type="checkbox" disabled className="sr-only peer" />
-                    <div className="w-11 h-6 bg-switch-background peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'security' && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-foreground mb-6 border-b border-border-strong pb-4">보안 및 인증</h2>
-              <div className="space-y-6 max-w-md">
-                <Input label="현재 비밀번호" type="password" disabled placeholder="••••••••" className="bg-background text-muted-foreground cursor-not-allowed" />
-                <Input label="새 비밀번호" type="password" disabled placeholder="영문, 숫자, 특수문자 조합 8자 이상" className="bg-background text-muted-foreground cursor-not-allowed" />
-                <Input label="새 비밀번호 확인" type="password" disabled placeholder="비밀번호 다시 입력" className="bg-background text-muted-foreground cursor-not-allowed" />
-                <div className="pt-4">
-                  <Button variant="secondary" disabled>비밀번호 변경</Button>
-                  <p className="text-[12px] text-muted-foreground mt-2">사용자 인증(계정) 도입 후 제공됩니다.</p>
-                </div>
-              </div>
-            </div>
-          )}
+        <div id="settings-panel" role="tabpanel" className="flex-1 bg-card border border-border-strong rounded-2xl shadow-sm p-5 sm:p-6">
 
           {activeTab === 'switches' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -276,11 +209,25 @@ export function Settings() {
           )}
 
           {activeTab === 'integrations' && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-lg font-bold text-foreground mb-1 border-b-0 pb-0">외부 서비스 연동</h2>
-              <p className="text-[13px] text-muted-foreground mb-6">서버에 연결 정보가 들어가 있는지로 판단한 실제 연결 상태입니다. (비밀 키는 표시되지 않아요)</p>
+            <div>
+              <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">외부 서비스 연동</h2>
+                  <p className="mt-1 text-[13px] text-muted-foreground">서버의 실제 연결 상태입니다. 비밀 키 값은 표시하지 않습니다.</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => void mutateIntegrations()} disabled={intValidating}>
+                  <RefreshCw size={14} className={intValidating ? "animate-spin" : ""} /> 새로고침
+                </Button>
+              </div>
               {intLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground py-8"><Loader2 size={18} className="animate-spin" /> 연동 상태 확인 중…</div>
+              ) : intError ? (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-error/30 bg-error-soft p-4 text-error-strong">
+                  <div className="flex items-start gap-2 text-[13px] font-bold"><AlertCircle size={17} className="mt-0.5 shrink-0" /> 연결 상태를 불러오지 못했어요. 알 수 없는 상태를 미연결로 표시하지 않았습니다.</div>
+                  <Button variant="secondary" size="sm" onClick={() => void mutateIntegrations()}>다시 확인</Button>
+                </div>
+              ) : integrations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border-strong bg-background px-4 py-10 text-center text-[13px] text-muted-foreground">표시할 연동 항목이 없어요.</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {integrations.map((it) => {
@@ -293,14 +240,14 @@ export function Settings() {
                             <div className="text-[14px] font-bold text-foreground truncate">{meta.name}</div>
                             <div className="text-[12px] text-muted-foreground mt-0.5 truncate">{meta.desc}</div>
                             {it.key === "solapi" && it.configured && (
-                              <div className={`text-[11px] mt-1 font-bold ${it.kakao_ready ? "text-success" : "text-warning-strong"}`}>
+                              <div className={`text-xs mt-1 font-bold ${it.kakao_ready ? "text-success" : "text-warning-strong"}`}>
                                 {it.kakao_ready ? "알림톡(PFID) 준비됨" : "알림톡 PFID 미설정 — SMS만 가능"}
                               </div>
                             )}
                             {!it.configured && (
                               // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
                               // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
-                              <div className="text-[11px] text-muted-foreground mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
+                              <div className="text-xs text-muted-foreground mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
                                 아직 연결 정보가 없어요 — 개발팀에 연결 요청이 필요해요
                               </div>
                             )}

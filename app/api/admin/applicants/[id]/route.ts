@@ -17,9 +17,10 @@ export const dynamic = "force-dynamic";
 // 통합 지원자 상세 패널용 — applicant 전체 + 연결된 job_candidates(공고/지점/화주사) 집계.
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
@@ -249,9 +250,10 @@ const ALLOWED_FIELDS = new Set([
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const routeParams = await params;
+  const id = Number(routeParams.id);
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }

@@ -11,9 +11,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import { coarseArea } from "@/lib/geo";
+import {
+  clearPoolActionAttempt,
+  getPoolActionAttempt,
+  poolLoadFailure,
+  submitPoolAction,
+} from "@/lib/pool-action";
+import { IMMEDIATE_AVAILABILITY_COPY } from "@/lib/pool-availability";
+import { poolJobGroups } from "@/lib/pool-job-groups";
 import { POOL_STATUS_DONE_LABEL } from "@/lib/pool-status";
 import { useParams } from "next/navigation";
 import Image from "next/image";
+import {
+  AlertCircle,
+  Bell,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  MessageCircle,
+  Zap,
+} from "lucide-react";
 
 interface PoolJob {
   id: number;
@@ -93,7 +111,14 @@ export default function PoolPage() {
   const [jobs, setJobs] = useState<PoolJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [sendingId, setSendingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<{
+    jobId: number;
+    message: string;
+    retryable: boolean;
+  } | null>(null);
   // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   // 본인 차량 보유(정규화 '있음'|'없음'|'미확인') — 차량이 필요한 공고에 그 사실을 알려주는 데만 쓴다(노출은 그대로).
@@ -101,6 +126,8 @@ export default function PoolPage() {
   // 갱신 타이머(=[token] 의존 effect)에서 최신 값을 읽기 위한 ref — 확인 중·전송 중 갱신을 건너뛴다.
   const confirmingRef = useRef<number | null>(null);
   const sendingRef = useRef<number | null>(null);
+  // 응답을 받지 못한 재시도는 같은 action_id를 보낸다. 서버가 이미 저장했다면 멱등 성공으로 복구된다.
+  const actionAttemptsRef = useRef<Map<string, string>>(new Map());
   confirmingRef.current = confirmingId;
   sendingRef.current = sendingId;
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
@@ -109,10 +136,11 @@ export default function PoolPage() {
   const [notifyIds, setNotifyIds] = useState<Set<number>>(new Set());
   // 요건이 다른 자리 접기 — 기본 접힘. 펼치면 그대로 유지(읽는 중 다시 접히면 오클릭).
   const [showOthers, setShowOthers] = useState(false);
-  // 이 화면에서 관심을 눌러 띄운 후속 박스('바로 시작 가능?')는 세션 내 유지 —
+  // 이 화면에서 관심을 눌러 띄운 후속 박스('오늘·내일부터 가능?')는 세션 내 유지 —
   // AUTO 모드는 관심 클릭 즉시 AI 문자가 나가 status가 talking으로 바뀌는데, 그때 박스를 치우면
   // 손이 향하던 버튼이 60초 안에 눈앞에서 사라진다. 새 로드에선 비어 있어 '대화 중엔 생략' 규칙 그대로.
   const [followupIds, setFollowupIds] = useState<Set<number>>(new Set());
+  const groupedJobs = poolJobGroups(jobs);
 
   const toggleExpanded = (id: number) =>
     setExpandedIds((prev) => {
@@ -122,28 +150,30 @@ export default function PoolPage() {
       return next;
     });
 
-  // '바로 시작 가능' 후속 버튼 — 관심 표시 이후에만 노출되는 강한 가용성 신호
+  // '오늘·내일부터 가능' 후속 버튼 — 관심 표시 이후에만 노출되는 강한 가용성 신호
   const expressImmediate = async (job: PoolJob) => {
     if (sendingId !== null || immediateIds.has(job.id)) return;
+    setActionError(null);
     setSendingId(job.id);
-    try {
-      const res = await fetch(`/api/pool/${token}/interest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: job.id, immediate: true }),
-      });
-      if (res.ok) {
-        setImmediateIds((prev) => new Set(prev).add(job.id));
-        setAvailability("즉시가능");
-      } else {
-        const json = await res.json().catch(() => null);
-        alert(json?.error ?? "잠시 후 다시 시도해주세요.");
-      }
-    } catch {
-      alert("잠시 후 다시 시도해주세요.");
-    } finally {
-      setSendingId(null);
+    const attempt = getPoolActionAttempt(
+      actionAttemptsRef.current,
+      { jobId: job.id, action: "interest", immediate: true },
+    );
+    const result = await submitPoolAction({
+      token,
+      jobId: job.id,
+      action: "interest",
+      immediate: true,
+      actionId: attempt.actionId,
+    });
+    if (result.ok) {
+      clearPoolActionAttempt(actionAttemptsRef.current, attempt.key);
+      setImmediateIds((prev) => new Set(prev).add(job.id));
+      setAvailability("즉시가능");
+    } else {
+      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable });
     }
+    setSendingId(null);
   };
 
   useEffect(() => {
@@ -152,11 +182,19 @@ export default function PoolPage() {
     // 백그라운드 갱신은 로딩 화면을 다시 띄우지 않고, 관심/알림 상태는 로컬과 서버의 합집합(낙관적 클릭 보존).
     let cancelled = false;
     const load = (background: boolean) => {
+      if (!background) {
+        setNotFound(false);
+        setLoadError(false);
+      }
       fetch(`/api/pool/${token}`)
         .then(async (res) => {
           if (cancelled) return;
           if (!res.ok) {
-            if (!background) setNotFound(true);
+            if (!background) {
+              const failure = poolLoadFailure(res.status);
+              setNotFound(failure === "invalid-link");
+              setLoadError(failure === "retryable");
+            }
             return;
           }
           const json = await res.json();
@@ -216,7 +254,7 @@ export default function PoolPage() {
           setNotifyIds((prev) => new Set([...(background ? prev : []), ...serverNotify]));
         })
         .catch(() => {
-          if (!background && !cancelled) setNotFound(true);
+          if (!background && !cancelled) setLoadError(true);
         })
         .finally(() => {
           if (!background && !cancelled) setLoading(false);
@@ -237,53 +275,60 @@ export default function PoolPage() {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [token]);
+  }, [retryKey, token]);
+
+  const retryLoad = () => {
+    setLoading(true);
+    setRetryKey((current) => current + 1);
+  };
 
   const expressInterest = async (job: PoolJob) => {
     if (sendingId !== null || doneIds.has(job.id)) return;
+    setActionError(null);
     setSendingId(job.id);
-    try {
-      const res = await fetch(`/api/pool/${token}/interest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: job.id }),
-      });
-      if (res.ok) {
-        setDoneIds((prev) => new Set(prev).add(job.id));
-        setFollowupIds((prev) => new Set(prev).add(job.id));
-        setConfirmingId(null);
-      } else {
-        const json = await res.json().catch(() => null);
-        alert(json?.error ?? "잠시 후 다시 시도해주세요.");
-      }
-    } catch {
-      alert("잠시 후 다시 시도해주세요.");
-    } finally {
-      setSendingId(null);
+    const attempt = getPoolActionAttempt(
+      actionAttemptsRef.current,
+      { jobId: job.id, action: "interest" },
+    );
+    const result = await submitPoolAction({
+      token,
+      jobId: job.id,
+      action: "interest",
+      actionId: attempt.actionId,
+    });
+    if (result.ok) {
+      clearPoolActionAttempt(actionAttemptsRef.current, attempt.key);
+      setDoneIds((prev) => new Set(prev).add(job.id));
+      setFollowupIds((prev) => new Set(prev).add(job.id));
+      setConfirmingId(null);
+    } else {
+      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable });
     }
+    setSendingId(null);
   };
 
-  // 마감된 공고 카드의 "이런 일자리가 또 나오면 먼저 알려주세요" — 놓친 지원자의 가용성 수집
+  // 마감된 공고 카드의 "이런 일자리가 또 나오면 먼저 알려주세요" — 다음 기회 안내 의사 수집
   const expressNotify = async (job: PoolJob) => {
     if (sendingId !== null || notifyIds.has(job.id)) return;
+    setActionError(null);
     setSendingId(job.id);
-    try {
-      const res = await fetch(`/api/pool/${token}/notify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: job.id }),
-      });
-      if (res.ok) {
-        setNotifyIds((prev) => new Set(prev).add(job.id));
-      } else {
-        const json = await res.json().catch(() => null);
-        alert(json?.error ?? "잠시 후 다시 시도해주세요.");
-      }
-    } catch {
-      alert("잠시 후 다시 시도해주세요.");
-    } finally {
-      setSendingId(null);
+    const attempt = getPoolActionAttempt(
+      actionAttemptsRef.current,
+      { jobId: job.id, action: "notify" },
+    );
+    const result = await submitPoolAction({
+      token,
+      jobId: job.id,
+      action: "notify",
+      actionId: attempt.actionId,
+    });
+    if (result.ok) {
+      clearPoolActionAttempt(actionAttemptsRef.current, attempt.key);
+      setNotifyIds((prev) => new Set(prev).add(job.id));
+    } else {
+      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable });
     }
+    setSendingId(null);
   };
 
   if (loading) {
@@ -302,8 +347,35 @@ export default function PoolPage() {
       <main className="min-h-screen flex items-center justify-center p-6">
         <div className="text-center">
           <Image src="/onggoing-logo.png" alt="옹고잉" width={84} height={65} className="mx-auto mb-3" />
-          <p className="text-[20px] font-extrabold text-foreground mb-2">링크를 확인할 수 없어요</p>
-          <p className="text-[16px] text-muted-foreground">문자로 받으신 링크 주소를 다시 확인해주세요.</p>
+          <h1 className="text-[20px] font-extrabold text-foreground mb-2">링크를 확인할 수 없어요</h1>
+          <p className="text-[16px] leading-relaxed text-muted-foreground">
+            문자로 받으신 링크 주소를 다시 확인해 주세요.
+            <br />계속 열리지 않으면 받으신 문자에 답장해 주세요.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6">
+        <div role="alert" className="w-full max-w-[360px] text-center">
+          <Image src="/onggoing-logo.png" alt="옹고잉" width={84} height={65} className="mx-auto mb-3" />
+          <h1 className="text-[20px] font-extrabold text-foreground mb-2">일자리를 불러오지 못했어요</h1>
+          <p className="text-[16px] leading-relaxed text-muted-foreground">
+            인터넷 연결을 확인한 뒤 다시 시도해 주세요.
+          </p>
+          <button
+            type="button"
+            onClick={retryLoad}
+            className="mt-5 min-h-[52px] w-full rounded-2xl bg-brand-yellow px-5 text-[17px] font-extrabold text-foreground shadow-brand outline-none transition-colors hover:bg-yellow-500 active:bg-yellow-500 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            다시 시도하기
+          </button>
+          <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
+            계속 열리지 않으면 받으신 문자에 답장해 주세요.
+          </p>
         </div>
       </main>
     );
@@ -315,37 +387,35 @@ export default function PoolPage() {
         {/* 빈 상태에서 제목·안내가 바뀐다 — 예전엔 공고 0개여도 "지금 모집 중인 일자리예요 /
             [관심 있어요]를 눌러주세요"가 그대로 떠서, 한 화면이 "일자리가 있다(제목) ·
             없는 버튼을 눌러라(안내) · 없다(카드)"를 동시에 말했다(2026-08-14 감사, 649명 노출). */}
-        {(() => {
-          const hasOpenJobs = jobs.some((j) => !j.expired);
-          return (
-            <header className="mb-6">
-              <div className="mb-4 flex items-center gap-2.5">
-                <Image src="/onggoing-logo.png" alt="옹고잉" width={64} height={50} priority />
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <span className="text-[14px] font-bold text-warning-strong">맞춤 일자리</span>
-              </div>
-              <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
-                {name ? `${name}님,` : "안녕하세요,"}
-                <br />{hasOpenJobs ? "지금 모집 중인 일자리예요" : "지금은 준비된 일자리가 없어요"}
-              </h1>
-              <p className="mt-2 text-[16px] text-muted-foreground leading-relaxed">
-                {hasOpenJobs ? (
-                  <>
-                    마음에 드는 일자리에 <b className="text-foreground">[관심 있어요]</b>를 눌러주세요.
-                    담당 매니저가 확인 후 연락드립니다.
-                  </>
-                ) : (
-                  <>새 일자리가 나오면 이 페이지에 먼저 올라와요. 문자로도 알려드립니다.</>
-                )}
-              </p>
-            </header>
-          );
-        })()}
+        <header className="mb-6">
+          <div className="mb-4 flex items-center gap-2.5">
+            <Image src="/onggoing-logo.png" alt="옹고잉" width={64} height={50} priority />
+            <span aria-hidden="true" className="text-muted-foreground">·</span>
+            <span className="text-[14px] font-bold text-warning-strong">맞춤 일자리</span>
+          </div>
+          <h1 className="text-[24px] font-extrabold text-foreground leading-snug">
+            {name ? `${name}님,` : "안녕하세요,"}
+            <br />
+            {groupedJobs.activeCount > 0
+              ? `지금 모집 중인 일자리 ${groupedJobs.activeCount}개예요`
+              : "지금은 준비된 일자리가 없어요"}
+          </h1>
+          <p className="mt-2 text-[16px] text-muted-foreground leading-relaxed">
+            {groupedJobs.activeCount > 0 ? (
+              <>
+                조건을 확인한 뒤 마음에 드는 자리에 <b className="text-foreground">관심 있어요</b>를 눌러주세요.
+                관심은 매니저 검토 목록에 표시되며, 진행 여부는 검토 후 안내됩니다.
+              </>
+            ) : (
+              <>새 일자리가 나오면 이 페이지에 먼저 올라와요. 문자 안내를 받으실 수 있어요.</>
+            )}
+          </p>
+        </header>
 
-        {jobs.filter((j) => !j.expired).length === 0 && (
+        {groupedJobs.activeCount === 0 && (
           <div className="bg-card border border-border-strong rounded-2xl p-6 text-center mb-4 shadow-sm">
             <p className="text-[16px] font-bold text-foreground mb-1">지금은 모집 중인 공고가 없어요</p>
-            <p className="text-[14px] text-muted-foreground">새 일자리가 나오면 문자로 알려드릴게요.</p>
+            <p className="text-[14px] text-muted-foreground">새 일자리는 이 페이지와 문자 안내에서 확인할 수 있어요.</p>
           </div>
         )}
 
@@ -362,25 +432,48 @@ export default function PoolPage() {
                   </span>
                   <h2 className="mt-2 text-[16px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
                   {job.interested && (
-                    <p className="mt-2 text-[14px] font-bold text-success-strong">
-                      ✓ 관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.
+                    <p className="mt-2 flex items-start gap-1.5 text-[14px] font-bold text-success-strong">
+                      <CheckCircle2 size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+                      <span>관심을 접수하셨던 공고예요 — 매니저에게 전달됐어요.</span>
                     </p>
                   )}
                   <p className="mt-2 text-[14px] text-muted-foreground leading-relaxed">
                     이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
                   </p>
                   {notified ? (
-                    <p className="mt-3 py-3 text-[16px] font-bold text-success-strong text-center">
-                      ✓ 네, 새 일자리가 나오면 먼저 안내드릴게요
+                    <p className="mt-3 flex items-center justify-center gap-2 py-3 text-center text-[16px] font-bold text-success-strong">
+                      <CheckCircle2 size={18} aria-hidden="true" className="shrink-0" />
+                      <span>다음 기회 안내 요청이 저장됐어요</span>
                     </p>
                   ) : (
                     <button
                       onClick={() => expressNotify(job)}
                       disabled={sendingId !== null}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-3 w-full py-3 rounded-2xl text-[16px] font-extrabold bg-card border-2 border-gray-300 text-gray-700 hover:bg-muted active:bg-muted"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-gray-300 bg-card py-3 text-[16px] font-extrabold text-gray-700 hover:bg-muted active:bg-muted"
                     >
-                      {sendingId === job.id ? "접수 중…" : "이런 일자리가 또 나오면 먼저 알려주세요"}
+                      <Bell size={18} aria-hidden="true" />
+                      <span>
+                        {sendingId === job.id
+                          ? "접수 중…"
+                          : actionError?.jobId === job.id && actionError.retryable
+                            ? "다시 시도하기"
+                            : "이런 일자리가 또 나오면 먼저 알려주세요"}
+                      </span>
                     </button>
+                  )}
+                  {actionError?.jobId === job.id && (
+                    <div
+                      role="alert"
+                      className="mt-3 flex items-start gap-2 rounded-xl border border-error/25 bg-error-soft px-3 py-2.5 text-[15px] font-bold leading-relaxed text-error-strong"
+                    >
+                      <AlertCircle size={18} aria-hidden="true" className="mt-0.5 shrink-0" />
+                      <div>
+                        <p>{actionError.message}</p>
+                        {actionError.retryable && (
+                          <p className="mt-1 font-semibold">저장 완료로 표시하지 않았어요. 버튼을 다시 눌러 주세요.</p>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </section>
               );
@@ -391,13 +484,19 @@ export default function PoolPage() {
             // 남아 오지 않는 연락을 기다리게 했다.
             const done = doneIds.has(job.id);
             const pay = payLabel(job);
+            const doneLabel = job.status === "talking"
+              ? POOL_STATUS_DONE_LABEL.talking
+              : job.status === "paused"
+                ? POOL_STATUS_DONE_LABEL.paused
+                : POOL_STATUS_DONE_LABEL.interested;
+            const DoneIcon = job.status === "talking" ? MessageCircle : CheckCircle2;
             return (
               <section key={job.id} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {/* 상황 배지 — '나 이 자리 어디까지 했더라'를 카드가 먼저 답한다(문구 규칙은 lib/pool-status). */}
                   {job.status === "talking" && (
-                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
-                      💬 이야기 중
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
+                      <MessageCircle size={14} aria-hidden="true" /> 이야기 중
                     </span>
                   )}
                   {job.status === "paused" && (
@@ -417,8 +516,8 @@ export default function PoolPage() {
                     </span>
                   )}
                   {job.closes_at && (
-                    <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-error-soft text-error-strong border border-error-soft">
-                      ⏰ {closesLabel(job.closes_at)}
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-error-soft text-error-strong border border-error-soft">
+                      <Clock3 size={14} aria-hidden="true" /> {closesLabel(job.closes_at)}
                     </span>
                   )}
                 </div>
@@ -472,7 +571,9 @@ export default function PoolPage() {
                         <p key={i}>{r}</p>
                       ))}
                       <p className="mt-1 font-semibold text-warning-strong">
-                        {done ? "매니저가 연락드릴 때 함께 확인할게요." : "그래도 괜찮으시면 관심을 눌러 주세요."}
+                        {done
+                          ? "관심이 전달되어 매니저 검토 목록에 표시됐어요."
+                          : "그래도 괜찮으시면 관심을 눌러 주세요."}
                       </p>
                     </div>
                   )}
@@ -483,7 +584,7 @@ export default function PoolPage() {
                     {/* 본문은 기본 접힘 — 위 요약(급여·시작일·차량)이 스캔 단위. 프로즈가 요약과 겹쳐
                         기본 노출하면 글자만 많아지고 3개 비교가 어렵다. 원하는 사람만 펼쳐 본다. */}
                     {expandedIds.has(job.id) && (
-                      <div className="mt-1 text-[16px] text-gray-700 leading-relaxed">
+                      <div id={`job-${job.id}-details`} className="mt-1 text-[16px] text-gray-700 leading-relaxed">
                         {/* 업무 관련 주요 내용(■ 항목 = 운임·요일·시간·차량 등)은 볼드로 강조 */}
                         {job.body.split("\n").map((line, i) => (
                           <p
@@ -497,9 +598,16 @@ export default function PoolPage() {
                     )}
                     <button
                       onClick={() => toggleExpanded(job.id)}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background py-2.5 mb-2 text-[16px] font-bold text-warning-strong"
+                      aria-expanded={expandedIds.has(job.id)}
+                      aria-controls={`job-${job.id}-details`}
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background mb-2 inline-flex min-h-11 items-center gap-1.5 py-2.5 text-[16px] font-bold text-warning-strong"
                     >
-                      {expandedIds.has(job.id) ? "접기 ▲" : "자세한 공고 내용 보기 ▼"}
+                      <span>{expandedIds.has(job.id) ? "공고 내용 접기" : "자세한 공고 내용 보기"}</span>
+                      {expandedIds.has(job.id) ? (
+                        <ChevronUp size={18} aria-hidden="true" />
+                      ) : (
+                        <ChevronDown size={18} aria-hidden="true" />
+                      )}
                     </button>
                   </div>
                 )}
@@ -510,6 +618,7 @@ export default function PoolPage() {
                       if (done) return;
                       // 전송 중에는 다른 카드 버튼도 눌리지 않는다(예전엔 눌러도 아무 반응이 없어 고장으로 보였다).
                       if (sendingId !== null) return;
+                      setActionError(null);
                       setConfirmingId(job.id);
                     }}
                     disabled={done || sendingId !== null}
@@ -521,13 +630,12 @@ export default function PoolPage() {
                           : "bg-brand-yellow text-foreground shadow-brand hover:bg-yellow-500 active:bg-yellow-500"
                     } disabled:cursor-default`}
                   >
-                    {done
-                      ? job.status === "talking"
-                        ? POOL_STATUS_DONE_LABEL.talking
-                        : job.status === "paused"
-                          ? POOL_STATUS_DONE_LABEL.paused
-                          : POOL_STATUS_DONE_LABEL.interested
-                      : sendingId !== null
+                    {done ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <DoneIcon size={20} aria-hidden="true" />
+                        <span>{doneLabel}</span>
+                      </span>
+                    ) : sendingId !== null
                         ? "잠시만요…"
                         : job.status === "ended"
                           ? "다시 관심 있어요"
@@ -547,7 +655,10 @@ export default function PoolPage() {
                     )}
                     <div className="mt-3 flex gap-2">
                       <button
-                        onClick={() => setConfirmingId(null)}
+                        onClick={() => {
+                          setActionError(null);
+                          setConfirmingId(null);
+                        }}
                         disabled={sendingId !== null}
                         className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-2xl text-[16px] font-extrabold bg-white text-gray-700 border border-gray-300"
                       >
@@ -558,7 +669,11 @@ export default function PoolPage() {
                         disabled={sendingId !== null}
                         className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-2xl text-[16px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
                       >
-                        {sendingId === job.id ? "보내는 중…" : "네, 보낼게요"}
+                        {sendingId === job.id
+                          ? "보내는 중…"
+                          : actionError?.jobId === job.id && actionError.retryable
+                            ? "다시 시도하기"
+                            : "네, 보낼게요"}
                       </button>
                     </div>
                   </div>
@@ -569,30 +684,50 @@ export default function PoolPage() {
                     {/* 이미 '즉시가능' 상태면(이번 클릭이든 과거 응답이든) 질문을 다시 하지 않는다 —
                         새로고침 시 서버의 availability로 재수화 (중복 클릭 방지) */}
                     {immediateIds.has(job.id) || availability === "즉시가능" ? (
-                      <p className="text-[16px] font-bold text-success text-center">
-                        ⚡ 바로 시작 가능 — 확인했어요! 매니저가 참고할게요
+                      <p className="flex items-center justify-center gap-2 text-center text-[16px] font-bold text-success">
+                        <Zap size={18} aria-hidden="true" className="shrink-0" />
+                        <span>오늘·내일부터 가능하다는 응답이 저장됐어요</span>
                       </p>
                     ) : (
                       <>
                         <p className="text-[16px] font-bold text-gray-700 text-center mb-2">
-                          혹시 시작일에 바로 시작도 가능하세요?
+                          {IMMEDIATE_AVAILABILITY_COPY.question}
                         </p>
                         <button
                           onClick={() => expressImmediate(job)}
                           disabled={sendingId !== null}
                           className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-3 rounded-2xl text-[16px] font-extrabold bg-white border-2 border-brand-yellow text-foreground hover:bg-yellow-50 active:bg-yellow-50"
                         >
-                          {sendingId === job.id ? "확인 중…" : "네, 바로도 가능해요"}
+                          {sendingId === job.id
+                            ? "확인 중…"
+                            : actionError?.jobId === job.id && actionError.retryable
+                              ? "다시 시도하기"
+                              : IMMEDIATE_AVAILABILITY_COPY.answer}
                         </button>
                       </>
                     )}
                   </div>
                 )}
 
+                {actionError?.jobId === job.id && (
+                  <div
+                    role="alert"
+                    className="mt-3 flex items-start gap-2 rounded-xl border border-error/25 bg-error-soft px-3 py-2.5 text-[15px] font-bold leading-relaxed text-error-strong"
+                  >
+                    <AlertCircle size={18} aria-hidden="true" className="mt-0.5 shrink-0" />
+                    <div>
+                      <p>{actionError.message}</p>
+                      {actionError.retryable && (
+                        <p className="mt-1 font-semibold">저장 완료로 표시하지 않았어요. 버튼을 다시 눌러 주세요.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {job.closes_at && (
                   <p className="mt-3 text-[13px] text-muted-foreground text-center leading-relaxed">
                     마감시각이 지나면 새 지원은 받을 수 없어요.
-                    <br />먼저 관심 주신 분부터 매니저가 연락드립니다.
+                    <br />관심은 매니저 검토 목록에 표시되며, 진행 여부는 검토 후 안내됩니다.
                   </p>
                 )}
               </section>
@@ -604,14 +739,13 @@ export default function PoolPage() {
           // 기본 접힘 뒤에 숨으면, M1b가 세운 '이야기 중인 공고가 본인 화면에서 사라지면 안 된다'는
           // 불변식이 시각적으로 되돌아간다(AI만 그 공고를 말하는 상태와 같은 체감). 접기는 **아직
           // 손대지 않은 자리**를 정리하는 장치일 뿐이다.
-          const isFolded = (j: PoolJob) => j.fit === "warn" && j.status === "none";
-          const activeMain = jobs.filter((j) => !j.expired && !isFolded(j));
-          const activeOthers = jobs.filter((j) => !j.expired && isFolded(j));
-          const expiredJobs = jobs.filter((j) => j.expired);
+          const activeMain = groupedJobs.main;
+          const activeOthers = groupedJobs.others;
+          const expiredJobs = groupedJobs.expired;
           // 활성 카드가 전부 접히면 위 영역이 **카드 0장**이 된다 — 헤더는 "[관심 있어요]를 눌러주세요"라고
           // 하는데 그 버튼이 화면에 없고, 빈 상태 안내도 뜨지 않는다(활성 공고는 있으니까).
           // 실측: 실공고 6개가 전부 차량 필수라 차량 없는 165명이 정확히 이 상태였다. 그때는 자동으로 펼친다.
-          const forceShowOthers = activeMain.length === 0 && activeOthers.length > 0;
+          const forceShowOthers = groupedJobs.forceShowOthers;
           return (
             <div className="flex flex-col gap-4">
               {activeMain.map(renderCard)}
@@ -625,21 +759,30 @@ export default function PoolPage() {
                         지금 올라온 자리는 등록해 주신 정보와 조건이 좀 달라요
                       </p>
                       <p className="mt-1 text-[14px] text-muted-foreground leading-relaxed">
-                        그래도 괜찮으시면 관심을 눌러 주세요 — 매니저가 확인 후 연락드립니다.
+                        그래도 괜찮으시면 관심을 눌러 주세요 — 매니저 검토 목록에 표시됩니다.
                       </p>
                     </div>
                   ) : (
                     <button
                       onClick={() => setShowOthers((v) => !v)}
-                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-4 rounded-2xl text-[16px] font-extrabold bg-card border-2 border-dashed border-gray-300 text-muted-foreground hover:bg-background active:bg-background"
+                      aria-expanded={showOthers}
+                      aria-controls="other-pool-jobs"
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 bg-card py-4 text-[16px] font-extrabold text-muted-foreground hover:bg-background active:bg-background"
                     >
-                      {showOthers
-                        ? "조건이 다른 자리 접기 ▲"
-                        : `조건이 다를 수 있는 자리 ${activeOthers.length}개 더 보기 ▼`}
+                      <span>
+                        {showOthers
+                          ? "조건이 다른 자리 접기"
+                          : `조건이 다를 수 있는 자리 ${activeOthers.length}개 더 보기`}
+                      </span>
+                      {showOthers ? (
+                        <ChevronUp size={18} aria-hidden="true" />
+                      ) : (
+                        <ChevronDown size={18} aria-hidden="true" />
+                      )}
                     </button>
                   )}
                   {(showOthers || forceShowOthers) && (
-                    <div className="mt-4 flex flex-col gap-4">{activeOthers.map(renderCard)}</div>
+                    <div id="other-pool-jobs" className="mt-4 flex flex-col gap-4">{activeOthers.map(renderCard)}</div>
                   )}
                 </section>
               )}
