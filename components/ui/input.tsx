@@ -19,7 +19,7 @@ const inputVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-surface-raised border-border-strong text-foreground hover:border-gray-300 shadow-inset",
+          "bg-surface-raised border-control-border text-foreground hover:border-foreground/55 shadow-inset",
         glass:
           "bg-white/55 border-white/75 text-foreground hover:bg-white/75 focus:bg-white backdrop-blur-md shadow-inset",
         ghost:
@@ -81,6 +81,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(
       {(error || hint) && (
         <p
           id={describedById}
+          role={error ? "alert" : undefined}
           className={cn(
             "mt-1.5 text-[12px] font-medium",
             error ? "text-error-strong" : "text-muted-foreground",

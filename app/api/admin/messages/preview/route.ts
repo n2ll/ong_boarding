@@ -32,6 +32,17 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
-  const previews = await gatherMessagePreviews(supabase, ids, { withManual });
-  return NextResponse.json({ previews });
+  try {
+    const previews = await gatherMessagePreviews(supabase, ids, {
+      withManual,
+      throwOnCoreError: true,
+    });
+    return NextResponse.json({ previews });
+  } catch (error) {
+    console.error("[messages/preview] core query failed", error);
+    return NextResponse.json(
+      { error: "대화 상태를 확인하지 못했어요." },
+      { status: 503 },
+    );
+  }
 }

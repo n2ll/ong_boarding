@@ -1,4 +1,4 @@
-export const MANAGER_PANEL_DOCK_MIN_WIDTH = 1280;
+export const MANAGER_PANEL_DOCK_MIN_WIDTH = 1536;
 
 export function shouldDockManagerPanels(viewportWidth: number): boolean {
   return Number.isFinite(viewportWidth) && viewportWidth >= MANAGER_PANEL_DOCK_MIN_WIDTH;

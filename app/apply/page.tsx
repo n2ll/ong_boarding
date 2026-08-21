@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, BriefcaseBusiness, CheckCircle2, FileText, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, BriefcaseBusiness, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/apply-job-flow";
 import {
   type ApplicantFormData,
+  type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
 import {
   applicationCompletionKind,
@@ -23,6 +24,7 @@ import {
   type ApplicationSubmissionAttempt,
   type ApplicationSubmissionResult,
 } from "@/lib/application-submission";
+import { isRequestTimeoutError, requestWithTimeout } from "@/lib/request-timeout";
 
 const TIMESLOTS = [
   { label: "평일 오전", sub: "월~금 09:00 ~ 14:00", value: "평일(월~금) 오전 타임 (09:00 ~ 14:00)" },
@@ -32,6 +34,7 @@ const TIMESLOTS = [
 ];
 
 const LICENSE_TYPES = ["1종 보통", "2종 보통", "1종 대형", "없음"];
+const APPLICATION_REQUEST_TIMEOUT_MS = 15_000;
 
 type FormState = ApplicantFormData;
 
@@ -65,8 +68,28 @@ function digits(raw: string, max: number): string {
 
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-border-strong rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-input-background";
+  "w-full px-4 py-3.5 border border-control-border rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-input-background";
 const requiredMark = <span className="text-error ml-0.5">*</span>;
+
+function fieldErrorId(field: keyof FormState): string {
+  return `${field}-error`;
+}
+
+function FieldError({
+  field,
+  issue,
+}: {
+  field: keyof FormState;
+  issue: ApplicantValidationIssue | null;
+}) {
+  if (issue?.field !== field) return null;
+  return (
+    <p id={fieldErrorId(field)} className="mt-2 flex items-start gap-1.5 text-[14px] font-bold leading-relaxed text-error-strong">
+      <AlertCircle size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+      <span>{issue.message}</span>
+    </p>
+  );
+}
 
 interface JobContext {
   id: number;
@@ -89,14 +112,18 @@ function ApplyForm() {
   const [branches, setBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationIssue, setValidationIssue] = useState<ApplicantValidationIssue | null>(null);
   const [submissionResult, setSubmissionResult] = useState<ApplicationSubmissionResult | null>(null);
   const [job, setJob] = useState<JobContext | null>(null);
   const [jobLoadState, setJobLoadState] = useState<ApplyJobLoadState>(
     jobIntent.kind === "job" ? "loading" : jobIntent.kind === "invalid" ? "unavailable" : "idle",
   );
   const [jobLoadAttempt, setJobLoadAttempt] = useState(0);
+  const [jobLoadTimedOut, setJobLoadTimedOut] = useState(false);
   const [generalOptIn, setGeneralOptIn] = useState(false);
+  const [manualBranchEntry, setManualBranchEntry] = useState({ branch1: false, branch2: false });
   const submissionAttemptRef = useRef<ApplicationSubmissionAttempt | null>(null);
+  const successTitleRef = useRef<HTMLHeadingElement>(null);
 
   // 공고 지원 링크(?job=ID)로 들어오면 공고 맥락을 불러와 헤더에 표기하고 지점을 미리 채운다.
   useEffect(() => {
@@ -104,23 +131,29 @@ function ApplyForm() {
     setGeneralOptIn(false);
     if (jobIntent.kind === "general") {
       setJobLoadState("idle");
+      setJobLoadTimedOut(false);
       return;
     }
     if (jobIntent.kind === "invalid" || jobId == null) {
       setJobLoadState("unavailable");
+      setJobLoadTimedOut(false);
       return;
     }
     let cancelled = false;
     setJobLoadState("loading");
+    setJobLoadTimedOut(false);
     (async () => {
       try {
-        const res = await fetch(`/api/apply/job/${jobId}`);
+        const { res, json } = await requestWithTimeout(async (signal) => {
+          const res = await fetch(`/api/apply/job/${jobId}`, { signal });
+          const json = res.ok ? await res.json() : null;
+          return { res, json };
+        }, APPLICATION_REQUEST_TIMEOUT_MS);
         if (cancelled) return;
         if (!res.ok) {
           setJobLoadState(res.status === 400 || res.status === 404 ? "unavailable" : "error");
           return;
         }
-        const json = await res.json();
         const j = json.job as JobContext;
         if (cancelled || !j || j.id !== jobId) {
           if (!cancelled) setJobLoadState("error");
@@ -129,8 +162,11 @@ function ApplyForm() {
         setJob(j);
         setJobLoadState("loaded");
         if (j.branch) setForm((prev) => (prev.branch1 ? prev : { ...prev, branch1: j.branch as string }));
-      } catch {
-        if (!cancelled) setJobLoadState("error");
+      } catch (loadError) {
+        if (!cancelled) {
+          setJobLoadTimedOut(isRequestTimeoutError(loadError));
+          setJobLoadState("error");
+        }
       }
     })();
     return () => {
@@ -141,9 +177,11 @@ function ApplyForm() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/branches");
-        if (!res.ok) return;
-        const json = await res.json();
+        const json = await requestWithTimeout(async (signal) => {
+          const res = await fetch("/api/branches", { signal });
+          return res.ok ? await res.json() : null;
+        }, APPLICATION_REQUEST_TIMEOUT_MS);
+        if (!json) return;
         setBranches((json.branches ?? []) as string[]);
       } catch {
         /* 지점 목록 못 불러와도 직접 입력 가능 */
@@ -158,13 +196,26 @@ function ApplyForm() {
     }
   }, [prefillBranch]);
 
+  useEffect(() => {
+    if (!submissionResult) return;
+    window.scrollTo({ top: 0, behavior: "auto" });
+    requestAnimationFrame(() => successTitleRef.current?.focus({ preventScroll: true }));
+  }, [submissionResult]);
+
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setError(null);
+    if (validationIssue?.field === key) setValidationIssue(null);
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setManualBranch = (key: "branch1" | "branch2", value: string) => {
+    setManualBranchEntry((current) => ({ ...current, [key]: true }));
+    set(key, value);
   };
 
   const toggleWorkHour = (value: string) => {
     setError(null);
+    if (validationIssue?.field === "workHours") setValidationIssue(null);
     setForm((prev) => ({
       ...prev,
       workHours: prev.workHours.includes(value)
@@ -177,14 +228,16 @@ function ApplyForm() {
     const issue = validateApplicationSubmission(form, vehicleRequired);
     if (issue) {
       setError(issue.message);
+      setValidationIssue(issue);
       requestAnimationFrame(() => {
         const field = document.getElementById(`field-${issue.field}`);
-        field?.scrollIntoView({ behavior: "smooth", block: "center" });
+        field?.scrollIntoView({ behavior: "auto", block: "center" });
         field?.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
       });
       return;
     }
     setError(null);
+    setValidationIssue(null);
     setSubmitting(true);
     try {
       const prepared = prepareApplicationSubmission(
@@ -193,12 +246,16 @@ function ApplyForm() {
         () => crypto.randomUUID(),
       );
       submissionAttemptRef.current = prepared.attempt;
-      const res = await fetch("/api/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(prepared.payload),
-      });
-      const json = await res.json();
+      const { res, json } = await requestWithTimeout(async (signal) => {
+        const res = await fetch("/api/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(prepared.payload),
+          signal,
+        });
+        const json = await res.json().catch(() => ({}));
+        return { res, json };
+      }, APPLICATION_REQUEST_TIMEOUT_MS);
       if (!res.ok) {
         if (res.status === 429) {
           const retryAfter = Number(
@@ -220,9 +277,10 @@ function ApplyForm() {
         return;
       }
       setSubmissionResult(json);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      setError("제출에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } catch (submitError) {
+      setError(isRequestTimeoutError(submitError)
+        ? "응답이 늦어 접수 결과를 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 접수 없이 상태를 다시 확인합니다."
+        : "인터넷 연결을 확인한 뒤 같은 내용으로 다시 시도해주세요. 제출 내용이 같으면 중복 접수되지 않아요.");
     } finally {
       setSubmitting(false);
     }
@@ -239,6 +297,13 @@ function ApplyForm() {
     generalOptIn,
   });
   const hasUnavailableJobLink = jobIntent.kind === "invalid" || jobLoadState === "unavailable";
+  const invalidField = validationIssue?.field ?? null;
+  const fieldA11y = (field: keyof FormState) => ({
+    "aria-invalid": invalidField === field ? true : undefined,
+    "aria-describedby": invalidField === field ? fieldErrorId(field) : undefined,
+  });
+  const fieldInputClass = (field: keyof FormState, extra = "") =>
+    `${inputCls} ${invalidField === field ? "border-error focus-visible:border-error focus-visible:ring-error/25" : ""} ${extra}`;
 
   if (submissionResult) {
     const completionKind = applicationCompletionKind(submissionResult.jobApplication);
@@ -258,14 +323,14 @@ function ApplyForm() {
             ? "지원서는 접수됐지만 공고 연결을 확인하지 못했어요"
             : "지원서가 접수됐어요";
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="bg-card border border-border-strong rounded-3xl p-10 max-w-[480px] w-full text-center shadow-sm">
+      <div className="min-h-dvh flex items-center justify-center p-5 sm:p-8">
+        <div className="bg-card border border-border-strong rounded-3xl p-6 sm:p-10 max-w-[480px] w-full text-center shadow-sm">
           <div className={`mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full ${hasJobIssue ? "bg-warning-soft" : "bg-success-soft"}`}>
             {hasJobIssue
               ? <AlertCircle size={36} aria-hidden="true" className="text-warning-strong" />
               : <CheckCircle2 size={36} aria-hidden="true" className="text-success-strong" />}
           </div>
-          <h1 className="text-[24px] font-extrabold text-foreground mb-2">{title}</h1>
+          <h1 ref={successTitleRef} tabIndex={-1} className="text-[24px] font-extrabold text-foreground mb-2">{title}</h1>
           <p className="text-[16px] text-gray-700 leading-relaxed">
             {form.name}님, 작성하신 내용을 매니저가 확인합니다.<br />
             근무 확정이 아니며, 매니저의 별도 안내가 있어야 다음 절차가 진행됩니다.
@@ -302,12 +367,12 @@ function ApplyForm() {
   }
 
   return (
-    <div className="min-h-screen py-10 px-5">
+    <div className="min-h-dvh px-4 py-6 sm:px-5 sm:py-10 landscape:py-3">
       <div className="max-w-[560px] mx-auto w-full">
         {/* Header */}
-        <div className="mb-8 text-center">
+        <div className="mb-6 text-center landscape:mb-3">
           <div className="inline-flex items-center gap-2.5 mb-3">
-            <Image src="/onggoing-logo.png" alt="옹고잉" width={72} height={56} priority />
+            <Image src="/onggoing-logo.png" alt="옹고잉" width={72} height={56} priority className="landscape:h-10 landscape:w-auto" />
             <h1 className="text-[18px] font-extrabold text-foreground">배송원 지원</h1>
           </div>
           <p className="text-[16px] text-muted-foreground">
@@ -334,8 +399,14 @@ function ApplyForm() {
             <div className="flex items-start gap-3">
               <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-error-strong" />
               <div>
-                <h2 className="text-[17px] font-extrabold text-foreground">공고 정보를 불러오지 못했어요</h2>
-                <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">인터넷 연결을 확인한 뒤 다시 시도해주세요.</p>
+                <h2 className="text-[17px] font-extrabold text-foreground">
+                  {jobLoadTimedOut ? "공고 확인 시간이 길어지고 있어요" : "공고 정보를 불러오지 못했어요"}
+                </h2>
+                <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">
+                  {jobLoadTimedOut
+                    ? "공고 상태를 확인하지 못했어요. 잠시 후 다시 불러오거나 다른 일자리 지원서를 작성할 수 있어요."
+                    : "인터넷 연결을 확인한 뒤 다시 시도해주세요."}
+                </p>
               </div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -349,7 +420,7 @@ function ApplyForm() {
               <button
                 type="button"
                 onClick={() => setGeneralOptIn(true)}
-                className="min-h-12 rounded-2xl border border-border-strong bg-card px-4 text-[16px] font-bold text-foreground transition-colors hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="min-h-12 rounded-2xl border border-control-border bg-card px-4 text-[16px] font-bold text-foreground transition-colors hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 다른 일자리 지원하기
               </button>
@@ -433,8 +504,8 @@ function ApplyForm() {
             void handleSubmit();
           }}
         >
-        <div className="sticky top-0 z-20 -mx-2 mb-5 px-2 py-2 bg-background/95 backdrop-blur-sm">
-          <div className="bg-card border border-border-strong rounded-2xl px-4 py-3 shadow-sm">
+        <div className={`sticky top-0 z-20 -mx-2 mb-5 bg-background/95 px-2 py-2 backdrop-blur-sm ${error ? "" : "landscape:static landscape:z-auto landscape:mx-0 landscape:mb-3 landscape:bg-transparent landscape:px-0 landscape:py-0 landscape:backdrop-blur-none"}`}>
+          <div className="bg-card border border-border-strong rounded-2xl px-4 py-3 shadow-sm landscape:px-3 landscape:py-2">
             <div className="flex items-center justify-between gap-4 text-[14px]">
               <span className="font-extrabold text-foreground">필수 항목 {progress.completed} / {progress.total}</span>
               <span className="font-bold text-muted-foreground">작성 {progress.percent}%</span>
@@ -447,7 +518,7 @@ function ApplyForm() {
               aria-valuemax={100}
               aria-valuenow={progress.percent}
             >
-              <div className="h-full rounded-full bg-brand-yellow transition-[width]" style={{ width: `${progress.percent}%` }} />
+              <div className="h-full rounded-full bg-brand-yellow transition-[width] motion-reduce:transition-none" style={{ width: `${progress.percent}%` }} />
             </div>
             {error && (
               <div role="alert" aria-live="assertive" className="mt-3 flex items-start gap-2 border-t border-error/20 pt-3 text-[14px] font-bold text-error-strong">
@@ -457,7 +528,7 @@ function ApplyForm() {
           </div>
         </div>
 
-        <div className="bg-card border border-border-strong rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col gap-7">
+        <div className="bg-card border border-border-strong rounded-2xl p-5 sm:p-8 landscape:p-5 shadow-sm flex flex-col gap-7">
           <div className="flex items-start gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">1</span>
             <div>
@@ -469,25 +540,29 @@ function ApplyForm() {
           {/* 이름 */}
           <div id="field-name">
             <label htmlFor="name" className={labelCls}>이름{requiredMark}</label>
-            <input id="name" name="name" autoComplete="name" aria-required="true" className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="홍길동" />
+            <input id="name" name="name" autoComplete="name" aria-required="true" {...fieldA11y("name")} className={fieldInputClass("name")} value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="홍길동" />
+            <FieldError field="name" issue={validationIssue} />
           </div>
 
           {/* 생년월일 */}
           <div id="field-birthDate">
             <label htmlFor="birthDate" className={labelCls}>생년월일 (6자리){requiredMark}</label>
-            <input id="birthDate" name="birthDate" aria-required="true" className={inputCls} inputMode="numeric" value={form.birthDate} onChange={(e) => set("birthDate", digits(e.target.value, 6))} placeholder="예: 600101" />
+            <input id="birthDate" name="birthDate" aria-required="true" {...fieldA11y("birthDate")} className={fieldInputClass("birthDate")} inputMode="numeric" value={form.birthDate} onChange={(e) => set("birthDate", digits(e.target.value, 6))} placeholder="예: 600101" />
+            <FieldError field="birthDate" issue={validationIssue} />
           </div>
 
           {/* 연락처 */}
           <div id="field-phone">
             <label htmlFor="phone" className={labelCls}>연락처{requiredMark}</label>
-            <input id="phone" name="phone" type="tel" autoComplete="tel-national" aria-required="true" className={inputCls} inputMode="numeric" value={form.phone} onChange={(e) => set("phone", digits(e.target.value, 11))} placeholder="01012345678" />
+            <input id="phone" name="phone" type="tel" autoComplete="tel-national" aria-required="true" {...fieldA11y("phone")} className={fieldInputClass("phone")} inputMode="numeric" value={form.phone} onChange={(e) => set("phone", digits(e.target.value, 11))} placeholder="01012345678" />
+            <FieldError field="phone" issue={validationIssue} />
           </div>
 
           {/* 거주지 */}
           <div id="field-location">
             <label htmlFor="location" className={labelCls}>거주지 주소{requiredMark}</label>
-            <input id="location" name="location" autoComplete="street-address" aria-required="true" className={inputCls} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="예: 서울시 강남구 역삼동" />
+            <input id="location" name="location" autoComplete="street-address" aria-required="true" {...fieldA11y("location")} className={fieldInputClass("location")} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="예: 서울시 강남구 역삼동" />
+            <FieldError field="location" issue={validationIssue} />
           </div>
 
           <div className="flex items-start gap-3 border-t border-border pt-7">
@@ -507,36 +582,40 @@ function ApplyForm() {
               {/* 자차 보유 */}
               <div id="field-ownVehicle">
                 <div id="ownVehicle-label" className={labelCls}>자차(본인 차량) 보유{requiredMark}</div>
-                <div role="group" aria-labelledby="ownVehicle-label" aria-required="true" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div role="group" aria-labelledby="ownVehicle-label" aria-required="true" {...fieldA11y("ownVehicle")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {["있음", "없음"].map((opt) => (
                     <button
                       key={opt}
                       type="button"
                       aria-pressed={form.ownVehicle === opt}
+                      {...fieldA11y("ownVehicle")}
                       onClick={() => set("ownVehicle", opt)}
-                      className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-card text-gray-700 hover:border-gray-300"}`}
+                      className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-gray-700 hover:border-foreground/50"}`}
                     >
                       {opt}
                     </button>
                   ))}
                 </div>
+                <FieldError field="ownVehicle" issue={validationIssue} />
               </div>
 
               {/* 운전면허 */}
               <div id="field-licenseType">
                 <label htmlFor="licenseType" className={labelCls}>운전면허 종류{requiredMark}</label>
-                <select id="licenseType" name="licenseType" aria-required="true" className={inputCls} value={form.licenseType} onChange={(e) => set("licenseType", e.target.value)}>
+                <select id="licenseType" name="licenseType" aria-required="true" {...fieldA11y("licenseType")} className={fieldInputClass("licenseType")} value={form.licenseType} onChange={(e) => set("licenseType", e.target.value)}>
                   <option value="">선택해주세요</option>
                   {LICENSE_TYPES.map((l) => (
                     <option key={l} value={l}>{l}</option>
                   ))}
                 </select>
+                <FieldError field="licenseType" issue={validationIssue} />
               </div>
 
               {/* 이동 수단 */}
               <div id="field-vehicleType">
                 <label htmlFor="vehicleType" className={labelCls}>이동 수단{requiredMark}</label>
-                <input id="vehicleType" name="vehicleType" aria-required="true" className={inputCls} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} placeholder="예: 오토바이 / 승용차" />
+                <input id="vehicleType" name="vehicleType" aria-required="true" {...fieldA11y("vehicleType")} className={fieldInputClass("vehicleType")} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} placeholder="예: 오토바이 / 승용차" />
+                <FieldError field="vehicleType" issue={validationIssue} />
               </div>
             </>
           ) : (
@@ -548,37 +627,50 @@ function ApplyForm() {
           {/* 희망 지점 */}
           <div id="field-branch1">
             <label htmlFor="branch1" className={labelCls}>희망 지점 (1순위){requiredMark}</label>
-            {branches.length > 0 ? (
-              <select id="branch1" name="branch1" aria-required="true" className={inputCls} value={form.branch1} onChange={(e) => set("branch1", e.target.value)}>
+            {branches.length > 0 && !manualBranchEntry.branch1 ? (
+              <select id="branch1" name="branch1" aria-required="true" {...fieldA11y("branch1")} className={fieldInputClass("branch1")} value={form.branch1} onChange={(e) => set("branch1", e.target.value)}>
                 <option value="">선택해주세요</option>
+                {form.branch1 && !branches.includes(form.branch1) && (
+                  <option value={form.branch1}>{form.branch1}</option>
+                )}
                 {branches.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
             ) : (
-              <input id="branch1" name="branch1" aria-required="true" className={inputCls} value={form.branch1} onChange={(e) => set("branch1", e.target.value)} placeholder="희망 지점을 입력해주세요" />
+              <input id="branch1" name="branch1" aria-required="true" {...fieldA11y("branch1")} className={fieldInputClass("branch1")} value={form.branch1} onChange={(e) => setManualBranch("branch1", e.target.value)} placeholder="희망 지점을 입력해주세요" />
             )}
+            <FieldError field="branch1" issue={validationIssue} />
           </div>
 
           {/* 희망 지점 2순위 */}
-          <div>
-            <label htmlFor="branch2" className={labelCls}>희망 지점 (2순위, 선택)</label>
-            {branches.length > 0 ? (
-              <select id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => set("branch2", e.target.value)}>
-                <option value="">선택 안 함</option>
-                {branches.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            ) : (
-              <input id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => set("branch2", e.target.value)} placeholder="(선택)" />
-            )}
-          </div>
+          <details className="group overflow-hidden rounded-2xl border border-border bg-muted/30">
+            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[15px] font-bold text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <span>다른 희망 지점 추가 <span className="font-medium text-muted-foreground">(선택)</span></span>
+              <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+            </summary>
+            <div className="border-t border-border px-4 pb-4 pt-3">
+              <label htmlFor="branch2" className={labelCls}>희망 지점 (2순위)</label>
+              {branches.length > 0 && !manualBranchEntry.branch2 ? (
+                <select id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => set("branch2", e.target.value)}>
+                  <option value="">선택 안 함</option>
+                  {form.branch2 && !branches.includes(form.branch2) && (
+                    <option value={form.branch2}>{form.branch2}</option>
+                  )}
+                  {branches.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              ) : (
+                <input id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => setManualBranch("branch2", e.target.value)} placeholder="두 번째 희망 지점을 입력해주세요" />
+              )}
+            </div>
+          </details>
 
           {/* 희망 근무 시간대 */}
           <div id="field-workHours">
             <div id="workHours-label" className={labelCls}>희망 근무 시간대 (복수 선택){requiredMark}</div>
-            <div role="group" aria-labelledby="workHours-label" aria-required="true" className="grid grid-cols-1 gap-3">
+            <div role="group" aria-labelledby="workHours-label" aria-required="true" {...fieldA11y("workHours")} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {TIMESLOTS.map((slot) => {
                 const checked = form.workHours.includes(slot.value);
                 return (
@@ -586,80 +678,91 @@ function ApplyForm() {
                     key={slot.value}
                     type="button"
                     aria-pressed={checked}
+                    {...fieldA11y("workHours")}
                     onClick={() => toggleWorkHour(slot.value)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-border-strong bg-card hover:border-gray-300"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-control-border bg-card hover:border-foreground/50"}`}
                   >
                     <div>
                       <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
                       <div className="text-[13px] text-muted-foreground">{slot.sub}</div>
                     </div>
-                    <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-gray-300"}`}>
+                    <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-control-border"}`}>
                       {checked && <CheckCircle2 size={16} className="text-foreground" />}
                     </div>
                   </button>
                 );
               })}
             </div>
+            <FieldError field="workHours" issue={validationIssue} />
           </div>
 
           {/* 근무 가능 시작일 */}
           <div id="field-availableDate">
             <label htmlFor="availableDate" className={labelCls}>근무 가능 시작일{requiredMark}</label>
-            <input id="availableDate" name="availableDate" type="date" aria-required="true" className={inputCls} value={form.availableDate} onChange={(e) => set("availableDate", e.target.value)} />
+            <input id="availableDate" name="availableDate" type="date" aria-required="true" {...fieldA11y("availableDate")} className={fieldInputClass("availableDate")} value={form.availableDate} onChange={(e) => set("availableDate", e.target.value)} />
+            <FieldError field="availableDate" issue={validationIssue} />
           </div>
 
           {vehicleRequired && (
             <div id="field-selfOwnership">
               <div id="selfOwnership-label" className={labelCls}>배달앱·정산계좌 본인 명의 가능 여부{requiredMark}</div>
-              <div role="group" aria-labelledby="selfOwnership-label" aria-required="true" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div role="group" aria-labelledby="selfOwnership-label" aria-required="true" {...fieldA11y("selfOwnership")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {["문제 없음", "문제 있음"].map((opt) => (
                   <button
                     key={opt}
                     type="button"
                     aria-pressed={form.selfOwnership === opt}
+                    {...fieldA11y("selfOwnership")}
                     onClick={() => set("selfOwnership", opt)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-border-strong bg-card text-gray-700 hover:border-gray-300"}`}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-gray-700 hover:border-foreground/50"}`}
                   >
                     {opt}
                   </button>
                 ))}
               </div>
+              <FieldError field="selfOwnership" issue={validationIssue} />
             </div>
           )}
-
-          <div className="flex items-start gap-3 border-t border-border pt-7">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-[14px] font-extrabold text-foreground">3</span>
-            <div>
-              <h2 className="text-[18px] font-extrabold text-foreground">추가 정보</h2>
-              <p className="mt-0.5 text-[14px] text-muted-foreground">선택 항목이에요. 작성하지 않아도 지원할 수 있어요.</p>
-            </div>
-          </div>
-
-          {/* 경력 */}
-          <div>
-            <label htmlFor="experience" className={labelCls}>배달·운전 경력 (선택)</label>
-            <textarea id="experience" name="experience" className={`${inputCls} min-h-[90px] resize-none`} value={form.experience} onChange={(e) => set("experience", e.target.value)} placeholder="예: 쿠팡이츠 도보 배달 1년" />
-          </div>
-
-          {/* 자기소개 */}
-          <div>
-            <label htmlFor="introduction" className={labelCls}>간단한 자기소개 (선택)</label>
-            <textarea id="introduction" name="introduction" className={`${inputCls} min-h-[90px] resize-none`} value={form.introduction} onChange={(e) => set("introduction", e.target.value)} placeholder="자유롭게 작성해주세요" />
-          </div>
-
-          {/* 마케팅 동의 */}
-          <label htmlFor="marketingConsent" className="flex items-start gap-3 cursor-pointer">
-            <input id="marketingConsent" name="marketingConsent" type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="mt-1 w-5 h-5 accent-brand-yellow" />
-            <span className="text-[14px] text-gray-700 leading-relaxed">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
-          </label>
         </div>
+
+        <details className="group mt-5 overflow-hidden rounded-2xl border border-border-strong bg-card shadow-sm">
+          <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <div className="text-left">
+              <h2 className="text-[16px] font-extrabold text-foreground">추가 정보 <span className="font-medium text-muted-foreground">(선택)</span></h2>
+              <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">경력이나 소개를 남기고 싶을 때만 작성해주세요.</p>
+            </div>
+            <ChevronDown size={20} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+          </summary>
+
+          <div className="flex flex-col gap-6 border-t border-border px-5 pb-5 pt-5 sm:px-8 sm:pb-8">
+            {/* 경력 */}
+            <div>
+              <label htmlFor="experience" className={labelCls}>배달·운전 경력 (선택)</label>
+              <textarea id="experience" name="experience" className={`${inputCls} min-h-[90px] resize-y`} value={form.experience} onChange={(e) => set("experience", e.target.value)} placeholder="예: 쿠팡이츠 도보 배달 1년" />
+            </div>
+
+            {/* 자기소개 */}
+            <div>
+              <label htmlFor="introduction" className={labelCls}>간단한 자기소개 (선택)</label>
+              <textarea id="introduction" name="introduction" className={`${inputCls} min-h-[90px] resize-y`} value={form.introduction} onChange={(e) => set("introduction", e.target.value)} placeholder="자유롭게 작성해주세요" />
+            </div>
+
+            {/* 마케팅 동의 */}
+            <label htmlFor="marketingConsent" className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl py-1 transition-colors hover:bg-muted/50">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center">
+                <input id="marketingConsent" name="marketingConsent" type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="h-6 w-6 accent-brand-yellow" />
+              </span>
+              <span className="py-2 text-[14px] leading-relaxed text-gray-700">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
+            </label>
+          </div>
+        </details>
 
         <button
           type="submit"
           disabled={submitting}
-          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-7 bg-brand-yellow hover:bg-yellow-500 disabled:opacity-60 text-foreground py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-brand"
+          className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-4 min-h-14 bg-brand-yellow hover:bg-yellow-500 disabled:cursor-wait disabled:opacity-60 text-foreground px-4 py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-brand"
         >
-          {submitting ? <Loader2 size={20} className="animate-spin" /> : null}
+          {submitting ? <Loader2 size={20} aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : null}
           {submitting ? "제출 중…" : submissionJobId ? "이 공고에 지원하기" : "지원서 제출하기"}
         </button>
         </form>}

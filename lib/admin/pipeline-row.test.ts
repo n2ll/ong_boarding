@@ -13,15 +13,16 @@ type ContactMeta = {
 };
 
 type TableLayout = {
+  mode: "narrow" | "core" | "wide";
   columnCount: number;
-  hideSecondaryColumns: boolean;
+  showCoreColumns: boolean;
+  showWideColumns: boolean;
   minWidthClass: string;
 };
 
 async function loadRowModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./pipeline-row.js";
-    return await import(modulePath) as Record<string, unknown>;
+    return await import(new URL("./pipeline-row.ts", import.meta.url).href) as Record<string, unknown>;
   } catch {
     return {};
   }
@@ -78,19 +79,93 @@ test("recent contact distinguishes applicant replies from campaign sends", async
   );
 });
 
-test("split review keeps only identity and current status in the narrow list", async () => {
+test("a 1024-class content area keeps four operational columns without supplementary detail", async () => {
   const row = await loadRowModule();
   const pipelineTableLayout = row.pipelineTableLayout as
-    | ((splitPanelActive: boolean) => TableLayout)
+    | ((contentWidth: number | null, splitPanelActive: boolean) => TableLayout)
     | undefined;
 
   assert.equal(typeof pipelineTableLayout, "function");
   assert.deepEqual(
-    pipelineTableLayout!(true),
-    { columnCount: 3, hideSecondaryColumns: true, minWidthClass: "min-w-[500px]" },
+    pipelineTableLayout!(840, false),
+    {
+      mode: "core",
+      columnCount: 5,
+      showCoreColumns: true,
+      showWideColumns: false,
+      minWidthClass: "min-w-[760px]",
+    },
+  );
+});
+
+test("supplementary vehicle and source columns require genuinely wide content", async () => {
+  const row = await loadRowModule();
+  const pipelineTableLayout = row.pipelineTableLayout as
+    | ((contentWidth: number | null, splitPanelActive: boolean) => TableLayout)
+    | undefined;
+
+  assert.equal(typeof pipelineTableLayout, "function");
+  assert.deepEqual(
+    pipelineTableLayout!(1039, false),
+    {
+      mode: "core",
+      columnCount: 5,
+      showCoreColumns: true,
+      showWideColumns: false,
+      minWidthClass: "min-w-[760px]",
+    },
   );
   assert.deepEqual(
-    pipelineTableLayout!(false),
-    { columnCount: 7, hideSecondaryColumns: false, minWidthClass: "min-w-[1060px]" },
+    pipelineTableLayout!(1040, false),
+    {
+      mode: "wide",
+      columnCount: 7,
+      showCoreColumns: true,
+      showWideColumns: true,
+      minWidthClass: "min-w-[1040px]",
+    },
   );
+});
+
+test("split review stays narrow even while its outer desktop viewport is wide", async () => {
+  const row = await loadRowModule();
+  const pipelineTableLayout = row.pipelineTableLayout as
+    | ((contentWidth: number | null, splitPanelActive: boolean) => TableLayout)
+    | undefined;
+
+  assert.equal(typeof pipelineTableLayout, "function");
+  assert.deepEqual(
+    pipelineTableLayout!(1200, true),
+    {
+      mode: "narrow",
+      columnCount: 3,
+      showCoreColumns: false,
+      showWideColumns: false,
+      minWidthClass: "min-w-[500px]",
+    },
+  );
+});
+
+test("the list width observer waits for a renderable list surface", async () => {
+  const row = await loadRowModule();
+  const pipelineListSurfaceReady = row.pipelineListSurfaceReady as
+    | ((view: string, state: string, hasSnapshot: boolean) => boolean)
+    | undefined;
+
+  assert.equal(typeof pipelineListSurfaceReady, "function");
+  assert.equal(pipelineListSurfaceReady!("list", "loading", false), true);
+  assert.equal(pipelineListSurfaceReady!("list", "error", false), false);
+  assert.equal(pipelineListSurfaceReady!("list", "error", true), true);
+  assert.equal(pipelineListSurfaceReady!("kanban", "ready", true), false);
+});
+
+test("docked split review drops the secondary jobs shortcut before core tools", async () => {
+  const row = await loadRowModule();
+  const showPipelineJobsShortcut = row.showPipelineJobsShortcut as
+    | ((splitPanelActive: boolean) => boolean)
+    | undefined;
+
+  assert.equal(typeof showPipelineJobsShortcut, "function");
+  assert.equal(showPipelineJobsShortcut!(false), true);
+  assert.equal(showPipelineJobsShortcut!(true), false);
 });

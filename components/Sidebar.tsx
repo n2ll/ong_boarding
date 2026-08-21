@@ -19,8 +19,8 @@ import { LogoMark } from "./Logo";
 /**
  * 앱 도크 — Ongboarding UI System의 셸.
  *
- * 종이 배경 위에 떠 있는 어두운 내비게이션. 데스크톱(XL 이상)은 240px 고정 라벨,
- * 작은 노트북(LG)은 72px 아이콘 레일로 공간을 보존한다. 마우스 호버에 폭이 바뀌지 않아
+ * 종이 배경 위에 떠 있는 어두운 내비게이션. 1440px 이상은 240px 고정 라벨,
+ * 작은 데스크톱(LG~1439px)은 72px 아이콘 레일로 공간을 보존한다. 마우스 호버에 폭이 바뀌지 않아
  * 작업 중인 목록·대화·상세 레이아웃이 흔들리지 않는다.
  */
 
@@ -66,12 +66,13 @@ export function Sidebar() {
 
   return (
     /*
-      1280px 이상에서는 라벨을 항상 보여 업무 목적지를 바로 읽게 한다. 1024~1279px는
-      아이콘 레일을 유지해 3열 작업대 폭을 확보한다.
+      1440px 이상에서는 라벨을 항상 보여 업무 목적지를 바로 읽게 한다. 1024~1439px는
+      아이콘 레일을 유지해 3열 작업대 폭을 확보한다. 1280px에서 라벨과 상세패널이 동시에
+      확장돼 작업영역이 오히려 좁아지던 단절을 피한다.
     */
     <nav
       aria-label="주요 메뉴"
-      className="fixed bottom-4 left-4 top-4 z-50 hidden w-[72px] overflow-hidden rounded-[32px] glass-dark backdrop-blur-xl backdrop-saturate-150 shadow-glass-dark lg:flex xl:w-60"
+      className="fixed bottom-4 left-4 top-4 z-50 hidden w-[72px] overflow-hidden rounded-[32px] glass-dark backdrop-blur-xl backdrop-saturate-150 shadow-glass-dark lg:flex wide:w-60"
     >
       <div className="flex h-full w-full flex-col gap-2 p-3 text-white">
         <Link
@@ -82,7 +83,7 @@ export function Sidebar() {
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white">
             <LogoMark size={26} />
           </span>
-          <span className="hidden min-w-0 xl:block">
+          <span className="hidden min-w-0 wide:block">
               <span className="block whitespace-nowrap text-[16px] font-extrabold leading-none tracking-tight">옹보딩</span>
               <span className="mt-[3px] block whitespace-nowrap text-xs font-medium tracking-wide text-white/50">시니어 채용 운영</span>
           </span>
@@ -113,7 +114,7 @@ export function Sidebar() {
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-dark text-[16px] font-bold text-brand-yellow">
               옹
             </span>
-            <div className="hidden min-w-0 flex-1 items-center gap-1 xl:flex">
+            <div className="hidden min-w-0 flex-1 items-center gap-1 wide:flex">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] font-semibold leading-tight">옹고잉 채용팀</span>
                   <span className="block truncate text-[12px] text-white/50">관리자 콘솔</span>
@@ -204,7 +205,7 @@ function DockItem({
               숫자를 글자로 같이 보여 색만으로 전달하지 않는다(MASTER.md §1). */}
           {badge && (
             <span
-              className={`absolute right-0 top-0 min-w-[17px] rounded-full px-[4px] text-xs font-extrabold leading-[17px] text-white xl:hidden ${
+              className={`absolute right-0 top-0 min-w-[17px] rounded-full px-[4px] text-xs font-extrabold leading-[17px] text-white wide:hidden ${
                 badge.tone === "error" ? "bg-error" : "bg-success-strong"
               }`}
             >
@@ -213,7 +214,7 @@ function DockItem({
           )}
         </span>
 
-        <span className="hidden min-w-0 flex-1 items-center gap-2 xl:flex">
+        <span className="hidden min-w-0 flex-1 items-center gap-2 wide:flex">
             <span className="min-w-0 flex-1 truncate text-left text-[14px] font-bold">{item.label}</span>
             {badge && (
               <span
@@ -229,7 +230,7 @@ function DockItem({
 
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-md transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100 xl:hidden"
+        className="pointer-events-none absolute left-[58px] top-1/2 z-50 -translate-x-2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-white/10 bg-gray-900 px-3 py-2 text-xs font-bold text-white opacity-0 shadow-md transition-all group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100 wide:hidden"
       >
         {item.label}
       </span>

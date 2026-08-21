@@ -196,7 +196,7 @@ function Modal({
               <DialogPrimitive.Close
                 aria-label="창 닫기"
                 disabled={busy}
-                className="relative -mr-1 grid size-9 place-items-center rounded-2xl text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40"
+                className="relative -mr-1 grid size-11 place-items-center rounded-2xl text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-40"
               >
                 <X size={18} />
               </DialogPrimitive.Close>

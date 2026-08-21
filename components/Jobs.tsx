@@ -9,6 +9,8 @@ import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
 import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { StageBadge } from "./ui/stage-badge";
 import { Modal } from "./ui/modal";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
@@ -19,6 +21,7 @@ import { jobCandidateBoardPolicy, jobOperationMeta, jobOperationsSummary, type J
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
+import { buildJobListSummary, type JobListSummaryItem } from "@/lib/admin/job-list-layout";
 
 interface JobRow {
   id: string;
@@ -201,16 +204,6 @@ const STAGE_KO: Record<string, string> = {
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
   active: "활동 중", paused: "수동 응대", abort: "중단",
 };
-const STAGE_COLOR: Record<string, string> = {
-  interest: "bg-warning-soft text-warning-strong",
-  exploration: "bg-muted text-gray-700",
-  screening: "bg-yellow-100 text-warning-strong",
-  onboarding: "bg-copilot-soft text-copilot-strong",
-  active: "bg-success-soft text-success-strong",
-  paused: "bg-muted text-muted-foreground",
-  abort: "bg-error-soft text-error-strong",
-};
-
 // 공고 마감 안내 문구 — #{이름}/#{맞춤링크}는 bulk-send가 수신자별 치환, #{공고명}은 발송 시점에 치환.
 // 맞춤링크(/p/[token])가 활성 공고를 자동으로 보여주므로 타 공고 안내는 링크 하나로 끝난다.
 // 톤: 진행 중이던 지원자가 이탈하지 않도록 죄송·친절 우선(지원자 경험 원칙, 2026-07-14) —
@@ -563,6 +556,16 @@ const NEXT_ACTION_TONE: Record<JobOperationTone, string> = {
   info: "border-info/25 bg-info-soft text-info-strong",
   muted: "border-border-strong bg-muted text-gray-700",
 };
+
+const JOB_LIST_SUMMARY_TONE: Record<JobListSummaryItem["tone"], string> = {
+  critical: "bg-priority-critical-soft text-priority-critical-ink",
+  screening: "bg-stage-screening-soft text-stage-screening-ink",
+  onboarding: "bg-stage-onboarding-soft text-stage-onboarding-ink",
+  active: "bg-stage-active-soft text-stage-active-ink",
+  neutral: "bg-muted text-gray-700",
+};
+
+const JOB_LIST_GRID = "grid-cols-1 lg:grid-cols-[minmax(210px,1.4fr)_minmax(175px,1fr)_minmax(155px,0.9fr)_minmax(168px,auto)] xl:grid-cols-[minmax(225px,1.3fr)_minmax(125px,0.72fr)_minmax(190px,1fr)_minmax(170px,0.9fr)_minmax(220px,auto)]";
 
 // 모집 기간(work_period) 배지 — 하루/단기=노랑, 정기=초록
 const PERIOD_BADGE: Record<string, string> = {
@@ -1072,6 +1075,13 @@ export function Jobs() {
   const boardPolicy = jobCandidateBoardPolicy(boardJobClosed);
   // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
   const jobsFirstLoad = jobsLoading && !jobsApi;
+  const jobListSummary = useMemo(
+    () => buildJobListSummary(
+      operationsSummary,
+      jobsError ? "error" : jobsFirstLoad ? "loading" : "ready",
+    ),
+    [jobsError, jobsFirstLoad, operationsSummary],
+  );
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
 
   // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
@@ -1922,91 +1932,81 @@ export function Jobs() {
   };
 
   return (
-    <PageShell>
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-strong bg-background px-4 py-2.5 text-[13px]">
-        <p className="font-semibold text-gray-700">
-          공고별 모집 현황과 지원자 진행, 충원 상태를 관리하는 곳입니다.
-        </p>
-        <Link
-          href="/pipeline"
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 font-bold text-info-strong outline-none hover:bg-info-soft focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          전체 인재풀에서 사람 찾기 <ChevronRight size={14} />
-        </Link>
-      </div>
-      {/* Stats Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-        {[
-          { label: "진행 중 공고", value: operationsSummary.openJobs, unit: "건", note: "현재 모집·응대 중" },
-          {
-            label: "남은 충원",
-            value: operationsSummary.remaining,
-            unit: "명",
-            highlight: operationsSummary.remaining > 0,
-            note: operationsSummary.unconfiguredCapacity > 0 ? `정원 미설정 ${operationsSummary.unconfiguredCapacity}건 별도` : "매니저 확정 기준",
-          },
-          {
-            label: "사람 확인 필요",
-            value: operationsSummary.attention,
-            unit: "명",
-            color: operationsSummary.attention > 0 ? "text-error-strong" : "text-foreground",
-            note: "수동 응대 · 응대 시작 전",
-          },
-          {
-            label: "후보 검토",
-            value: operationsSummary.reviewReady,
-            unit: "명",
-            color: "text-info-strong",
-            note: "스크리닝 완료 · 확정 전",
-          }
-        ].map((stat, i) => (
-          <div key={i} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm flex min-h-[118px] flex-col justify-between">
-            <div className="text-[13px] font-bold text-muted-foreground mb-2">{stat.label}</div>
-            <div className="flex items-baseline gap-1">
-              {/* 데이터를 못 받았으면 숫자를 말하지 않는다 — "0건"과 "모름"은 다른 말이다.
-                  스쳐 보는 매니저에게 로딩·에러 중의 0은 "할 일 없음"으로 읽힌다. */}
-              {jobsFirstLoad || jobsError ? (
-                <span className="text-[26px] font-extrabold tracking-tight leading-none text-muted-foreground/40" title={jobsError ? "불러오지 못했어요" : "불러오는 중"}>—</span>
-              ) : (
-                <>
-                  <span className={`text-[26px] font-extrabold tracking-tight leading-none ${stat.highlight ? 'text-warning-strong' : stat.color || 'text-foreground'}`}>
-                    {stat.value}
-                  </span>
-                  <span className="text-sm font-semibold text-muted-foreground">{stat.unit}</span>
-                </>
-              )}
-            </div>
-            <div className="mt-2 text-[12px] font-semibold text-muted-foreground">{stat.note}</div>
+    <PageShell className="gap-3 p-4 pb-12 sm:p-5 sm:pb-12 lg:p-5 lg:pb-12">
+      <section
+        aria-labelledby="jobs-operations-title"
+        aria-busy={jobsFirstLoad || undefined}
+        className="rounded-panel border border-border-strong bg-card p-3"
+      >
+        <div className="grid gap-2 md:grid-cols-[minmax(180px,1.15fr)_repeat(4,minmax(105px,0.72fr))]">
+          <div className="flex min-w-0 flex-col justify-center px-1 py-0.5">
+            <h2 id="jobs-operations-title" className="text-[14px] font-extrabold text-foreground">공고 운영</h2>
+            <p className="mt-0.5 text-[12px] font-semibold leading-snug text-muted-foreground">확인이 필요한 후보부터 처리하세요.</p>
+            <Link
+              href="/pipeline"
+              className="mt-1 inline-flex w-fit items-center gap-1 rounded-md text-[12px] font-bold text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              인재풀에서 사람 찾기 <ChevronRight size={13} />
+            </Link>
           </div>
-        ))}
-      </div>
+          {jobListSummary.map((item) => (
+            <div key={item.key} className={`min-w-0 rounded-2xl px-3 py-2 ${JOB_LIST_SUMMARY_TONE[item.tone]}`}>
+              <div className="truncate text-[12px] font-bold opacity-75">{item.label}</div>
+              <div
+                className="mt-1 flex items-baseline gap-1"
+                title={item.unavailableReason === "error" ? "불러오지 못했어요" : item.unavailableReason === "loading" ? "불러오는 중" : item.note}
+              >
+                <span className="text-[21px] font-extrabold tabular-nums leading-none">{item.value ?? "—"}</span>
+                {item.value !== null && <span className="text-[12px] font-bold opacity-75">{item.unit}</span>}
+              </div>
+              <div className="mt-1 truncate text-[11px] font-semibold opacity-75">{item.note}</div>
+            </div>
+          ))}
+        </div>
+      </section>
 
-      <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-x-auto flex flex-col min-h-[600px]">
-        {/* Toolbar */}
-        <div className="p-5 border-b border-border-strong flex flex-wrap items-center justify-between gap-4">
-          <div className="flex gap-1.5">
+      <section aria-label="채용공고 목록" className="flex min-h-[600px] flex-col overflow-hidden rounded-panel border border-border-strong bg-card">
+        {/* Toolbar — 상태·행동과 검색 조건을 두 줄로 고정해 1024px에서도 예측 가능하게 읽힌다. */}
+        <div className="space-y-2 border-b border-border-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-1.5" role="tablist" aria-label="공고 상태">
             <button aria-selected={activeTab === 'all'} role="tab"
               onClick={() => setActiveTab('all')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'all' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'all' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               전체
             </button>
             <button aria-selected={activeTab === 'active'} role="tab"
               onClick={() => setActiveTab('active')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'active' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'active' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => !j.effectivelyClosed).length}</span>
             </button>
             <button aria-selected={activeTab === 'closed'} role="tab"
               onClick={() => setActiveTab('closed')}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'closed' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
+              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'closed' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
             >
               마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.effectivelyClosed).length}</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-background border border-border-strong rounded-2xl px-2 py-1">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={openApplicantPreview}
+                isLoading={previewLoading}
+                title="테스트 지원자의 맞춤 공고 링크를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
+              >
+                {!previewLoading && <Eye size={16} />} <span className="hidden sm:inline">지원자 화면</span> 미리보기
+              </Button>
+              <Button variant="brand" onClick={() => setAiModalOpen(true)}>
+                <Wand2 size={16} /> 새 공고
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(210px,320px)]">
+            <div className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-2xl border border-control-border bg-background px-2">
               <Filter size={15} className="text-muted-foreground ml-1" />
               <select
                 value={clientFilter}
@@ -2015,18 +2015,18 @@ export function Jobs() {
                   setClientFilter(v);
                   setBranchFilter("");
                 }}
-                className="pr-8 bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
+                className="min-w-0 flex-1 cursor-pointer bg-transparent py-2 pr-1 text-[13px] font-semibold text-gray-700 focus:outline-none"
                 aria-label="화주사로 목록 좁히기"
                 title="화주사로 목록 좁히기"
               >
                 <option value="">전체 화주사</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <span className="text-muted-foreground">›</span>
+              <span aria-hidden="true" className="text-muted-foreground">›</span>
               <select
                 value={branchFilter}
                 onChange={(e) => setBranchFilter(e.target.value === "" ? "" : Number(e.target.value))}
-                className="pr-8 bg-transparent text-sm font-semibold text-gray-700 py-1.5 pr-1 focus:outline-none cursor-pointer"
+                className="min-w-0 flex-1 cursor-pointer bg-transparent py-2 pr-1 text-[13px] font-semibold text-gray-700 focus:outline-none"
                 aria-label="지점으로 목록 좁히기"
                 title="지점으로 목록 좁히기"
               >
@@ -2034,7 +2034,7 @@ export function Jobs() {
                 {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
-            <div className="relative">
+            <div className="relative min-w-0">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
@@ -2042,28 +2042,16 @@ export function Jobs() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="공고명, 지점 검색"
                 aria-label="공고명·지점 검색"
-                className="pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm w-[220px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-h-11 w-full rounded-2xl border border-control-border bg-input-background/90 py-2 pl-9 pr-4 text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
-            <Button
-              variant="secondary"
-              onClick={openApplicantPreview}
-              isLoading={previewLoading}
-              title="테스트 지원자의 맞춤 공고 링크를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
-            >
-              {!previewLoading && <Eye size={16} />} 지원자용 공고 미리보기
-            </Button>
-            <Button variant="brand" onClick={() => setAiModalOpen(true)}>
-              <Wand2 size={16} /> 새 공고
-            </Button>
           </div>
         </div>
 
         {/* Table Header */}
-        <div className="grid min-w-[1040px] grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-3.5 border-b border-border-strong bg-background text-[13px] font-bold text-muted-foreground">
+        <div className={`hidden items-center border-b border-border-strong bg-background px-4 py-2.5 text-[12px] font-bold text-muted-foreground lg:grid ${JOB_LIST_GRID}`}>
           <div>공고 정보</div>
-          <div>지점 / 직무</div>
-          <div>모집 기간</div>
+          <div className="hidden xl:block">지점 / 직무</div>
           <div>후보 흐름</div>
           <div>상태 · 다음 할 일</div>
           <div className="text-right">관리</div>
@@ -2091,7 +2079,7 @@ export function Jobs() {
             filteredJobs.map(job => {
               const operation = jobOperationMeta(toJobOperationInput(job));
               return (
-              <div key={job.id} className="grid min-w-[1040px] grid-cols-[1.9fr_0.9fr_0.9fr_1.4fr_1fr_minmax(175px,1fr)] items-center px-6 py-5 border-b border-muted hover:bg-background transition-colors">
+              <div key={job.id} className={`grid items-center border-b border-muted px-4 py-4 transition-colors hover:bg-background ${JOB_LIST_GRID}`}>
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {/* 제목 클릭 = 지원자 보드 열기. 예전엔 div+onClick이라 키보드로는 들어갈 수 없었다. */}
@@ -2111,7 +2099,17 @@ export function Jobs() {
                     <span className="text-[12px] text-muted-foreground font-mono">{job.id}</span>
                     <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${RECRUIT_MODE_META[job.recruitMode].badge}`}>{RECRUIT_MODE_META[job.recruitMode].label}</span>
                     {job.targetedExposure && (
-                      <span className="px-1.5 py-0.5 rounded-full text-[12px] font-bold border bg-yellow-50 text-warning border-warning-soft" title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</span>
+                      <Badge title="지정 노출 — 노출 대상(규칙·수동 지정)에게만 맞춤 공고 링크에 표시됩니다">지정 노출</Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-1 text-[12px] font-semibold text-muted-foreground">
+                    <span>모집 {job.created} ~</span>
+                    {!job.closesAt ? (
+                      <span className="text-gray-700">상시</span>
+                    ) : (
+                      <span className={new Date(job.closesAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000 && !job.effectivelyClosed ? "text-warning-strong" : "text-gray-700"}>
+                        {fmtCloses(job.closesAt)}
+                      </span>
                     )}
                   </div>
                   {/* 충원율 게이지는 진행 중 공고에만 — 마감 공고는 서버가 확정 계상을 제외(이중계상 방지)해
@@ -2133,24 +2131,13 @@ export function Jobs() {
                   })()}
                 </div>
 
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 lg:hidden xl:flex">
                   <div className="flex items-center gap-1.5 text-[14px] font-semibold text-gray-700">
                     <MapPin size={14} className="text-muted-foreground" /> {job.branch}
                   </div>
                   <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
                     <Briefcase size={14} className="text-muted-foreground" /> {job.role}
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-1 text-[13px] text-gray-700">
-                  <div>{job.created} ~</div>
-                  {!job.closesAt ? (
-                    <div className="font-bold text-gray-800">상시</div>
-                  ) : new Date(job.closesAt).getTime() <= Date.now() ? (
-                    <span className="w-fit px-1.5 py-0.5 rounded-full text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong">마감됨</span>
-                  ) : (
-                    <div className={`font-bold ${new Date(job.closesAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000 ? "text-warning" : "text-gray-800"}`}>{fmtCloses(job.closesAt)}</div>
-                  )}
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-2 pr-3">
@@ -2166,19 +2153,19 @@ export function Jobs() {
                   </button>
                   <div className="flex flex-wrap gap-1">
                     {job.pausedCandidates > 0 && (
-                      <span className="rounded-full border border-error/25 bg-error-soft px-2 py-0.5 text-[12px] font-bold text-error-strong">수동 응대 {job.pausedCandidates}</span>
+                      <Badge variant="priority-critical">수동 응대 {job.pausedCandidates}</Badge>
                     )}
                     {job.newCandidates > 0 && (
-                      <span className="rounded-full border border-warning-soft bg-warning-soft px-2 py-0.5 text-[12px] font-bold text-warning-strong">시작 전 {job.newCandidates}</span>
+                      <Badge variant="priority-attention">시작 전 {job.newCandidates}</Badge>
                     )}
                     {job.reviewReady > 0 && (
-                      <span className="rounded-full border border-info/25 bg-info-soft px-2 py-0.5 text-[12px] font-bold text-info-strong" title="스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보">후보 검토 {job.reviewReady}</span>
+                      <Badge variant="stage-screening" title="스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보">후보 검토 {job.reviewReady}</Badge>
                     )}
                     {job.aiInProgress > 0 && (
-                      <span className="rounded-full border border-border-strong bg-muted px-2 py-0.5 text-[12px] font-bold text-gray-700">AI 진행 {job.aiInProgress}</span>
+                      <Badge variant="info">AI 진행 {job.aiInProgress}</Badge>
                     )}
                     {job.interestCount > 0 && (
-                      <span className="rounded-full border border-success/25 bg-success-soft px-2 py-0.5 text-[12px] font-bold text-success-strong" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</span>
+                      <Badge variant="priority-attention" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</Badge>
                     )}
                     {job.candidates === 0 && <span className="text-[12px] font-semibold text-muted-foreground">연결된 후보 없음</span>}
                   </div>
@@ -2193,13 +2180,13 @@ export function Jobs() {
                     예전엔 초록 CTA가 '진행 중' pill을 대체해, 정원이 찬 행만 상태 표시가 사라졌다. */}
                 <div className="flex flex-col items-start gap-1.5">
                   {!job.effectivelyClosed ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-success-soft text-success-strong border border-success/25">
-                      <Play size={12} className="fill-current" /> 진행 중
-                    </span>
+                    <Badge variant="stage-active" className="px-3 py-1.5">
+                      <Play aria-hidden="true" size={12} className="fill-current" /> 진행 중
+                    </Badge>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-muted text-muted-foreground border border-border-strong">
-                      <Pause size={12} className="fill-current" /> 마감됨
-                    </span>
+                    <Badge className="px-3 py-1.5 text-muted-foreground">
+                      <Pause aria-hidden="true" size={12} className="fill-current" /> 마감됨
+                    </Badge>
                   )}
                   {!job.effectivelyClosed && operation.nextAction.tone === "success" && (
                     // 충원 완료(확정≥정원) — 바로 마감으로 잇는 권유. 기존 확인 모달(handleToggleClose)을 그대로 탄다.
@@ -2276,7 +2263,7 @@ export function Jobs() {
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
-                        size="toolbar"
+                        size="icon"
                         aria-label={`${job.title} 더보기 — ${moreActionsLabel(job)}`}
                         title={`더보기 — ${moreActionsLabel(job)}`}
                       >
@@ -2324,7 +2311,7 @@ export function Jobs() {
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {/* AI JD Generator Modal */}
       {aiModalOpen && (
@@ -3233,7 +3220,7 @@ export function Jobs() {
                       <div className="text-[12px] font-bold text-muted-foreground mb-1.5">진행 단계</div>
                       <div className="flex flex-wrap gap-1.5">
                         {STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => (
-                          <span key={s} className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[s] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[s] ?? s} {stageCounts[s]}</span>
+                          <StageBadge key={s} stage={s} count={stageCounts[s]} />
                         ))}
                       </div>
                     </div>
@@ -3287,7 +3274,7 @@ export function Jobs() {
                 {stageGroups.map((group) => (
                   <div key={group.stage} className="space-y-2">
                     <div className="flex items-center gap-2 px-0.5">
-                      <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${STAGE_COLOR[group.stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[group.stage] ?? group.stage}</span>
+                      <StageBadge stage={group.stage} />
                       <span className="text-[12px] text-muted-foreground font-bold">{group.items.length}명</span>
                       <div className="flex-1 h-px bg-muted" />
                     </div>
@@ -3341,7 +3328,7 @@ export function Jobs() {
                                 isClosed ? (
                                   <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
                                 ) : (
-                                  <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${STAGE_COLOR[stage] ?? "bg-muted text-gray-700"}`}>{STAGE_KO[stage] ?? stage}</span>
+                                  <StageBadge stage={stage} />
                                 )
                               )}
                             </div>
@@ -3350,7 +3337,9 @@ export function Jobs() {
                           {phone && (
                             <div className="flex items-center gap-1 mt-2 text-[12px] font-semibold text-gray-700">
                               <span className="font-mono">{phone}</span>
-                              <Button variant="ghost" size="chip" aria-label="전화번호 복사" title="전화번호 복사" onClick={() => copyPhone(phone)} className="px-1"><Copy size={12} /></Button>
+                              <Button variant="ghost" size="chip" aria-label="전화번호 복사" title="전화번호 복사" onClick={() => copyPhone(phone)} className="px-2">
+                                <Copy aria-hidden="true" size={12} /> 복사
+                              </Button>
                             </div>
                           )}
                           {boardPolicy.allowCandidateMutation && (isClosed ? (
@@ -3445,7 +3434,7 @@ export function Jobs() {
                     <div className="min-w-0 flex-1">
                       <div className="text-[14px] font-bold text-foreground flex items-center gap-1.5">
                         {p.name ?? `#${p.id}`}
-                        {conflict && <span className="text-[12px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-50 text-warning border border-warning-soft">다른 공고 진행 중</span>}
+                        {conflict && <Badge variant="priority-attention">다른 공고 진행 중</Badge>}
                       </div>
                       <div className="text-[12px] text-muted-foreground truncate">{(p.source ? sourceLabel(p.source) + " · " : "")}{p.branch1 ?? "-"} · {p.work_hours ?? "-"}{p.status ? " · " + p.status : ""}</div>
                     </div>

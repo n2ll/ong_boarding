@@ -19,20 +19,24 @@ async function loadModule(): Promise<ManagerPanelLayoutModule> {
   }
 }
 
-test("manager detail panels stay overlaid below the xl desktop breakpoint", async () => {
+test("manager detail panels stay overlaid on laptop-width desktops", async () => {
   const { shouldDockManagerPanels } = await loadModule();
 
   assert.equal(typeof shouldDockManagerPanels, "function");
   assert.equal(shouldDockManagerPanels!(1024), false);
   assert.equal(shouldDockManagerPanels!(1279), false);
+  assert.equal(shouldDockManagerPanels!(1280), false);
+  assert.equal(shouldDockManagerPanels!(1366), false);
+  assert.equal(shouldDockManagerPanels!(1439), false);
+  assert.equal(shouldDockManagerPanels!(1440), false);
+  assert.equal(shouldDockManagerPanels!(1535), false);
 });
 
-test("manager detail panels dock at xl widths and above", async () => {
+test("manager detail panels dock only on wide desktops", async () => {
   const { shouldDockManagerPanels } = await loadModule();
 
   assert.equal(typeof shouldDockManagerPanels, "function");
-  assert.equal(shouldDockManagerPanels!(1280), true);
-  assert.equal(shouldDockManagerPanels!(1440), true);
+  assert.equal(shouldDockManagerPanels!(1536), true);
 });
 
 test("an invalid viewport measurement never enables docking", async () => {

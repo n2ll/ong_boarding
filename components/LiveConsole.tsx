@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Search, X, AlertTriangle, ArrowRight, Phone } from "lucide-react";
+import { Search, X, AlertTriangle, ArrowRight, Phone, CheckCircle2, Clock3 } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
@@ -47,9 +47,12 @@ const ApplicantDetailContent = dynamic(
 import { getBrowserClient } from "@/lib/supabase";
 import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ApplicantStatusBadge, StageBadge } from "@/components/ui/stage-badge";
 import { nextQueueApplicantId } from "@/lib/admin/nav";
 import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
@@ -123,18 +126,18 @@ interface ConfirmPending {
   can_send_venue: boolean;
 }
 
-// 인계 카테고리 배지 색(tone 기반). urgent=빨강, answerable=호박, human=파랑, neutral=회색
+// 인계 카테고리 배지 색(tone 기반). 실제 오류/파괴가 아닌 운영 우선순위는 저채도 지표색을 쓴다.
 const TONE_STYLE: Record<Handoff["tone"], string> = {
-  urgent: "bg-error-soft text-error-strong border-error/30",
-  answerable: "bg-yellow-50 text-warning-strong border-yellow-200",
+  urgent: "bg-priority-critical-soft text-priority-critical-ink border-priority-critical/30",
+  answerable: "bg-priority-attention-soft text-priority-attention-ink border-priority-attention-ink/25",
   human: "bg-info-soft text-info-strong border-info/25",
   neutral: "bg-background text-gray-700 border-border-strong",
 };
 
-/** 방치 경과일 색 — 오래될수록 빨강(SLA 환기). */
+/** 방치 경과일 색 — 오류 빨강 대신 운영 우선순위의 저채도 잉크로 SLA를 환기한다. */
 function ageStyle(days: number): string {
-  if (days >= 7) return "text-error-strong";
-  if (days >= 3) return "text-warning";
+  if (days >= 7) return "text-priority-critical-ink";
+  if (days >= 3) return "text-priority-attention-ink";
   return "text-muted-foreground";
 }
 
@@ -217,7 +220,7 @@ function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBad
   if (unanswered) {
     // 활성 대화 없이 답장 온 재컨택 응답자 = 스크리닝 스코프 밖 답장. 서브라벨로만 구분(별도 색 배지 X).
     const isPool = (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
-    return { label: "내가 답할 차례", cls: "bg-error-soft text-error-strong border border-error/30", sub: isPool ? "풀 밖 답장" : undefined };
+    return { label: "내가 답할 차례", cls: "bg-priority-critical-soft text-priority-critical-ink border border-priority-critical/30", sub: isPool ? "풀 밖 답장" : undefined };
   }
   if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-muted text-gray-700" };
   if (isAwaitingPreview(pv)) return { label: "상대 답 기다림", cls: "bg-muted text-muted-foreground" };
@@ -442,6 +445,8 @@ export function LiveConsole() {
   );
   const globalKill = killData?.disabled === true || killData?.env_forced === true;
   const copilotMode = !globalKill && killData?.mode === "draft";
+  const queueSummary = liveQueueSummary(appsState, unansweredCount);
+  const modeNotice = liveModeNotice(globalKill, copilotMode);
 
   // 확정 모달 오픈 신호 — 큐의 '확정' 버튼이 상세 패널의 확정 모달(지점·슬롯·시작일 수집)을 열게 한다.
   // 대상 지원자 id를 함께 실어야 한다: 패널은 applicantId가 key라 지원자를 바꾸면 리마운트되므로
@@ -835,17 +840,34 @@ export function LiveConsole() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-      <div className="shrink-0 border-b border-border-strong bg-card px-4 py-3 lg:px-5">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-[14px] font-extrabold text-foreground">오늘 처리할 지원자 업무</h1>
-            <div className="mt-0.5 text-[12px] text-muted-foreground">큐를 바꿔도 선택한 지원자와 대화 맥락을 이어서 확인할 수 있어요.</div>
+      <div className="shrink-0 border-b border-border-strong bg-card px-4 py-2.5 lg:px-5">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="shrink-0">
+              <h1 className="text-[15px] font-extrabold leading-tight text-foreground">오늘 처리할 지원자 업무</h1>
+              <div className="mt-0.5 hidden text-[12px] text-muted-foreground wide:block">답장 · 인계 · 확정 검토를 한 흐름으로 처리합니다.</div>
+            </div>
+            {modeNotice && (
+              <div
+                role="status"
+                className={`flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-bold leading-none ${modeNotice === "off" ? "border-priority-critical/30 bg-priority-critical-soft text-priority-critical-ink" : "border-copilot/30 bg-copilot-soft text-copilot-strong"}`}
+              >
+                <AlertTriangle size={14} className="shrink-0" />
+                <span className="truncate">{modeNotice === "off" ? "AI 자동응답 중지 · 수동 발송만" : "코파일럿 · 승인 후 발송"}</span>
+                <Link href="/brain" className="shrink-0 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">설정</Link>
+              </div>
+            )}
           </div>
-          <div role="tablist" aria-label="지원자 운영 작업 큐" className="flex min-w-0 flex-wrap gap-1.5">
-            <button id="operations-tab-all" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "all"} onClick={() => setActiveTab("all")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "all" ? "bg-foreground text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-muted"}`}>전체 대화 <span className="ml-1 opacity-70">{appsState === "loading" || appsState === "error" ? "—" : chats.length}</span></button>
-            <button id="operations-tab-intervention" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "intervention"} onClick={() => setActiveTab("intervention")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "intervention" ? "bg-error text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-error-soft"}`}>사람 확인 필요 <span className="ml-1 opacity-70">{handoffsState === "loading" || handoffsState === "error" ? "—" : handoffApplicantIds.length}</span></button>
-            <button id="operations-tab-confirm" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "confirm"} onClick={() => setActiveTab("confirm")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "confirm" ? "bg-success-strong text-white" : "border border-border-strong bg-card text-gray-700 hover:bg-success-soft"}`}>확정 검토 <span className="ml-1 opacity-70">{confirmState === "loading" || confirmState === "error" ? "—" : confirmPending.length}</span></button>
-            <button id="operations-tab-inbox" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "inbox"} onClick={() => setActiveTab("inbox")} className={`min-h-10 rounded-lg px-3 text-[13px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "inbox" ? "bg-brand-yellow text-foreground" : "border border-border-strong bg-card text-gray-700 hover:bg-yellow-50"}`}>분류 필요 <span className="ml-1 opacity-70">{inboxCount}</span></button>
+          <div className="flex min-w-0 items-center justify-between gap-2 lg:justify-end">
+            <Link href="/pipeline" className="hidden min-h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring wide:flex">
+              대량 발송 <ArrowRight size={13} />
+            </Link>
+            <div role="tablist" aria-label="지원자 운영 작업 큐" className="flex min-w-0 gap-1.5">
+              <button type="button" id="operations-tab-all" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "all"} onClick={() => setActiveTab("all")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "all" ? "border-foreground bg-foreground text-card" : "border-border-strong bg-card text-gray-700 hover:bg-muted"}`}>전체 <span className="ml-1 tabular-nums opacity-70">{appsState === "loading" || appsState === "error" ? "—" : chats.length}</span></button>
+              <button type="button" id="operations-tab-intervention" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "intervention"} onClick={() => setActiveTab("intervention")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "intervention" ? "border-priority-critical/30 bg-priority-critical-soft text-priority-critical-ink" : "border-border-strong bg-card text-gray-700 hover:bg-priority-critical-soft"}`}>사람 확인 <span className="ml-1 tabular-nums opacity-70">{handoffsState === "loading" || handoffsState === "error" ? "—" : handoffApplicantIds.length}</span></button>
+              <button type="button" id="operations-tab-confirm" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "confirm"} onClick={() => setActiveTab("confirm")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "confirm" ? "border-stage-screening-ink/20 bg-stage-screening-soft text-stage-screening-ink" : "border-border-strong bg-card text-gray-700 hover:bg-stage-screening-soft"}`}>확정 검토 <span className="ml-1 tabular-nums opacity-70">{confirmState === "loading" || confirmState === "error" ? "—" : confirmPending.length}</span></button>
+              <button type="button" id="operations-tab-inbox" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "inbox"} onClick={() => setActiveTab("inbox")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "inbox" ? "border-priority-attention-ink/25 bg-priority-attention-soft text-priority-attention-ink" : "border-border-strong bg-card text-gray-700 hover:bg-priority-attention-soft"}`}>분류 필요 <span className="ml-1 tabular-nums opacity-70">{inboxCount}</span></button>
+            </div>
           </div>
         </div>
       </div>
@@ -857,83 +879,56 @@ export function LiveConsole() {
       ) : (
       <div id="operations-panel" role="tabpanel" aria-labelledby={`operations-tab-${activeTab}`} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card lg:flex-row">
       {/* Left Sidebar */}
-      <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[320px] lg:border-b-0 lg:border-r">
-        {/* 전역 킬스위치 경고 — 켜져 있는 줄 알고 기다리는 교착을 방지 */}
-        {globalKill && (
-          <div className="shrink-0 bg-yellow-50 border-b border-yellow-300 px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-warning-strong leading-snug">
-            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-            <span>
-              AI 전역 응답이 꺼져 있습니다 — 수동 응대만 발송됩니다 (
-              <Link href="/brain" className="underline underline-offset-2">에이전트 두뇌</Link>
-              에서 변경)
-            </span>
-          </div>
-        )}
-        {copilotMode && (
-          <div className="shrink-0 bg-copilot-soft border-b border-copilot/30 px-4 py-2.5 flex items-start gap-2 text-[12px] font-bold text-copilot-strong leading-snug">
-            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-            <span>
-              코파일럿 모드 — AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다 (
-              <Link href="/brain" className="underline underline-offset-2">에이전트 두뇌</Link>
-              에서 변경)
-            </span>
-          </div>
-        )}
-        {appsState === "error" && (
-          <QueueErrorState label="지원자 대화 목록" onRetry={() => void mutateApps()} />
-        )}
-        <div className="p-5 border-b border-border-strong bg-card flex flex-col gap-3">
+      <div className="flex w-full shrink-0 flex-col border-b border-border-strong bg-background lg:w-[304px] lg:border-b-0 lg:border-r wide:w-[320px]">
+        {(activeTab === "all" || activeTab === "intervention") && (
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border-strong bg-card p-3">
           {/* 배경 갱신 표시 — 데이터가 있는데 새로 불러오는 중이면 '갱신 중'(전체 스켈레톤 대신 비침투적 힌트). */}
-          {appsValidating && !loadingList && chats.length > 0 && (
-            <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted-foreground">
-              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> 최신 데이터로 갱신 중…
-            </div>
-          )}
           {activeTab === "all" && (
-            <div className="relative">
+            <div className="relative shrink-0">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" aria-label="대화 검색" className="w-full pl-9 pr-4 py-2 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-muted" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="이름·전화번호 검색" aria-label="대화 검색" className="h-10 w-full rounded-xl border border-control-border bg-card pl-9 pr-4 text-sm outline-none transition-colors hover:border-foreground/55 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring" />
             </div>
           )}
-          {/* 전체 탭: 하위 필터칩을 제거하고 목록을 긴급도순 자동 정렬(내가 답할 차례→AI→상대 답 기다림)로 대체(간소화).
-              '미답 N'만 상단에 요약해 남긴다 — 필터를 누르지 않아도 지금 답할 게 몇 건인지 바로 보이게.
-              사람 확인 필요 탭은 사유 카테고리 필터를 유지(작업 큐라 세분 필요). */}
           {activeTab === "all" ? (
-            appsState === "loading" ? (
-              <div className="text-[12px] font-semibold text-muted-foreground">답할 대화를 확인하는 중…</div>
-            ) : appsState === "error" ? (
-              <div className="text-[12px] font-semibold text-error-strong">답할 대화 수를 확인할 수 없어요</div>
-            ) : unansweredCount > 0 ? (
-              <div className="text-[12px] font-bold text-error flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-error" />
-                지금 답할 대화 {unansweredCount}건 — 목록 맨 위에 있어요
+            <div className="flex min-h-8 items-center justify-between gap-2">
+              <div className={`flex min-w-0 items-center gap-1.5 text-[12px] font-bold ${queueSummary.kind === "error" ? "text-error-strong" : queueSummary.kind === "attention" ? "text-priority-critical-ink" : queueSummary.kind === "clear" ? "text-success-strong" : "text-muted-foreground"}`}>
+                {queueSummary.kind === "clear" ? <CheckCircle2 size={14} className="shrink-0" /> : queueSummary.kind === "attention" ? <Clock3 size={14} className="shrink-0" /> : null}
+                <span className="truncate">
+                  {queueSummary.kind === "loading" && "답할 대화를 확인하는 중…"}
+                  {queueSummary.kind === "error" && "답할 대화 수를 확인할 수 없어요"}
+                  {queueSummary.kind === "attention" && `지금 답할 대화 ${queueSummary.count}건 · 위부터 처리`}
+                  {queueSummary.kind === "clear" && "지금 답할 대화 없음"}
+                </span>
+                {appsValidating && !loadingList && chats.length > 0 && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-info" title="최신 데이터로 갱신 중" />}
               </div>
-            ) : (
-              <div className="text-[12px] font-semibold text-success">답할 대화 없음 — 모두 응대했어요 👍</div>
-            )
-          ) : activeTab === "intervention" && handoffsState === "ready" ? (
-            <div className="flex gap-1 flex-wrap">
-              {/* 탭 숫자는 '건'(공고별), 카드는 '사람' — 두 숫자가 다른 이유를 여기서 밝힌다.
-                  한 분이 공고 3건으로 넘어오면 3건 · 1명이 된다. */}
+              <Link href="/pipeline" className="flex min-h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring wide:hidden">
+                대량 발송 <ArrowRight size={13} />
+              </Link>
+            </div>
+          ) : handoffsState === "ready" ? (
+            <div className="flex min-h-9 items-center gap-2">
+              <label htmlFor="handoff-category" className="shrink-0 text-[12px] font-bold text-muted-foreground">사유</label>
+              <select
+                id="handoff-category"
+                value={handoffCat}
+                onChange={(event) => setHandoffCat(event.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-xl border border-control-border bg-card px-2.5 text-[12px] font-bold text-foreground outline-none hover:border-foreground/55 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="all">전체 · {handoffs.length}건</option>
+                {catOrder.map((cid) => {
+                  const sample = handoffs.find((handoff) => handoff.category === cid)!;
+                  return <option value={cid} key={cid}>{sample.category_label} · {catCounts[cid]}건</option>;
+                })}
+              </select>
               {visibleHandoffs.length !== handoffGroups.length && (
-                <span className="w-full text-[12px] font-bold text-muted-foreground">
-                  {visibleHandoffs.length}건 · {handoffGroups.length}명 — 한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줘요
+                <span className="shrink-0 text-[12px] font-bold tabular-nums text-muted-foreground" title="한 분이 여러 공고에서 넘어오면 카드 하나로 묶어 보여줍니다">
+                  {visibleHandoffs.length}건 / {handoffGroups.length}명
                 </span>
               )}
-              <button aria-pressed={handoffCat === "all"} onClick={() => setHandoffCat("all")} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === "all" ? "bg-brand-yellow text-foreground" : "bg-card border border-border-strong text-muted-foreground"}`}>전체 {handoffs.length}</button>
-              {catOrder.map((cid) => {
-                const sample = handoffs.find((h) => h.category === cid)!;
-                return (
-                  <button aria-pressed={handoffCat === cid} key={cid} onClick={() => setHandoffCat(cid)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${handoffCat === cid ? "bg-brand-yellow text-foreground" : "bg-card border border-border-strong text-muted-foreground"}`}>{sample.category_label} {catCounts[cid]}</button>
-                );
-              })}
             </div>
           ) : null}
-          {/* 대량 발송 진입점 — 큰 버튼 대신 작은 링크로(개별 응대 화면에서 실사용 빈도 낮음) */}
-          <Link href="/pipeline" className="relative self-start flex min-h-8 items-center gap-1 rounded-md py-1.5 text-[12px] font-bold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            대량 발송은 파이프라인에서 <ArrowRight size={13} />
-          </Link>
         </div>
+        )}
 
         {/* 사람 확인 필요 탭: paused 후보 작업 큐(오래된 순). 카테고리 배지 + 경과일 + 사유 요약. */}
         {activeTab === "intervention" ? (
@@ -951,7 +946,7 @@ export function LiveConsole() {
               return (
                 <div
                   key={head.applicant_id}
-                  className={`rounded-2xl transition-all ${groupSelected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}
+                  className={`rounded-xl border transition-colors ${groupSelected ? "border-priority-attention-ink/30 bg-priority-attention-soft" : "border-transparent bg-card hover:border-border-strong"}`}
                 >
                   {/* 이름 줄도 눌러서 연다 — 카드에서 가장 크고 굵은 요소가 죽어 있으면
                       "안 열리는구나"라고 학습하고 떠난다(제목 클릭은 카드 UI의 기본 관습).
@@ -964,12 +959,13 @@ export function LiveConsole() {
                     >
                       <span className="truncate text-[14px] font-bold text-foreground">{head.applicant_name}</span>
                       {multi && (
-                        <span
-                          className="shrink-0 px-1.5 py-0.5 rounded-full text-[12px] font-bold bg-error-soft text-error-strong"
+                        <Badge
+                          variant="priority-critical"
+                          className="shrink-0 px-1.5"
                           title="이 한 분이 여러 공고에서 넘어왔어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                         >
                           공고 {items.length}건
-                        </span>
+                        </Badge>
                       )}
                     </button>
                     <div className="flex items-center gap-2 shrink-0">
@@ -978,12 +974,12 @@ export function LiveConsole() {
                           href={`tel:${head.phone}`}
                           onClick={(e) => e.stopPropagation()}
                           title={`${head.applicant_name}님에게 전화 (${head.phone})`}
-                          className="relative flex items-center gap-1 rounded-md text-[12px] font-bold text-info after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="relative flex items-center gap-1 rounded-md text-[12px] font-bold text-foreground after:absolute after:-inset-2 after:content-[''] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <Phone size={12} /> 전화
                         </a>
                       )}
-                      <span className={`text-[12px] font-bold ${ageStyle(worstAge)}`}>⏱ {worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
+                      <span className={`flex items-center gap-1 text-[12px] font-bold ${ageStyle(worstAge)}`}><Clock3 size={12} />{worstAge === 0 ? "오늘" : `${worstAge}일 방치`}</span>
                     </div>
                   </div>
                   {items.map((h) => {
@@ -991,11 +987,11 @@ export function LiveConsole() {
                     return (
                       <div
                         key={h.candidate_id}
-                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-brand-yellow bg-yellow-50" : "border-muted bg-card hover:border-gray-300"}`}
+                        className={`mx-2 mb-2 rounded-lg border transition-colors ${selected ? "border-priority-attention-ink/30 bg-priority-attention-soft" : "border-muted bg-card hover:border-control-border"}`}
                       >
                         <button onClick={() => selectHandoff(h)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left px-2.5 pt-2 pb-1.5 cursor-pointer">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[12px] font-bold border ${TONE_STYLE[h.tone]}`}>{h.category_label}</span>
+                            <Badge className={`shrink-0 ${TONE_STYLE[h.tone]}`}>{h.category_label}</Badge>
                             {/* 어느 공고 건인지 — 공고가 동시에 여러 개 열리면 지점명만으론 구분되지 않는다. */}
                             {/* 시스템 더미 공고 줄은 지점을 쓰지 않는다 — 큐의 branch에 '지원자 지점'이 섞여 와서
                                 공고 자리에 사람 지점명이 찍힌다('공고 미지정' 건이 부천 지점 공고처럼 보였다). */}
@@ -1040,7 +1036,7 @@ export function LiveConsole() {
                 <div key={p.applicant_id} className={`rounded-2xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
                   <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="px-2 py-0.5 rounded-full text-[12px] font-bold border bg-success-soft text-success-strong border-success/25">온보딩 완료</span>
+                      <Badge variant="stage-screening">스크리닝 완료 · 확정 전</Badge>
                       {p.baemin_id && <span className="text-[12px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
                     </div>
                     <div className="text-[14px] font-bold text-foreground mb-0.5 flex items-center gap-1.5">
@@ -1064,6 +1060,7 @@ export function LiveConsole() {
           </div>
         ) : (
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 [&>*]:shrink-0">
+          {appsState === "error" && <QueueErrorState label="지원자 대화 목록" onRetry={() => void mutateApps()} />}
           {/* 콜드 로드(데이터 아직 없음)일 때 스켈레톤 카드 — 옛 데이터를 진짜처럼 보여주는 혼동 방지.
               배경 갱신(데이터 있음+isValidating)은 상단 '갱신 중' 표시로만 — 매 주기 전체 스켈레톤은 깜빡여서 안 씀. */}
           {loadingList && (
@@ -1123,9 +1120,9 @@ export function LiveConsole() {
                 )}
                 {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-full text-[12px] font-bold shrink-0 ${turn.cls}`}>
+                  <Badge className={`shrink-0 px-2 py-1 ${turn.cls}`}>
                     {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
-                  </span>
+                  </Badge>
                   {metaLine && <span className="text-[12px] text-muted-foreground truncate">{metaLine}</span>}
                 </div>
               </button>
@@ -1143,8 +1140,8 @@ export function LiveConsole() {
             <div className="flex items-center gap-1.5 flex-wrap">
               {activeChat.source && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
-              {activeChat.agent_stage && <span className={`px-2 py-1 rounded-full text-[12px] font-bold ${activeChat.agent_stage === "paused" ? "bg-muted text-gray-700" : "bg-info-soft text-info-strong"}`}>{STAGE_KO[activeChat.agent_stage] ?? activeChat.agent_stage}</span>}
-              <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-yellow-50 text-warning-strong border border-yellow-200">{activeChat.status}</span>
+              {activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
+              <ApplicantStatusBadge status={activeChat.status} className="px-2 py-1" />
             </div>
           </div>
 
@@ -1285,14 +1282,15 @@ export function LiveConsole() {
             : "fixed inset-y-4 right-4 z-50 flex w-[340px] max-w-[calc(100vw-2rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-border-strong bg-card shadow-xl"}
         >
           {!canDockDetail && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label="지원자 상세 닫기"
               onClick={() => setSelectedChatId(null)}
-              className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border-strong bg-card text-muted-foreground shadow-sm outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="absolute right-2 top-2 z-10 border border-border-strong bg-card shadow-sm"
             >
-              <X size={17} />
-            </button>
+              <X aria-hidden="true" size={17} />
+            </Button>
           )}
           {/* key에 selectedJobId를 넣지 않는다 — 그 값은 /active-jobs 응답이 온 뒤 비동기로 채워져
               패널을 한 번 더 리마운트시킨다. 큐에서 확정 모달을 열었을 때 그 리마운트가 모달 state를

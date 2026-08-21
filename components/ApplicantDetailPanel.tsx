@@ -8,7 +8,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { calcAge, STATUS_COLORS, STATUS_TEXT_COLORS, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
+import { calcAge, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
 import { isLiveLinkResolved } from "@/lib/candidate-links";
 import { ConversationThread } from "./ConversationThread";
@@ -26,6 +26,8 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { ApplicantStatusBadge, StageBadge } from "@/components/ui/stage-badge";
 
 // ──────────────────────────────────────────────────────────────────────────
 // 타입
@@ -909,7 +911,7 @@ export function ApplicantDetailContent({
           <h2 className="text-[16px] font-extrabold text-foreground flex items-center gap-2">
             <Sparkles size={16} className="text-brand-yellow" /> 지원자 상세
           </h2>
-          <span className="text-[12px] font-bold px-2 py-1 rounded-full" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#A8A29E"}1A`, color: STATUS_TEXT_COLORS[a.status] ?? "#44403C" }}>{a.status}</span>
+          <ApplicantStatusBadge status={a.status} className="px-2 py-1" />
         </div>
       )}
 
@@ -932,28 +934,29 @@ export function ApplicantDetailContent({
         {/* 구분·유입·단계 배지 */}
         <div className="flex items-center gap-2 flex-wrap">
           {isPurePool ? (
-            <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-muted text-gray-700">순수 인재풀</span>
+            <Badge className="px-2.5 py-1">순수 인재풀</Badge>
           ) : (
-            <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-info-soft text-info-strong">공고 지원자 · {cands.length}건</span>
+            <Badge variant="info" className="px-2.5 py-1">공고 지원자 · {cands.length}건</Badge>
           )}
-          {a.source && <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-background text-muted-foreground border border-border-strong" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</span>}
-          {focusCand?.agent_stage && <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-copilot-soft text-copilot-strong">{STAGE_LABEL[focusCand.agent_stage] ?? focusCand.agent_stage}</span>}
+          {a.source && <Badge className="px-2.5 py-1 text-muted-foreground" title="유입 채널 — 이 지원자가 처음 들어온 경로">유입 · {SOURCE_LABEL[a.source] ?? a.source}</Badge>}
+          {focusCand?.agent_stage && <StageBadge stage={focusCand.agent_stage} className="px-2.5 py-1" />}
           {detail.suntop?.done && (
-            <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong border border-success/25" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</span>
+            <Badge variant="stage-onboarding" className="px-2.5 py-1" title={`선탑(동승) 완료 ${detail.suntop.events.length}회 — 현장을 미리 경험한 프리보딩 인력. 새 공고 안내 시 최우선 대상`}>선탑 완료</Badge>
           )}
           {a.tms_active_signal === true && (
-            <span
-              className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-yellow-50 text-warning-strong border border-yellow-300"
+            <Badge
+              variant="stage-active"
+              className="px-2.5 py-1"
               title={`옹고잉 실배차 기준 현재 활동 중 — 최근/예정 배차 있음${a.tms_active_checked_at ? ` (${relTime(a.tms_active_checked_at)} 확인)` : ""}. 콜드 상태로 다시 연락하기 전 검토 대상(병행 가능 건이면 유지 가능 — 자동 제외 아님)`}
             >
               활동 중(옹고잉)
-            </span>
+            </Badge>
           )}
           {a.sms_opt_out_at && (
-            <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</span>
+            <Badge variant="error" className="px-2.5 py-1" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</Badge>
           )}
           {detail.blacklisted && (
-            <span className="px-2.5 py-1 rounded-full text-[12px] font-bold bg-foreground text-white" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</span>
+            <Badge variant="solid" className="px-2.5 py-1" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</Badge>
           )}
           <button
             onClick={toggleBlacklist}
@@ -1838,7 +1841,7 @@ export function ApplicantDetailPanel({
                 <div className="flex items-center gap-2 mb-1">
                   <h2 id="applicant-detail-panel-title" className="text-[20px] font-extrabold text-foreground">{a?.name ?? "지원자"}</h2>
                   {age && <span className="text-[12px] font-medium text-muted-foreground bg-white px-2 py-0.5 rounded-full border border-border-strong">{age}세</span>}
-                  {a && <span className="text-[12px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${STATUS_COLORS[a.status] ?? "#A8A29E"}1A`, color: STATUS_TEXT_COLORS[a.status] ?? "#44403C" }}>{a.status}</span>}
+                  {a && <ApplicantStatusBadge status={a.status} />}
                 </div>
                 <div className="text-[12px] text-muted-foreground font-mono">
                   #{applicantId} ·{" "}

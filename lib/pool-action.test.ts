@@ -19,6 +19,7 @@ type SubmitPoolAction = (
     actionId: string;
   },
   fetcher?: PoolActionFetcher,
+  timeoutMs?: number,
 ) => Promise<PoolActionResult>;
 
 type PoolActionAttempt = {
@@ -143,6 +144,33 @@ test("network failure returns a recoverable inline message", async () => {
   assert.deepEqual(result, {
     ok: false,
     error: "처리하지 못했어요. 잠시 후 다시 시도해주세요.",
+    retryable: true,
+  });
+});
+
+test("a timed-out action explains that retrying reuses the same request", async () => {
+  const poolActionModule = await loadPoolActionModule();
+  const submitPoolAction = poolActionModule.submitPoolAction as SubmitPoolAction | undefined;
+
+  assert.equal(typeof submitPoolAction, "function");
+  const result = await submitPoolAction!(
+    {
+      token: "sample-token",
+      jobId: 20,
+      action: "interest",
+      actionId: "45454545-4545-4545-8545-454545454545",
+    },
+    (_url, init) => new Promise<never>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }),
+    5,
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: "처리가 지연되고 있어요. 같은 요청으로 다시 시도하면 중복 없이 확인합니다.",
     retryable: true,
   });
 });

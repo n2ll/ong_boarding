@@ -45,6 +45,9 @@
 
   --border: rgba(28, 25, 23, 0.08);
   --border-strong: rgba(28, 25, 23, 0.14);
+  /* 입력 컨트롤의 resting boundary. 카드(#FFFDFA) 대비 3.15:1로 비텍스트
+     경계 3:1을 넘긴다. 카드 구분선과 입력 가능 영역을 같은 선으로 쓰지 않는다. */
+  --control-border: #968F87;
   --input: transparent;
   --input-background: #FFFEFC;
   --switch-background: #C9C4B8;
@@ -70,6 +73,24 @@
   /* @deprecated 쿨 존은 2026-08-18 사용자 기각("뭔가뭔가") — 사용처 0. 값만 웜 세계와
      싸우지 않게 블루 틴트를 소거해 둔다. 새 사용처를 만들지 말 것. */
   --zone-cool: #ECEAE6;
+
+  /* ── 운영 단계 · 우선순위 ──────────────────────────────────
+     정상 업무 단계를 success/warning/error에 빌려 쓰면 스크리닝도 경고처럼,
+     온보딩도 AI 모드처럼 보인다. 단계색은 저채도 지표 전용, priority는 매니저의
+     처리 순서 전용이다. 실제 실패·삭제·차단은 아래 error/destructive가 계속 담당한다. */
+  --stage-exploration-soft: #F4F2ED;
+  --stage-exploration-ink: #6A655D;
+  --stage-screening-soft: #FEF9E8;
+  --stage-screening-ink: #88451D;
+  --stage-onboarding-soft: #F1E9F4;
+  --stage-onboarding-ink: #442B7C;
+  --stage-active-soft: #EBF2E7;
+  --stage-active-ink: #2D5F41;
+  --priority-attention-soft: #FEF9E8;
+  --priority-attention-ink: #88451D;
+  --priority-critical-soft: #F7ECE9;
+  --priority-critical: #A7473B;
+  --priority-critical-ink: #7C302A;
 
   /* 오버레이 뒤 스크림 단일 토큰 — 모달·확인창·패널이 전부 이 값 하나를 쓴다.
      bg-foreground/45 표기는 다크 도입 시 밝은 스크림으로 뒤집혀서 전용 토큰으로 분리. */
@@ -184,6 +205,7 @@
   --destructive-foreground: #FFFFFF;
   --border: rgba(245, 243, 240, 0.12);
   --border-strong: rgba(245, 243, 240, 0.2);
+  --control-border: #6B655C;
   --input: rgba(245, 243, 240, 0.12);
   --input-background: #1D1A17;
   --switch-background: #474139;
@@ -198,6 +220,19 @@
   --border-glass: rgba(245, 243, 240, 0.1);
   --zone-warm: #211D17;
   --zone-cool: #1E1C19;
+  --stage-exploration-soft: #2B2723;
+  --stage-exploration-ink: #C7C1B8;
+  --stage-screening-soft: #2C2113;
+  --stage-screening-ink: #F2C46B;
+  --stage-onboarding-soft: #241D33;
+  --stage-onboarding-ink: #C4AEF2;
+  --stage-active-soft: #152B1F;
+  --stage-active-ink: #7FDCAC;
+  --priority-attention-soft: #2C2113;
+  --priority-attention-ink: #F2C46B;
+  --priority-critical-soft: #2F1D1A;
+  --priority-critical: #D97A6D;
+  --priority-critical-ink: #F3A59B;
 
   /* 상태 계열 다크 대응(2026-08-18 신설 — 예전엔 :root 상속이라 다크에서 대비가 죽었다).
      다크 비활성 상태지만 값이 썩지 않게 유지. 도입 시 재측정. */
@@ -260,6 +295,10 @@
 }
 
 @theme inline {
+  /* 1280px에서 라벨 도크와 상세 패널이 동시에 확장되면 실제 작업 폭이 줄어든다.
+     1440px부터만 넓은 운영 셸을 쓰는 제품 전용 브레이크포인트. */
+  --breakpoint-wide: 90rem;
+
   /* 중립 램프 — 2026-08-18 웜 스톤으로 재조율(hue 24~38°·저채도). 종이·크림 세계와
      글씨·보더의 쿨 슬레이트가 싸우던 것을 값 차원에서 통일했다. 라이브러리(src/index.css)
      원본과는 이제 값이 다르다 — 컴포넌트를 옮겨오면 자동으로 웜 톤을 입는 것이 의도. */
@@ -307,6 +346,7 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-control-border: var(--control-border);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
   --color-switch-background: var(--switch-background);
@@ -322,6 +362,20 @@
   --color-zone-warm: var(--zone-warm);
   --color-zone-cool: var(--zone-cool);
   --color-scrim: var(--scrim);
+
+  --color-stage-exploration-soft: var(--stage-exploration-soft);
+  --color-stage-exploration-ink: var(--stage-exploration-ink);
+  --color-stage-screening-soft: var(--stage-screening-soft);
+  --color-stage-screening-ink: var(--stage-screening-ink);
+  --color-stage-onboarding-soft: var(--stage-onboarding-soft);
+  --color-stage-onboarding-ink: var(--stage-onboarding-ink);
+  --color-stage-active-soft: var(--stage-active-soft);
+  --color-stage-active-ink: var(--stage-active-ink);
+  --color-priority-attention-soft: var(--priority-attention-soft);
+  --color-priority-attention-ink: var(--priority-attention-ink);
+  --color-priority-critical-soft: var(--priority-critical-soft);
+  --color-priority-critical: var(--priority-critical);
+  --color-priority-critical-ink: var(--priority-critical-ink);
 
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -369,6 +423,7 @@
   --radius-sm: 8px;
   --radius-md: 12px;   /* 컨트롤 */
   --radius-lg: 16px;   /* 카드 하한 */
+  --radius-panel: 20px; /* 운영 패널 — 카드와 셸 사이의 중간 계층 */
   --radius-xl: 24px;   /* 카드 상한 · 모달 */
   --radius-2xl: 24px;  /* Tailwind 기본 16px이 xl과 겹쳐 구분이 없었다 */
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 type ApplyJobIntent =
@@ -70,4 +71,13 @@ test("general applications remain available through an explicit fallback choice"
     recruiting: false,
     generalOptIn: true,
   }), true);
+});
+
+test("a job lookup timeout reports uncertainty instead of asserting the job is unchanged", async () => {
+  const page = await readFile(new URL("../app/apply/page.tsx", import.meta.url), "utf8");
+  const timeoutCopy = page.match(/\{jobLoadTimedOut\s*\?\s*"([^"]+)"\s*:\s*"인터넷 연결/)?.[1] ?? "";
+
+  assert.match(timeoutCopy, /공고 상태를 확인하지 못했어요/);
+  assert.match(timeoutCopy, /다시 불러오/);
+  assert.doesNotMatch(timeoutCopy, /바뀐 것은 아니에요/);
 });

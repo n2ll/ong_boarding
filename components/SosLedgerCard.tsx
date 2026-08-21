@@ -247,25 +247,27 @@ export function SosLedgerCard() {
   };
 
   const inputCls =
-    "w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring";
+    "w-full px-4 py-3 border border-control-border rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-zone-warm border border-border-strong rounded-2xl p-6 shadow-sm flex flex-col">
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="flex flex-col rounded-panel border border-border-strong bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-error-strong" /> 긴급 건 기록</h2>
+          <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><Siren size={15} className="text-priority-critical-ink" /> 긴급 건 기록</h2>
           <div className="text-[12px] text-muted-foreground mt-0.5">결원·증차 발생~해결 로그와 월 운영비 (기록 전용)</div>
         </div>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => setCreateForm({ ...EMPTY_SOS_FORM })}
-          className="flex items-center gap-1.5 text-[12px] font-bold text-white bg-error hover:bg-error-strong px-3 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
+          className="border-priority-critical/25 bg-priority-critical-soft text-priority-critical-ink shadow-none hover:bg-priority-critical-soft/70"
         >
           <Plus size={14} /> 긴급 건 기록
-        </button>
+        </Button>
       </div>
 
       {/* 이번 달 요약 */}
-      <div className="bg-background rounded-2xl px-4 py-2.5 text-[13px] font-semibold text-gray-700 mb-4">
+      <div className="mb-4 rounded-2xl bg-background/70 px-4 py-2.5 text-[13px] font-semibold text-gray-700">
         이번 달 긴급 <b className="text-foreground">{summary?.count ?? 0}건</b> · 해결 <b className="text-foreground">{summary?.resolved ?? 0}건</b> · 건별 비용 <b className="text-foreground">{won(summary?.cost_sum ?? 0)}</b> + 월 운영비 <b className="text-foreground">{won(ledgerTotal)}</b>
       </div>
 
@@ -275,15 +277,15 @@ export function SosLedgerCard() {
       ) : (
         <div className="flex flex-col gap-2">
           {openRows.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 p-3 border border-error/30 bg-error-soft rounded-2xl">
-              <span className="w-2 h-2 rounded-full bg-error animate-pulse shrink-0" />
+            <div key={r.id} className="flex items-center gap-3 rounded-2xl border border-priority-critical/25 bg-priority-critical-soft p-3">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-priority-critical" />
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-bold text-foreground truncate">{r.line_label}</div>
-                <div className="text-[12px] text-error-strong truncate">
+                <div className="truncate text-[12px] text-priority-critical-ink">
                   {[r.region, r.vehicle, `${r.needed_count}명 필요`, r.note].filter(Boolean).join(" · ")}
                 </div>
               </div>
-              <span className="text-[12px] font-bold text-error-strong shrink-0">{elapsedLabel(r.created_at, nowTick)}</span>
+              <span className="shrink-0 text-[12px] font-bold text-priority-critical-ink">{elapsedLabel(r.created_at, nowTick)}</span>
               <button
                 onClick={() => handleMakeJob(r)}
                 className="flex items-center gap-1 text-[12px] font-bold text-gray-700 bg-white border border-border-strong hover:bg-background px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -335,10 +337,9 @@ export function SosLedgerCard() {
               <div className="text-[12px] text-muted-foreground">이번 달 입력된 운영비가 없어요.</div>
             )}
             {ledgerRows.map((row) => (
-              <div key={row.id} className="flex items-center gap-3 px-3 py-2 bg-background rounded-lg">
-                <span className="text-[12px] font-bold text-gray-700 w-[110px] shrink-0">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
-                <span className="text-[13px] font-extrabold text-foreground shrink-0">{won(row.amount_krw)}</span>
-                <span className="flex-1 text-[12px] text-muted-foreground truncate">{row.memo}</span>
+              <div key={row.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2">
+                <span className="truncate text-[12px] font-bold text-gray-700">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
+                <span className="shrink-0 text-[13px] font-extrabold text-foreground">{won(row.amount_krw)}</span>
                 <button
                   onClick={() => handleDeleteLedger(row)}
                   title="삭제"
@@ -346,15 +347,16 @@ export function SosLedgerCard() {
                 >
                   <Trash2 size={14} />
                 </button>
+                {row.memo && <span className="col-span-3 truncate text-[12px] text-muted-foreground">{row.memo}</span>}
               </div>
             ))}
 
             {/* 추가 폼 */}
-            <div className="flex items-center gap-2 mt-1">
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
               <select
                 value={ledgerForm.category}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
-                className="pr-8 px-3 py-2 border border-border-strong rounded-lg text-[13px] bg-white focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-[140px] flex-1 rounded-lg border border-control-border bg-white px-3 py-2 pr-8 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
                   <option key={k} value={k}>{label}</option>
@@ -366,18 +368,18 @@ export function SosLedgerCard() {
                 placeholder="금액(원)"
                 value={ledgerForm.amount_krw}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] px-3 py-2 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-[110px] flex-none rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <input
                 placeholder="메모 (선택)"
                 value={ledgerForm.memo}
                 onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="flex-1 px-3 py-2 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-[140px] flex-[2_1_180px] rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
               />
               <button
                 onClick={handleAddLedger}
                 disabled={saving}
-                className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-2 rounded-lg disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-h-10 flex-none items-center gap-1 rounded-lg bg-foreground px-3 py-2 text-[12px] font-bold text-white transition-colors hover:bg-gray-800 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Plus size={13} /> 추가
               </button>
@@ -397,7 +399,7 @@ export function SosLedgerCard() {
         footer={
           <>
             <Button variant="secondary" size="sm" onClick={() => setCreateForm(null)} disabled={saving}>취소</Button>
-            <Button size="sm" variant="destructive" onClick={handleCreate} isLoading={saving}>
+                <Button size="sm" variant="primary" onClick={handleCreate} isLoading={saving}>
               <Siren size={15} /> 기록
             </Button>
           </>

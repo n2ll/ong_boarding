@@ -64,7 +64,7 @@ export type PreviewMap = Record<number, LastMessagePreview>;
 export async function gatherMessagePreviews(
   supabase: SupabaseClient,
   ids: number[],
-  opts: { withManual?: boolean } = {},
+  opts: { withManual?: boolean; throwOnCoreError?: boolean } = {},
 ): Promise<PreviewMap> {
   const allIds = new Set<number>(ids.filter((n) => Number.isFinite(n)));
 
@@ -157,6 +157,7 @@ export async function gatherMessagePreviews(
   }
   if (msgErr) {
     console.error("[message-preview]", msgErr);
+    if (opts.throwOnCoreError) throw msgErr;
     return {};
   }
 

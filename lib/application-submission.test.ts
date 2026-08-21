@@ -647,6 +647,39 @@ test("general and vehicle-required applications retain the legacy vehicle gate",
   });
 });
 
+test("vehicle-required validation follows the visible form order", async () => {
+  const { validateApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    branch1: "",
+    workHours: [],
+    availableDate: "",
+    selfOwnership: "",
+  }, true), {
+    field: "branch1",
+    message: "희망 지점을 선택해주세요.",
+  });
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    workHours: [],
+    availableDate: "",
+    selfOwnership: "",
+  }, true), {
+    field: "workHours",
+    message: "희망 근무 시간대를 1개 이상 선택해주세요.",
+  });
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    availableDate: "",
+    selfOwnership: "",
+  }, true), {
+    field: "availableDate",
+    message: "근무 가능 시작일을 선택해주세요.",
+  });
+});
+
 test("only a confirmed candidate link produces the job-linked completion state", async () => {
   const { applicationCompletionKind } = await loadApplicationSubmissionModule();
 

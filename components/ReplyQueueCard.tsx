@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
 import { motion } from "motion/react";
-import { MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
+import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { dashboardQueuePreview, oldestUntouchedReplyDays } from "@/lib/admin/dashboard-priority";
 
 /**
  * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
@@ -47,6 +49,13 @@ interface Preview {
   last_inbound_at?: string | null;
 }
 
+export type ReplyQueueCounts = {
+  state: "loading" | "error" | "ready";
+  total: number;
+  untouched: number;
+  oldestDays: number | null;
+};
+
 // 미답 건을 잃지 않도록 미리보기 조회 대상을 넓게 잡는 기간(최근 답장 기준)
 
 function agoLabel(iso: string | null | undefined, now: number): string {
@@ -64,9 +73,11 @@ function agoLabel(iso: string | null | undefined, now: number): string {
 export function ReplyQueueCard({
   initialJobId,
   onCountsChange,
+  retrySignal = 0,
 }: {
   initialJobId?: number | null;
-  onCountsChange?: (counts: { total: number; untouched: number; oldestDays: number | null }) => void;
+  onCountsChange?: (counts: ReplyQueueCounts) => void;
+  retrySignal?: number;
 } = {}) {
   // scope=dashboard — Dashboard.tsx와 **반드시 같은 키**(합집합 컬럼 응답·캐시 공유).
   // 이 카드의 mutate()가 대시보드 통계까지 갱신하는 것도 같은 키라서 가능하다.
@@ -96,30 +107,47 @@ export function ReplyQueueCard({
   // 매니저가 답장해도 last_message_at(=inbound 시각)은 그대로여서 조회 대상 집합이 바뀌지 않는다 →
   // idsKey만 보면 미리보기가 영원히 stale이고 처리한 건이 큐·대시보드에 계속 남는다. 명시적 재조회 신호를 둔다.
   const [previewNonce, setPreviewNonce] = useState(0);
+  const [previewLoad, setPreviewLoad] = useState<{
+    key: string;
+    state: "loading" | "error" | "ready";
+  }>({ key: "", state: "loading" });
   useEffect(() => {
+    if (!data) {
+      setPreviewLoad({ key: idsKey, state: "loading" });
+      return;
+    }
     if (!idsKey) {
       setPreviewById({});
+      setPreviewLoad({ key: "", state: "ready" });
       return;
     }
     let cancelled = false;
+    setPreviewById({});
+    setPreviewLoad({ key: idsKey, state: "loading" });
     (async () => {
       try {
         const res = await fetch(`/api/admin/messages/preview?ids=${idsKey}`);
-        if (res.ok && !cancelled) {
-          const json = await res.json();
-          setPreviewById(json.previews ?? {});
-        }
+        if (!res.ok) throw new Error(`preview ${res.status}`);
+        const json = await res.json();
+        if (cancelled) return;
+        setPreviewById(json.previews ?? {});
+        setPreviewLoad({ key: idsKey, state: "ready" });
       } catch {
-        /* 미리보기는 부가정보 — 실패해도 큐 자체는 보여준다 */
+        if (!cancelled) setPreviewLoad({ key: idsKey, state: "error" });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [idsKey, previewNonce]);
+  }, [data, idsKey, previewNonce, retrySignal]);
+
+  // 이 값은 마지막 메시지 방향을 판정하는 필수 데이터다. 아직 확인 전이거나 실패한 상태를
+  // 빈 큐로 축약하면 대시보드가 거짓으로 "할 일 없음"을 보여주므로 별도 상태로 유지한다.
+  const previewState = !data || previewLoad.key !== idsKey ? "loading" : previewLoad.state;
 
   // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound'.
   const allItems = useMemo(() => {
+    if (previewState !== "ready") return [];
     return previewTargets
       .filter((a) => previewById[a.id]?.direction === "inbound")
       // 오래 기다린 사람이 맨 위 — 최신순이면 오래된 미답이 아래로 밀려 영영 안 보인다.
@@ -128,7 +156,7 @@ export function ReplyQueueCard({
         const bt = new Date(b.last_message_at ?? b.created_at ?? 0).getTime();
         return at - bt;
       });
-  }, [previewTargets, previewById]);
+  }, [previewTargets, previewById, previewState]);
 
   // 공고별 필터 — 진행 중 공고 포인터(current_job_id) 기준. 큐에 등장하는 공고들로 옵션 구성.
   const [jobFilter, setJobFilter] = useState<number | "all">(initialJobId ?? "all");
@@ -149,6 +177,7 @@ export function ReplyQueueCard({
   }, [jobFilter, jobOptions]);
 
   const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.current_job_id === jobFilter);
+  const queuePreview = dashboardQueuePreview(items);
 
   const count = items.length;
   // 미착수 = 매니저가 아직 개입 안 함(paused 아님). paused 건은 '사람 확인 필요'로 따로 집계된다.
@@ -160,13 +189,18 @@ export function ReplyQueueCard({
   onCountsRef.current = onCountsChange;
   const allUntouched = useMemo(() => allItems.filter((a) => a.agent_stage !== "paused").length, [allItems]);
   // 가장 오래 기다린 답장의 경과일 — 대시보드 '오늘의 할 일'이 색 승급(7일+ 빨강)에 쓴다.
-  const oldestDays = useMemo(() => {
-    const t = allItems[0]?.last_message_at; // 오래된 순 정렬이라 첫 행이 최장 대기
-    return t ? Math.max(0, Math.floor((Date.now() - new Date(t).getTime()) / 86400000)) : null;
-  }, [allItems]);
+  const oldestDays = useMemo(
+    () => oldestUntouchedReplyDays(allItems, Date.now()),
+    [allItems],
+  );
   useEffect(() => {
-    onCountsRef.current?.({ total: allItems.length, untouched: allUntouched, oldestDays });
-  }, [allItems.length, allUntouched, oldestDays]);
+    onCountsRef.current?.({
+      state: previewState,
+      total: allItems.length,
+      untouched: allUntouched,
+      oldestDays,
+    });
+  }, [allItems.length, allUntouched, oldestDays, previewState]);
 
   // 상대시각을 화면에 머무는 동안 갱신 (InterestQueueCard와 동일 1분 틱)
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -178,7 +212,7 @@ export function ReplyQueueCard({
   const [detailId, setDetailId] = useState<number | null>(null);
 
   // 빈 큐는 헤더+한 줄로 접는다 — 0건 카드가 설명문으로 자리를 차지하지 않게(2026-08-18 합의)
-  const collapsed = !error && !!data && items.length === 0;
+  const collapsed = !error && !!data && previewState === "ready" && items.length === 0;
 
   return (
     <motion.div
@@ -211,18 +245,18 @@ export function ReplyQueueCard({
             </select>
           )}
           {untouchedCount > 0 && (
-            <span className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-error-soft border border-error/30 px-2.5 py-1 rounded-full">
+            <span className="flex items-center gap-1 rounded-full border border-priority-critical/25 bg-priority-critical-soft px-2.5 py-1 text-[12px] font-bold text-priority-critical-ink">
               미착수 {untouchedCount}건
             </span>
           )}
           {/* 숫자 배지는 데이터가 있을 때만 — 에러 분기 밖에 있으면 "총 0건"과
               "목록을 불러오지 못했어요"가 한 화면에 같이 뜬다. 거짓 0은 "할 일 없음"으로 읽힌다. */}
-          {!error && data ? (
+          {!error && data && previewState === "ready" ? (
             <span className="text-[12px] font-bold text-gray-700 bg-background border border-border-strong px-2.5 py-1 rounded-full">
               총 {count}건
             </span>
           ) : (
-            <span className="text-[12px] font-bold text-muted-foreground/60 bg-background border border-border-strong px-2.5 py-1 rounded-full" title={error ? "불러오지 못했어요" : "불러오는 중"}>
+            <span className="text-[12px] font-bold text-muted-foreground/60 bg-background border border-border-strong px-2.5 py-1 rounded-full" title={error || previewState === "error" ? "확인하지 못했어요" : "불러오는 중"}>
               총 —건
             </span>
           )}
@@ -235,24 +269,40 @@ export function ReplyQueueCard({
         <div className="py-4 flex items-center justify-center text-[13px] text-muted-foreground">
           <Loader2 size={15} className="animate-spin mr-1.5" /> 불러오는 중…
         </div>
+      ) : previewState === "loading" ? (
+        <div className="flex items-center justify-center py-4 text-[13px] text-muted-foreground">
+          <Loader2 size={15} className="mr-1.5 animate-spin" /> 마지막 답장 상태를 확인하는 중…
+        </div>
+      ) : previewState === "error" ? (
+        <div role="alert" className="rounded-xl border border-error/30 bg-error-soft p-4 text-error-strong">
+          <div className="text-[13px] font-bold">답장 대기 건수를 확인하지 못했어요</div>
+          <div className="mt-1 text-[12px]">0건이라는 뜻이 아닙니다. 대화 상태를 다시 확인해 주세요.</div>
+          <button
+            type="button"
+            onClick={() => setPreviewNonce((n) => n + 1)}
+            className="mt-3 min-h-10 rounded-lg border border-error/30 bg-card px-3 text-[12px] font-bold text-error-strong transition-colors hover:bg-error-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            다시 시도
+          </button>
+        </div>
       ) : items.length === 0 ? (
         <div className="mt-1.5 text-[12px] text-muted-foreground">지금 답할 차례가 없어요 · 답장이 오면 여기가 펼쳐집니다.</div>
       ) : (
         <div className="flex flex-col gap-2">
-          {items.map((it) => {
+          {queuePreview.visible.map((it) => {
             const untouched = it.agent_stage !== "paused";
             const pv = previewById[it.id];
             const optOut = !!it.sms_opt_out_at;
             return (
               <div
                 key={it.id}
-                className={`flex items-center gap-3 p-3 border rounded-2xl ${untouched ? "border-error/30 bg-error-soft" : "border-border-strong bg-white"}`}
+                className={`flex items-center gap-3 rounded-2xl border p-3 ${untouched ? "border-priority-critical/25 bg-priority-critical-soft" : "border-border-strong bg-white"}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
-                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full border ${untouched ? "bg-error-soft text-error-strong border-error/30" : "bg-yellow-100 text-warning-strong border-yellow-300"}`}
+                      className={`rounded-full border px-1.5 py-0.5 text-[11px] font-bold ${untouched ? "border-priority-critical/25 bg-priority-critical-soft text-priority-critical-ink" : "border-priority-attention-ink/25 bg-priority-attention-soft text-priority-attention-ink"}`}
                     >
                       {untouched ? "미착수" : "응대중"}
                     </span>
@@ -297,6 +347,18 @@ export function ReplyQueueCard({
               </div>
             );
           })}
+          {queuePreview.remaining > 0 && (
+            <Link
+              href="/live"
+              className="group mt-1 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border-strong bg-background px-4 py-2.5 text-left transition-colors hover:border-foreground/20 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span>
+                <span className="block text-[13px] font-bold text-foreground">숨겨진 {queuePreview.remaining}건 포함 전체 {items.length}건 보기</span>
+                <span className="block text-[12px] text-muted-foreground">지원자 운영에서 전체 대화를 확인합니다.</span>
+              </span>
+              <ArrowRight size={16} className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none" />
+            </Link>
+          )}
         </div>
       )}
 

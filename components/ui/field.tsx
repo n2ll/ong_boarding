@@ -25,7 +25,7 @@ import { cn } from "./utils";
 
 /** 모든 입력 컨트롤이 공유하는 표면. 유리 면 위에서도 흰 카드 위에서도 같은 무게로 읽힌다. */
 export const controlBase =
-  "w-full rounded-2xl border border-border-strong bg-input-background/90 px-3.5 text-[14px] font-medium text-foreground shadow-inset outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:font-normal placeholder:text-muted-foreground/70 hover:border-foreground/25 focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55 aria-[invalid=true]:border-error aria-[invalid=true]:focus-visible:ring-error";
+  "w-full rounded-2xl border border-control-border bg-input-background/90 px-3.5 text-[14px] font-medium text-foreground shadow-inset outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:font-normal placeholder:text-muted-foreground/70 hover:border-foreground/55 focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55 aria-[invalid=true]:border-error aria-[invalid=true]:focus-visible:ring-error";
 
 const CONTROL_H = "min-h-11 py-2.5";
 
@@ -84,6 +84,7 @@ function Field({
       {(error || hint) && (
         <p
           id={describedBy}
+          role={error ? "alert" : undefined}
           className={cn(
             "mt-1.5 text-[12px] font-medium leading-relaxed",
             error ? "text-error-strong" : "text-muted-foreground",
@@ -209,7 +210,7 @@ function ToggleRow({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-2xl border border-border-strong bg-input-background/70 px-3.5 py-2.5 text-left outline-none transition-colors hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55",
+        "flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-2xl border border-control-border bg-input-background/70 px-3.5 py-2.5 text-left outline-none transition-colors hover:border-foreground/55 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-55",
         full && "col-span-full",
         className,
       )}

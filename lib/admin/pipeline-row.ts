@@ -12,9 +12,23 @@ export interface PipelineContactMeta {
 }
 
 export interface PipelineTableLayout {
+  mode: "narrow" | "core" | "wide";
   columnCount: number;
-  hideSecondaryColumns: boolean;
+  showCoreColumns: boolean;
+  showWideColumns: boolean;
   minWidthClass: string;
+}
+
+export function pipelineListSurfaceReady(
+  view: string,
+  applicantsState: "loading" | "error" | "empty" | "ready",
+  hasSnapshot: boolean,
+): boolean {
+  return view === "list" && (applicantsState !== "error" || hasSnapshot);
+}
+
+export function showPipelineJobsShortcut(splitPanelActive: boolean): boolean {
+  return !splitPanelActive;
 }
 
 function relativeTimeAt(iso: string | null, nowMs: number): string | null {
@@ -54,8 +68,35 @@ export function pipelineContactMeta(
   };
 }
 
-export function pipelineTableLayout(splitPanelActive: boolean): PipelineTableLayout {
-  return splitPanelActive
-    ? { columnCount: 3, hideSecondaryColumns: true, minWidthClass: "min-w-[500px]" }
-    : { columnCount: 7, hideSecondaryColumns: false, minWidthClass: "min-w-[1060px]" };
+export function pipelineTableLayout(
+  contentWidth: number | null,
+  splitPanelActive: boolean,
+): PipelineTableLayout {
+  if (splitPanelActive || contentWidth === null || contentWidth < 720) {
+    return {
+      mode: "narrow",
+      columnCount: 3,
+      showCoreColumns: false,
+      showWideColumns: false,
+      minWidthClass: "min-w-[500px]",
+    };
+  }
+
+  if (contentWidth < 1040) {
+    return {
+      mode: "core",
+      columnCount: 5,
+      showCoreColumns: true,
+      showWideColumns: false,
+      minWidthClass: "min-w-[760px]",
+    };
+  }
+
+  return {
+    mode: "wide",
+    columnCount: 7,
+    showCoreColumns: true,
+    showWideColumns: true,
+    minWidthClass: "min-w-[1040px]",
+  };
 }

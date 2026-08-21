@@ -298,7 +298,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
       <div className={`flex flex-wrap items-start justify-between gap-3 ${collapsed ? "" : "mb-4"}`}>
         <div>
           <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
-            <Heart size={15} className="text-error" /> 관심 표시 처리 대기
+            <Heart size={15} className="text-priority-attention-ink" /> 관심 표시 처리 대기
           </h2>
           {!collapsed && <div className="text-[12px] text-muted-foreground mt-0.5">맞춤 공고 링크에서 관심을 누른 후보 · 상세 확인 후 컨택/보류로 처리</div>}
         </div>
@@ -370,7 +370,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
                   )}
                   {multi && (
                     <span
-                      className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-error-soft text-error-strong"
+                      className="rounded-full bg-priority-critical-soft px-1.5 py-0.5 text-[11px] font-bold text-priority-critical-ink"
                       title="이 한 분이 여러 공고에 관심을 눌렀어요 — 전화는 한 번만 하고 아래에서 공고별로 처리하세요"
                     >
                       공고 {rows.length}건

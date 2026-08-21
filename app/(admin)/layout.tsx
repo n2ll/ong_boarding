@@ -30,7 +30,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <ConfirmProvider>
         {/*
           Ongboarding UI System 셸 — 종이 배경 위에 도크·헤더·본문이 떠 있다.
-          도크는 fixed라 본문이 LG에서 104px, XL에서 272px 자리를 비켜준다.
+          도크는 fixed라 본문이 LG에서 104px, 1440px 이상에서 272px 자리를 비켜준다.
           모바일(lg 미만)은 하단 내비가 가리므로 본문 아래에 safe-area만큼 여백을 준다.
         */}
         {/*
@@ -50,7 +50,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           <Sidebar />
 
-          <div className="flex h-[100dvh] w-full min-w-0 flex-col px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:ml-[104px] lg:w-[calc(100%-104px)] lg:px-0 lg:pb-4 lg:pr-4 xl:ml-[272px] xl:w-[calc(100%-272px)]">
+          <div className="flex h-[100dvh] w-full min-w-0 flex-col px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:ml-[104px] lg:w-[calc(100%-104px)] lg:px-0 lg:pb-4 lg:pr-4 wide:ml-[272px] wide:w-[calc(100%-272px)]">
             <Topbar crumb={crumb} pageTitle={pageTitle} />
             <main
               id="app-content"
