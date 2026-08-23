@@ -7,6 +7,17 @@ type ConversationThreadViewModule = {
     error: boolean;
     itemCount: number;
   }) => "loading" | "error" | "empty" | "ready";
+  conversationAgentPresentation?: (input: {
+    scopeReady: boolean;
+    draftScope: "all" | "unscoped";
+    agentStage: string | null;
+  }) => {
+    kind: "loading" | "unscoped" | "manual" | "paused" | "active";
+    showControls: boolean;
+    hasActiveFlow: boolean;
+    isAiEnabled: boolean;
+    notice: string | null;
+  };
 };
 
 async function loadModule(): Promise<ConversationThreadViewModule> {
@@ -40,5 +51,25 @@ test("only a successful loaded zero-item response is empty", async () => {
   assert.equal(
     conversationMessagesView!({ loading: false, error: false, itemCount: 2 }),
     "ready"
+  );
+});
+
+test("an unscoped draft never exposes or inherits a job-level AI state", async () => {
+  const { conversationAgentPresentation } = await loadModule();
+
+  assert.equal(typeof conversationAgentPresentation, "function");
+  assert.deepEqual(
+    conversationAgentPresentation!({
+      scopeReady: true,
+      draftScope: "unscoped",
+      agentStage: "screening",
+    }),
+    {
+      kind: "unscoped",
+      showControls: false,
+      hasActiveFlow: false,
+      isAiEnabled: false,
+      notice: "AI 상태는 공고별로 관리돼요. 공고 탭에서 확인·변경하세요.",
+    },
   );
 });

@@ -9,6 +9,10 @@ interface DraftRow {
 }
 
 type PendingDraftScopeModule = {
+  shouldLoadCandidateAgentState?: (
+    requestedJobId: number | null,
+    draftScope?: "all" | "unscoped",
+  ) => boolean;
   pendingDraftMatchesScope?: (
     draftJobId: number | null,
     requestedJobId: number | null,
@@ -79,6 +83,15 @@ test("an explicit unscoped view rejects job-bound drafts while the all view keep
   assert.equal(pendingDraftMatchesScope!(11, 11, "all"), true);
 });
 
+test("an explicit unscoped view never inherits AI state from an arbitrary job", async () => {
+  const { shouldLoadCandidateAgentState } = await loadModule();
+
+  assert.equal(typeof shouldLoadCandidateAgentState, "function");
+  assert.equal(shouldLoadCandidateAgentState!(null, "unscoped"), false);
+  assert.equal(shouldLoadCandidateAgentState!(null, "all"), true);
+  assert.equal(shouldLoadCandidateAgentState!(11, "all"), true);
+});
+
 test("ignoring a draft requires the same applicant, job, and unresolved status", async () => {
   const route = await readFile(
     new URL("../../app/api/admin/drafts/[id]/route.ts", import.meta.url),
@@ -140,6 +153,7 @@ test("the message endpoint limits an explicit unscoped draft request to job_id N
     route,
     /draftScope\w*\s*===\s*"unscoped"[\s\S]*?pendingDraftQuery\s*=\s*pendingDraftQuery\.is\("job_id",\s*null\)/,
   );
+  assert.match(route, /shouldLoadCandidateAgentState\(jobIdFilter,\s*draftScope/);
 });
 
 test("the unscoped live tab passes an explicit draft scope into the conversation", async () => {
@@ -151,6 +165,21 @@ test("the unscoped live tab passes an explicit draft scope into the conversation
   assert.match(thread, /draftScope\?:\s*"all"\s*\|\s*"unscoped"/);
   assert.match(live, /selectedJobId\s*===\s*null[\s\S]*?pending_draft_job_id\s*===\s*null[\s\S]*?"unscoped"/);
   assert.match(live, /<ConversationThread[\s\S]*?draftScope=\{/);
+  assert.match(thread, /agentPresentation\.kind\s*===\s*"unscoped"[\s\S]*?role="status"[\s\S]*?agentPresentation\.notice/);
+});
+
+test("the unscoped draft context hides unrelated job state and direct-send controls", async () => {
+  const [live, thread] = await Promise.all([
+    readFile(new URL("../../components/LiveConsole.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../components/ConversationThread.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(live, /const\s+isUnscopedDraftContext\s*=[\s\S]*?pending_draft_job_id\s*===\s*null/);
+  assert.match(live, /!isUnscopedDraftContext\s*&&\s*activeChat\.agent_stage\s*&&\s*<StageBadge/);
+  assert.match(
+    thread,
+    /agentPresentation\.kind\s*===\s*"unscoped"\s*\?\s*\([\s\S]*?초안 카드[\s\S]*?\)\s*:\s*canSend\s*\?/,
+  );
 });
 
 test("a late unscoped ignore response cannot clear or leave a newer thread scope", async () => {

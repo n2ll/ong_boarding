@@ -29,7 +29,10 @@ import {
   writeManualMessageComposerSnapshot,
   type ManualMessageComposerSnapshot,
 } from "@/lib/manual-message-composer-storage";
-import { conversationMessagesView } from "@/lib/conversation-thread-view";
+import {
+  conversationAgentPresentation,
+  conversationMessagesView,
+} from "@/lib/conversation-thread-view";
 import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
 import { pendingDraftMatchesScope } from "@/lib/admin/pending-draft-scope";
 
@@ -394,7 +397,11 @@ export function ConversationThread({
   const currentMessages = scopeReady ? messages : [];
   const currentEvents = scopeReady ? events : [];
   const currentJobsMap = scopeReady ? jobsMap : {};
-  const currentAgentStage = scopeReady ? agentStage : null;
+  const agentPresentation = conversationAgentPresentation({
+    scopeReady,
+    draftScope,
+    agentStage,
+  });
 
   // 스크롤: 최초 로드는 '마지막 지원자(inbound) 메시지' 위치로 — 무엇에 답해야 하는지 바로 보이게.
   // inbound가 없으면 기존처럼 맨 아래. 이후 새 메시지 도착 시에는 맨 아래로.
@@ -418,9 +425,9 @@ export function ConversationThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMessages]);
 
-  const isPaused = currentAgentStage === "paused";
-  const hasActiveFlow = currentAgentStage != null && currentAgentStage !== "abort";
-  const isAiEnabled = hasActiveFlow && !isPaused;
+  const isPaused = agentPresentation.kind === "paused";
+  const hasActiveFlow = agentPresentation.hasActiveFlow;
+  const isAiEnabled = agentPresentation.isAiEnabled;
   // 전역 킬스위치·코파일럿 중에는 AI가 직접 발송하지 않으므로 수동 발송을 열어 교착을 방지한다.
   const canSend = scopeReady && (!isAiEnabled || globalKill || copilotMode);
 
@@ -992,6 +999,8 @@ export function ConversationThread({
               <span className="flex items-center gap-1.5 text-xs font-bold text-error bg-error-soft px-3 py-1.5 rounded-lg border border-error/30"><AlertTriangle size={14} /> 대화 상태를 불러오지 못함</span>
             ) : !scopeReady ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground bg-muted px-3 py-1.5 rounded-lg border border-border-strong"><Loader2 size={14} className="animate-spin" /> 대화 상태 불러오는 중</span>
+            ) : agentPresentation.kind === "unscoped" ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-warning-soft px-3 py-1.5 rounded-lg border border-warning/30"><AlertTriangle size={14} /> 공고 미지정 초안 · 수동 검토</span>
             ) : !hasActiveFlow ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
@@ -1027,19 +1036,27 @@ export function ConversationThread({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
-              <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
-              <Switch
-                checked={isAiEnabled}
-                onCheckedChange={handleToggleAi}
-                disabled={!hasActiveFlow}
-                aria-label={isAiEnabled ? "AI 자동 응대 끄기" : "AI 자동 응대 켜기"}
-                className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error"
-              />
-            </div>
-            {isAiEnabled && (
-              <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
-            )}
+            {agentPresentation.kind === "unscoped" ? (
+              <div role="status" className="max-w-[320px] rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] font-semibold leading-4 text-warning-strong">
+                {agentPresentation.notice}
+              </div>
+            ) : agentPresentation.showControls ? (
+              <>
+                <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
+                  <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
+                  <Switch
+                    checked={isAiEnabled}
+                    onCheckedChange={handleToggleAi}
+                    disabled={!hasActiveFlow}
+                    aria-label={isAiEnabled ? "AI 자동 응대 끄기" : "AI 자동 응대 켜기"}
+                    className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error"
+                  />
+                </div>
+                {isAiEnabled && (
+                  <button onClick={() => handleToggleAi(false, { skipConfirm: true })} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-foreground text-white px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"><User size={15} /> 개입</button>
+                )}
+              </>
+            ) : null}
           </div>
         </div>
       )}
@@ -1178,11 +1195,19 @@ export function ConversationThread({
               다시 시도
             </button>
           </div>
-        ) : !scopeReady ? (
-          <div className="flex min-h-[54px] items-center justify-center gap-2 text-[13px] font-semibold text-muted-foreground">
-            <Loader2 size={16} className="animate-spin" /> 대화와 발송 상태를 확인하는 중…
-          </div>
-        ) : canSend ? (
+            ) : !scopeReady ? (
+              <div className="flex min-h-[54px] items-center justify-center gap-2 text-[13px] font-semibold text-muted-foreground">
+                <Loader2 size={16} className="animate-spin" /> 대화와 발송 상태를 확인하는 중…
+              </div>
+            ) : agentPresentation.kind === "unscoped" ? (
+              <div role="status" className="rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-[13px] text-warning-strong">
+                {scopedPendingDraft ? (
+                  <><b>공고 미지정 초안만 처리할 수 있어요.</b> 위 초안 카드에서 내용을 검수해 발송하거나 무시하세요.</>
+                ) : (
+                  <><b>처리할 공고 미지정 초안을 찾지 못했어요.</b> 목록을 새로 확인하거나 공고 탭을 선택하세요.</>
+                )}
+              </div>
+            ) : canSend ? (
           <>
           <div className="flex gap-1.5 flex-wrap mb-2.5">
             {QUICK_TEMPLATES.map((t) => (

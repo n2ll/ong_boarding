@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { selectPendingDraftForJob } from "@/lib/admin/pending-draft-scope";
+import {
+  selectPendingDraftForJob,
+  shouldLoadCandidateAgentState,
+} from "@/lib/admin/pending-draft-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +37,7 @@ export async function GET(
     if (jobIdFilter !== null && draftScopeParam === "unscoped") {
       return NextResponse.json({ error: "공고와 미지정 초안 범위는 함께 선택할 수 없습니다." }, { status: 400 });
     }
+    const draftScope = draftScopeParam === "unscoped" ? "unscoped" : "all";
 
     // 지원자 phone 번호 조회 (+access_token — 스레드 빠른 템플릿 #{맞춤링크} 치환용)
     const { data: applicant } = await supabase
@@ -172,18 +176,20 @@ export async function GET(
     // 현재 후보의 agent_stage + agent_state (체크리스트)
     let agentStage: string | null = null;
     let agentState: Record<string, unknown> | null = null;
-    const jcQuery = supabase
-      .from("job_candidates")
-      .select("agent_stage, agent_state, created_at")
-      .eq("applicant_id", applicantId)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const { data: jc } = jobIdFilter !== null && Number.isFinite(jobIdFilter)
-      ? await jcQuery.eq("job_id", jobIdFilter).maybeSingle()
-      : await jcQuery.maybeSingle();
-    if (jc) {
-      agentStage = (jc.agent_stage as string | null) ?? null;
-      agentState = (jc.agent_state as Record<string, unknown> | null) ?? null;
+    if (shouldLoadCandidateAgentState(jobIdFilter, draftScope)) {
+      const jcQuery = supabase
+        .from("job_candidates")
+        .select("agent_stage, agent_state, created_at")
+        .eq("applicant_id", applicantId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const { data: jc } = jobIdFilter !== null && Number.isFinite(jobIdFilter)
+        ? await jcQuery.eq("job_id", jobIdFilter).maybeSingle()
+        : await jcQuery.maybeSingle();
+      if (jc) {
+        agentStage = (jc.agent_stage as string | null) ?? null;
+        agentState = (jc.agent_state as Record<string, unknown> | null) ?? null;
+      }
     }
 
     return NextResponse.json({

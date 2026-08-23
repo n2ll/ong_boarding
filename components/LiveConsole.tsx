@@ -586,6 +586,10 @@ export function LiveConsole() {
     chats.find((c) => c.id === selectedChatId) ??
     (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
     null;
+  const isUnscopedDraftContext = activeChat != null
+    && selectedJobId === null
+    && previewById[activeChat.id]?.pending_draft === true
+    && previewById[activeChat.id]?.pending_draft_job_id === null;
 
   const showDetailPanel = shouldShowManagerDetailPanel({
     hasActiveChat: activeChat != null,
@@ -1267,7 +1271,7 @@ export function LiveConsole() {
             <div className="flex items-center gap-1.5 flex-wrap">
               {activeChat.source && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-background text-muted-foreground border border-border-strong">{SOURCE_LABEL[activeChat.source] ?? activeChat.source}</span>}
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
-              {activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
+              {!isUnscopedDraftContext && activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
               <ApplicantStatusBadge status={activeChat.status} className="px-2 py-1" />
               {replyQueueEligible && (
                 <span className="rounded-lg border border-border-strong bg-background px-2 py-1 text-[12px] font-bold tabular-nums text-muted-foreground" aria-label={`답장 큐 ${replyQueuePosition.current}번째, 총 ${replyQueuePosition.total}건`}>
@@ -1367,13 +1371,7 @@ export function LiveConsole() {
             applicantName={activeChat.name}
             phone={activeChat.phone}
             jobId={selectedJobId}
-            draftScope={
-              selectedJobId === null
-              && previewById[activeChat.id]?.pending_draft === true
-              && previewById[activeChat.id]?.pending_draft_job_id === null
-                ? "unscoped"
-                : "all"
-            }
+            draftScope={isUnscopedDraftContext ? "unscoped" : "all"}
             globalKill={globalKill}
             copilotMode={copilotMode}
             smsOptOutAt={activeChat.sms_opt_out_at ?? null}

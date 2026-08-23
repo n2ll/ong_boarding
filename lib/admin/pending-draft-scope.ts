@@ -2,6 +2,14 @@ export interface JobScopedPendingDraft {
   job_id: number | null;
 }
 
+/** 공고 미지정 초안에는 결속된 후보가 없으므로 임의의 최신 공고 AI 상태를 상속하지 않는다. */
+export function shouldLoadCandidateAgentState(
+  requestedJobId: number | null,
+  draftScope: "all" | "unscoped" = "all",
+): boolean {
+  return requestedJobId !== null || draftScope !== "unscoped";
+}
+
 /** 전체 대화와 공고 미지정 초안 탭이 같은 null jobId를 쓰더라도 초안 범위는 분리한다. */
 export function pendingDraftMatchesScope(
   draftJobId: number | null,
