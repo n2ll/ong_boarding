@@ -1,7 +1,29 @@
 export const MANAGER_PANEL_DOCK_MIN_WIDTH = 1536;
+export const LIVE_DETAIL_DOCK_MIN_WIDTH = 1680;
 
 export function shouldDockManagerPanels(viewportWidth: number): boolean {
   return Number.isFinite(viewportWidth) && viewportWidth >= MANAGER_PANEL_DOCK_MIN_WIDTH;
+}
+
+export function shouldDockLiveDetailPanel(viewportWidth: number): boolean {
+  return Number.isFinite(viewportWidth) && viewportWidth >= LIVE_DETAIL_DOCK_MIN_WIDTH;
+}
+
+export function shouldShowManagerDetailPanel(input: {
+  hasActiveChat: boolean;
+  canDock: boolean;
+  overlayOpen: boolean;
+}): boolean {
+  return input.hasActiveChat && (input.canDock || input.overlayOpen);
+}
+
+export function validManagerDetailOverlayApplicantId(input: {
+  selectedApplicantId: number | null;
+  overlayApplicantId: number | null;
+  canDock: boolean;
+}): number | null {
+  if (input.canDock || input.selectedApplicantId !== input.overlayApplicantId) return null;
+  return input.overlayApplicantId;
 }
 
 export type ManagerPanelKeyboardAction =

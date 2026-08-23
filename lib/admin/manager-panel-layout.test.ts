@@ -3,6 +3,17 @@ import test from "node:test";
 
 type ManagerPanelLayoutModule = {
   shouldDockManagerPanels?: (viewportWidth: number) => boolean;
+  shouldDockLiveDetailPanel?: (viewportWidth: number) => boolean;
+  shouldShowManagerDetailPanel?: (input: {
+    hasActiveChat: boolean;
+    canDock: boolean;
+    overlayOpen: boolean;
+  }) => boolean;
+  validManagerDetailOverlayApplicantId?: (input: {
+    selectedApplicantId: number | null;
+    overlayApplicantId: number | null;
+    canDock: boolean;
+  }) => number | null;
   managerPanelKeyboardAction?: (input: {
     key: string;
     shiftKey: boolean;
@@ -19,7 +30,7 @@ async function loadModule(): Promise<ManagerPanelLayoutModule> {
   }
 }
 
-test("manager detail panels stay overlaid on laptop-width desktops", async () => {
+test("manager detail stays optional through common desktop widths", async () => {
   const { shouldDockManagerPanels } = await loadModule();
 
   assert.equal(typeof shouldDockManagerPanels, "function");
@@ -27,16 +38,77 @@ test("manager detail panels stay overlaid on laptop-width desktops", async () =>
   assert.equal(shouldDockManagerPanels!(1279), false);
   assert.equal(shouldDockManagerPanels!(1280), false);
   assert.equal(shouldDockManagerPanels!(1366), false);
-  assert.equal(shouldDockManagerPanels!(1439), false);
   assert.equal(shouldDockManagerPanels!(1440), false);
   assert.equal(shouldDockManagerPanels!(1535), false);
 });
 
-test("manager detail panels dock only on wide desktops", async () => {
+test("manager detail panels dock only when the work area is wide enough", async () => {
   const { shouldDockManagerPanels } = await loadModule();
 
   assert.equal(typeof shouldDockManagerPanels, "function");
   assert.equal(shouldDockManagerPanels!(1536), true);
+});
+
+test("the live conversation keeps at least 640px before docking applicant detail", async () => {
+  const { shouldDockLiveDetailPanel } = await loadModule();
+
+  assert.equal(typeof shouldDockLiveDetailPanel, "function");
+  assert.equal(shouldDockLiveDetailPanel!(1536), false);
+  assert.equal(shouldDockLiveDetailPanel!(1679), false);
+  assert.equal(shouldDockLiveDetailPanel!(1680), true);
+});
+
+test("a laptop conversation does not open the detail overlay until the manager asks", async () => {
+  const { shouldShowManagerDetailPanel } = await loadModule();
+
+  assert.equal(typeof shouldShowManagerDetailPanel, "function");
+  assert.equal(shouldShowManagerDetailPanel!({
+    hasActiveChat: true,
+    canDock: false,
+    overlayOpen: false,
+  }), false);
+  assert.equal(shouldShowManagerDetailPanel!({
+    hasActiveChat: true,
+    canDock: false,
+    overlayOpen: true,
+  }), true);
+});
+
+test("a desktop conversation keeps its contextual detail panel docked", async () => {
+  const { shouldShowManagerDetailPanel } = await loadModule();
+
+  assert.equal(typeof shouldShowManagerDetailPanel, "function");
+  assert.equal(shouldShowManagerDetailPanel!({
+    hasActiveChat: true,
+    canDock: true,
+    overlayOpen: false,
+  }), true);
+  assert.equal(shouldShowManagerDetailPanel!({
+    hasActiveChat: false,
+    canDock: true,
+    overlayOpen: true,
+  }), false);
+});
+
+test("detail overlay intent is discarded after queue advance or docking", async () => {
+  const { validManagerDetailOverlayApplicantId } = await loadModule();
+
+  assert.equal(typeof validManagerDetailOverlayApplicantId, "function");
+  assert.equal(validManagerDetailOverlayApplicantId!({
+    selectedApplicantId: 10,
+    overlayApplicantId: 10,
+    canDock: false,
+  }), 10);
+  assert.equal(validManagerDetailOverlayApplicantId!({
+    selectedApplicantId: 11,
+    overlayApplicantId: 10,
+    canDock: false,
+  }), null);
+  assert.equal(validManagerDetailOverlayApplicantId!({
+    selectedApplicantId: 10,
+    overlayApplicantId: 10,
+    canDock: true,
+  }), null);
 });
 
 test("an invalid viewport measurement never enables docking", async () => {

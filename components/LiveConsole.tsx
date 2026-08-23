@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Search, X, AlertTriangle, ArrowRight, Phone, CheckCircle2, Clock3 } from "lucide-react";
+import { Search, X, AlertTriangle, ArrowRight, Phone, CheckCircle2, Clock3, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
@@ -51,7 +51,13 @@ import { Badge } from "@/components/ui/badge";
 import { ApplicantStatusBadge, StageBadge } from "@/components/ui/stage-badge";
 import { nextQueueApplicantId } from "@/lib/admin/nav";
 import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
-import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+import {
+  LIVE_DETAIL_DOCK_MIN_WIDTH,
+  managerPanelKeyboardAction,
+  shouldDockLiveDetailPanel,
+  shouldShowManagerDetailPanel,
+  validManagerDetailOverlayApplicantId,
+} from "@/lib/admin/manager-panel-layout";
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
 import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
 
@@ -267,8 +273,8 @@ export function LiveConsole() {
   const [activeTab, setActiveTabState] = useState<OperationsTab>(urlTab);
   const [canDockDetail, setCanDockDetail] = useState(false);
   useEffect(() => {
-    const media = window.matchMedia(`(min-width: ${MANAGER_PANEL_DOCK_MIN_WIDTH}px)`);
-    const update = () => setCanDockDetail(shouldDockManagerPanels(window.innerWidth));
+    const media = window.matchMedia(`(min-width: ${LIVE_DETAIL_DOCK_MIN_WIDTH}px)`);
+    const update = () => setCanDockDetail(shouldDockLiveDetailPanel(window.innerWidth));
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
@@ -288,6 +294,14 @@ export function LiveConsole() {
     }
   }, []);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const [detailOverlayApplicantId, setDetailOverlayApplicantId] = useState<number | null>(null);
+  useEffect(() => {
+    setDetailOverlayApplicantId((current) => validManagerDetailOverlayApplicantId({
+      selectedApplicantId: selectedChatId,
+      overlayApplicantId: current,
+      canDock: canDockDetail,
+    }));
+  }, [selectedChatId, canDockDetail]);
   const detailPanelRef = useRef<HTMLDivElement>(null);
   const detailReturnFocusRef = useRef<HTMLElement | null>(null);
   const detailWasModalOpenRef = useRef(false);
@@ -306,7 +320,7 @@ export function LiveConsole() {
     });
     if (action === null) return;
     event.preventDefault();
-    if (action === "close") setSelectedChatId(null);
+    if (action === "close") setDetailOverlayApplicantId(null);
     else if (action === "focus-first") focusables[0]?.focus();
     else if (action === "focus-last") focusables[focusables.length - 1]?.focus();
     else detailPanelRef.current?.focus();
@@ -557,7 +571,12 @@ export function LiveConsole() {
     (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
     null;
 
-  const detailModalOpen = activeChat != null && !canDockDetail;
+  const showDetailPanel = shouldShowManagerDetailPanel({
+    hasActiveChat: activeChat != null,
+    canDock: canDockDetail,
+    overlayOpen: activeChat?.id === detailOverlayApplicantId,
+  });
+  const detailModalOpen = showDetailPanel && !canDockDetail;
   useEffect(() => {
     if (detailModalOpen && !detailWasModalOpenRef.current) {
       detailReturnFocusRef.current = document.activeElement instanceof HTMLElement
@@ -786,6 +805,7 @@ export function LiveConsole() {
   // 지점·슬롯·시작일이 비어 확정 데이터 품질이 경로마다 갈렸다. 이제 어디서 확정하든 같은 정보를 받는다.
   const openConfirmFor = (p: ConfirmPending) => {
     setSelectedChatId(p.applicant_id);
+    if (!canDockDetail) setDetailOverlayApplicantId(p.applicant_id);
     confirmSignalSeq.current += 1;
     // 큐 카드가 고른 대상 공고(jobId)를 함께 넘긴다 — 큐는 '진행단계 우선', 모달 기본 시드는 '최신 링크'라
     // 열린 링크가 2개 이상이면 카드에 보인 공고와 모달 선택이 어긋나 다른 공고로 확정될 수 있다
@@ -1136,6 +1156,18 @@ export function LiveConsole() {
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
               {activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
               <ApplicantStatusBadge status={activeChat.status} className="px-2 py-1" />
+              {!canDockDetail && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-controls="applicant-detail-panel"
+                  aria-expanded={detailModalOpen}
+                  onClick={() => setDetailOverlayApplicantId(activeChat.id)}
+                >
+                  <PanelRightOpen aria-hidden="true" size={15} />
+                  지원자 정보
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1254,17 +1286,18 @@ export function LiveConsole() {
       )}
 
       {/* Right Sidebar — 통합 지원자 상세(컨텍스트) */}
-      {activeChat && (
+      {activeChat && showDetailPanel && (
         <>
         {!canDockDetail && (
           <button
             type="button"
             aria-label="지원자 상세 닫기"
-            onClick={() => setSelectedChatId(null)}
+            onClick={() => setDetailOverlayApplicantId(null)}
             className="fixed inset-0 z-40 bg-scrim"
           />
         )}
         <div
+          id="applicant-detail-panel"
           ref={detailPanelRef}
           role={canDockDetail ? "complementary" : "dialog"}
           aria-modal={canDockDetail ? undefined : true}
@@ -1280,7 +1313,7 @@ export function LiveConsole() {
               variant="ghost"
               size="icon"
               aria-label="지원자 상세 닫기"
-              onClick={() => setSelectedChatId(null)}
+              onClick={() => setDetailOverlayApplicantId(null)}
               className="absolute right-2 top-2 z-10 border border-border-strong bg-card shadow-sm"
             >
               <X aria-hidden="true" size={17} />
