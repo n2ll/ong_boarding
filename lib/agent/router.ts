@@ -439,6 +439,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             applicant_id: applicant.id,
             applicant_phone: applicant.phone,
             inbound_message_id,
+            job_id: jc.job_id,
             draft_text: result.reply_text,
             reasoning: `${headerParts.join(" ")}\n${result.reasoning ?? ""}`,
             // 안전 가드에 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
@@ -583,6 +584,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
         await supabase.from("message_drafts").insert({
           applicant_id: applicant.id,
           inbound_message_id,
+          job_id: jc.job_id,
           draft_text: result.reply_text,
           reasoning: reasoningWithTransition,
           status: "auto_sent",

@@ -52,11 +52,12 @@ type ManualMessageModule = {
     claim: () => Promise<
       | { kind: "claimed" }
       | { kind: "existing"; request: ExistingOutboxRequest }
+      | { kind: "conflict" }
       | { kind: "error" }
     >;
     send: () => Promise<{ success: boolean; messageId?: string; error?: string }>;
     markUnknown: (error: string) => Promise<void>;
-    markFailed: (error: string) => Promise<void>;
+    markFailed: (error: string) => Promise<boolean>;
     markSent: (providerMessageId: string | null) => Promise<boolean>;
     record: (providerMessageId: string | null) => Promise<TMessage | null>;
   }) => Promise<{
@@ -89,6 +90,11 @@ type ManualMessageModule = {
     | { kind: "changed" }
     | { kind: "none" }
     | { kind: "unknown" };
+  manualDraftSendEligibility?: (
+    draft: { applicant_id: number | null; job_id: number | null; status: string | null; send_claim_key: string | null } | null,
+    request: { applicantId: number | null; jobId: number | null },
+    idempotencyKey: string,
+  ) => { ok: true } | { ok: false; reason: "missing" | "applicant_mismatch" | "job_mismatch" | "claimed_elsewhere" | "resolved" };
 };
 
 async function loadModule(): Promise<ManualMessageModule> {
@@ -123,6 +129,31 @@ function existingOutbox(overrides: Partial<ExistingOutboxRequest> = {}): Existin
     ...overrides,
   };
 }
+
+test("a draft send is eligible only for the same applicant, job, and unresolved state", async () => {
+  const { manualDraftSendEligibility } = await loadModule();
+  assert.equal(typeof manualDraftSendEligibility, "function");
+
+  const key = "41f82761-a37a-4f6f-8ad5-8b6b93acb8c1";
+  const pending = { applicant_id: 17, job_id: 31, status: "pending", send_claim_key: key };
+  assert.deepEqual(manualDraftSendEligibility!(pending, { applicantId: 17, jobId: 31 }, key), { ok: true });
+  assert.deepEqual(
+    manualDraftSendEligibility!({ ...pending, status: "need_info" }, { applicantId: 17, jobId: 31 }, key),
+    { ok: true },
+  );
+  assert.deepEqual(manualDraftSendEligibility!(null, { applicantId: 17, jobId: 31 }, key), { ok: false, reason: "missing" });
+  assert.deepEqual(manualDraftSendEligibility!(pending, { applicantId: 18, jobId: 31 }, key), { ok: false, reason: "applicant_mismatch" });
+  assert.deepEqual(manualDraftSendEligibility!(pending, { applicantId: 17, jobId: 32 }, key), { ok: false, reason: "job_mismatch" });
+  assert.deepEqual(manualDraftSendEligibility!(pending, { applicantId: 17, jobId: null }, key), { ok: false, reason: "job_mismatch" });
+  assert.deepEqual(
+    manualDraftSendEligibility!(pending, { applicantId: 17, jobId: 31 }, "b5a9ae89-b79d-4a07-9db6-a49f58446f88"),
+    { ok: false, reason: "claimed_elsewhere" },
+  );
+  assert.deepEqual(
+    manualDraftSendEligibility!({ ...pending, status: "used" }, { applicantId: 17, jobId: 31 }, key),
+    { ok: false, reason: "resolved" },
+  );
+});
 
 test("a manual message requires a caller-supplied UUID", async () => {
   const { validateManualMessageIdempotencyKey } = await loadModule();
@@ -195,6 +226,36 @@ test("a sent outbox request is recovered into the message history without anothe
   );
 });
 
+test("a draft already claimed by another key is never sent again", async () => {
+  const { deliverManualMessage } = await loadModule();
+  assert.equal(typeof deliverManualMessage, "function");
+  let sendCalls = 0;
+
+  const result = await deliverManualMessage!({
+    key: "unused",
+    request: { ...request, draftId: "draft-1" },
+    claim: async () => ({ kind: "conflict" }),
+    send: async () => {
+      sendCalls += 1;
+      return { success: true, messageId: "must-not-send" };
+    },
+    markUnknown: async () => {},
+    markFailed: async () => true,
+    markSent: async () => true,
+    record: async () => ({ id: "must-not-record" }),
+  });
+
+  assert.equal(sendCalls, 0);
+  assert.deepEqual(result, {
+    delivery: "not_attempted",
+    recorded: false,
+    retryable: false,
+    deduplicated: true,
+    message: null,
+    conflict: true,
+  });
+});
+
 test("an in-flight or uncertain claim is never sent again", async () => {
   const { manualMessageReplayDecision } = await loadModule();
   assert.equal(typeof manualMessageReplayDecision, "function");
@@ -257,7 +318,7 @@ test("the first attempt records a message only after the provider reports succes
       return { success: true, messageId: "provider-1" };
     },
     markUnknown: async () => { order.push("unknown"); },
-    markFailed: async () => { order.push("failed"); },
+    markFailed: async () => { order.push("failed"); return true; },
     markSent: async () => {
       order.push("mark-sent");
       return true;
@@ -293,7 +354,7 @@ test("a provider-unknown response is persisted as unknown and is never made retr
       error: "provider response was interrupted",
     }),
     markUnknown: async () => { states.push("unknown"); },
-    markFailed: async () => { states.push("failed"); },
+    markFailed: async () => { states.push("failed"); return true; },
     markSent: async () => {
       states.push("sent");
       return true;
@@ -314,6 +375,40 @@ test("a provider-unknown response is persisted as unknown and is never made retr
   });
 });
 
+test("a declared provider failure is retryable only after its durable claim is released", async () => {
+  const { deliverManualMessage, manualMessageClientResolution } = await loadModule();
+  assert.equal(typeof deliverManualMessage, "function");
+  assert.equal(typeof manualMessageClientResolution, "function");
+
+  const result = await deliverManualMessage!({
+    key: "request-1",
+    request,
+    claim: async () => ({ kind: "claimed" }),
+    send: async () => ({
+      success: false,
+      failureKind: "declared",
+      error: "provider rejected",
+    }),
+    markUnknown: async () => {},
+    markFailed: async () => false,
+    markSent: async () => true,
+    record: async () => ({ id: "must-not-record" }),
+  });
+
+  assert.deepEqual(result, {
+    delivery: "failed",
+    recorded: false,
+    retryable: false,
+    deduplicated: false,
+    message: null,
+    providerError: "provider rejected",
+  });
+  assert.deepEqual(
+    manualMessageClientResolution!({ delivery: "failed", retryable: false }, false),
+    { kind: "not_attempted", clearComposer: false, rotateKey: false, continueAfterSend: false },
+  );
+});
+
 test("a sent-but-unrecorded replay repairs history without invoking the provider", async () => {
   const { deliverManualMessage } = await loadModule();
   assert.equal(typeof deliverManualMessage, "function");
@@ -329,7 +424,7 @@ test("a sent-but-unrecorded replay repairs history without invoking the provider
       return { success: true, messageId: "provider-2" };
     },
     markUnknown: async () => {},
-    markFailed: async () => {},
+    markFailed: async () => true,
     markSent: async () => true,
     record: async (providerMessageId) => {
       records += 1;
@@ -361,7 +456,7 @@ test("sending, unknown, and failed replays never invoke the provider or create a
         return { success: true };
       },
       markUnknown: async () => {},
-      markFailed: async () => {},
+      markFailed: async () => true,
       markSent: async () => true,
       record: async () => {
         records += 1;
@@ -386,7 +481,7 @@ test("a failed sent-state write never creates a message row", async () => {
     claim: async () => ({ kind: "claimed" }),
     send: async () => ({ success: true, messageId: "provider-1" }),
     markUnknown: async () => {},
-    markFailed: async () => {},
+    markFailed: async () => true,
     markSent: async () => false,
     record: async () => {
       records += 1;
@@ -562,5 +657,37 @@ test("manual message postprocessing is claimed and completed in one database tra
   assert.match(migration, /revoke execute on function public\.complete_manual_message_postprocess/i);
   assert.match(route, /\.rpc\(\s*"complete_manual_message_postprocess"/);
   assert.doesNotMatch(route, /\.from\("job_candidates"\)[\s\S]*?\.update\(/);
-  assert.doesNotMatch(route, /\.from\("message_drafts"\)[\s\S]*?\.update\(/);
+  assert.doesNotMatch(route, /\.from\("message_drafts"\)\s*\.update\(/);
+});
+
+test("manual draft postprocessing is isolated to the request job", async () => {
+  const migration = await readFile(
+    new URL("../docs/migrations/2026-08-manual-message-draft-job-scope.sql", import.meta.url),
+    "utf8",
+  ).catch(() => "");
+  const route = await readFile(
+    new URL("../app/api/admin/messages/send/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(migration, /alter table public\.message_drafts[\s\S]*?add column if not exists job_id bigint/i);
+  assert.match(migration, /create unique index[\s\S]*?manual_message_send_requests_draft_claim_idx/i);
+  assert.match(migration, /where draft_id is not null and status <> 'failed'/i);
+  assert.doesNotMatch(migration, /update public\.message_drafts as md\s+set job_id/i);
+  assert.match(migration, /md\.job_id is not distinct from new\.job_id/i);
+  assert.match(migration, /manual message draft scope mismatch/i);
+  assert.match(migration, /md\.job_id is not distinct from v_request\.job_id/i);
+  assert.match(migration, /send_claim_key\s*=\s*new\.idempotency_key/i);
+  assert.match(migration, /md\.send_claim_key\s*=\s*v_request\.idempotency_key/i);
+  assert.match(migration, /get diagnostics v_draft_updated_count = row_count/i);
+  assert.match(migration, /guard_claimed_message_draft_status_change/i);
+  assert.match(migration, /release_failed_manual_message_draft_claim/i);
+  assert.match(migration, /fail_manual_message_send_request/i);
+  assert.match(migration, /elsif v_request\.applicant_id is not null[\s\S]*?v_request\.job_id is not null/i);
+  assert.match(migration, /md\.job_id\s*=\s*v_request\.job_id/i);
+  assert.match(migration, /create or replace function public\.complete_manual_message_postprocess\(\s*p_idempotency_key uuid/i);
+  assert.match(route, /select\("applicant_id, job_id, status, send_claim_key"\)/i);
+  assert.match(route, /manualDraftSendEligibility\([\s\S]*?idempotencyKey\)/i);
+  assert.match(route, /rpc\("fail_manual_message_send_request"/i);
+  assert.match(route, /retryable:\s*delivery\.retryable/i);
 });

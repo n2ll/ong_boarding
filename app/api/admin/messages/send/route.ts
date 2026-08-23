@@ -4,6 +4,7 @@ import { sendSms } from "@/lib/solapi";
 import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety";
 import {
   deliverManualMessage,
+  manualDraftSendEligibility,
   manualMessagePostprocessResult,
   type ExistingManualMessageRequest,
   type ManualMessageFingerprint,
@@ -106,7 +107,11 @@ export async function POST(req: NextRequest) {
           .select("*")
           .single();
         if (!claim.error) return { kind: "claimed" as const };
-        if ((claim.error as { code?: string }).code !== "23505") {
+        const claimErrorCode = (claim.error as { code?: string }).code;
+        if (claimErrorCode === "23514") {
+          return { kind: "conflict" as const };
+        }
+        if (claimErrorCode !== "23505") {
           console.error("[manual message outbox claim error]", claim.error);
           return { kind: "error" as const };
         }
@@ -116,7 +121,7 @@ export async function POST(req: NextRequest) {
           .select("*")
           .eq("idempotency_key", idempotencyKey)
           .maybeSingle();
-        if (existing.error || !existing.data) {
+        if (existing.error) {
           console.error("[manual message outbox replay lookup error]", existing.error);
           // 충돌 행은 존재하지만 상태 조회가 실패했다. 불명확 상태로 고정해 재발송을 막는다.
           const unknown: ExistingManualMessageRequest = {
@@ -132,17 +137,70 @@ export async function POST(req: NextRequest) {
           };
           return { kind: "existing" as const, request: unknown };
         }
-        return {
-          kind: "existing" as const,
-          request: existing.data as ExistingManualMessageRequest,
-        };
+        if (existing.data) {
+          return {
+            kind: "existing" as const,
+            request: existing.data as ExistingManualMessageRequest,
+          };
+        }
+
+        // draft_id partial unique index가 다른 요청 키의 동시 승인을 막은 경우다.
+        // 그 요청을 현재 key의 replay로 취급하면 provider id를 다른 key로 기록할 수 있으므로
+        // 명시적 conflict로 끝내고 공급자를 절대 호출하지 않는다.
+        if (draftId) {
+          const competing = await supabase
+            .from("manual_message_send_requests")
+            .select("idempotency_key")
+            .eq("draft_id", draftId)
+            .neq("status", "failed")
+            .limit(1);
+          if (competing.error) {
+            console.error("[manual message draft claim lookup error]", competing.error);
+            return { kind: "error" as const };
+          }
+          if ((competing.data ?? []).length > 0) return { kind: "conflict" as const };
+        }
+        console.error("[manual message outbox unique conflict without owner]", claim.error);
+        return { kind: "error" as const };
       },
-      send: () => sendSms(
-        targetPhone,
-        messageBody,
-        undefined,
-        { clientRequestId: idempotencyKey }
-      ),
+      send: async () => {
+        // 같은 key의 recorded replay는 deliverManualMessage가 이 callback을 건너뛴다.
+        // 신규 외부 발송 직전에만 초안의 지원자·공고·미처리 상태를 재검증한다.
+        if (draftId) {
+          const draftResult = await supabase
+            .from("message_drafts")
+            .select("applicant_id, job_id, status, send_claim_key")
+            .eq("id", draftId)
+            .maybeSingle();
+          if (draftResult.error) {
+            console.error("[manual message draft validation error]", draftResult.error);
+            return {
+              success: false as const,
+              failureKind: "declared" as const,
+              error: "초안 상태를 확인하지 못해 문자를 보내지 않았습니다.",
+            };
+          }
+          const eligibility = manualDraftSendEligibility(draftResult.data, {
+            applicantId,
+            jobId,
+          }, idempotencyKey);
+          if (!eligibility.ok) {
+            return {
+              success: false as const,
+              failureKind: "declared" as const,
+              error: eligibility.reason === "resolved"
+                ? "이미 처리된 초안이라 문자를 보내지 않았습니다. 대화를 새로고침해주세요."
+                : "현재 지원자·공고의 초안이 아니라 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
+            };
+          }
+        }
+        return sendSms(
+          targetPhone,
+          messageBody,
+          undefined,
+          { clientRequestId: idempotencyKey }
+        );
+      },
       markUnknown: async (error) => {
         const result = await supabase
           .from("manual_message_send_requests")
@@ -152,12 +210,19 @@ export async function POST(req: NextRequest) {
         if (result.error) console.error("[manual message outbox unknown error]", result.error);
       },
       markFailed: async (error) => {
-        const result = await supabase
-          .from("manual_message_send_requests")
-          .update({ status: "failed", last_error: error, updated_at: new Date().toISOString() })
-          .eq("idempotency_key", idempotencyKey)
-          .eq("status", "sending");
-        if (result.error) console.error("[manual message outbox failed error]", result.error);
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          const result = await supabase.rpc("fail_manual_message_send_request", {
+            p_idempotency_key: idempotencyKey,
+            p_error: error,
+          });
+          if (!result.error && result.data === "failed") return true;
+          console.error("[manual message outbox failed error]", {
+            attempt,
+            error: result.error,
+            outcome: result.data,
+          });
+        }
+        return false;
       },
       markSent: async (providerMessageId) => {
         const result = await supabase
@@ -237,7 +302,9 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: delivery.conflict
-            ? "같은 발송 요청 키를 다른 내용이나 처리 조건에 사용할 수 없습니다."
+            ? draftId
+              ? "이 초안은 이미 다른 발송 요청으로 처리 중이거나 완료됐습니다. 대화를 새로고침해주세요."
+              : "같은 발송 요청 키를 다른 내용이나 처리 조건에 사용할 수 없습니다."
             : "발송 요청을 안전하게 저장하지 못해 문자를 보내지 않았습니다.",
           delivery: "not_attempted",
           recorded: false,
@@ -264,15 +331,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: delivery.providerError
-            ? `문자 발송 실패: ${delivery.providerError}`
-            : "이 발송 시도는 실패했습니다. 다시 보내려면 새 발송으로 시도해주세요.",
+          error: delivery.retryable
+            ? delivery.providerError
+              ? `문자 발송 실패: ${delivery.providerError}`
+              : "이 발송 시도는 실패했습니다. 다시 보내려면 새 발송으로 시도해주세요."
+            : "문자는 발송되지 않았지만 실패 상태를 안전하게 저장하지 못했습니다. 같은 초안을 다시 보내지 말고 잠시 뒤 대화 상태를 확인해주세요.",
           delivery: "failed",
           recorded: false,
-          retryable: true,
+          retryable: delivery.retryable,
           deduplicated: delivery.deduplicated,
         },
-        { status: delivery.deduplicated ? 409 : 502 }
+        { status: delivery.deduplicated ? 409 : delivery.retryable ? 502 : 503 }
       );
     }
 

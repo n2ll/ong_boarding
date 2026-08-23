@@ -8,28 +8,45 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { selectPendingDraftForJob } from "@/lib/admin/pending-draft-scope";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const applicantId = Number(new URL(req.url).searchParams.get("applicant_id"));
+  const url = new URL(req.url);
+  const applicantId = Number(url.searchParams.get("applicant_id"));
   if (!Number.isFinite(applicantId)) {
     return NextResponse.json({ error: "applicant_id가 필요합니다." }, { status: 400 });
   }
+  const jobIdParam = url.searchParams.get("job_id");
+  const jobId = jobIdParam === null ? null : Number(jobIdParam);
+  if (jobIdParam !== null && (!Number.isSafeInteger(jobId) || (jobId ?? 0) <= 0)) {
+    return NextResponse.json({ error: "유효하지 않은 job_id입니다." }, { status: 400 });
+  }
+  const draftScopeParam = url.searchParams.get("draft_scope");
+  if (draftScopeParam !== null && draftScopeParam !== "unscoped") {
+    return NextResponse.json({ error: "유효하지 않은 draft_scope입니다." }, { status: 400 });
+  }
+  if (jobId !== null && draftScopeParam === "unscoped") {
+    return NextResponse.json({ error: "job_id와 draft_scope는 함께 지정할 수 없습니다." }, { status: 400 });
+  }
 
   const supabase = createServiceClient();
-  const { data, error } = await supabase
+  let pendingDraftQuery = supabase
     .from("message_drafts")
-    .select("id, draft_text, reasoning, status, missing_info, created_at")
+    .select("id, draft_text, reasoning, status, missing_info, job_id, created_at")
     .eq("applicant_id", applicantId)
     .in("status", ["pending", "need_info"])
     .order("created_at", { ascending: false })
-    .limit(1);
+    .order("id", { ascending: false });
+  if (jobId !== null) pendingDraftQuery = pendingDraftQuery.eq("job_id", jobId);
+  else if (draftScopeParam === "unscoped") pendingDraftQuery = pendingDraftQuery.is("job_id", null);
+  const { data, error } = await pendingDraftQuery.limit(1);
 
   if (error) {
     console.error("[admin/drafts/pending]", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data: data?.[0] ?? null });
+  return NextResponse.json({ data: selectPendingDraftForJob(data ?? [], jobId) });
 }

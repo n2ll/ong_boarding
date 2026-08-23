@@ -15,13 +15,27 @@ import {
   manualMessageClientResolution,
   manualMessagePauseOutcome,
   nextManualMessageAttempt,
-  type ManualMessageAttempt,
 } from "@/lib/manual-message-send";
+import {
+  clearDraftMessageComposerSnapshot,
+  manualMessageComposerSnapshotMatches,
+  manualMessageComposerResolution,
+  manualMessageComposerStorageKey,
+  readDraftMessageComposerSnapshot,
+  readManualMessageComposerSnapshot,
+  resolveDraftMessageComposerSnapshot,
+  resolveManualMessageComposerSnapshot,
+  writeDraftMessageComposerSnapshot,
+  writeManualMessageComposerSnapshot,
+  type ManualMessageComposerSnapshot,
+} from "@/lib/manual-message-composer-storage";
 import { conversationMessagesView } from "@/lib/conversation-thread-view";
 import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
+import { pendingDraftMatchesScope } from "@/lib/admin/pending-draft-scope";
 
 interface PendingDraft {
   id: string;
+  job_id: number | null;
   draft_text: string | null;
   reasoning: string | null;
   status: string;
@@ -141,6 +155,8 @@ interface ConversationThreadProps {
   phone: string | null;
   /** 공고별 대화 분리 — 지정 시 해당 공고 컨텍스트의 메시지/단계만 표시 */
   jobId?: number | null;
+  /** jobId가 없을 때 미지정 초안만 조회할지, 전체 공고의 최신 초안을 조회할지 구분 */
+  draftScope?: "all" | "unscoped";
   /** 전역 킬스위치 상태 — true면 AI 배지 문구를 바꾸고 수동 발송 차단을 해제 */
   globalKill?: boolean;
   /** 전역 코파일럿(초안만) 모드 — true면 AI가 발송하지 않으므로 수동 발송을 열고 배지 문구를 바꾼다 */
@@ -151,6 +167,8 @@ interface ConversationThreadProps {
   onChanged?: () => void;
   /** 완전히 기록된 발송 뒤 부모의 다음 답장 대상으로 이동 */
   onQueueItemCompleted?: (applicantId: number, contextKey: string) => void;
+  /** 공고 미지정 초안을 닫은 뒤 job_id NULL 작성창에 머물지 않도록 부모가 안전한 공고로 전환 */
+  onUnscopedDraftResolved?: () => void;
   /** 현재 항목 뒤에 처리할 답장이 더 있는지 — 없으면 완료 액션으로 표시 */
   hasNextQueueItem?: boolean;
   /** 발송 시작 시점의 탭·검색 범위. 완료 시 범위가 달라졌으면 자동 이동하지 않는다. */
@@ -189,11 +207,13 @@ export function ConversationThread({
   applicantName,
   phone,
   jobId = null,
+  draftScope = "all",
   globalKill = false,
   copilotMode = false,
   smsOptOutAt = null,
   onChanged,
   onQueueItemCompleted,
+  onUnscopedDraftResolved,
   hasNextQueueItem = false,
   queueContextKey = "",
   pollMs = 12000,
@@ -206,34 +226,115 @@ export function ConversationThread({
   const [jobsMap, setJobsMap] = useState<Record<number, JobLabel>>({});
   const [agentStage, setAgentStage] = useState<string | null>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
-  const [messagesLoadError, setMessagesLoadError] = useState(false);
+  const [messagesLoadErrorIdentity, setMessagesLoadErrorIdentity] = useState<{ key: string; revision: number } | null>(null);
+  const [loadedScopeIdentity, setLoadedScopeIdentity] = useState<{ key: string; revision: number } | null>(null);
   const [sending, setSending] = useState(false);
-  const [inputValue, setInputValue] = useState("");
+  const [manualComposer, setManualComposer] = useState<ManualMessageComposerSnapshot & {
+    scopeKey: string;
+    ready: boolean;
+  }>({ scopeKey: "", body: "", attempt: null, ready: false });
   const [pendingDraft, setPendingDraft] = useState<PendingDraft | null>(null);
-  const [draftText, setDraftText] = useState("");
+  const [draftComposer, setDraftComposer] = useState<ManualMessageComposerSnapshot & {
+    draftId: string | null;
+    ready: boolean;
+  }>({ draftId: null, body: "", attempt: null, ready: false });
   const [draftBusy, setDraftBusy] = useState(false);
   const [optOutBusy, setOptOutBusy] = useState(false);
   const confirm = useConfirm();
   const scrollRef = useRef<HTMLDivElement>(null);
-  // 응답 유실 뒤 같은 본문을 다시 눌러도 서버가 같은 선점 행을 조회하도록 키를 유지한다.
-  const manualSendAttemptRef = useRef<ManualMessageAttempt | null>(null);
-  const draftSendAttemptRef = useRef<ManualMessageAttempt | null>(null);
+  const mountedRef = useRef(false);
+  const messageLoadSequenceRef = useRef(0);
+  const loadedScopeIdentityRef = useRef<{ key: string; revision: number } | null>(null);
 
-  const jobQS = jobId != null ? `?job_id=${jobId}` : "";
+  const threadScopeKey = `${applicantId}:${jobId ?? "all"}:${draftScope}`;
+  const threadScopeRef = useRef(threadScopeKey);
+  threadScopeRef.current = threadScopeKey;
+  const threadScopeIdentityRef = useRef({ key: threadScopeKey, revision: 0 });
+  if (threadScopeIdentityRef.current.key !== threadScopeKey) {
+    threadScopeIdentityRef.current = {
+      key: threadScopeKey,
+      revision: threadScopeIdentityRef.current.revision + 1,
+    };
+  }
+  const threadScopeRevision = threadScopeIdentityRef.current.revision;
+  const messagesLoadError = messagesLoadErrorIdentity?.key === threadScopeKey
+    && messagesLoadErrorIdentity.revision === threadScopeRevision;
+  const isCurrentThreadScope = (scopeKey: string, revision: number) => (
+    mountedRef.current
+    && threadScopeIdentityRef.current.key === scopeKey
+    && threadScopeIdentityRef.current.revision === revision
+  );
+  const manualComposerKey = manualMessageComposerStorageKey(applicantId, jobId);
+  const manualComposerReady = manualComposer.ready && manualComposer.scopeKey === manualComposerKey;
+  const inputValue = manualComposerReady ? manualComposer.body : "";
 
-  // 편집칸에 이미 실어준 초안의 id. 폴링이 매니저가 고쳐 쓰던 글을 덮어쓰지 않게 하는 기준.
-  const seededDraftIdRef = useRef<string | null>(null);
+  // 공고 탭 전환 직후 이전 요청의 초안이 잠시 남더라도 다른 공고 카드로 노출·처리하지 않는다.
+  const scopedPendingDraft = loadedScopeIdentity?.key === threadScopeKey
+    && loadedScopeIdentity.revision === threadScopeRevision
+    && pendingDraft
+    && pendingDraftMatchesScope(pendingDraft.job_id, jobId, draftScope)
+    ? pendingDraft
+    : null;
+  const activeDraftId = scopedPendingDraft?.id ?? null;
+  const draftComposerReady = draftComposer.ready && draftComposer.draftId === activeDraftId;
+  const draftText = draftComposerReady ? draftComposer.body : "";
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const snapshot = readManualMessageComposerSnapshot(applicantId, jobId);
+    setManualComposer({
+      scopeKey: manualComposerKey,
+      body: snapshot?.body ?? "",
+      attempt: snapshot?.attempt ?? null,
+      ready: true,
+    });
+  }, [applicantId, jobId, manualComposerKey]);
+
+  useEffect(() => {
+    if (!scopedPendingDraft) {
+      setDraftComposer({ draftId: null, body: "", attempt: null, ready: true });
+      return;
+    }
+    const snapshot = readDraftMessageComposerSnapshot(scopedPendingDraft.id);
+    setDraftComposer({
+      draftId: scopedPendingDraft.id,
+      body: snapshot?.body ?? scopedPendingDraft.draft_text ?? "",
+      attempt: snapshot?.attempt ?? null,
+      ready: true,
+    });
+  }, [scopedPendingDraft?.id]);
+
+  const jobQS = jobId != null
+    ? `?job_id=${jobId}`
+    : draftScope === "unscoped"
+      ? "?draft_scope=unscoped"
+      : "";
 
   const loadMessages = useCallback(
     async (opts?: { silent?: boolean }) => {
+      const requestedScopeKey = threadScopeKey;
+      const requestedScopeRevision = threadScopeIdentityRef.current.revision;
+      const requestSequence = ++messageLoadSequenceRef.current;
       if (!opts?.silent) {
         setLoadingMsgs(true);
-        setMessagesLoadError(false);
+        setMessagesLoadErrorIdentity(null);
       }
       try {
         const res = await fetch(`/api/admin/messages/${applicantId}${jobQS}`);
         const json = await res.json();
         if (!res.ok) throw new Error(typeof json.error === "string" ? json.error : "message fetch failed");
+        if (
+          !mountedRef.current
+          || threadScopeRef.current !== requestedScopeKey
+          || threadScopeIdentityRef.current.revision !== requestedScopeRevision
+          || messageLoadSequenceRef.current !== requestSequence
+        ) return;
         setMessages((json.messages ?? []) as ApiMessage[]);
         setEvents((json.events ?? []) as PoolEvent[]);
         setAccessToken((json.access_token as string | null) ?? null);
@@ -245,24 +346,34 @@ export function ConversationThread({
         // 조건·같은 정렬의 완전히 같은 조회였고, 12초 폴링이라 요청이 두 배로 나가고 있었다.
         const d = (json.draft as PendingDraft | null) ?? null;
         setPendingDraft(d);
-        // 글자는 '다른 초안이 왔을 때만' 새로 채운다.
-        // 예전엔 폴링마다 무조건 덮어써서, 매니저가 AI 초안을 고쳐 쓰다 12초를 넘기면
-        // 고친 내용이 소리 없이 원래 초안으로 되돌아갔다(코파일럿 모드의 핵심 동선).
-        if (d?.id !== seededDraftIdRef.current) {
-          seededDraftIdRef.current = d?.id ?? null;
-          setDraftText(d?.draft_text ?? "");
-        }
-        setMessagesLoadError(false);
+        const loadedIdentity = { key: requestedScopeKey, revision: requestedScopeRevision };
+        loadedScopeIdentityRef.current = loadedIdentity;
+        setLoadedScopeIdentity(loadedIdentity);
+        setMessagesLoadErrorIdentity(null);
       } catch {
-        if (!opts?.silent) {
-          setMessagesLoadError(true);
-          toast.error("대화 내역을 불러오지 못했어요");
+        if (
+          !mountedRef.current
+          || threadScopeRef.current !== requestedScopeKey
+          || threadScopeIdentityRef.current.revision !== requestedScopeRevision
+          || messageLoadSequenceRef.current !== requestSequence
+        ) return;
+        if (
+          loadedScopeIdentityRef.current?.key !== requestedScopeKey
+          || loadedScopeIdentityRef.current.revision !== requestedScopeRevision
+        ) {
+          setMessagesLoadErrorIdentity({ key: requestedScopeKey, revision: requestedScopeRevision });
+          if (!opts?.silent) toast.error("대화 내역을 불러오지 못했어요");
         }
       } finally {
-        if (!opts?.silent) setLoadingMsgs(false);
+        if (
+          mountedRef.current
+          && threadScopeRef.current === requestedScopeKey
+          && threadScopeIdentityRef.current.revision === requestedScopeRevision
+          && messageLoadSequenceRef.current === requestSequence
+        ) setLoadingMsgs(false);
       }
     },
-    [applicantId, jobQS]
+    [applicantId, jobQS, threadScopeKey]
   );
 
   useEffect(() => {
@@ -278,15 +389,25 @@ export function ConversationThread({
     return () => clearInterval(t);
   }, [pollMs, loadMessages]);
 
+  const scopeReady = loadedScopeIdentity?.key === threadScopeKey
+    && loadedScopeIdentity.revision === threadScopeRevision;
+  const currentMessages = scopeReady ? messages : [];
+  const currentEvents = scopeReady ? events : [];
+  const currentJobsMap = scopeReady ? jobsMap : {};
+  const currentAgentStage = scopeReady ? agentStage : null;
+
   // 스크롤: 최초 로드는 '마지막 지원자(inbound) 메시지' 위치로 — 무엇에 답해야 하는지 바로 보이게.
   // inbound가 없으면 기존처럼 맨 아래. 이후 새 메시지 도착 시에는 맨 아래로.
   const didInitialScrollRef = useRef(false);
   useEffect(() => {
+    didInitialScrollRef.current = false;
+  }, [threadScopeKey]);
+  useEffect(() => {
     const el = scrollRef.current;
-    if (!el || messages.length === 0) return;
+    if (!el || currentMessages.length === 0) return;
     if (!didInitialScrollRef.current) {
       didInitialScrollRef.current = true;
-      const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound");
+      const lastInbound = [...currentMessages].reverse().find((m) => m.direction === "inbound");
       const target = lastInbound ? el.querySelector<HTMLElement>(`[data-msg-id="${lastInbound.id}"]`) : null;
       if (target) {
         el.scrollTop = Math.max(0, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 24);
@@ -295,22 +416,22 @@ export function ConversationThread({
     }
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, [currentMessages]);
 
-  const isPaused = agentStage === "paused";
-  const hasActiveFlow = agentStage != null && agentStage !== "abort";
+  const isPaused = currentAgentStage === "paused";
+  const hasActiveFlow = currentAgentStage != null && currentAgentStage !== "abort";
   const isAiEnabled = hasActiveFlow && !isPaused;
   // 전역 킬스위치·코파일럿 중에는 AI가 직접 발송하지 않으므로 수동 발송을 열어 교착을 방지한다.
-  const canSend = !isAiEnabled || globalKill || copilotMode;
+  const canSend = scopeReady && (!isAiEnabled || globalKill || copilotMode);
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
-  const showJobChips = jobId == null && Object.keys(jobsMap).length > 1;
+  const showJobChips = jobId == null && Object.keys(currentJobsMap).length > 1;
 
   // 재컨택 이벤트 노이즈 억제 — 같은 타입(+같은 공고) 연속은 마지막 것만 남긴다
   // (link_view 반복 열람 등). 서버가 created_at 오름차순으로 내려준다.
   const dedupedEvents: PoolEvent[] = [];
-  for (const ev of events) {
+  for (const ev of currentEvents) {
     const last = dedupedEvents[dedupedEvents.length - 1];
     if (last && last.event_type === ev.event_type && last.job_id === ev.job_id) {
       dedupedEvents[dedupedEvents.length - 1] = ev;
@@ -323,7 +444,7 @@ export function ConversationThread({
   // 매니저가 "이 '네'가 무엇에 대한 답인지"를 스레드 안에서 바로 대조할 수 있게 한다.
   type TimelineItem = { kind: "msg"; msg: ApiMessage } | { kind: "event"; ev: PoolEvent };
   const timeline: TimelineItem[] = [
-    ...messages.map((msg): TimelineItem => ({ kind: "msg", msg })),
+    ...currentMessages.map((msg): TimelineItem => ({ kind: "msg", msg })),
     ...dedupedEvents.map((ev): TimelineItem => ({ kind: "event", ev })),
   ].sort((a, b) => {
     const at = new Date(a.kind === "msg" ? a.msg.created_at : a.ev.created_at).getTime();
@@ -331,7 +452,7 @@ export function ConversationThread({
     return at - bt; // 안정 정렬 — 동시각이면 메시지가 이벤트보다 먼저
   });
   const messagesView = conversationMessagesView({
-    loading: loadingMsgs,
+    loading: loadingMsgs || (!scopeReady && !messagesLoadError),
     error: messagesLoadError,
     itemCount: timeline.length,
   });
@@ -339,7 +460,7 @@ export function ConversationThread({
   // 빠른 템플릿 변수 치환 — #{이름}/#{공고명}/#{지점}/#{맞춤링크}(bulk-send 문법 통일).
   // 값이 없는 변수는 토큰을 그대로 남기고 목록으로 돌려줘 경고 토스트의 근거로 쓴다.
   const fillTemplateVars = (text: string): { filled: string; unresolved: string[] } => {
-    const job = jobId != null ? jobsMap[jobId] : undefined;
+    const job = jobId != null ? currentJobsMap[jobId] : undefined;
     const values: Record<string, string | null> = {
       "#{이름}": (applicantName || "지원자").trim() || "지원자",
       "#{공고명}": job?.title?.trim() || null,
@@ -354,6 +475,68 @@ export function ConversationThread({
       else unresolved.push(token);
     }
     return { filled, unresolved };
+  };
+
+  const setInputValue = (next: string | ((previous: string) => string)) => {
+    if (!manualComposerReady || sending) return;
+    const body = typeof next === "function" ? next(manualComposer.body) : next;
+    const snapshot = { body, attempt: manualComposer.attempt };
+    writeManualMessageComposerSnapshot(applicantId, jobId, snapshot);
+    setManualComposer({ ...snapshot, scopeKey: manualComposerKey, ready: true });
+  };
+
+  const setDraftText = (body: string) => {
+    if (!activeDraftId || !draftComposerReady || draftBusy) return;
+    const snapshot = { body, attempt: draftComposer.attempt };
+    writeDraftMessageComposerSnapshot(activeDraftId, snapshot);
+    setDraftComposer({ ...snapshot, draftId: activeDraftId, ready: true });
+  };
+
+  const applyManualComposerResolution = (
+    origin: {
+      scopeKey: string;
+      scopeRevision: number;
+      composerKey: string;
+      applicantId: number;
+      jobId: number | null;
+      snapshot: ManualMessageComposerSnapshot;
+    },
+    resolution: ReturnType<typeof manualMessageClientResolution>,
+  ) => {
+    const transition = manualMessageComposerResolution(origin.snapshot, resolution);
+    resolveManualMessageComposerSnapshot(
+      origin.applicantId,
+      origin.jobId,
+      origin.snapshot,
+      resolution,
+    );
+    if (!isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) return;
+    setManualComposer((previous) => previous.scopeKey === origin.composerKey
+      && manualMessageComposerSnapshotMatches(previous, origin.snapshot)
+      ? { ...transition.visible, scopeKey: origin.composerKey, ready: true }
+      : previous);
+  };
+
+  const applyDraftComposerResolution = (
+    origin: {
+      scopeKey: string;
+      scopeRevision: number;
+      draftId: string;
+      snapshot: ManualMessageComposerSnapshot;
+    },
+    resolution: ReturnType<typeof manualMessageClientResolution>,
+  ) => {
+    const transition = manualMessageComposerResolution(origin.snapshot, resolution);
+    resolveDraftMessageComposerSnapshot(
+      origin.draftId,
+      origin.snapshot,
+      resolution,
+    );
+    if (!isCurrentThreadScope(origin.scopeKey, origin.scopeRevision) || activeDraftId !== origin.draftId) return;
+    setDraftComposer((previous) => previous.draftId === origin.draftId
+      && manualMessageComposerSnapshotMatches(previous, origin.snapshot)
+      ? { ...transition.visible, draftId: origin.draftId, ready: true }
+      : previous);
   };
 
   const insertTemplate = (text: string) => {
@@ -379,6 +562,8 @@ export function ConversationThread({
       }))) return;
     }
     const endpoint = checked ? "/api/admin/agent/resume" : "/api/admin/agent/pause";
+    const originScopeKey = threadScopeKey;
+    const originScopeRevision = threadScopeRevision;
     try {
       const res = await fetch(endpoint, {
         method: "POST",
@@ -387,23 +572,27 @@ export function ConversationThread({
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error || "상태 변경에 실패했어요");
+        if (mountedRef.current) toast.error(json.error || "상태 변경에 실패했어요");
         return;
       }
-      setAgentStage(checked ? json.restored_stage ?? "exploration" : "paused");
-      toast.success(
-        checked
-          ? `${applicantName}님 AI 자동 응대를 재개했어요.`
-          : `${applicantName}님 AI를 끄고 매니저 수동 응대로 전환했어요.`
-      );
-      onChanged?.();
+      if (isCurrentThreadScope(originScopeKey, originScopeRevision)) {
+        setAgentStage(checked ? json.restored_stage ?? "exploration" : "paused");
+      }
+      if (mountedRef.current) {
+        toast.success(
+          checked
+            ? `${applicantName}님 AI 자동 응대를 재개했어요.`
+            : `${applicantName}님 AI를 끄고 매니저 수동 응대로 전환했어요.`
+        );
+        onChanged?.();
+      }
     } catch {
-      toast.error("상태 변경에 실패했어요");
+      if (mountedRef.current) toast.error("상태 변경에 실패했어요");
     }
   };
 
   const handleSendMessage = async (advanceAfterSend = false) => {
-    if (!inputValue.trim() || sending) return;
+    if (!manualComposerReady || !inputValue.trim() || sending) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -414,11 +603,24 @@ export function ConversationThread({
     }
     const body = inputValue.trim();
     const attempt = nextManualMessageAttempt(
-      manualSendAttemptRef.current,
+      manualComposer.attempt,
       { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
       () => crypto.randomUUID()
     );
-    manualSendAttemptRef.current = attempt;
+    const snapshot = { body, attempt };
+    const origin = {
+      scopeKey: threadScopeKey,
+      scopeRevision: threadScopeRevision,
+      composerKey: manualComposerKey,
+      applicantId,
+      jobId,
+      snapshot,
+    };
+    if (!writeManualMessageComposerSnapshot(applicantId, jobId, snapshot)) {
+      toast.error("중복 발송 방지 정보를 저장하지 못해 문자를 보내지 않았어요. 브라우저 저장 공간을 확인한 뒤 새로고침해주세요.");
+      return;
+    }
+    setManualComposer({ ...snapshot, scopeKey: manualComposerKey, ready: true });
     setSending(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
@@ -428,8 +630,8 @@ export function ConversationThread({
       });
       const json = await res.json().catch(() => ({}));
       const resolution = manualMessageClientResolution(json, res.ok);
-      if (resolution.rotateKey) manualSendAttemptRef.current = null;
-      if (resolution.clearComposer) setInputValue("");
+      applyManualComposerResolution(origin, resolution);
+      if (!mountedRef.current) return;
       if (!resolution.continueAfterSend) {
         if (resolution.kind === "unknown") {
           toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
@@ -453,7 +655,7 @@ export function ConversationThread({
       // 관심만 누른 공고(진행 단계 없음) 탭에서 답장하면 멈출 후보가 아예 없는데도 '수동 응대'로 바뀌어,
       // 매니저는 AI가 멈춘 줄 알고 손을 떼지만 다른 공고의 AI는 계속 돌아 이중 응답이 된다.
       const pauseOutcome = manualMessagePauseOutcome(json);
-      if (pauseOutcome.kind === "paused") {
+      if (pauseOutcome.kind === "paused" && isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) {
         setAgentStage("paused");
       } else if (pauseOutcome.kind === "ambiguous") {
         toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요 — 필요하면 공고를 고르고 'AI 끄기'를 눌러 주세요.");
@@ -463,7 +665,7 @@ export function ConversationThread({
         toast.info("이 공고에는 멈출 AI 응대가 없어 그대로예요 — 다른 공고에서 AI가 돌고 있다면 그 탭에서 꺼 주세요.");
       }
       onChanged?.();
-      if (shouldAdvanceLiveReplyAfterSend({
+      if (isCurrentThreadScope(origin.scopeKey, origin.scopeRevision) && shouldAdvanceLiveReplyAfterSend({
         requested: advanceAfterSend,
         resolutionKind: resolution.kind,
         resumeRequired: false,
@@ -473,15 +675,15 @@ export function ConversationThread({
         onQueueItemCompleted?.(applicantId, queueContextKey);
       }
     } catch {
-      toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
+      if (mountedRef.current) toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
-      setSending(false);
+      if (mountedRef.current) setSending(false);
     }
   };
 
   // §6.5 원자 동작: 발송 성공 후 인계 큐의 'AI 재개'와 동일한 재개 API를 순차 호출.
   const handleSendAndResume = async (advanceAfterSend = false) => {
-    if (!inputValue.trim() || sending) return;
+    if (!manualComposerReady || !inputValue.trim() || sending) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -492,11 +694,24 @@ export function ConversationThread({
     }
     const body = inputValue.trim();
     const attempt = nextManualMessageAttempt(
-      manualSendAttemptRef.current,
+      manualComposer.attempt,
       { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
       () => crypto.randomUUID()
     );
-    manualSendAttemptRef.current = attempt;
+    const snapshot = { body, attempt };
+    const origin = {
+      scopeKey: threadScopeKey,
+      scopeRevision: threadScopeRevision,
+      composerKey: manualComposerKey,
+      applicantId,
+      jobId,
+      snapshot,
+    };
+    if (!writeManualMessageComposerSnapshot(applicantId, jobId, snapshot)) {
+      toast.error("중복 발송 방지 정보를 저장하지 못해 문자를 보내지 않았어요. 브라우저 저장 공간을 확인한 뒤 새로고침해주세요.");
+      return;
+    }
+    setManualComposer({ ...snapshot, scopeKey: manualComposerKey, ready: true });
     setSending(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
@@ -506,20 +721,21 @@ export function ConversationThread({
       });
       const json = await res.json();
       const resolution = manualMessageClientResolution(json, res.ok);
-      if (resolution.rotateKey) manualSendAttemptRef.current = null;
-      if (resolution.clearComposer) setInputValue("");
+      applyManualComposerResolution(origin, resolution);
       if (!resolution.continueAfterSend) {
         if (resolution.kind === "unknown") {
-          toast.warning(json.error || "발송 결과를 확인할 수 없어 AI를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
-          await loadMessages({ silent: true });
+          if (mountedRef.current) {
+            toast.warning(json.error || "발송 결과를 확인할 수 없어 AI를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+            await loadMessages({ silent: true });
+          }
         } else {
-          toast.error(json.error || "문자 발송에 실패했어요");
+          if (mountedRef.current) toast.error(json.error || "문자 발송에 실패했어요");
         }
         return;
       }
-      if (typeof json.warning === "string") {
+      if (mountedRef.current && typeof json.warning === "string") {
         toast.warning(json.warning);
-      } else if (resolution.kind === "sent_unrecorded") {
+      } else if (mountedRef.current && resolution.kind === "sent_unrecorded") {
         toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. AI 재개 결과도 별도로 확인해주세요.");
       }
       // 발송은 이미 성공한 시점 — 재개의 네트워크 예외가 바깥 catch의 "발송 실패"로 오표시되지 않게 분리
@@ -532,18 +748,20 @@ export function ConversationThread({
         });
         const resumeJson = await resumeRes.json().catch(() => ({}));
         if (!resumeRes.ok) {
-          toast.error(resumeJson.error || "발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+          if (mountedRef.current) toast.error(resumeJson.error || "발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
         } else {
           resumeSucceeded = true;
-          setAgentStage(resumeJson.restored_stage ?? "exploration");
-          toast.success("문자를 보내고 AI 응대를 재개했어요.");
+          if (isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) {
+            setAgentStage(resumeJson.restored_stage ?? "exploration");
+          }
+          if (mountedRef.current) toast.success("문자를 보내고 AI 응대를 재개했어요.");
         }
       } catch {
-        toast.error("발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+        if (mountedRef.current) toast.error("발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
       }
-      await loadMessages({ silent: true });
-      onChanged?.();
-      if (shouldAdvanceLiveReplyAfterSend({
+      if (mountedRef.current) await loadMessages({ silent: true });
+      if (mountedRef.current) onChanged?.();
+      if (isCurrentThreadScope(origin.scopeKey, origin.scopeRevision) && shouldAdvanceLiveReplyAfterSend({
         requested: advanceAfterSend,
         resolutionKind: resolution.kind,
         resumeRequired: true,
@@ -553,14 +771,14 @@ export function ConversationThread({
         onQueueItemCompleted?.(applicantId, queueContextKey);
       }
     } catch {
-      toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
+      if (mountedRef.current) toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
-      setSending(false);
+      if (mountedRef.current) setSending(false);
     }
   };
 
   const handleSendDraft = async (advanceAfterSend = false) => {
-    if (!pendingDraft || draftBusy) return;
+    if (!scopedPendingDraft || !draftComposerReady || draftBusy) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -574,21 +792,33 @@ export function ConversationThread({
       toast.error("신분증 사진은 문자로 요청할 수 없어요. 안전한 제출 방법 안내로 수정해주세요.");
       return;
     }
-    const draftWasEdited = body !== (pendingDraft.draft_text ?? "");
+    const draftWasEdited = body !== (scopedPendingDraft.draft_text ?? "");
+    const draftJobId = jobId ?? scopedPendingDraft.job_id;
     const attempt = nextManualMessageAttempt(
-      draftSendAttemptRef.current,
+      draftComposer.attempt,
       {
         applicantId,
         phone,
         body,
-        jobId,
+        jobId: draftJobId,
         sentBy: "관리자",
-        draftId: pendingDraft.id,
+        draftId: scopedPendingDraft.id,
         draftWasEdited,
       },
       () => crypto.randomUUID()
     );
-    draftSendAttemptRef.current = attempt;
+    const snapshot = { body, attempt };
+    const origin = {
+      scopeKey: threadScopeKey,
+      scopeRevision: threadScopeRevision,
+      draftId: scopedPendingDraft.id,
+      snapshot,
+    };
+    if (!writeDraftMessageComposerSnapshot(origin.draftId, snapshot)) {
+      toast.error("중복 발송 방지 정보를 저장하지 못해 초안을 보내지 않았어요. 브라우저 저장 공간을 확인한 뒤 새로고침해주세요.");
+      return;
+    }
+    setDraftComposer({ ...snapshot, draftId: origin.draftId, ready: true });
     setDraftBusy(true);
     try {
       const res = await fetch("/api/admin/messages/send", {
@@ -599,21 +829,23 @@ export function ConversationThread({
           phone,
           body,
           sent_by: "관리자",
-          job_id: jobId ?? undefined,
-          draft_id: pendingDraft.id,
+          job_id: draftJobId ?? undefined,
+          draft_id: scopedPendingDraft.id,
           draft_was_edited: draftWasEdited,
           idempotency_key: attempt.key,
         }),
       });
       const json = await res.json().catch(() => ({}));
       const resolution = manualMessageClientResolution(json, res.ok);
-      if (resolution.rotateKey) draftSendAttemptRef.current = null;
+      applyDraftComposerResolution(origin, resolution);
+      if (!mountedRef.current) return;
       if (!resolution.continueAfterSend) {
         if (resolution.kind === "unknown") {
           toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 초안을 다시 보내지 말고 대화 내역을 확인해주세요.");
           await loadMessages({ silent: true });
         } else {
           toast.error(json.error || "발송에 실패했어요");
+          if (res.status === 409) await loadMessages({ silent: true });
         }
         return;
       }
@@ -627,10 +859,11 @@ export function ConversationThread({
         toast.success("AI 초안을 검수해 발송했어요.");
       }
       const pauseOutcome = manualMessagePauseOutcome(json);
-      setPendingDraft(null);
-      setDraftText("");
+      if (isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) {
+        setPendingDraft((current) => current?.id === origin.draftId ? null : current);
+      }
       await loadMessages({ silent: true });
-      if (pauseOutcome.kind === "paused") {
+      if (pauseOutcome.kind === "paused" && isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) {
         setAgentStage("paused");
       } else if (pauseOutcome.kind === "ambiguous") {
         toast.warning("진행 중 공고가 여러 개라 AI 자동 응대는 멈추지 않았어요. 공고를 고른 뒤 AI 토글을 확인해주세요.");
@@ -638,19 +871,26 @@ export function ConversationThread({
         toast.warning("발송 요청 뒤 AI 상태가 바뀌어 자동 응대를 다시 끄지 않았어요. 현재 AI 토글 상태를 확인해주세요.");
       }
       onChanged?.();
-      if (shouldAdvanceLiveReplyAfterSend({
+      const shouldAdvance = isCurrentThreadScope(origin.scopeKey, origin.scopeRevision) && shouldAdvanceLiveReplyAfterSend({
         requested: advanceAfterSend,
         resolutionKind: resolution.kind,
         resumeRequired: false,
         resumeSucceeded: false,
         pauseOutcomeKind: pauseOutcome.kind,
-      })) {
+      });
+      if (shouldAdvance) {
         onQueueItemCompleted?.(applicantId, queueContextKey);
+      } else if (
+        resolution.kind === "sent"
+        && scopedPendingDraft.job_id === null
+        && isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)
+      ) {
+        onUnscopedDraftResolved?.();
       }
     } catch {
-      toast.error("서버 응답을 확인하지 못했어요. 같은 초안으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
+      if (mountedRef.current) toast.error("서버 응답을 확인하지 못했어요. 같은 초안으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
-      setDraftBusy(false);
+      if (mountedRef.current) setDraftBusy(false);
     }
   };
 
@@ -695,36 +935,51 @@ export function ConversationThread({
   };
 
   const handleIgnoreDraft = async () => {
-    if (!pendingDraft || draftBusy) return;
+    if (!scopedPendingDraft || draftBusy) return;
+    const ignoredDraftId = scopedPendingDraft.id;
+    const ignoredDraftJobId = scopedPendingDraft.job_id;
+    const originScopeKey = threadScopeKey;
+    const originScopeRevision = threadScopeRevision;
     setDraftBusy(true);
     try {
-      const res = await fetch(`/api/admin/drafts/${pendingDraft.id}`, {
+      const res = await fetch(`/api/admin/drafts/${ignoredDraftId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "ignored" }),
+        body: JSON.stringify({
+          action: "ignored",
+          applicant_id: applicantId,
+          job_id: scopedPendingDraft.job_id,
+        }),
       });
       if (!res.ok) {
+        if (!isCurrentThreadScope(originScopeKey, originScopeRevision)) return;
         const j = await res.json().catch(() => ({}));
         toast.error(j.error || "처리에 실패했어요");
         return;
       }
+      clearDraftMessageComposerSnapshot(ignoredDraftId);
+      if (!isCurrentThreadScope(originScopeKey, originScopeRevision)) return;
       toast.info("AI 초안을 무시했어요.");
-      setPendingDraft(null);
-      setDraftText("");
+      setDraftComposer((current) => current.draftId === ignoredDraftId
+        ? { draftId: null, body: "", attempt: null, ready: true }
+        : current);
+      setPendingDraft((current) => current?.id === ignoredDraftId ? null : current);
+      onChanged?.();
+      if (ignoredDraftJobId === null) onUnscopedDraftResolved?.();
     } catch {
-      toast.error("처리에 실패했어요");
+      if (isCurrentThreadScope(originScopeKey, originScopeRevision)) toast.error("처리에 실패했어요");
     } finally {
-      setDraftBusy(false);
+      if (mountedRef.current) setDraftBusy(false);
     }
   };
 
   const currentBytes = getByteLength(inputValue);
   const isLMS = currentBytes > 90;
 
-  const isCopilotDraft = (pendingDraft?.reasoning ?? "").startsWith(COPILOT_MARKER);
+  const isCopilotDraft = (scopedPendingDraft?.reasoning ?? "").startsWith(COPILOT_MARKER);
   const draftReasoningDisplay = isCopilotDraft
-    ? (pendingDraft?.reasoning ?? "").slice(COPILOT_MARKER.length).trimStart()
-    : pendingDraft?.reasoning ?? null;
+    ? (scopedPendingDraft?.reasoning ?? "").slice(COPILOT_MARKER.length).trimStart()
+    : scopedPendingDraft?.reasoning ?? null;
 
   return (
     // 대화 스레드 = 불투명 캔버스(유리 금지) — 밴드·말풍선은 bg-muted 위 불투명 표면으로만 놓는다.
@@ -733,7 +988,11 @@ export function ConversationThread({
       {showHeader && (
         <div className="shrink-0 bg-card border-b border-border-strong px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
-            {!hasActiveFlow ? (
+            {!scopeReady && messagesLoadError ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-error bg-error-soft px-3 py-1.5 rounded-lg border border-error/30"><AlertTriangle size={14} /> 대화 상태를 불러오지 못함</span>
+            ) : !scopeReady ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground bg-muted px-3 py-1.5 rounded-lg border border-border-strong"><Loader2 size={14} className="animate-spin" /> 대화 상태 불러오는 중</span>
+            ) : !hasActiveFlow ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-100 px-3 py-1.5 rounded-lg border border-yellow-300"><User size={14} /> 수동 개입 중</span>
@@ -819,7 +1078,7 @@ export function ConversationThread({
                 )}
                 <div className="flex justify-center -my-2">
                   <div className="bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
-                    {poolEventLabel(ev, jobsMap)} · {fmtTime(createdAt)}
+                    {poolEventLabel(ev, currentJobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>
               </Fragment>
@@ -840,9 +1099,9 @@ export function ConversationThread({
               {sender === "ai" && <div className="w-9 h-9 rounded-full bg-brand-yellow flex items-center justify-center shrink-0 border border-yellow-500"><Bot size={18} className="text-foreground" /></div>}
               <div className={`flex flex-col gap-1 max-w-[78%] ${sender === "user" ? "items-end" : "items-start"}`}>
                 {sender === "ai" && <span className="text-[12px] font-bold text-muted-foreground ml-1">{msg.sent_by === "관리자" ? "매니저" : "옹봇 에이전트"}</span>}
-                {showJobChips && msg.job_id != null && jobsMap[msg.job_id] && (
-                  <span className="text-[12px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={jobsMap[msg.job_id]!.title}>
-                    {jobChipLabel(jobsMap[msg.job_id]!)}
+                {showJobChips && msg.job_id != null && currentJobsMap[msg.job_id] && (
+                  <span className="text-[12px] font-bold text-info-strong bg-info-soft border border-info/25 px-2 py-0.5 rounded-full mx-1" title={currentJobsMap[msg.job_id]!.title}>
+                    {jobChipLabel(currentJobsMap[msg.job_id]!)}
                   </span>
                 )}
                 <div className={`p-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm whitespace-pre-wrap ${sender === "user" ? "bg-foreground text-white rounded-tr-sm" : outboundFailed ? "bg-error-soft border border-error/30 text-error-strong rounded-tl-sm" : outboundUncertain ? "bg-warning-soft border border-warning/35 text-gray-800 rounded-tl-sm" : "bg-card border border-border-strong text-gray-800 rounded-tl-sm"}`}>
@@ -859,27 +1118,28 @@ export function ConversationThread({
       </div>
 
       {/* AI 초안 검수 카드 */}
-      {pendingDraft && (
+      {scopedPendingDraft && (
         <div className="px-5 pt-4 bg-card border-t border-border-strong">
           <div className="border border-copilot bg-copilot-soft rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2 text-[13px] font-extrabold text-copilot-strong">
                 <Wand2 size={16} /> {isCopilotDraft ? "⚡ 코파일럿 초안" : "옹봇이 제안한 답변 초안"}
-                {pendingDraft.status === "need_info" && (
+                {scopedPendingDraft.status === "need_info" && (
                   <span className="text-[12px] font-bold bg-yellow-50 text-warning-strong border border-warning/35 px-2 py-0.5 rounded-full">정보 부족 · 매니저 확인</span>
                 )}
               </div>
               <span className="text-[12px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
             </div>
-            {pendingDraft.status === "need_info" && pendingDraft.missing_info && (
+            {scopedPendingDraft.status === "need_info" && scopedPendingDraft.missing_info && (
               <div className="mb-2.5 text-[12px] text-warning-strong bg-card border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
-                <b>부족한 정보:</b> {pendingDraft.missing_info}
+                <b>부족한 정보:</b> {scopedPendingDraft.missing_info}
               </div>
             )}
             <textarea
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
-              placeholder={pendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
+              disabled={draftBusy || !draftComposerReady}
+              placeholder={scopedPendingDraft.status === "need_info" ? "AI가 답변을 보류했어요. 매니저가 직접 답변을 입력해 발송하세요." : "초안을 수정한 뒤 발송할 수 있어요."}
               rows={3}
               className="w-full bg-input-background border border-border-strong rounded-2xl p-3 text-[14px] leading-relaxed text-gray-800 focus:outline-none focus:border-copilot focus:ring-1 focus:ring-copilot resize-none"
             />
@@ -889,13 +1149,13 @@ export function ConversationThread({
               </div>
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
-              <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
+              <button onClick={handleIgnoreDraft} disabled={draftBusy || !draftComposerReady} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
               {onQueueItemCompleted && (
-                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftText.trim()} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
+                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim()} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
                   검수 발송만
                 </button>
               )}
-              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftText.trim()} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim()} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {onQueueItemCompleted ? (hasNextQueueItem ? "검수 발송 후 다음" : "검수 발송하고 완료") : "검수 후 발송"}
                 {onQueueItemCompleted && !draftBusy && <ArrowRight size={15} />}
@@ -907,13 +1167,29 @@ export function ConversationThread({
 
       {/* 입력 영역 */}
       <div className="p-5 bg-card border-t border-border-strong shrink-0">
-        {canSend ? (
+        {!scopeReady && messagesLoadError ? (
+          <div className="flex min-h-[54px] items-center justify-center gap-3 text-[13px] font-semibold text-error">
+            <span>대화와 발송 상태를 불러오지 못했어요.</span>
+            <button
+              type="button"
+              onClick={() => void loadMessages()}
+              className="min-h-9 rounded-lg border border-error/30 bg-error-soft px-3 font-bold outline-none hover:bg-error/10 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              다시 시도
+            </button>
+          </div>
+        ) : !scopeReady ? (
+          <div className="flex min-h-[54px] items-center justify-center gap-2 text-[13px] font-semibold text-muted-foreground">
+            <Loader2 size={16} className="animate-spin" /> 대화와 발송 상태를 확인하는 중…
+          </div>
+        ) : canSend ? (
           <>
           <div className="flex gap-1.5 flex-wrap mb-2.5">
             {QUICK_TEMPLATES.map((t) => (
               <button
                 key={t.label}
                 onClick={() => insertTemplate(t.text)}
+                disabled={sending || !manualComposerReady}
                 className="text-[12px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 title={t.text}
               >
@@ -927,6 +1203,7 @@ export function ConversationThread({
                 aria-label="지원자에게 보낼 문자"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
+                disabled={sending || !manualComposerReady}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void handleSendMessage(false); } }}
                 placeholder="지원자에게 발송될 문자를 입력하세요..."
                 className="w-full bg-transparent outline-none p-3.5 text-[14px] min-h-[56px]"

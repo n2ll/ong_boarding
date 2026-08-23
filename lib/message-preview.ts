@@ -51,6 +51,8 @@ export interface LastMessagePreview {
   last_inbound_at: string | null;
   /** 미처리 AI 초안(pending/need_info) 보유 — 목록 '초안 대기' 배지용 */
   pending_draft: boolean;
+  /** 가장 최근 미처리 초안의 공고. 대화를 열 때 그 공고 탭으로 바로 이동한다. */
+  pending_draft_job_id: number | null;
 }
 
 export type PreviewMap = Record<number, LastMessagePreview>;
@@ -144,6 +146,7 @@ export async function gatherMessagePreviews(
           manual_outbound: m.direction === "outbound" && !AUTO_SENT_BY.has(sentBy ?? ""),
           last_inbound_at: null,
           pending_draft: false,
+          pending_draft_job_id: null,
         };
       }
       if (previews[aid].last_inbound_at == null && m.direction === "inbound") {
@@ -161,20 +164,33 @@ export async function gatherMessagePreviews(
     return {};
   }
 
-  const draftRes = await supabase
-    .from("message_drafts")
-    .select("applicant_id")
-    .in("applicant_id", idList)
-    .in("status", ["pending", "need_info"]);
+  // 초안도 PostgREST 1000행 상한을 넘을 수 있다. 최신순으로 페이지를 훑고 지원자별
+  // 첫 행만 취해, 오래된 초안이 많은 한 사람 때문에 다른 사람의 배지가 누락되지 않게 한다.
+  const needDraft = new Set(idList);
+  for (let from = 0; needDraft.size > 0; from += PAGE) {
+    const draftRes = await supabase
+      .from("message_drafts")
+      .select("id, applicant_id, job_id, created_at")
+      .in("applicant_id", idList)
+      .in("status", ["pending", "need_info"])
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
 
-  // 초안 보유는 부가정보 — 실패해도 미리보기 자체는 내려준다.
-  if (draftRes.error) {
-    console.error("[message-preview] drafts query failed", draftRes.error);
-  } else {
-    for (const d of draftRes.data ?? []) {
-      const aid = d.applicant_id as number | null;
-      if (aid != null && previews[aid]) previews[aid].pending_draft = true;
+    // 초안 보유는 부가정보 — 실패해도 미리보기 자체는 내려준다.
+    if (draftRes.error) {
+      console.error("[message-preview] drafts query failed", draftRes.error);
+      break;
     }
+    const page = draftRes.data ?? [];
+    for (const d of page) {
+      const aid = d.applicant_id as number | null;
+      if (aid == null || !previews[aid] || !needDraft.has(aid)) continue;
+      needDraft.delete(aid);
+      previews[aid].pending_draft = true;
+      previews[aid].pending_draft_job_id = typeof d.job_id === "number" ? d.job_id : null;
+    }
+    if (page.length < PAGE) break;
   }
 
   return previews;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { selectPendingDraftForJob } from "@/lib/admin/pending-draft-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,16 @@ export async function GET(
     const url = new URL(req.url);
     const jobIdParam = url.searchParams.get("job_id");
     const jobIdFilter = jobIdParam ? Number(jobIdParam) : null;
+    if (jobIdParam !== null && (!Number.isSafeInteger(jobIdFilter) || (jobIdFilter ?? 0) <= 0)) {
+      return NextResponse.json({ error: "유효하지 않은 공고 ID" }, { status: 400 });
+    }
+    const draftScopeParam = url.searchParams.get("draft_scope");
+    if (draftScopeParam !== null && draftScopeParam !== "unscoped") {
+      return NextResponse.json({ error: "유효하지 않은 초안 범위" }, { status: 400 });
+    }
+    if (jobIdFilter !== null && draftScopeParam === "unscoped") {
+      return NextResponse.json({ error: "공고와 미지정 초안 범위는 함께 선택할 수 없습니다." }, { status: 400 });
+    }
 
     // 지원자 phone 번호 조회 (+access_token — 스레드 빠른 템플릿 #{맞춤링크} 치환용)
     const { data: applicant } = await supabase
@@ -77,15 +88,22 @@ export async function GET(
       .update({ unread_count: 0 })
       .eq("id", applicantId);
 
-    // 가장 최근 pending/need_info 초안 1건
-    const { data: latestDraft } = await supabase
+    // 최신순 미처리 초안 중 현재 공고와 정확히 결속된 1건. 공고가 다른 최신 초안을
+    // 현재 탭 초안으로 오인해 잘못된 job_id로 발송하는 멀티-잡 사고를 막는다.
+    let pendingDraftQuery = supabase
       .from("message_drafts")
-      .select("id, inbound_message_id, draft_text, reasoning, missing_info, status, created_at")
+      .select("id, inbound_message_id, draft_text, reasoning, missing_info, status, job_id, created_at")
       .eq("applicant_id", applicantId)
       .in("status", ["pending", "need_info"])
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("id", { ascending: false });
+    if (jobIdFilter !== null) pendingDraftQuery = pendingDraftQuery.eq("job_id", jobIdFilter);
+    else if (draftScopeParam === "unscoped") pendingDraftQuery = pendingDraftQuery.is("job_id", null);
+    const { data: pendingDrafts, error: draftsError } = await pendingDraftQuery.limit(1);
+    if (draftsError) console.error("[messages draft fetch error]", draftsError);
+    const latestDraft = draftsError
+      ? null
+      : selectPendingDraftForJob(pendingDrafts ?? [], jobIdFilter);
 
     // 메시지별 reasoning 매핑 — message_drafts.used_message_id 기준
     // (router.ts가 자동 발송 시 status='auto_sent'로 함께 insert함)

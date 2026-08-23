@@ -13,6 +13,13 @@ export interface ManualMessageFingerprint {
   draftWasEdited: boolean;
 }
 
+export interface ManualMessageDraftRecord {
+  applicant_id: number | null;
+  job_id: number | null;
+  status: string | null;
+  send_claim_key: string | null;
+}
+
 export interface ExistingManualMessageRequest {
   applicant_id: number | null;
   applicant_phone: string;
@@ -34,6 +41,7 @@ export type ManualMessageReplayDecision =
 export type ManualMessageClaimResult =
   | { kind: "claimed" }
   | { kind: "existing"; request: ExistingManualMessageRequest }
+  | { kind: "conflict" }
   | { kind: "error" };
 
 export interface ManualMessageDeliveryResult<TMessage> {
@@ -60,7 +68,7 @@ interface DeliverManualMessageArgs<TMessage> {
       }
   >;
   markUnknown: (error: string) => Promise<void>;
-  markFailed: (error: string) => Promise<void>;
+  markFailed: (error: string) => Promise<boolean>;
   markSent: (providerMessageId: string | null) => Promise<boolean>;
   record: (providerMessageId: string | null) => Promise<TMessage | null>;
 }
@@ -86,6 +94,24 @@ export type ManualMessagePauseOutcome =
   | { kind: "unknown" };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** 외부 SMS 호출 직전에 초안이 현재 지원자·공고의 미처리 건인지 다시 확인한다. */
+export function manualDraftSendEligibility(
+  draft: ManualMessageDraftRecord | null,
+  request: Pick<ManualMessageFingerprint, "applicantId" | "jobId">,
+  idempotencyKey: string,
+):
+  | { ok: true }
+  | { ok: false; reason: "missing" | "applicant_mismatch" | "job_mismatch" | "claimed_elsewhere" | "resolved" } {
+  if (!draft) return { ok: false, reason: "missing" };
+  if (draft.applicant_id !== request.applicantId) return { ok: false, reason: "applicant_mismatch" };
+  if (draft.job_id !== request.jobId) return { ok: false, reason: "job_mismatch" };
+  if (draft.send_claim_key !== idempotencyKey) return { ok: false, reason: "claimed_elsewhere" };
+  if (draft.status !== "pending" && draft.status !== "need_info") {
+    return { ok: false, reason: "resolved" };
+  }
+  return { ok: true };
+}
 
 /** 서버가 임의 키를 만들지 않도록 호출부가 보낸 UUID만 허용한다. */
 export function validateManualMessageIdempotencyKey(
@@ -185,6 +211,17 @@ export async function deliverManualMessage<TMessage>({
     };
   }
 
+  if (claimed.kind === "conflict") {
+    return {
+      delivery: "not_attempted",
+      recorded: false,
+      retryable: false,
+      deduplicated: true,
+      message: null,
+      conflict: true,
+    };
+  }
+
   if (claimed.kind === "existing") {
     const replay = manualMessageReplayDecision(claimed.request, request);
     if (replay.action === "conflict") {
@@ -257,15 +294,17 @@ export async function deliverManualMessage<TMessage>({
         message: null,
       };
     }
+    let failurePersisted = false;
     try {
-      await markFailed(detail);
+      failurePersisted = await markFailed(detail);
     } catch {
-      // 공급자가 실패를 확정했으므로 새 키를 통한 명시적 재시도는 안전하다.
+      failurePersisted = false;
     }
     return {
       delivery: "failed",
       recorded: false,
-      retryable: true,
+      // 실패 확정과 초안 선점 해제가 DB에 함께 기록된 뒤에만 새 키를 허용한다.
+      retryable: failurePersisted,
       deduplicated: false,
       message: null,
       providerError: detail,
@@ -342,6 +381,14 @@ export function manualMessageClientResolution(
     };
   }
   if (response.delivery === "failed") {
+    if (response.retryable === false) {
+      return {
+        kind: "not_attempted",
+        clearComposer: false,
+        rotateKey: false,
+        continueAfterSend: false,
+      };
+    }
     return {
       kind: "failed",
       clearComposer: false,
