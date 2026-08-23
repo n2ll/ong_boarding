@@ -234,7 +234,7 @@ export function Settings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {integrations.map((it) => {
                     const meta = INTEGRATION_META[it.key] ?? { name: it.key, desc: "", badge: "?", badgeColor: "bg-muted text-gray-700" };
-                    const slackOff = it.key === "slack" && it.configured && it.enabled === false;
+                    const slackOff = it.key === "slack" && it.enabled === false;
                     return (
                       <div key={it.key} className="p-5 border border-border-strong rounded-2xl flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
@@ -252,7 +252,7 @@ export function Settings() {
                                 전역 OFF — 모든 Slack 알림이 중단돼요.
                               </div>
                             )}
-                            {!it.configured && (
+                            {!it.configured && !slackOff && (
                               // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
                               // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
                               <div className="text-xs text-muted-foreground mt-1" title={`필요한 서버 설정: ${it.required.join(", ")}`}>
