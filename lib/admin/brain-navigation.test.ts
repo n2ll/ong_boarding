@@ -3,7 +3,7 @@ import test from "node:test";
 
 async function loadNavigationModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./brain-navigation.js";
+    const modulePath = "./brain-navigation.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

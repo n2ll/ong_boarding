@@ -8,7 +8,7 @@ type SafetyViolation = {
 
 async function loadSafetyModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./outbound-safety.js";
+    const modulePath = "./outbound-safety.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

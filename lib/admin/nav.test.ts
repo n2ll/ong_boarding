@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import * as adminNav from "./nav.js";
+const adminNav = await import(new URL("./nav.ts", import.meta.url).href) as typeof import("./nav");
 
 const { NAV_ITEMS, resolveHeader } = adminNav;
 

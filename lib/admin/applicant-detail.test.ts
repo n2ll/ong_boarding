@@ -14,7 +14,7 @@ type ConfirmationAction = {
 
 async function loadDetailModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./applicant-detail.js";
+    const modulePath = "./applicant-detail.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

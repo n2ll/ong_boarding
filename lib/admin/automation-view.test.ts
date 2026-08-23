@@ -14,7 +14,7 @@ type OverviewInput = {
 
 async function loadViewModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./automation-view.js";
+    const modulePath = "./automation-view.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

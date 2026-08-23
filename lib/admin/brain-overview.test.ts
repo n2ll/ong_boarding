@@ -16,7 +16,7 @@ type BrainOverviewInput = {
 
 async function loadOverviewModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./brain-overview.js";
+    const modulePath = "./brain-overview.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

@@ -24,7 +24,7 @@ type JobOperationMeta = {
 
 async function loadOperationsModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./job-operations.js";
+    const modulePath = "./job-operations.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};

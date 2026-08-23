@@ -12,7 +12,7 @@ type Request = (url: string, init: RequestInit) => Promise<{
 
 async function loadActionModule(): Promise<Record<string, unknown>> {
   try {
-    const modulePath = "./automation-config-action.js";
+    const modulePath = "./automation-config-action.ts";
     return await import(modulePath) as Record<string, unknown>;
   } catch {
     return {};
