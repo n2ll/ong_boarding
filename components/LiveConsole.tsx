@@ -53,6 +53,7 @@ import { nextQueueApplicantId } from "@/lib/admin/nav";
 import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
+import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
@@ -404,7 +405,7 @@ export function LiveConsole() {
   );
   const unansweredCount = useMemo(() => chats.filter(isUnanswered).length, [chats, isUnanswered]);
   // 카드 시각·정렬 기준 — 마지막 메시지 시각(미리보기)과 last_message_at(inbound 수신 시각) 중 더 최근.
-  // 매니저 발신은 last_message_at을 갱신하지 않아, 미리보기 시각이 있어야 답 대기 대화도 최신순에 올바로 낀다.
+  // 매니저 발신은 last_message_at을 갱신하지 않아, 미리보기 시각이 있어야 답 대기 시간도 정확히 계산된다.
   const lastActivityAt = useCallback(
     (c: Applicant): string | null => {
       const pv = previewById[c.id]?.created_at ?? null;
@@ -801,35 +802,28 @@ export function LiveConsole() {
     }, 6000);
   };
 
-  // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지,
-  // 같은 그룹 안에서는 마지막 활동 최신순. 폴링·브로드캐스트마다 재계산하지 않게 useMemo.
+  // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지.
+  // 처리할 세 그룹은 오래 기다린 순, 일반 대화는 최근 활동 순. 폴링·브로드캐스트마다 재계산하지 않게 useMemo.
   const visibleChats = useMemo(() => {
-    const rank = (c: Applicant): number => {
-      if (isUnanswered(c)) return 3;
-      if (previewById[c.id]?.pending_draft) return 2;
-      if (isAwaiting(c)) return 1;
-      return 0;
+    const priorityOf = (c: Applicant): LiveQueuePriority => {
+      if (isUnanswered(c)) return "unanswered";
+      if (previewById[c.id]?.pending_draft) return "draft";
+      if (isAwaiting(c)) return "awaiting";
+      return "rest";
     };
     const q = search.trim().toLowerCase();
     // 숫자 3자리 이상이면 전화번호(숫자열) 부분일치도 함께 검색
     const qDigits = q.replace(/\D/g, "");
-    return chats
-      .filter((c) => {
-        if (q) {
-          const nameHit = c.name.toLowerCase().includes(q);
-          const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
-          if (!nameHit && !phoneHit) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const ar = rank(a);
-        const br = rank(b);
-        if (ar !== br) return br - ar;
-        const at = new Date(lastActivityAt(a) ?? 0).getTime();
-        const bt = new Date(lastActivityAt(b) ?? 0).getTime();
-        return bt - at;
-      });
+    const filteredChats = chats.filter((c) => {
+      if (q) {
+        const nameHit = c.name.toLowerCase().includes(q);
+        const phoneHit = qDigits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(qDigits);
+        if (!nameHit && !phoneHit) return false;
+      }
+      return true;
+    });
+
+    return orderLiveQueueItems(filteredChats, priorityOf, lastActivityAt);
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
   const openApplicantFromInbox = useCallback(async (applicantId: number, tab: "all" | "intervention") => {
