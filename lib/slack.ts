@@ -1,18 +1,46 @@
 /**
- * Slack 알림 — 현재 전체 OFF (운영 판단)
+ * Slack 알림 — 전역 발송 스위치 적용
  *
- * 복구하려면 SLACK_NOTIFICATIONS_ENABLED=1 환경변수 설정 후 재배포.
- * 호출부는 그대로 두어도 됨 (각 함수가 진입 시점에 self-disable).
+ * SLACK_NOTIFICATIONS_ENABLED=1과 SLACK_WEBHOOK_URL이 모두 있어야 발송한다.
+ * 전역 OFF에서는 모든 발송 함수가 네트워크 요청 없이 self-disable한다.
  */
 
-const SLACK_ENABLED = process.env.SLACK_NOTIFICATIONS_ENABLED === "1";
+import type { SlackDeliveryResult } from "./onboarding-handoff";
+
+type SlackEnvironment = {
+  SLACK_NOTIFICATIONS_ENABLED?: string;
+  SLACK_WEBHOOK_URL?: string;
+};
+
+export function getSlackNotificationStatus(
+  env?: SlackEnvironment,
+): { enabled: boolean; webhookConfigured: boolean; active: boolean } {
+  const source: SlackEnvironment = env ?? {
+    SLACK_NOTIFICATIONS_ENABLED: process.env.SLACK_NOTIFICATIONS_ENABLED,
+    SLACK_WEBHOOK_URL: process.env.SLACK_WEBHOOK_URL,
+  };
+  const enabled = source.SLACK_NOTIFICATIONS_ENABLED === "1";
+  const webhookConfigured = !!source.SLACK_WEBHOOK_URL?.trim();
+  return { enabled, webhookConfigured, active: enabled && webhookConfigured };
+}
+
+export function slackNotificationsConfigured(
+  env?: SlackEnvironment,
+): boolean {
+  return getSlackNotificationStatus(env).active;
+}
+
+function slackWebhookUrl(): string | null {
+  if (!slackNotificationsConfigured()) return null;
+  return process.env.SLACK_WEBHOOK_URL!.trim();
+}
 
 /**
- * 범용 Slack 텍스트 발송. webhook 미설정 시 false 반환(전송 안 됨).
+ * 범용 Slack 텍스트 발송. 전역 OFF 또는 webhook 미설정 시 false 반환(전송 안 됨).
  * 자동 점검 규칙 등에서 사용.
  */
 export async function sendSlackText(text: string): Promise<boolean> {
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const webhookUrl = slackWebhookUrl();
   if (!webhookUrl) return false;
   try {
     const res = await fetch(webhookUrl, {
@@ -39,7 +67,7 @@ export async function sendSlackOnboardingReady(data: {
   branch: string | null;
   work_hours: string | null;
 }) {
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const webhookUrl = slackWebhookUrl();
   if (!webhookUrl) return;
 
   const name = data.applicant_name || "(이름 없음)";
@@ -75,9 +103,7 @@ export async function sendSlackPausedAlert(data: {
   reason: string;
   inbound_text?: string;
 }) {
-  // 매니저 인계 알림은 SLACK_WEBHOOK_URL만 있으면 무조건 발송
-  // (SLACK_NOTIFICATIONS_ENABLED 체크 없음 — 인계는 항상 알려야)
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const webhookUrl = slackWebhookUrl();
   if (!webhookUrl) return;
 
   const name = data.applicant_name || "(이름 없음)";
@@ -112,9 +138,13 @@ export async function sendSlackOnboardingHandoff(data: {
   applicant_name: string | null;
   applicant_phone: string;
   branch: string | null;          // 희망 근무지점 (applicant.branch1)
-}) {
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
-  if (!webhookUrl) return;
+}): Promise<SlackDeliveryResult> {
+  const status = getSlackNotificationStatus();
+  if (!status.enabled) return { kind: "disabled", reason: "switch_off" };
+  if (!status.webhookConfigured) {
+    return { kind: "failed", error: "Slack webhook is not configured" };
+  }
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL!.trim();
 
   const name = data.applicant_name || "(이름 없음)";
 
@@ -127,13 +157,16 @@ export async function sendSlackOnboardingHandoff(data: {
   };
 
   try {
-    await fetch(webhookUrl, {
+    const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(message),
     });
+    return res.ok
+      ? { kind: "delivered" }
+      : { kind: "failed", error: `Slack returned HTTP ${res.status}` };
   } catch (e) {
-    console.error("[slack onboarding handoff]", e);
+    return { kind: "failed", error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -147,8 +180,7 @@ export async function sendSlackAgentAlert(data: {
   inbound_text: string;
   missing_info: string;
 }) {
-  if (!SLACK_ENABLED) return;
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const webhookUrl = slackWebhookUrl();
   if (!webhookUrl) return;
 
   const name = data.applicant_name || "(이름 없음)";
@@ -173,4 +205,3 @@ export async function sendSlackAgentAlert(data: {
     console.error("[slack agent alert]", e);
   }
 }
-

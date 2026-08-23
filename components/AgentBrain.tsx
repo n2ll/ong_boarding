@@ -1180,7 +1180,7 @@ export function AgentBrain() {
                     <div className="flex flex-col gap-4">
                       <div className="bg-yellow-50 border border-warning/35 rounded-2xl p-4">
                         <div className="text-[13px] font-bold text-warning-strong mb-1.5 flex items-center gap-1.5"><AlertTriangle size={15} /> 사람 확인 필요</div>
-                        <div className="text-[13px] text-warning-strong leading-relaxed">AI가 자체 답변하지 않고 매니저에게 넘기는 상황이에요. 실제 운영에선 자동 응답이 중단되고 슬랙 알림이 발송됩니다.</div>
+                        <div className="text-[13px] text-warning-strong leading-relaxed">AI가 자체 답변하지 않고 매니저 인계 큐에 남기는 상황이에요. Slack 알림이 켜져 있으면 함께 발송됩니다.</div>
                       </div>
                       {simResult.missing_info && (
                         <div className="bg-card border border-border-strong rounded-2xl p-3.5">

@@ -109,7 +109,7 @@ export function Automation() {
       setRuleResults(map);
       setRuleRanAt(json.ran_at ?? new Date().toISOString());
       if (json.triggered_count > 0) {
-        toast.warning(`조치 필요 ${json.triggered_count}건 감지${json.notified ? " · 슬랙 발송됨" : " (슬랙 미설정)"}`);
+        toast.warning(`조치 필요 ${json.triggered_count}건 감지${json.notified ? " · Slack 발송됨" : " (Slack 미발송)"}`);
       } else {
         toast.success("점검 완료 — 조치 필요 항목 없음");
       }
@@ -262,7 +262,7 @@ export function Automation() {
                 </span>
               )}
             </div>
-            <p className="mt-1 text-[12px] text-muted-foreground">점검에서 조치 필요 항목이 발견되면 Slack 알림을 1회 전송합니다.</p>
+            <p className="mt-1 text-[12px] text-muted-foreground">점검에서 조치 필요 항목이 발견되면, Slack 알림이 켜져 있을 때 1회 전송합니다.</p>
           </div>
           <button
             onClick={runEvaluate}

@@ -4,10 +4,12 @@
  */
 
 import { NextResponse } from "next/server";
+import { getSlackNotificationStatus } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const slack = getSlackNotificationStatus();
   const integrations = [
     {
       key: "claude",
@@ -28,8 +30,10 @@ export async function GET() {
     },
     {
       key: "slack",
-      configured: process.env.SLACK_NOTIFICATIONS_ENABLED === "1" && !!process.env.SLACK_WEBHOOK_URL,
-      required: ["SLACK_WEBHOOK_URL", "SLACK_NOTIFICATIONS_ENABLED=1"],
+      configured: slack.webhookConfigured,
+      enabled: slack.enabled,
+      active: slack.active,
+      required: ["SLACK_WEBHOOK_URL"],
     },
     {
       key: "naver_geocode",

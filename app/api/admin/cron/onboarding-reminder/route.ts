@@ -10,9 +10,10 @@
  *          + meta.onboarding_reminder_sent_at 기록 (1회만)
  *
  *  단계 B — 매니저 전화 인계 슬랙 (리마인더 발송 후 3h 미회신)
- *    조건: reminder_sent_at < now-3h AND manager_handoff_alerted_at IS NULL
+ *    조건: reminder_sent_at < now-3h AND 발송/억제 기록이 모두 없음
  *          AND 배민 아이디 미수신
- *    동작: sendSlackOnboardingHandoff 호출 + meta.manager_handoff_alerted_at 기록
+ *    동작: Slack 2xx면 manager_handoff_alerted_at 기록
+ *          전역 OFF면 manager_handoff_slack_suppressed_at 기록(재활성화 후 재발송 안 함)
  *
  * 둘 다 수신된 후보는 어느 단계도 발동 안 함.
  */
@@ -22,6 +23,11 @@ import { createServiceClient } from "@/lib/supabase";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { sendSms } from "@/lib/solapi";
 import { sendSlackOnboardingHandoff, sendSlackPausedAlert } from "@/lib/slack";
+import {
+  buildOnboardingHandoffMarkerUpdate,
+  processOnboardingHandoffAttempt,
+  shouldAttemptOnboardingHandoff,
+} from "@/lib/onboarding-handoff";
 import { fillTemplate, getSystemMessage } from "@/lib/agent/system-messages";
 import { mergeAgentState, isComplete } from "@/lib/agent/checklist";
 import {
@@ -57,6 +63,7 @@ export async function GET(req: NextRequest) {
     .from("job_candidates")
     .select(`
       id, applicant_id, job_id, agent_state,
+      manager_handoff_alerted_at, manager_handoff_slack_suppressed_at,
       applicants:applicant_id (id, name, phone, source, branch1)
     `)
     .eq("agent_stage", "onboarding")
@@ -89,28 +96,57 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    // ─── 단계 B: 리마인더 발송 후 3h 경과 → 매니저 전화 인계 슬랙 (1회만) ───
-    if (
-      meta.onboarding_reminder_sent_at &&
-      !meta.manager_handoff_alerted_at &&
-      meta.onboarding_reminder_sent_at <= handoffCutoff
-    ) {
-      try {
-        if (applicant.source !== "danggeun_practice") {
-          await sendSlackOnboardingHandoff({
-            applicant_name: applicant.name,
-            applicant_phone: applicant.phone,
-            branch: applicant.branch1,
-          });
-        }
-      } catch (e) {
-        console.error("[onboarding-reminder cron] handoff slack fail", row.id, e);
-      }
-      const merged = mergeAgentState(state, {
-        meta: { manager_handoff_alerted_at: new Date().toISOString() },
+    // ─── 단계 B: 리마인더 발송 후 3h 경과 → 매니저 전화 인계 Slack (발송/억제 1회) ───
+    const handoffMeta = {
+      ...meta,
+      manager_handoff_alerted_at: row.manager_handoff_alerted_at
+        ?? meta.manager_handoff_alerted_at,
+      manager_handoff_slack_suppressed_at: row.manager_handoff_slack_suppressed_at
+        ?? meta.manager_handoff_slack_suppressed_at,
+    };
+
+    if (shouldAttemptOnboardingHandoff(handoffMeta, handoffCutoff)) {
+      const outcome = await processOnboardingHandoffAttempt({
+        practice: applicant.source === "danggeun_practice",
+        deliver: () => sendSlackOnboardingHandoff({
+          applicant_name: applicant.name,
+          applicant_phone: applicant.phone,
+          branch: applicant.branch1,
+        }),
+        mark: async (marker) => {
+          const markedAt = new Date().toISOString();
+          const { data: updated, error: updateError } = await supabase
+            .from("job_candidates")
+            .update(buildOnboardingHandoffMarkerUpdate(marker, markedAt))
+            .eq("id", row.id)
+            .eq("agent_stage", "onboarding")
+            .is("manager_handoff_alerted_at", null)
+            .is("manager_handoff_slack_suppressed_at", null)
+            .select("id")
+            .maybeSingle();
+          if (updateError) throw updateError;
+          if (!updated) throw new Error("candidate changed before handoff marker write");
+        },
       });
-      await supabase.from("job_candidates").update({ agent_state: merged }).eq("id", row.id);
-      results.push({ candidate_id: row.id as number, stage: "handoff", success: true });
+
+      if (outcome.kind === "delivered") {
+        results.push({ candidate_id: row.id as number, stage: "handoff", success: true });
+      } else if (outcome.kind === "suppressed") {
+        results.push({
+          candidate_id: row.id as number,
+          stage: "handoff",
+          success: true,
+          reason: outcome.reason === "practice" ? "practice — Slack suppressed" : "Slack globally disabled — suppressed",
+        });
+      } else {
+        console.error("[onboarding-reminder cron] handoff incomplete", row.id, outcome.error);
+        results.push({
+          candidate_id: row.id as number,
+          stage: "handoff",
+          success: false,
+          error: outcome.error,
+        });
+      }
       continue;
     }
 

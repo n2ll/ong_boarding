@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import useSWR from "swr";
-import { Link as LinkIcon, CheckCircle2, AlertCircle, Loader2, MapPin, Users, ToggleRight, RefreshCw, Settings2 } from "lucide-react";
+import { Link as LinkIcon, CheckCircle2, AlertCircle, BellOff, Loader2, MapPin, Users, ToggleRight, RefreshCw, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -16,6 +16,8 @@ import { settingsSectionFromLocation, settingsSectionHref, type SettingsSection 
 interface Integration {
   key: string;
   configured: boolean;
+  enabled?: boolean;
+  active?: boolean;
   kakao_ready?: boolean;
   required: string[];
 }
@@ -232,6 +234,7 @@ export function Settings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {integrations.map((it) => {
                     const meta = INTEGRATION_META[it.key] ?? { name: it.key, desc: "", badge: "?", badgeColor: "bg-muted text-gray-700" };
+                    const slackOff = it.key === "slack" && it.configured && it.enabled === false;
                     return (
                       <div key={it.key} className="p-5 border border-border-strong rounded-2xl flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
@@ -244,6 +247,11 @@ export function Settings() {
                                 {it.kakao_ready ? "알림톡(PFID) 준비됨" : "알림톡 PFID 미설정 — SMS만 가능"}
                               </div>
                             )}
+                            {slackOff && (
+                              <div className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">
+                                전역 OFF — 모든 Slack 알림이 중단돼요.
+                              </div>
+                            )}
                             {!it.configured && (
                               // 환경변수 이름은 실무자가 할 수 있는 일이 아니다 — 행동(개발팀 요청)을 안내하고
                               // 이름은 title에만 남겨 필요한 사람이 확인할 수 있게 한다.
@@ -253,9 +261,13 @@ export function Settings() {
                             )}
                           </div>
                         </div>
-                        {it.configured ? (
+                        {slackOff ? (
+                          <Badge variant="default" className="gap-1 px-2.5 py-1.5 text-[12px] rounded-lg">
+                            <BellOff size={13} /> 꺼짐
+                          </Badge>
+                        ) : it.configured ? (
                           <Badge variant="success" className="gap-1 px-2.5 py-1.5 text-[12px] rounded-lg">
-                            <CheckCircle2 size={13} /> 연결됨
+                            <CheckCircle2 size={13} /> {it.key === "slack" && it.active ? "사용 중" : "연결됨"}
                           </Badge>
                         ) : (
                           <Badge variant="warning" className="gap-1 px-2.5 py-1.5 text-[12px] rounded-lg">

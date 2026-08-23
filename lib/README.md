@@ -9,7 +9,7 @@
 | `supabase.ts` | Supabase 클라이언트 — `getBrowserClient()` (브라우저, anon key) / `createServiceClient()` (서버, service role) |
 | `claude.ts` | Anthropic API 직접 호출 — 공고 생성(`generateJobPosting`) / 추출(`extractJobInfo`). 둘 다 optional supabase 인자 받으면 ai_usage_daily에 비용 적재 |
 | `solapi.ts` | SOLAPI(SMS/알림톡) 발송. `sendSms` / `sendAlimtalk` / `sendNotification`(알림톡 우선 + SMS 폴백) |
-| `slack.ts` | Slack 알림 — 매니저 인계·온보딩 준비 완료·전화 인계 등. `SLACK_WEBHOOK_URL` 없으면 no-op |
+| `slack.ts` | Slack 알림 — 매니저 인계·온보딩 준비 완료·전화 인계 등. `SLACK_NOTIFICATIONS_ENABLED=1`과 웹훅이 모두 있어야 발송 |
 | `kakao-geocode.ts` | 카카오 지도 API로 주소 → 위경도. apply 폼·매니저 등록 시 사용 |
 | `scoring.ts` | 추천 받기용 후보 점수 계산 — 거리·차량 보유·최신성 가중치 |
 | `applicant-source.ts` | source 키(`danggeun`/`baemin`/`manual` 등) → 한글 라벨 매핑 |
