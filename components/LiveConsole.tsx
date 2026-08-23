@@ -60,6 +60,11 @@ import {
 } from "@/lib/admin/manager-panel-layout";
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
 import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
+import {
+  liveReplyQueuePosition,
+  liveReplySelectionAfterCompletion,
+  nextLiveReplyApplicantId,
+} from "@/lib/admin/live-reply-navigation";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
@@ -846,6 +851,43 @@ export function LiveConsole() {
     return orderLiveQueueItems(filteredChats, priorityOf, lastActivityAt);
   }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
 
+  const actionableReplyIds = useMemo(
+    () => visibleChats
+      .filter((chat) => isUnanswered(chat) || previewById[chat.id]?.pending_draft)
+      .map((chat) => chat.id),
+    [visibleChats, isUnanswered, previewById],
+  );
+  const replyQueuePosition = liveReplyQueuePosition(actionableReplyIds, selectedChatId);
+  const replyQueueEligible = activeTab === "all" && replyQueuePosition.current > 0;
+  const nextReplyApplicantId = replyQueueEligible
+    ? nextLiveReplyApplicantId(actionableReplyIds, selectedChatId)
+    : null;
+  const replyQueueContextKey = `${activeTab}:${search.trim().toLowerCase()}`;
+  const replyNavigationStateRef = useRef({
+    activeTab,
+    selectedChatId,
+    actionableReplyIds,
+    contextKey: replyQueueContextKey,
+  });
+  replyNavigationStateRef.current = {
+    activeTab,
+    selectedChatId,
+    actionableReplyIds,
+    contextKey: replyQueueContextKey,
+  };
+  const handleReplyQueueItemCompleted = useCallback((completedApplicantId: number, startedContextKey: string) => {
+    const current = replyNavigationStateRef.current;
+    if (current.activeTab !== "all" || current.contextKey !== startedContextKey) return;
+    const selection = liveReplySelectionAfterCompletion({
+      orderedActionableIds: current.actionableReplyIds,
+      selectedApplicantId: current.selectedChatId,
+      completedApplicantId,
+    });
+    if (!selection.applied) return;
+    setSelectedChatId(selection.applicantId);
+    if (selection.completedAll) toast.success("지금 답할 대화를 모두 처리했어요.");
+  }, []);
+
   const openApplicantFromInbox = useCallback(async (applicantId: number, tab: "all" | "intervention") => {
     setActiveTab(tab);
     await Promise.all([mutateApps(), mutateHandoffs()]);
@@ -1156,6 +1198,11 @@ export function LiveConsole() {
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
               {activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
               <ApplicantStatusBadge status={activeChat.status} className="px-2 py-1" />
+              {replyQueueEligible && (
+                <span className="rounded-lg border border-border-strong bg-background px-2 py-1 text-[12px] font-bold tabular-nums text-muted-foreground" aria-label={`답장 큐 ${replyQueuePosition.current}번째, 총 ${replyQueuePosition.total}건`}>
+                  답장 {replyQueuePosition.current} / {replyQueuePosition.total}
+                </span>
+              )}
               {!canDockDetail && (
                 <Button
                   variant="secondary"
@@ -1234,6 +1281,9 @@ export function LiveConsole() {
             copilotMode={copilotMode}
             smsOptOutAt={activeChat.sms_opt_out_at ?? null}
             onChanged={handleChanged}
+            onQueueItemCompleted={replyQueueEligible ? handleReplyQueueItemCompleted : undefined}
+            hasNextQueueItem={replyQueueEligible && nextReplyApplicantId != null}
+            queueContextKey={replyQueueContextKey}
             className="flex-1 min-h-0"
           />
         </div>

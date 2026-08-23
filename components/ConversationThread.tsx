@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback, useRef } from "react";
-import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban } from "lucide-react";
+import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban, ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
@@ -18,6 +18,7 @@ import {
   type ManualMessageAttempt,
 } from "@/lib/manual-message-send";
 import { conversationMessagesView } from "@/lib/conversation-thread-view";
+import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
 
 interface PendingDraft {
   id: string;
@@ -148,6 +149,12 @@ interface ConversationThreadProps {
   smsOptOutAt?: string | null;
   /** 발송·상태변경 후 부모(목록 등) 갱신용 */
   onChanged?: () => void;
+  /** 완전히 기록된 발송 뒤 부모의 다음 답장 대상으로 이동 */
+  onQueueItemCompleted?: (applicantId: number, contextKey: string) => void;
+  /** 현재 항목 뒤에 처리할 답장이 더 있는지 — 없으면 완료 액션으로 표시 */
+  hasNextQueueItem?: boolean;
+  /** 발송 시작 시점의 탭·검색 범위. 완료 시 범위가 달라졌으면 자동 이동하지 않는다. */
+  queueContextKey?: string;
   /** 폴링 주기(ms). 0이면 폴링 안 함 */
   pollMs?: number;
   /** 헤더(상태배지·AI토글) 표시 여부 — 패널 안에 임베드할 땐 끌 수 있음 */
@@ -186,6 +193,9 @@ export function ConversationThread({
   copilotMode = false,
   smsOptOutAt = null,
   onChanged,
+  onQueueItemCompleted,
+  hasNextQueueItem = false,
+  queueContextKey = "",
   pollMs = 12000,
   showHeader = true,
   className = "",
@@ -392,7 +402,7 @@ export function ConversationThread({
     }
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (advanceAfterSend = false) => {
     if (!inputValue.trim() || sending) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
@@ -453,6 +463,15 @@ export function ConversationThread({
         toast.info("이 공고에는 멈출 AI 응대가 없어 그대로예요 — 다른 공고에서 AI가 돌고 있다면 그 탭에서 꺼 주세요.");
       }
       onChanged?.();
+      if (shouldAdvanceLiveReplyAfterSend({
+        requested: advanceAfterSend,
+        resolutionKind: resolution.kind,
+        resumeRequired: false,
+        resumeSucceeded: false,
+        pauseOutcomeKind: pauseOutcome.kind,
+      })) {
+        onQueueItemCompleted?.(applicantId, queueContextKey);
+      }
     } catch {
       toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
@@ -461,7 +480,7 @@ export function ConversationThread({
   };
 
   // §6.5 원자 동작: 발송 성공 후 인계 큐의 'AI 재개'와 동일한 재개 API를 순차 호출.
-  const handleSendAndResume = async () => {
+  const handleSendAndResume = async (advanceAfterSend = false) => {
     if (!inputValue.trim() || sending) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
@@ -504,6 +523,7 @@ export function ConversationThread({
         toast.warning("문자는 발송됐지만 기록 상태를 확정하지 못했어요. AI 재개 결과도 별도로 확인해주세요.");
       }
       // 발송은 이미 성공한 시점 — 재개의 네트워크 예외가 바깥 catch의 "발송 실패"로 오표시되지 않게 분리
+      let resumeSucceeded = false;
       try {
         const resumeRes = await fetch("/api/admin/agent/resume", {
           method: "POST",
@@ -514,6 +534,7 @@ export function ConversationThread({
         if (!resumeRes.ok) {
           toast.error(resumeJson.error || "발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
         } else {
+          resumeSucceeded = true;
           setAgentStage(resumeJson.restored_stage ?? "exploration");
           toast.success("문자를 보내고 AI 응대를 재개했어요.");
         }
@@ -522,6 +543,15 @@ export function ConversationThread({
       }
       await loadMessages({ silent: true });
       onChanged?.();
+      if (shouldAdvanceLiveReplyAfterSend({
+        requested: advanceAfterSend,
+        resolutionKind: resolution.kind,
+        resumeRequired: true,
+        resumeSucceeded,
+        pauseOutcomeKind: "unknown",
+      })) {
+        onQueueItemCompleted?.(applicantId, queueContextKey);
+      }
     } catch {
       toast.error("서버 응답을 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
@@ -529,7 +559,7 @@ export function ConversationThread({
     }
   };
 
-  const handleSendDraft = async () => {
+  const handleSendDraft = async (advanceAfterSend = false) => {
     if (!pendingDraft || draftBusy) return;
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
@@ -608,6 +638,15 @@ export function ConversationThread({
         toast.warning("발송 요청 뒤 AI 상태가 바뀌어 자동 응대를 다시 끄지 않았어요. 현재 AI 토글 상태를 확인해주세요.");
       }
       onChanged?.();
+      if (shouldAdvanceLiveReplyAfterSend({
+        requested: advanceAfterSend,
+        resolutionKind: resolution.kind,
+        resumeRequired: false,
+        resumeSucceeded: false,
+        pauseOutcomeKind: pauseOutcome.kind,
+      })) {
+        onQueueItemCompleted?.(applicantId, queueContextKey);
+      }
     } catch {
       toast.error("서버 응답을 확인하지 못했어요. 같은 초안으로 다시 시도하면 중복 발송 없이 기존 상태를 확인합니다.");
     } finally {
@@ -851,8 +890,15 @@ export function ConversationThread({
             )}
             <div className="flex items-center justify-end gap-2 mt-3">
               <button onClick={handleIgnoreDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
-              <button onClick={handleSendDraft} disabled={draftBusy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-5 py-2 rounded-2xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
-                {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} 검수 후 발송
+              {onQueueItemCompleted && (
+                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftText.trim()} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
+                  검수 발송만
+                </button>
+              )}
+              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftText.trim()} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+                {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                {onQueueItemCompleted ? (hasNextQueueItem ? "검수 발송 후 다음" : "검수 발송하고 완료") : "검수 후 발송"}
+                {onQueueItemCompleted && !draftBusy && <ArrowRight size={15} />}
               </button>
             </div>
           </div>
@@ -876,12 +922,12 @@ export function ConversationThread({
             ))}
           </div>
           <div className="flex items-end gap-3">
-            <div className={`flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
+            <div className={`min-w-0 flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
                 aria-label="지원자에게 보낼 문자"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSendMessage(); } }}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void handleSendMessage(false); } }}
                 placeholder="지원자에게 발송될 문자를 입력하세요..."
                 className="w-full bg-transparent outline-none p-3.5 text-[14px] min-h-[56px]"
                 rows={2}
@@ -891,20 +937,36 @@ export function ConversationThread({
                   <span className={isLMS ? "text-error" : "text-info"}>{isLMS ? "LMS" : "SMS"}</span>
                   <span className="text-muted-foreground">{currentBytes} bytes</span>
                 </div>
-                <span className="text-[12px] text-muted-foreground">⌘+Enter 발송</span>
+                <span className="text-[12px] text-muted-foreground">Ctrl/⌘+Enter 발송</span>
               </div>
             </div>
-            <button aria-label="문자 발송" onClick={handleSendMessage} disabled={sending} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-[54px] h-[54px] rounded-lg bg-brand-yellow hover:bg-yellow-500 disabled:opacity-50 flex items-center justify-center shrink-0">{sending ? <Loader2 size={22} className="text-foreground animate-spin" /> : <Send size={22} className="text-foreground" />}</button>
+            <button
+              aria-label={onQueueItemCompleted ? "문자만 발송" : "문자 발송"}
+              title={onQueueItemCompleted ? "현재 문자를 발송하고 이 대화에 머뭅니다" : undefined}
+              onClick={() => void handleSendMessage(false)}
+              disabled={sending || !inputValue.trim()}
+              className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background h-[54px] min-w-[82px] rounded-lg border border-border-strong bg-card px-3.5 hover:bg-background disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0 text-[12px] font-bold text-gray-700"
+            >
+              {sending ? <Loader2 size={18} className="text-foreground animate-spin" /> : <><Send size={17} className="text-foreground" />{onQueueItemCompleted ? "발송만" : "발송"}</>}
+            </button>
+            {onQueueItemCompleted && !isPaused && (
+              <button
+                onClick={() => void handleSendMessage(true)}
+                disabled={sending || !inputValue.trim()}
+                title={hasNextQueueItem ? "발송이 완전히 기록된 뒤 다음 답장 대상으로 이동합니다" : "발송이 완전히 기록되면 답장 큐 처리를 마칩니다"}
+                className="h-[54px] rounded-lg bg-foreground px-4 text-[13px] font-bold text-white shadow-action outline-none transition-colors hover:bg-gray-800 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {hasNextQueueItem ? <>보내고 다음 <ArrowRight size={16} className="ml-1 inline" /></> : "보내고 완료"}
+              </button>
+            )}
             {isPaused && (
               <button
-                onClick={handleSendAndResume}
-                disabled={sending}
-                title="발송 성공 후 AI 자동 응대를 즉시 재개합니다"
-                className="h-[54px] px-3 rounded-lg text-[12px] font-bold bg-info-soft text-info-strong border border-info/25 hover:bg-info/25 disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => void handleSendAndResume(Boolean(onQueueItemCompleted))}
+                disabled={sending || !inputValue.trim()}
+                title={onQueueItemCompleted ? (hasNextQueueItem ? "발송과 AI 재개가 모두 성공한 뒤 다음 답장 대상으로 이동합니다" : "발송과 AI 재개가 모두 성공하면 답장 큐 처리를 마칩니다") : "발송 성공 후 AI 자동 응대를 즉시 재개합니다"}
+                className={`h-[54px] px-3 rounded-lg text-[12px] font-bold disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${onQueueItemCompleted ? "bg-foreground text-white hover:bg-gray-800 shadow-action" : "bg-info-soft text-info-strong border border-info/25 hover:bg-info/25"}`}
               >
-                보내고
-                <br />
-                AI 재개
+                {onQueueItemCompleted ? <>보내고 AI 재개<br />{hasNextQueueItem ? "후 다음" : "후 완료"}</> : <>보내고<br />AI 재개</>}
               </button>
             )}
           </div>
