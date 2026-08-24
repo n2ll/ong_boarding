@@ -17,6 +17,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "@/lib/jobs";
+import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
 
 export const dynamic = "force-dynamic";
 
@@ -50,11 +51,18 @@ export async function GET() {
     .order("created_at", { ascending: true })
     .limit(MAX_PENDING);
 
-  if (error) {
-    console.error("[confirm/pending]", error);
-    return NextResponse.json({ error: "조회 실패" }, { status: 500 });
+  const applicantsState = requiredRowsQueryState({ applicants: { data: apps, error } });
+  if (!applicantsState.ok) {
+    console.error("[confirm/pending] applicants", {
+      failed: applicantsState.failed,
+      cause: applicantsState.cause,
+    });
+    return NextResponse.json(
+      { error: "확정 검토 목록을 불러오지 못했습니다." },
+      { status: 500 },
+    );
   }
-  const applicants = (apps ?? []) as {
+  const applicants = applicantsState.rows.applicants as {
     id: number; name: string | null; phone: string | null;
     branch1: string | null; confirmed_branch: string | null; baemin_id: string | null;
   }[];
@@ -66,17 +74,28 @@ export async function GET() {
   const ids = applicants.map((a) => a.id);
 
   // 모든 후보 + 공고 (stage 필터 없이) — 라인 형태별 종료 stage가 달라 여기서 좁히지 않는다.
-  const { data: cands } = await supabase
+  const candidateResult = await supabase
     .from("job_candidates")
     .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, start_date, pickup_address, site_manager_id, status, closes_at, recruit_mode )")
     .in("applicant_id", ids)
     .order("created_at", { ascending: false });
+  const candidatesState = requiredRowsQueryState({ jobCandidates: candidateResult });
+  if (!candidatesState.ok) {
+    console.error("[confirm/pending] job_candidates", {
+      failed: candidatesState.failed,
+      cause: candidatesState.cause,
+    });
+    return NextResponse.json(
+      { error: "확정 검토 목록을 불러오지 못했습니다." },
+      { status: 500 },
+    );
+  }
 
   // 지원자별 확정 대상 공고 선택: 진행단계+비마감 우선 → 없으면 비마감 최신(null stage 포함).
   // 시스템 더미 공고·마감 공고는 대상에서 제외(마감된 공고로 확정 유도 방지).
   type Cand = { applicant_id: number; job_id: number; agent_stage: string | null; jobs: JobRow | null };
   const byApplicant = new Map<number, { primary: Cand | null; fallback: Cand | null }>();
-  for (const c of (cands ?? []) as unknown as Cand[]) {
+  for (const c of candidatesState.rows.jobCandidates as unknown as Cand[]) {
     const job = c.jobs ?? null;
     if (!job || isSystemJobTitle(job.title) || isJobEffectivelyClosed(job.status, job.closes_at)) continue;
     // abort(공고 단위 종료) 후보도 폴백으로 남긴다 — 대화가 중단됐어도 그 공고로 확정하는 것은
@@ -107,8 +126,19 @@ export async function GET() {
   );
   const smById = new Map<number, { name: string | null; phone: string | null }>();
   if (smIds.length > 0) {
-    const { data: sms } = await supabase.from("site_managers").select("id, name, phone").in("id", smIds);
-    for (const s of sms ?? []) {
+    const siteManagerResult = await supabase.from("site_managers").select("id, name, phone").in("id", smIds);
+    const siteManagersState = requiredRowsQueryState({ siteManagers: siteManagerResult });
+    if (!siteManagersState.ok) {
+      console.error("[confirm/pending] site_managers", {
+        failed: siteManagersState.failed,
+        cause: siteManagersState.cause,
+      });
+      return NextResponse.json(
+        { error: "확정 검토 목록을 불러오지 못했습니다." },
+        { status: 500 },
+      );
+    }
+    for (const s of siteManagersState.rows.siteManagers as { id: number; name: string | null; phone: string | null }[]) {
       smById.set(s.id as number, { name: (s.name as string) ?? null, phone: (s.phone as string) ?? null });
     }
   }

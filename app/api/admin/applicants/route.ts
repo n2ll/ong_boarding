@@ -9,6 +9,7 @@ import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { gatherLiveJobLinks } from "@/lib/candidate-links";
 import { gatherMessagePreviews, livePreviewTargetIds } from "@/lib/message-preview";
 import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
+import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
 
 export const dynamic = "force-dynamic";
 
@@ -225,12 +226,32 @@ export async function GET(req: NextRequest) {
         : gatherLiveJobLinks(supabase, ids),
       jobIds.length > 0
         ? supabase.from("jobs").select("id, recruit_mode").in("id", jobIds)
-        : Promise.resolve({ data: [] as { id: number; recruit_mode: string | null }[] }),
+        : Promise.resolve({ data: [] as { id: number; recruit_mode: string | null }[], error: null }),
     ]);
 
-    const jcs = jcRes.data;
+    let candidateRows = jcRes.data ?? [];
+    let jobRows = jobRes.data ?? [];
+    if (dashboardScope) {
+      const queryState = requiredRowsQueryState({
+        jobCandidates: jcRes,
+        jobs: jobRes,
+      });
+      if (!queryState.ok) {
+        console.error("[applicants] dashboard enrichment failed", {
+          failed: queryState.failed,
+          cause: queryState.cause,
+        });
+        return NextResponse.json(
+          { error: "대시보드 지원자 정보를 불러오지 못했습니다." },
+          { status: 500 },
+        );
+      }
+      candidateRows = queryState.rows.jobCandidates as typeof candidateRows;
+      jobRows = queryState.rows.jobs as typeof jobRows;
+    }
+
     const stageByApplicant = new Map<number, { stage: string | null; at: string | null }>();
-    for (const jc of jcs ?? []) {
+    for (const jc of candidateRows) {
       if (!stageByApplicant.has(jc.applicant_id as number)) {
         stageByApplicant.set(jc.applicant_id as number, {
           stage: jc.agent_stage as string | null,
@@ -265,7 +286,7 @@ export async function GET(req: NextRequest) {
     // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
     if (jobIds.length > 0) {
       const modeByJob = new Map<number, string | null>();
-      for (const j of jobRes.data ?? []) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
+      for (const j of jobRows) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
       withStage = withStage.map((a) => ({
         ...a,
         current_recruit_mode: typeof a.current_job_id === "number" ? modeByJob.get(a.current_job_id) ?? null : null,
