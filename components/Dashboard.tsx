@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { remoteSourcesState } from "@/lib/admin/remote-data-state";
 import { dashboardUrgencyLabel, isDashboardPrimaryPriority, orderDashboardUrgentItems, type DashboardUrgency } from "@/lib/admin/dashboard-priority";
+import { dashboardQueueStatus } from "@/lib/admin/dashboard-queue-status";
 
 interface UrgentItem {
   id: string;
@@ -108,8 +109,14 @@ export function Dashboard() {
       error: replyCounts.state === "error" ? true : undefined,
     },
   });
+  const queueStatus = dashboardQueueStatus(urgentSourcesState);
+  const queueStatusTone = {
+    success: { dot: "bg-success", text: "text-white/65" },
+    warning: { dot: "bg-warning", text: "text-warning-on-dark" },
+    error: { dot: "bg-error", text: "text-error-on-dark" },
+  }[queueStatus.tone];
   const urgentSourceLabels: Record<string, string> = {
-    applicants: "답장 대기",
+    applicants: "지원자 목록",
     inbox: "문자 분류",
     notifications: "사람 확인 필요",
     confirmations: "확정 검토",
@@ -374,12 +381,17 @@ export function Dashboard() {
               {scopeBranch ? `${scopeBranch} · 오늘의 채용 운영` : "오늘의 채용 운영"}
             </h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-white/65">
-              {/* 상태 dot·문구는 SWR 로딩/에러와 연동 — 하드코딩 '정상 가동' 아님 */}
-              <span className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${appsError ? "bg-error" : isLoading ? "bg-yellow-400" : "bg-success animate-pulse"}`}></span>
-                {appsError ? "불러오기 오류 — 데이터가 최신이 아닐 수 있어요" : isLoading ? "불러오는 중…" : "데이터 최신 상태"}
+              {/* 지원자 한 소스가 아니라 오늘의 업무 큐 전체 상태. 색상과 문구를 함께 바꾼다. */}
+              <span
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className={`flex items-center gap-1.5 ${queueStatusTone.text}`}
+              >
+                <span aria-hidden="true" className={`h-2 w-2 rounded-full ${queueStatusTone.dot}`} />
+                {queueStatus.label}
               </span>
-              <span>마지막 갱신: {syncLabel}</span>
+              <span>지원자 목록 갱신: {syncLabel}</span>
               {aiMode && (
                 <span
                   title="AI 응답 모드 — 변경은 지원자 운영 화면 상단 배너 또는 에이전트 두뇌에서"

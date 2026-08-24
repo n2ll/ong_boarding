@@ -8,7 +8,7 @@
  */
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { isAgentDisabled } from "@/lib/agent/kill-switch";
+import { notificationAiDisabled, notificationQueryState } from "@/lib/admin/notification-query-state";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +22,9 @@ type Notice = {
 
 export async function GET() {
   const supabase = createServiceClient();
+  const envForced = process.env.AGENT_DISABLED === "1";
 
-  const [inboxRes, inboxOldestRes, handoffRes, aiDisabled] = await Promise.all([
+  const [inboxRes, inboxOldestRes, handoffRes, killSwitchRes] = await Promise.all([
     supabase
       .from("messages")
       .select("id", { count: "exact", head: true })
@@ -48,16 +49,40 @@ export async function GET() {
       .eq("agent_stage", "paused")
       .order("updated_at", { ascending: true })
       .limit(1000),
-    isAgentDisabled(supabase),
+    // 운영 파이프라인의 fail-open 모드는 건드리지 않는다. 알림 집계만 별도로 오류를
+    // 확인해, 전역 중단 상태를 읽지 못한 상황을 정상(auto)으로 표시하지 않는다.
+    envForced
+      ? Promise.resolve({ data: null, error: null })
+      : supabase
+          .from("prompt_examples")
+          .select("body")
+          .eq("category", "system_message")
+          .eq("title", "agent_kill_switch")
+          .maybeSingle(),
   ]);
 
-  const inboxCount = inboxRes.count ?? 0;
+  const queryState = notificationQueryState({
+    inbox: inboxRes,
+    inboxOldest: inboxOldestRes,
+    handoffs: handoffRes,
+    killSwitch: killSwitchRes,
+  });
+  if (!queryState.ok) {
+    console.error("[notifications GET error]", {
+      failed: queryState.failed,
+      cause: queryState.cause,
+    });
+    return NextResponse.json({ error: "알림 집계를 불러오지 못했습니다." }, { status: 500 });
+  }
+
+  const inboxCount = queryState.inboxCount;
+  const aiDisabled = notificationAiDisabled(envForced, queryState.killSwitchBody);
   const dayDiff = (iso: string | null | undefined) =>
     iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)) : null;
-  const inboxOldestDays = dayDiff(inboxOldestRes.data?.[0]?.created_at as string | undefined);
+  const inboxOldestDays = dayDiff((queryState.inboxOldestRows[0] as { created_at?: string } | undefined)?.created_at);
 
   type PausedRow = { updated_at: string; agent_state: { meta?: { paused_at?: string; handoff_resolved?: unknown } } | null };
-  const pausedRows = ((handoffRes.data ?? []) as PausedRow[]).filter((r) => !r.agent_state?.meta?.handoff_resolved);
+  const pausedRows = (queryState.handoffRows as PausedRow[]).filter((r) => !r.agent_state?.meta?.handoff_resolved);
   const interventions = pausedRows.length;
   const interventionsOldestDays = pausedRows.length
     ? Math.max(...pausedRows.map((r) => dayDiff(r.agent_state?.meta?.paused_at ?? r.updated_at) ?? 0))

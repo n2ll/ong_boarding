@@ -1,55 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { motion } from "motion/react";
-import { Siren, Plus, X, Loader2, Save, Trash2, Wallet, ChevronDown, ChevronRight, Briefcase } from "lucide-react";
+import { Siren, Plus, X, Loader2, Save, Trash2, Wallet, ChevronDown, ChevronRight, Briefcase, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "./ui/modal";
 import { Button } from "./ui/button";
 import { TextField, TextareaField, SelectField } from "./ui/field";
 import { useConfirm } from "./ConfirmDialog";
 import { SOS_RESOLUTIONS, COST_CATEGORIES, kstMonth, type SosResolution, type CostCategory } from "@/lib/sos";
+import {
+  sosLedgerCardView,
+  type SosLedgerCostData as LedgerRes,
+  type SosLedgerCostRow as LedgerRow,
+  type SosLedgerSosData as SosRes,
+  type SosLedgerSosRow as SosRow,
+} from "@/lib/admin/sos-ledger-card-view";
 
 /**
  * 긴급 건 기록 카드 (내부 매니저용 · 기록 전용 — 발송 기능 없음).
  * sos_requests(발생~해결 로그) + cost_ledger(월 운영비)를 한 카드에서 수기 관리한다.
  */
-
-interface SosRow {
-  id: number;
-  created_at: string;
-  line_label: string;
-  region: string | null;
-  vehicle: string | null;
-  needed_count: number;
-  note: string | null;
-  status: "open" | "resolved" | "cancelled";
-  resolved_at: string | null;
-  resolution: SosResolution | null;
-  cost_krw: number | null;
-  duration_minutes: number | null;
-  resolution_note: string | null;
-}
-
-interface SosRes {
-  open?: SosRow[];
-  recent?: SosRow[];
-  month_summary?: { count: number; resolved: number; cost_sum: number };
-}
-
-interface LedgerRow {
-  id: number;
-  month: string;
-  category: string;
-  amount_krw: number;
-  memo: string | null;
-}
-
-interface LedgerRes {
-  month?: string;
-  rows?: LedgerRow[];
-  total?: number;
-}
 
 interface SosForm {
   line_label: string;
@@ -91,14 +62,27 @@ function parseOptInt(s: string): number | null | undefined {
 export function SosLedgerCard() {
   const router = useRouter();
   const confirm = useConfirm();
-  const { data: sosRes, mutate: mutateSos } = useSWR<SosRes>("/api/admin/sos");
-  const { data: ledgerRes, mutate: mutateLedger } = useSWR<LedgerRes>("/api/admin/cost-ledger");
-
-  const openRows = sosRes?.open ?? [];
-  const recentRows = sosRes?.recent ?? [];
-  const summary = sosRes?.month_summary;
-  const ledgerRows = ledgerRes?.rows ?? [];
-  const ledgerTotal = ledgerRes?.total ?? 0;
+  const ledgerDetailsId = useId();
+  const {
+    data: sosRes,
+    error: sosError,
+    mutate: mutateSos,
+    isValidating: sosValidating,
+  } = useSWR<SosRes>("/api/admin/sos");
+  const {
+    data: ledgerRes,
+    error: ledgerError,
+    mutate: mutateLedger,
+    isValidating: ledgerValidating,
+  } = useSWR<LedgerRes>("/api/admin/cost-ledger");
+  const view = sosLedgerCardView({ sosData: sosRes, sosError, ledgerData: ledgerRes, ledgerError });
+  const sosData = view.sos.state === "ready" || view.sos.state === "stale" ? view.sos.data : undefined;
+  const ledgerData = view.ledger.state === "ready" || view.ledger.state === "stale" ? view.ledger.data : undefined;
+  const openRows = sosData?.open ?? [];
+  const recentRows = sosData?.recent ?? [];
+  const summary = sosData?.month_summary;
+  const ledgerRows = ledgerData?.rows ?? [];
+  const ledgerTotal = ledgerData?.total ?? 0;
 
   // '경과' 표시가 화면에 머무는 동안 갱신되도록 1분 틱 (Dashboard 동기화 라벨과 동일 패턴)
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -203,7 +187,7 @@ export function SosLedgerCard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          month: ledgerRes?.month ?? kstMonth(),
+          month: ledgerData?.month ?? kstMonth(),
           category: ledgerForm.category,
           amount_krw: amount,
           memo: ledgerForm.memo.trim() || undefined,
@@ -248,6 +232,30 @@ export function SosLedgerCard() {
 
   const inputCls =
     "w-full px-4 py-3 border border-control-border rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring";
+  const retrySosButton = (
+    <Button
+      type="button"
+      variant="secondary"
+      size="sm"
+      onClick={() => void mutateSos()}
+      isLoading={sosValidating}
+      className="self-start shadow-none"
+    >
+      {sosValidating ? "갱신 중" : "다시 시도"}
+    </Button>
+  );
+  const retryLedgerButton = (
+    <Button
+      type="button"
+      variant="secondary"
+      size="sm"
+      onClick={() => void mutateLedger()}
+      isLoading={ledgerValidating}
+      className="self-start shadow-none"
+    >
+      {ledgerValidating ? "갱신 중" : "다시 시도"}
+    </Button>
+  );
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="flex flex-col rounded-panel border border-border-strong bg-card p-6">
@@ -266,13 +274,51 @@ export function SosLedgerCard() {
         </Button>
       </div>
 
+      {(view.sos.state === "error" || view.sos.state === "stale") && (
+        <div
+          role="alert"
+          className={`mb-4 flex flex-col gap-3 rounded-2xl border p-3.5 ${
+            view.sos.state === "error"
+              ? "border-error/30 bg-error-soft text-error-strong"
+              : "border-warning/30 bg-warning-soft text-warning-strong"
+          }`}
+        >
+          <div className="flex min-w-0 items-start gap-2.5">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <div className="text-[13px] font-bold">
+                {view.sos.state === "error" ? "긴급 건 현황을 불러오지 못했어요" : "긴급 건 업데이트에 실패했어요"}
+              </div>
+              <div className="mt-0.5 text-[12px] leading-relaxed">
+                {view.sos.state === "error"
+                  ? "진행 중 0건이라는 뜻이 아닙니다. 확인 전에는 빈 상태로 판단하지 마세요."
+                  : "아래에는 마지막으로 확인한 이전 값을 표시합니다."}
+              </div>
+            </div>
+          </div>
+          {retrySosButton}
+        </div>
+      )}
+
       {/* 이번 달 요약 */}
       <div className="mb-4 rounded-2xl bg-background/70 px-4 py-2.5 text-[13px] font-semibold text-gray-700">
-        이번 달 긴급 <b className="text-foreground">{summary?.count ?? 0}건</b> · 해결 <b className="text-foreground">{summary?.resolved ?? 0}건</b> · 건별 비용 <b className="text-foreground">{won(summary?.cost_sum ?? 0)}</b> + 월 운영비 <b className="text-foreground">{won(ledgerTotal)}</b>
+        이번 달 긴급 <b className="text-foreground">{summary ? `${summary.count}건` : "—"}</b>
+        <span aria-hidden="true"> · </span>
+        해결 <b className="text-foreground">{summary ? `${summary.resolved}건` : "—"}</b>
+        <span aria-hidden="true"> · </span>
+        건별 비용 <b className="text-foreground">{summary ? won(summary.cost_sum) : "—"}</b>
+        <span aria-hidden="true"> + </span>
+        월 운영비 <b className="text-foreground">{ledgerData ? won(ledgerTotal) : "—"}</b>
       </div>
 
       {/* 진행 중 건 */}
-      {openRows.length === 0 ? (
+      {view.sos.state === "loading" ? (
+        <div role="status" aria-live="polite" className="flex items-center justify-center gap-2 py-4 text-[13px] font-medium text-muted-foreground">
+          <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" /> 긴급 건 현황 확인 중…
+        </div>
+      ) : view.sos.state === "error" ? (
+        <div className="py-4 text-center text-[13px] font-medium text-error-strong">진행 중 긴급 건을 확인할 수 없어요.</div>
+      ) : openRows.length === 0 ? (
         <div className="py-4 text-center text-[13px] text-muted-foreground">진행 중인 긴급 건이 없어요. 결원·증차가 생기면 오른쪽 위 &lsquo;긴급 건 기록&rsquo;으로 남겨주세요.</div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -323,68 +369,102 @@ export function SosLedgerCard() {
 
       {/* 월 운영비 (접이식) */}
       <div className="mt-4 border-t border-muted pt-3">
-        <button
-          onClick={() => setLedgerOpen((o) => !o)}
-          className="flex min-h-9 w-full items-center justify-between rounded-lg px-1 text-[13px] font-bold text-gray-700 transition-colors hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="flex items-center gap-1.5"><Wallet size={14} className="text-info" /> {ledgerRes?.month ?? kstMonth()} 운영비 {won(ledgerTotal)}</span>
-          {ledgerOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
-        </button>
-
-        {ledgerOpen && (
-          <div className="mt-3 flex flex-col gap-2">
-            {ledgerRows.length === 0 && (
-              <div className="text-[12px] text-muted-foreground">이번 달 입력된 운영비가 없어요.</div>
-            )}
-            {ledgerRows.map((row) => (
-              <div key={row.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2">
-                <span className="truncate text-[12px] font-bold text-gray-700">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
-                <span className="shrink-0 text-[13px] font-extrabold text-foreground">{won(row.amount_krw)}</span>
-                <button
-                  onClick={() => handleDeleteLedger(row)}
-                  title="삭제"
-                  className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-error p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
-                >
-                  <Trash2 size={14} />
-                </button>
-                {row.memo && <span className="col-span-3 truncate text-[12px] text-muted-foreground">{row.memo}</span>}
-              </div>
-            ))}
-
-            {/* 추가 폼 */}
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-              <select
-                value={ledgerForm.category}
-                onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
-                className="min-w-[140px] flex-1 rounded-lg border border-control-border bg-white px-3 py-2 pr-8 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
-                  <option key={k} value={k}>{label}</option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min={1}
-                placeholder="금액(원)"
-                value={ledgerForm.amount_krw}
-                onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
-                className="w-[110px] flex-none rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <input
-                placeholder="메모 (선택)"
-                value={ledgerForm.memo}
-                onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
-                className="min-w-[140px] flex-[2_1_180px] rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <button
-                onClick={handleAddLedger}
-                disabled={saving}
-                className="flex min-h-10 flex-none items-center gap-1 rounded-lg bg-foreground px-3 py-2 text-[12px] font-bold text-white transition-colors hover:bg-gray-800 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Plus size={13} /> 추가
-              </button>
-            </div>
+        {view.ledger.state === "loading" ? (
+          <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-2 text-[13px] font-bold text-muted-foreground">
+            <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" /> 월 운영비 확인 중…
           </div>
+        ) : view.ledger.state === "error" ? (
+          <div role="alert" className="flex flex-col gap-3 rounded-2xl border border-error/30 bg-error-soft p-3.5 text-error-strong">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <div>
+                <div className="text-[13px] font-bold">월 운영비를 불러오지 못했어요</div>
+                <div className="mt-0.5 text-[12px] leading-relaxed">₩0이라는 뜻이 아닙니다. 긴급 건 현황과는 별도로 다시 확인해 주세요.</div>
+              </div>
+            </div>
+            {retryLedgerButton}
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => setLedgerOpen((o) => !o)}
+              aria-expanded={ledgerOpen}
+              aria-controls={ledgerDetailsId}
+              className="flex min-h-9 w-full items-center justify-between rounded-lg px-1 text-[13px] font-bold text-gray-700 transition-colors hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex items-center gap-1.5"><Wallet size={14} className="text-info" /> {ledgerData?.month ?? kstMonth()} 운영비 {won(ledgerTotal)}</span>
+              {ledgerOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+            </button>
+
+            {view.ledger.state === "stale" && (
+              <div role="alert" className="mt-2 flex flex-col gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-3.5 text-warning-strong">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <div>
+                    <div className="text-[13px] font-bold">운영비 업데이트에 실패했어요</div>
+                    <div className="mt-0.5 text-[12px] leading-relaxed">마지막으로 확인한 이전 값을 표시합니다.</div>
+                  </div>
+                </div>
+                {retryLedgerButton}
+              </div>
+            )}
+
+            {ledgerOpen && (
+              <div id={ledgerDetailsId} className="mt-3 flex flex-col gap-2">
+                {ledgerRows.length === 0 && (
+                  <div className="text-[12px] text-muted-foreground">이번 달 입력된 운영비가 없어요.</div>
+                )}
+                {ledgerRows.map((row) => (
+                  <div key={row.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2">
+                    <span className="truncate text-[12px] font-bold text-gray-700">{COST_CATEGORIES[row.category as CostCategory] ?? row.category}</span>
+                    <span className="shrink-0 text-[13px] font-extrabold text-foreground">{won(row.amount_krw)}</span>
+                    <button
+                      onClick={() => handleDeleteLedger(row)}
+                      title="삭제"
+                      className="after:absolute after:-inset-2 after:content-[''] relative text-muted-foreground hover:text-error p-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/40"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                    {row.memo && <span className="col-span-3 truncate text-[12px] text-muted-foreground">{row.memo}</span>}
+                  </div>
+                ))}
+
+                {/* 추가 폼 */}
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                  <select
+                    value={ledgerForm.category}
+                    onChange={(e) => setLedgerForm({ ...ledgerForm, category: e.target.value as CostCategory })}
+                    className="min-w-[140px] flex-1 rounded-lg border border-control-border bg-white px-3 py-2 pr-8 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {(Object.entries(COST_CATEGORIES) as [CostCategory, string][]).map(([k, label]) => (
+                      <option key={k} value={k}>{label}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="금액(원)"
+                    value={ledgerForm.amount_krw}
+                    onChange={(e) => setLedgerForm({ ...ledgerForm, amount_krw: e.target.value })}
+                    className="w-[110px] flex-none rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <input
+                    placeholder="메모 (선택)"
+                    value={ledgerForm.memo}
+                    onChange={(e) => setLedgerForm({ ...ledgerForm, memo: e.target.value })}
+                    className="min-w-[140px] flex-[2_1_180px] rounded-2xl border border-control-border px-3 py-2 text-[13px] focus:outline-none focus-visible:border-foreground/65 focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <button
+                    onClick={handleAddLedger}
+                    disabled={saving}
+                    className="flex min-h-10 flex-none items-center gap-1 rounded-lg bg-foreground px-3 py-2 text-[12px] font-bold text-white transition-colors hover:bg-gray-800 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Plus size={13} /> 추가
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
