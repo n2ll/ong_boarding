@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-type QueuePriority = "unanswered" | "draft" | "awaiting" | "rest";
+type QueuePriority = "unanswered" | "draft" | "send_attention" | "awaiting" | "rest";
 
 type QueueItem = {
   id: string;
@@ -35,8 +35,10 @@ test("live queue puts actionable waits oldest-first while keeping passive histor
     { id: "awaiting-new", priority: "awaiting", activityAt: "2026-08-20T00:00:00.000Z" },
     { id: "unanswered-new", priority: "unanswered", activityAt: "2026-08-21T00:00:00.000Z" },
     { id: "draft-new", priority: "draft", activityAt: "2026-08-22T00:00:00.000Z" },
+    { id: "send-attention-new", priority: "send_attention", activityAt: "2026-08-23T00:00:00.000Z" },
     { id: "unanswered-old", priority: "unanswered", activityAt: "2026-08-01T00:00:00.000Z" },
     { id: "draft-old", priority: "draft", activityAt: "2026-08-02T00:00:00.000Z" },
+    { id: "send-attention-old", priority: "send_attention", activityAt: "2026-08-02T12:00:00.000Z" },
     { id: "awaiting-old", priority: "awaiting", activityAt: "2026-08-03T00:00:00.000Z" },
     { id: "rest-new", priority: "rest", activityAt: "2026-08-23T00:00:00.000Z" },
   ];
@@ -49,6 +51,8 @@ test("live queue puts actionable waits oldest-first while keeping passive histor
       "unanswered-new",
       "draft-old",
       "draft-new",
+      "send-attention-old",
+      "send-attention-new",
       "awaiting-old",
       "awaiting-new",
       "rest-new",

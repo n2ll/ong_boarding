@@ -4,6 +4,7 @@ import {
   selectPendingDraftForJob,
   shouldLoadCandidateAgentState,
 } from "@/lib/admin/pending-draft-scope";
+import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export async function GET(
     }
 
     const supabase = createServiceClient();
+    const manualMessageAttentionPromise = loadManualMessageAttention(supabase, { applicantId });
 
     // job_id 필터 (선택) — 구인 에이전트 탭에서 공고별 컨텍스트 분리용
     const url = new URL(req.url);
@@ -192,6 +194,8 @@ export async function GET(
       }
     }
 
+    const manualMessageAttention = await manualMessageAttentionPromise;
+
     return NextResponse.json({
       data: messagesWithReasoning,
       messages: messagesWithReasoning,
@@ -201,6 +205,7 @@ export async function GET(
       agent_stage: agentStage,
       agent_state: agentState,
       jobs: jobsMap,
+      manual_message_attention: manualMessageAttention,
     });
   } catch (err) {
     console.error("[messages API error]", err);

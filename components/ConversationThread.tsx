@@ -35,6 +35,10 @@ import {
 } from "@/lib/conversation-thread-view";
 import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
 import { pendingDraftMatchesScope } from "@/lib/admin/pending-draft-scope";
+import {
+  manualMessageAttentionPresentation,
+  type ManualMessageAttentionCollection,
+} from "@/lib/admin/manual-message-attention";
 
 interface PendingDraft {
   id: string;
@@ -59,6 +63,20 @@ interface JobLabel {
   title: string;
   branch: string | null;
 }
+
+const EMPTY_MANUAL_MESSAGE_ATTENTION: ManualMessageAttentionCollection = {
+  state: "ready",
+  items: [],
+  totalCount: 0,
+  truncated: false,
+};
+
+const FAILED_MANUAL_MESSAGE_ATTENTION: ManualMessageAttentionCollection = {
+  state: "error",
+  items: [],
+  totalCount: null,
+  truncated: false,
+};
 
 /** 재컨택 맥락 이벤트(pool_events) — 스레드에 인라인 시스템 칩으로 병합 표시 */
 interface PoolEvent {
@@ -225,6 +243,9 @@ export function ConversationThread({
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [events, setEvents] = useState<PoolEvent[]>([]);
+  const [manualMessageAttention, setManualMessageAttention] = useState<ManualMessageAttentionCollection>(
+    EMPTY_MANUAL_MESSAGE_ATTENTION,
+  );
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [jobsMap, setJobsMap] = useState<Record<number, JobLabel>>({});
   const [agentStage, setAgentStage] = useState<string | null>(null);
@@ -340,6 +361,12 @@ export function ConversationThread({
         ) return;
         setMessages((json.messages ?? []) as ApiMessage[]);
         setEvents((json.events ?? []) as PoolEvent[]);
+        const nextManualMessageAttention = json.manual_message_attention as ManualMessageAttentionCollection | undefined;
+        setManualMessageAttention(
+          nextManualMessageAttention?.state === "ready" || nextManualMessageAttention?.state === "error"
+            ? nextManualMessageAttention
+            : FAILED_MANUAL_MESSAGE_ATTENTION,
+        );
         setAccessToken((json.access_token as string | null) ?? null);
         setJobsMap((json.jobs ?? {}) as Record<number, JobLabel>);
         setAgentStage(json.agent_stage ?? null);
@@ -360,6 +387,9 @@ export function ConversationThread({
           || threadScopeIdentityRef.current.revision !== requestedScopeRevision
           || messageLoadSequenceRef.current !== requestSequence
         ) return;
+        // 메시지는 마지막 성공 스냅샷을 유지해도, 재발송 안전 신호는 현재 조회 실패를
+        // 과거의 ready/0으로 덮으면 안 된다. 다음 성공 폴링 전까지 fail-closed로 표시한다.
+        setManualMessageAttention(FAILED_MANUAL_MESSAGE_ATTENTION);
         if (
           loadedScopeIdentityRef.current?.key !== requestedScopeKey
           || loadedScopeIdentityRef.current.revision !== requestedScopeRevision
@@ -397,6 +427,18 @@ export function ConversationThread({
   const currentMessages = scopeReady ? messages : [];
   const currentEvents = scopeReady ? events : [];
   const currentJobsMap = scopeReady ? jobsMap : {};
+  const currentManualMessageAttention = scopeReady ? manualMessageAttention : null;
+  const manualMessageAttentionView = currentManualMessageAttention?.state === "ready"
+    ? manualMessageAttentionPresentation(currentManualMessageAttention.items)
+    : null;
+  const oldestManualMessageAttentionAt = currentManualMessageAttention?.state === "ready"
+    ? currentManualMessageAttention.items.reduce<string | null>((oldest, item) => {
+        if (oldest === null) return item.createdAt;
+        return new Date(item.createdAt).getTime() < new Date(oldest).getTime()
+          ? item.createdAt
+          : oldest;
+      }, null)
+    : null;
   const agentPresentation = conversationAgentPresentation({
     scopeReady,
     draftScope,
@@ -643,6 +685,7 @@ export function ConversationThread({
         if (resolution.kind === "unknown") {
           toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
           await loadMessages({ silent: true });
+          onChanged?.();
         } else {
           toast.error(json.error || "문자 발송에 실패했어요");
         }
@@ -734,6 +777,7 @@ export function ConversationThread({
           if (mountedRef.current) {
             toast.warning(json.error || "발송 결과를 확인할 수 없어 AI를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
             await loadMessages({ silent: true });
+            onChanged?.();
           }
         } else {
           if (mountedRef.current) toast.error(json.error || "문자 발송에 실패했어요");
@@ -850,6 +894,7 @@ export function ConversationThread({
         if (resolution.kind === "unknown") {
           toast.warning(json.error || "발송 결과를 확인할 수 없어 중복 발송을 막았습니다. 초안을 다시 보내지 말고 대화 내역을 확인해주세요.");
           await loadMessages({ silent: true });
+          onChanged?.();
         } else {
           toast.error(json.error || "발송에 실패했어요");
           if (res.status === 409) await loadMessages({ silent: true });
@@ -1133,6 +1178,57 @@ export function ConversationThread({
           );
         })}
       </div>
+
+      {manualMessageAttentionView && currentManualMessageAttention?.state === "ready" && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="shrink-0 border-t border-warning/35 bg-warning-soft px-5 py-3"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle aria-hidden="true" size={17} className="mt-0.5 shrink-0 text-warning-strong" />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-extrabold text-warning-strong">
+                <span>{manualMessageAttentionView.badgeLabel}</span>
+                <span className="rounded-full border border-warning/35 bg-card px-1.5 py-0.5 text-[12px] tabular-nums">
+                  {currentManualMessageAttention.totalCount ?? manualMessageAttentionView.count}건
+                </span>
+              </div>
+              <p className="mt-1 max-w-3xl text-[12px] font-semibold leading-5 text-gray-800">
+                {manualMessageAttentionView.description}
+              </p>
+              <p className="max-w-3xl text-[12px] font-semibold leading-5 text-gray-800">
+                이 지원자의 전체 공고 기준입니다. 시스템은 자동으로 재발송하지 않으니, 같은 내용을 새로 보내지 말고 대화 흐름을 먼저 확인해 주세요.
+              </p>
+              {oldestManualMessageAttentionAt && (
+                <p className="mt-0.5 text-[12px] text-warning-strong">
+                  가장 오래된 요청 · {fmtDateLabel(oldestManualMessageAttentionAt)} {fmtTime(oldestManualMessageAttentionAt)}
+                  {currentManualMessageAttention.truncated ? " · 일부 요청만 표시 중" : ""}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentManualMessageAttention?.state === "error" && (
+        <div
+          role="alert"
+          aria-atomic="true"
+          className="shrink-0 border-t border-error/30 bg-error-soft px-5 py-3"
+        >
+          <div className="flex items-start gap-2.5 text-error-strong">
+            <AlertTriangle aria-hidden="true" size={17} className="mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[13px] font-extrabold">발송 확인 상태를 불러오지 못했어요</div>
+              <p className="mt-1 text-[12px] font-semibold leading-5">
+                건수를 확인할 수 없습니다. 상태가 확인될 때까지 같은 문자를 새로 보내지 마세요.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI 초안 검수 카드 */}
       {scopedPendingDraft && (

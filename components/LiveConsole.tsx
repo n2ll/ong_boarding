@@ -61,6 +61,12 @@ import {
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
 import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
 import {
+  indexManualMessageAttention,
+  manualMessageAttentionRemoteState,
+  type ManualMessageAttentionCollection,
+  type ManualMessageAttentionItem,
+} from "@/lib/admin/manual-message-attention";
+import {
   liveReplyQueuePosition,
   liveReplySelectionAfterCompletion,
   nextLiveReplyApplicantId,
@@ -104,6 +110,12 @@ interface LastMessagePreview {
   last_inbound_at?: string | null;
   pending_draft?: boolean;
   pending_draft_job_id?: number | null;
+}
+
+interface LiveApplicantsResponse {
+  data?: Applicant[];
+  previews?: Record<number, LastMessagePreview>;
+  manual_message_attention?: ManualMessageAttentionCollection;
 }
 
 interface Handoff {
@@ -214,6 +226,7 @@ const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
 // 빈 미리보기 — 매 렌더 새 객체를 만들면 이 값에 의존하는 useMemo가 계속 무효화된다.
 const EMPTY_PREVIEWS: Record<number, LastMessagePreview> = {};
+const EMPTY_MANUAL_MESSAGE_ATTENTION: ManualMessageAttentionItem[] = [];
 
 // '답 대기'(표시 라벨 '상대 답 기다림') 판정: 마지막 메시지가 매니저 수동 발신(14일 내) — 내가 보내고 회신을 기다리는 대화.
 // 캠페인 벌크 핑(system-bulk)·AI 발송은 서버(preview API)가 manual_outbound=false로 걸러준다.
@@ -376,7 +389,7 @@ export function LiveConsole() {
   // 갱신되니 화면은 살아 있어 보이고, 새로 답장한 사람만 안 뜬다. 다른 창을 갔다 와도
   // 갱신되지 않는다(전역 revalidateOnFocus: false). 백스톱으로 60초를 둔다 —
   // 위 scope=live로 응답이 22KB(gzip)로 줄어서 이제 이 주기를 감당할 수 있다(예전 95KB).
-  const { data: appsData, error: appsError, isValidating: appsValidating, mutate: mutateApps } = useSWR<{ data?: Applicant[]; previews?: Record<number, LastMessagePreview> }>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
+  const { data: appsData, error: appsError, isValidating: appsValidating, mutate: mutateApps } = useSWR<LiveApplicantsResponse>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
   const appsState = remoteCollectionState({ items: appsData?.data, error: appsError });
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
@@ -393,12 +406,29 @@ export function LiveConsole() {
   // 명단이 **서로 달랐다** — 사람이 나타나고 사라지고, 미리보기 줄과 배지가 뒤늦게 붙었다.
   // 서버가 한 응답에 같이 실어 보내므로 첫 렌더부터 최종 명단이 그려진다.
   const previewById = appsData?.previews ?? EMPTY_PREVIEWS;
+  // 발송 결과가 불명확하거나 대화 기록 복구 중인 수동 SMS는 messages 행이 없을 수 있다.
+  // durable outbox 집계를 별도 안전 신호로 유지해, 대화 목록 조건과 무관하게 계속 발견할 수 있게 한다.
+  // collection 자체가 빠지거나 조회에 실패하면 0건으로 간주하지 않는다.
+  const manualMessageAttention = appsData?.manual_message_attention;
+  const manualMessageAttentionState = manualMessageAttentionRemoteState(appsState, manualMessageAttention);
+  const manualMessageAttentionItems = manualMessageAttention?.items ?? EMPTY_MANUAL_MESSAGE_ATTENTION;
+  const manualMessageAttentionByApplicant = useMemo(
+    () => indexManualMessageAttention(manualMessageAttentionItems),
+    [manualMessageAttentionItems],
+  );
+  const manualMessageAttentionCount = manualMessageAttentionState === "ready"
+    ? manualMessageAttention?.totalCount ?? manualMessageAttentionItems.length
+    : null;
+  const manualMessageAttentionIsClear = manualMessageAttentionState === "ready"
+    && manualMessageAttentionCount === 0
+    && manualMessageAttention?.truncated !== true;
   // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음'(풀 응답)
   // 또는 '마지막 메시지가 매니저 수동 발신'(답 대기) — 발신만 하고 회신을 기다리는 대화(빠른 컨택 등)가
   // 목록에서 사라지지 않는다. previewById에는 서버가 합집합으로 찾아준 답 대기 건도 들어있다.
   const chats = useMemo(
     () =>
       (appsData?.data ?? []).filter((a) => {
+        if (manualMessageAttentionByApplicant.has(a.id)) return true;
         if (isBaseChat(a)) return true;
         const pv = previewById[a.id];
         if (!pv) return false;
@@ -410,7 +440,7 @@ export function LiveConsole() {
         if (li && Date.now() - new Date(li).getTime() < RECENT_INBOUND_MS) return true;
         return isAwaitingPreview(pv);
       }),
-    [appsData, previewById]
+    [appsData, manualMessageAttentionByApplicant, previewById]
   );
   const loadingList = appsState === "loading" && chats.length === 0;
 
@@ -908,6 +938,7 @@ export function LiveConsole() {
     const priorityOf = (c: Applicant): LiveQueuePriority => {
       if (isUnanswered(c)) return "unanswered";
       if (previewById[c.id]?.pending_draft) return "draft";
+      if (manualMessageAttentionByApplicant.has(c.id)) return "send_attention";
       if (isAwaiting(c)) return "awaiting";
       return "rest";
     };
@@ -923,8 +954,17 @@ export function LiveConsole() {
       return true;
     });
 
-    return orderLiveQueueItems(filteredChats, priorityOf, lastActivityAt);
-  }, [chats, search, isUnanswered, isAwaiting, previewById, lastActivityAt]);
+    // 발송 확인 전용 행은 outbox가 오래된 순으로 처리한다. 같은 지원자에게 미답/초안이
+    // 함께 있으면 그 업무의 기존 활동 시각을 유지해 답장 큐 정렬을 바꾸지 않는다.
+    const queueActivityAt = (chat: Applicant) => {
+      if (priorityOf(chat) === "send_attention") {
+        return manualMessageAttentionByApplicant.get(chat.id)?.[0]?.createdAt ?? null;
+      }
+      return lastActivityAt(chat);
+    };
+
+    return orderLiveQueueItems(filteredChats, priorityOf, queueActivityAt);
+  }, [chats, search, isUnanswered, isAwaiting, manualMessageAttentionByApplicant, previewById, lastActivityAt]);
 
   const actionableReplyIds = useMemo(
     () => visibleChats
@@ -1003,6 +1043,23 @@ export function LiveConsole() {
         </div>
       </div>
 
+      {manualMessageAttentionState === "error" ? (
+        <div role="alert" className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-error/30 bg-error-soft px-4 py-2 text-[12px] text-error-strong lg:px-5">
+          <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
+          <span className="font-extrabold">발송 확인 건수를 확인할 수 없음</span>
+          <span className="font-semibold">상태 확인 전 같은 문자를 새로 보내지 마세요.</span>
+        </div>
+      ) : manualMessageAttentionState === "ready" && (manualMessageAttentionCount ?? 0) > 0 ? (
+        <div role="status" aria-live="polite" aria-atomic="true" className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-warning/35 bg-warning-soft px-4 py-2 text-[12px] text-warning-strong lg:px-5">
+          <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
+          <span className="font-extrabold">발송 확인 {manualMessageAttentionCount}건 · 재발송 금지</span>
+          <span className="font-semibold">전체 탭에서 해당 지원자를 확인해 주세요.</span>
+          {manualMessageAttention?.truncated && (
+            <span className="font-semibold">일부 항목은 목록에 표시할 수 없습니다.</span>
+          )}
+        </div>
+      ) : null}
+
       {activeTab === "inbox" ? (
         <div id="operations-panel" role="tabpanel" aria-labelledby="operations-tab-inbox" className="flex min-h-0 flex-1">
           <Inbox embedded onOpenApplicant={openApplicantFromInbox} onQueueChanged={() => { void mutateOperationsNotices(); }} />
@@ -1021,16 +1078,18 @@ export function LiveConsole() {
             </div>
           )}
           {activeTab === "all" ? (
-            <div className="flex min-h-8 items-center justify-between gap-2">
-              <div className={`flex min-w-0 items-center gap-1.5 text-[12px] font-bold ${queueSummary.kind === "error" ? "text-error-strong" : queueSummary.kind === "attention" ? "text-priority-critical-ink" : queueSummary.kind === "clear" ? "text-success-strong" : "text-muted-foreground"}`}>
-                {queueSummary.kind === "clear" ? <CheckCircle2 size={14} className="shrink-0" /> : queueSummary.kind === "attention" ? <Clock3 size={14} className="shrink-0" /> : null}
-                <span className="truncate">
-                  {queueSummary.kind === "loading" && "답할 대화를 확인하는 중…"}
-                  {queueSummary.kind === "error" && "답할 대화 수를 확인할 수 없어요"}
-                  {queueSummary.kind === "attention" && `지금 답할 대화 ${queueSummary.count}건 · 위부터 처리`}
-                  {queueSummary.kind === "clear" && "지금 답할 대화 없음"}
-                </span>
-                {appsValidating && !loadingList && chats.length > 0 && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-info" title="최신 데이터로 갱신 중" />}
+            <div className="flex min-h-8 items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center" aria-live="polite">
+                <div className={`flex min-w-0 items-center gap-1.5 text-[12px] font-bold ${queueSummary.kind === "error" ? "text-error-strong" : queueSummary.kind === "attention" ? "text-priority-critical-ink" : queueSummary.kind === "clear" && manualMessageAttentionIsClear ? "text-success-strong" : "text-muted-foreground"}`}>
+                  {queueSummary.kind === "clear" && manualMessageAttentionIsClear ? <CheckCircle2 size={14} className="shrink-0" /> : queueSummary.kind === "attention" ? <Clock3 size={14} className="shrink-0" /> : null}
+                  <span className="truncate">
+                    {queueSummary.kind === "loading" && "답할 대화를 확인하는 중…"}
+                    {queueSummary.kind === "error" && "답할 대화 수를 확인할 수 없어요"}
+                    {queueSummary.kind === "attention" && `지금 답할 대화 ${queueSummary.count}건 · 위부터 처리`}
+                    {queueSummary.kind === "clear" && "지금 답할 대화 없음"}
+                  </span>
+                  {appsValidating && !loadingList && chats.length > 0 && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-info" title="최신 데이터로 갱신 중" />}
+                </div>
               </div>
               <Link href="/pipeline" className="flex min-h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring wide:hidden">
                 대량 발송 <ArrowRight size={13} />
@@ -1213,7 +1272,11 @@ export function LiveConsole() {
             <div className="text-[13px] text-muted-foreground p-4 text-center">
               {search.trim()
                 ? "검색 결과가 없어요 — 이름·전화번호를 확인해주세요"
-                : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
+                : manualMessageAttentionState === "error"
+                  ? "진행 대화는 없지만 발송 확인 상태는 불러오지 못했어요"
+                  : (manualMessageAttentionCount ?? 0) > 0
+                    ? "목록에 표시할 수 없는 발송 확인 항목이 있어요 — 위 경고를 확인해주세요"
+                    : "진행 중인 대화가 없어요 — 새 답장이 오면 여기 떠요"}
             </div>
           )}
           {visibleChats.map((chat, idx) => {
@@ -1221,6 +1284,9 @@ export function LiveConsole() {
             const intervention = isUnanswered(chat);
             const pv = previewById[chat.id];
             const turn = whoseTurn(chat, pv);
+            const attentionItems = manualMessageAttentionByApplicant.get(chat.id) ?? EMPTY_MANUAL_MESSAGE_ATTENTION;
+            const attentionDrivesOrder = attentionItems.length > 0 && !intervention && !pv?.pending_draft;
+            const cardActivityAt = attentionDrivesOrder ? attentionItems[0]?.createdAt : lastActivityAt(chat);
             // 메타(유입·지점·가용성)는 회색 한 줄로 강등 — 색 배지 경쟁을 없앤다. 수신거부는 turn 배지가 대신 표시.
             const src = chat.source ? SOURCE_LABEL[chat.source] ?? chat.source : null;
             const branch = chat.branch || chat.branch1 || null;
@@ -1239,7 +1305,9 @@ export function LiveConsole() {
                       <div className="text-[14px] font-bold text-foreground">{chat.name}</div>
                     </div>
                   </div>
-                  <div className={`text-[12px] font-semibold ${intervention ? "text-error" : "text-muted-foreground"}`}>{intervention && "⏱ "}{relTime(lastActivityAt(chat))}</div>
+                  <div className={`text-[12px] font-semibold ${intervention ? "text-error" : attentionDrivesOrder ? "text-warning-strong" : "text-muted-foreground"}`}>
+                    {intervention ? "⏱ " : attentionDrivesOrder ? "확인 필요 · " : ""}{relTime(cardActivityAt)}
+                  </div>
                 </div>
                 {pv?.body ? (
                   <div className="text-[13px] line-clamp-1 mb-2">
@@ -1249,12 +1317,18 @@ export function LiveConsole() {
                 ) : (
                   <div className="text-[13px] text-gray-700 line-clamp-1 mb-2">{chat.status}{chat.agent_stage ? ` · ${STAGE_KO[chat.agent_stage] ?? chat.agent_stage}` : ""}</div>
                 )}
-                {/* 상태 배지 1개(누구 차례냐) + 회색 메타 한 줄 — 색 배지 경쟁 제거 */}
-                <div className="flex items-center gap-2">
+                {/* 업무 상태 배지는 하나로 유지하고, 재발송 방지 안전 신호만 희소하게 병기한다. */}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <Badge className={`shrink-0 px-2 py-1 ${turn.cls}`}>
                     {turn.label}{turn.sub && <span className="font-semibold opacity-70"> · {turn.sub}</span>}
                   </Badge>
-                  {metaLine && <span className="text-[12px] text-muted-foreground truncate">{metaLine}</span>}
+                  {attentionItems.length > 0 && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-warning/35 bg-warning-soft px-2 py-1 text-[12px] font-bold text-warning-strong">
+                      <AlertTriangle aria-hidden="true" size={12} />
+                      발송 확인 필요{attentionItems.length > 1 ? ` · ${attentionItems.length}건` : ""}
+                    </span>
+                  )}
+                  {metaLine && <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{metaLine}</span>}
                 </div>
               </button>
             );
@@ -1412,6 +1486,28 @@ export function LiveConsole() {
                 .filter((c) => previewById[c.id]?.direction === "inbound")
                 .sort((a, b) => new Date(lastActivityAt(a) ?? 0).getTime() - new Date(lastActivityAt(b) ?? 0).getTime());
               const oldest = waiting[0];
+              if (!oldest && manualMessageAttentionState === "error") {
+                return (
+                  <div role="alert" className="flex items-center justify-center gap-1.5 rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[13px] font-bold text-error-strong">
+                    <AlertTriangle aria-hidden="true" size={15} className="shrink-0" />
+                    건수를 확인할 수 없어요 · 상태 확인 전 같은 문자를 새로 보내지 마세요
+                  </div>
+                );
+              }
+              if (!oldest && manualMessageAttentionState === "ready" && (manualMessageAttentionCount ?? 0) > 0) {
+                return (
+                  <div role="status" className="rounded-xl border border-warning/35 bg-warning-soft px-3 py-2 text-[13px] text-warning-strong">
+                    <div className="flex items-center justify-center gap-1.5 font-bold">
+                      <AlertTriangle aria-hidden="true" size={15} className="shrink-0" />
+                      발송 확인 {manualMessageAttentionCount}건 · 재발송 금지
+                    </div>
+                    <div className="mt-0.5 text-[12px] font-semibold">왼쪽 목록의 ‘발송 확인 필요’ 표시를 확인해 주세요.</div>
+                    {manualMessageAttention?.truncated && (
+                      <div className="mt-0.5 text-[12px] font-semibold">일부 발송 확인 항목을 목록에 표시할 수 없습니다.</div>
+                    )}
+                  </div>
+                );
+              }
               if (!oldest) return <div className="text-[13px] text-muted-foreground">지금 답을 기다리는 대화가 없어요 👍</div>;
               const d = Math.max(0, Math.floor((Date.now() - new Date(lastActivityAt(oldest) ?? 0).getTime()) / 86400000));
               return (

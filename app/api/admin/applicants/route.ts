@@ -8,6 +8,7 @@ import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { gatherLiveJobLinks } from "@/lib/candidate-links";
 import { gatherMessagePreviews, RECENT_MANUAL_MS } from "@/lib/message-preview";
+import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
 
 export const dynamic = "force-dynamic";
 
@@ -176,6 +177,9 @@ export async function GET(req: NextRequest) {
   const liveScope = scope === "live";
   const rollupScope = scope === "rollup";
   const dashboardScope = scope === "dashboard";
+  const manualMessageAttentionPromise = liveScope
+    ? loadManualMessageAttention(supabase)
+    : null;
 
   let q = supabase
     .from("applicants")
@@ -336,8 +340,13 @@ export async function GET(req: NextRequest) {
     targets.map((a) => a.id),
     { withManual: true },
   );
+  const manualMessageAttention = await manualMessageAttentionPromise!;
 
-  return NextResponse.json({ data: safe, previews });
+  return NextResponse.json({
+    data: safe,
+    previews,
+    manual_message_attention: manualMessageAttention,
+  });
 }
 
 /**

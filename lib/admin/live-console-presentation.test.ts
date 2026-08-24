@@ -51,10 +51,20 @@ test("operational signals do not borrow hiring-stage colors", () => {
 test("queue health uses operational success and info tones", () => {
   assert.match(
     live,
-    /queueSummary\.kind === "clear" \? "text-success-strong"/,
+    /queueSummary\.kind === "clear" && manualMessageAttentionIsClear \? "text-success-strong"/,
   );
   assert.match(
     live,
     /appsValidating[\s\S]*?animate-pulse rounded-full bg-info/,
   );
+});
+
+test("manual send attention remains visible across every operations tab", () => {
+  const sharedHeader = live.slice(
+    live.indexOf('<div className="shrink-0 border-b border-border-strong bg-card px-4 py-2.5 lg:px-5">'),
+    live.indexOf('{activeTab === "inbox" ? ('),
+  );
+
+  assert.match(sharedHeader, /manualMessageAttentionState === "error"/);
+  assert.match(sharedHeader, /발송 확인 \{manualMessageAttentionCount\}건 · 재발송 금지/);
 });

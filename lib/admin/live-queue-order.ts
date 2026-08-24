@@ -1,8 +1,9 @@
-export type LiveQueuePriority = "unanswered" | "draft" | "awaiting" | "rest";
+export type LiveQueuePriority = "unanswered" | "draft" | "send_attention" | "awaiting" | "rest";
 
 const PRIORITY_RANK: Record<LiveQueuePriority, number> = {
-  unanswered: 3,
-  draft: 2,
+  unanswered: 4,
+  draft: 3,
+  send_attention: 2,
   awaiting: 1,
   rest: 0,
 };
