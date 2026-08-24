@@ -411,7 +411,7 @@ export function Dashboard() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
               오늘의 할 일
-              {urgentSourcesState.state === "ready" && urgent.length > 0 && <Badge className="tabular-nums">{urgent.length}</Badge>}
+              {urgentSourcesState.state === "ready" && urgent.length > 0 && <Badge className="tabular-nums">업무 유형 {urgent.length}개</Badge>}
               {urgentSourcesState.state !== "ready" && <Badge>{urgentSourcesState.state === "error" ? "일부 확인 불가" : "확인 중"}</Badge>}
             </h2>
             {/* 목록과 동일한 우선순위 정렬의 첫 항목을 연다. 차단 상태 우선, 같은 단계는 최장 대기 순. */}
@@ -432,14 +432,14 @@ export function Dashboard() {
             )}
           </div>
 
-          <div className="grid flex-1 grid-cols-1 gap-3 wide:grid-cols-3 [&>*]:shrink-0">
+          <div className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3 [&>*]:shrink-0">
             {urgentSourcesState.state === "loading" && (
-              <div className="flex items-center gap-2 rounded-lg border border-border-strong bg-background p-4 text-[13px] font-medium text-muted-foreground wide:col-span-3">
+              <div className="flex items-center gap-2 rounded-lg border border-border-strong bg-background p-4 text-[13px] font-medium text-muted-foreground lg:col-span-2 xl:col-span-3">
                 <RefreshCw size={15} className="animate-spin" /> 업무 큐를 모두 확인하는 중이에요…
               </div>
             )}
             {urgentSourcesState.state === "error" && (
-              <div role="alert" className="rounded-lg border border-error/30 bg-error-soft p-4 text-error-strong wide:col-span-3">
+              <div role="alert" className="rounded-lg border border-error/30 bg-error-soft p-4 text-error-strong lg:col-span-2 xl:col-span-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-1.5 text-[14px] font-bold"><AlertTriangle size={15} /> 일부 업무 큐를 확인하지 못했어요</div>
@@ -452,7 +452,7 @@ export function Dashboard() {
               </div>
             )}
             {urgentSourcesState.state === "ready" && urgent.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center py-4 text-center wide:col-span-3">
+              <div className="flex flex-1 flex-col items-center justify-center py-4 text-center lg:col-span-2 xl:col-span-3">
                 <CheckCircle2 size={28} className="text-success mb-2" />
                 <div className="text-[13px] font-bold text-gray-700">지금 처리할 긴급 항목이 없어요</div>
                 <div className="text-[12px] mt-0.5 text-muted-foreground">분류가 필요한 문자, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
@@ -492,12 +492,12 @@ export function Dashboard() {
                       ? document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" })
                       : router.push(item.path)
                   }
-                  className={`group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring wide:min-h-[148px] ${surface}`}
+                  className={`group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-[148px] ${surface}`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-current/15 bg-card/70 ${accent}`}>
                     {isCritical ? <Activity size={16} /> : <PhoneCall size={16} />}
                   </span>
-                  <span className="min-w-0 flex-1 lg:flex lg:items-center lg:gap-4 wide:flex wide:h-full wide:flex-col wide:items-stretch wide:gap-3">
+                  <span className="min-w-0 flex-1 lg:flex lg:h-full lg:flex-col lg:items-stretch lg:gap-3">
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <Badge variant={isCritical ? "priority-critical" : "priority-attention"}>{priorityLabel}</Badge>
@@ -506,7 +506,7 @@ export function Dashboard() {
                       </span>
                       <span className="mt-1 block text-[12px] leading-relaxed text-muted-foreground">{item.desc}</span>
                     </span>
-                    <span className={`mt-2.5 inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold lg:mt-0 wide:mt-auto wide:self-start ${accent}`}>
+                    <span className={`mt-2.5 inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold lg:mt-auto lg:self-start ${accent}`}>
                       {item.cta} <ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none" />
                     </span>
                   </span>
@@ -523,8 +523,8 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* 실제 응대 큐가 홈의 주 작업이다. wide(1440+)에서만 2:1로 나누고 1024에서는 우선순위대로 쌓는다. */}
-      <div className="grid grid-cols-1 items-start gap-6 wide:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      {/* 실제 응대 큐가 홈의 주 작업이다. 본문 폭이 충분한 xl(1280+)부터 2:1로 나누고 1024에서는 우선순위대로 쌓는다. */}
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         <ReplyQueueCard onCountsChange={handleReplyCounts} retrySignal={replyRetrySignal} />
         <div className="flex min-w-0 flex-col gap-6">
           <InterestQueueCard />
@@ -761,8 +761,8 @@ function DashboardSkeleton() {
           <Skeleton className="h-9 w-36 rounded-2xl bg-white/10" />
         </div>
       </div>
-      <Skeleton className="h-[420px] rounded-lg wide:h-[220px]" />
-      <div className="grid grid-cols-1 items-start gap-6 wide:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+      <Skeleton className="h-[420px] rounded-lg xl:h-[270px]" />
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         <Skeleton className="h-[520px] rounded-lg" />
         <div className="flex flex-col gap-6">
           <Skeleton className="h-[160px] rounded-lg" />
