@@ -1,4 +1,4 @@
-import { ArrowRight, Users, MousePointerClick, MessageSquare, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, Database, TrendingUp, ChevronRight, ChevronDown, MapPin, AlertTriangle, RefreshCw } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, TrendingUp, ChevronRight, ChevronDown, MapPin, AlertTriangle, RefreshCw, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -16,6 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { remoteSourcesState } from "@/lib/admin/remote-data-state";
 import { dashboardUrgencyLabel, isDashboardPrimaryPriority, orderDashboardUrgentItems, type DashboardUrgency } from "@/lib/admin/dashboard-priority";
 import { dashboardQueueStatus } from "@/lib/admin/dashboard-queue-status";
+import {
+  dashboardMetricTiles,
+  dashboardMetricsState,
+  type DashboardMetricTile,
+  type DashboardMetricTone,
+} from "@/lib/admin/dashboard-metrics";
 
 interface UrgentItem {
   id: string;
@@ -55,6 +61,63 @@ interface HeartbeatRow {
   pending_count: number;
 }
 
+const METRIC_ICONS: Record<DashboardMetricTile["id"], LucideIcon> = {
+  today: Users,
+  screening: MousePointerClick,
+  screeningComplete: ClipboardCheck,
+  confirmed: CheckCircle2,
+};
+
+const METRIC_TONE_STYLES: Record<DashboardMetricTone, {
+  surface: string;
+  border: string;
+  ink: string;
+}> = {
+  exploration: {
+    surface: "bg-stage-exploration-soft",
+    border: "border-stage-exploration-ink/15",
+    ink: "text-stage-exploration-ink",
+  },
+  screening: {
+    surface: "bg-stage-screening-soft",
+    border: "border-stage-screening-ink/15",
+    ink: "text-stage-screening-ink",
+  },
+  onboarding: {
+    surface: "bg-stage-onboarding-soft",
+    border: "border-stage-onboarding-ink/15",
+    ink: "text-stage-onboarding-ink",
+  },
+  active: {
+    surface: "bg-stage-active-soft",
+    border: "border-stage-active-ink/15",
+    ink: "text-stage-active-ink",
+  },
+};
+
+function DashboardMetricTileView({ metric }: { metric: DashboardMetricTile }) {
+  const Icon = METRIC_ICONS[metric.id];
+  const tone = METRIC_TONE_STYLES[metric.tone];
+
+  return (
+    <div className={`flex min-h-[132px] min-w-0 flex-col rounded-2xl border p-4 ${tone.surface} ${tone.border}`}>
+      <dt className="flex items-start justify-between gap-3 text-[13px] font-semibold leading-5 text-muted-foreground">
+        <span>{metric.label}</span>
+        <Icon aria-hidden="true" size={17} className={`mt-0.5 shrink-0 ${tone.ink}`} />
+      </dt>
+      <dd className="mt-4 flex flex-1 flex-col">
+        <span className="flex items-baseline gap-1">
+          <span className={`text-[30px] font-bold leading-none tabular-nums tracking-tight ${tone.ink}`}>
+            {metric.value.toLocaleString()}
+          </span>
+          <span className="text-[13px] font-semibold text-muted-foreground">{metric.unit}</span>
+        </span>
+        <span className="mt-auto pt-2 text-[12px] leading-4 text-muted-foreground">{metric.description}</span>
+      </dd>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
@@ -63,7 +126,7 @@ export function Dashboard() {
   // (gzip 67KB → 29KB, 랜딩 화면 + 60초 폴링이라 절감이 반복된다). ReplyQueueCard와
   // **반드시 같은 키**여야 한다 — 키가 갈라지면 그쪽이 기본 응답을 또 받고, 답장 큐의
   // mutate()가 이 화면 통계를 같이 갱신하는 동작(같은 캐시)도 깨진다.
-  const { data: appsRes, isLoading, error: appsError, mutate: mutateApps } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
+  const { data: appsRes, isLoading, isValidating: isAppsValidating, error: appsError, mutate: mutateApps } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
   const { data: inboxRes, error: inboxError, mutate: mutateInbox } = useSWR<{ data?: { created_at?: string | null }[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
   const { data: notiRes, error: notiError, mutate: mutateNoti } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null } }>("/api/admin/notifications");
@@ -130,6 +193,10 @@ export function Dashboard() {
   };
   const rawApps = appsRes?.data ?? [];
   const hasAppsSnapshot = appsRes?.data !== undefined;
+  const metricsState = dashboardMetricsState({
+    hasSnapshot: hasAppsSnapshot,
+    hasError: Boolean(appsError),
+  });
   const inboxCount = inboxRes?.data?.length ?? 0;
   // 캐시된 이전 데이터 없이 첫 로딩 중일 때만 스켈레톤 노출
   const showSkeleton = isLoading && rawApps.length === 0;
@@ -173,6 +240,12 @@ export function Dashboard() {
       total: apps.length,
     };
   }, [apps, liveApps]);
+  const metricTiles = dashboardMetricTiles({
+    today: stats.today,
+    screening: stats.screening,
+    screeningComplete: stats.interview,
+    confirmed: stats.passed,
+  });
 
   // 최근 14일 일별 신규 유입 추이 (created_at 기준, stats.today와 동일하게 UTC 일자 슬라이스 · 임포트 제외)
   const trend = useMemo(() => {
@@ -551,53 +624,69 @@ export function Dashboard() {
       {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김. */}
       <CampaignStatsCard />
 
-      {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 5칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
+      {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 4칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
           접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="overflow-hidden rounded-panel border border-border-strong bg-card">
-        <button
-          onClick={() => setMetricsOpen((v) => !v)}
-          aria-expanded={metricsOpen}
-          disabled={!hasAppsSnapshot}
-          className="w-full flex items-center justify-between gap-3 px-6 py-4 text-left hover:bg-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5"><TrendingUp size={15} className="text-info" /> 지표 · 분석</h2>
-            <span className="text-[13px] text-muted-foreground">
-              {hasAppsSnapshot ? (
-                <>총 인재풀 <b className="text-foreground">{stats.total.toLocaleString()}</b>명
-                  <span className="text-muted-foreground"> · </span>확정 <b className="text-foreground">{stats.passed}</b>명
-                  <span className="text-muted-foreground"> · </span>오늘 유입 <b className="text-foreground">{stats.today}</b>명</>
-              ) : "지원자 지표를 확인할 수 없어요"}
+        <div className="flex flex-col sm:flex-row sm:items-stretch">
+          <button
+            onClick={() => setMetricsOpen((v) => !v)}
+            aria-expanded={metricsOpen}
+            disabled={metricsState === "loading" || metricsState === "error"}
+            className="flex min-w-0 flex-1 items-center justify-between gap-3 px-6 py-4 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <h2 className="flex items-center gap-1.5 text-[16px] font-bold text-foreground">
+                <TrendingUp size={15} className="text-muted-foreground" /> 지표 · 분석
+              </h2>
+              <span className="text-[13px] text-muted-foreground">
+                {metricsState === "loading" && "지원자 지표를 불러오는 중이에요"}
+                {metricsState === "error" && "지원자 지표를 불러오지 못했어요"}
+                {hasAppsSnapshot && (
+                  <>
+                    총 인재풀 <b className="tabular-nums text-foreground">{stats.total.toLocaleString()}</b>명
+                    {!metricsOpen && (
+                      <>
+                        <span> · </span>확정 <b className="tabular-nums text-foreground">{stats.passed.toLocaleString()}</b>명
+                        <span> · </span>오늘 유입 <b className="tabular-nums text-foreground">{stats.today.toLocaleString()}</b>명
+                      </>
+                    )}
+                    {metricsState === "stale" && <span className="font-semibold text-warning-strong"> · 이전 집계 · 갱신 실패</span>}
+                  </>
+                )}
+              </span>
+            </div>
+            <span className="flex shrink-0 items-center gap-1 text-[12px] font-bold text-muted-foreground">
+              {metricsState === "loading" ? "불러오는 중" : metricsState === "error" ? "확인 불가" : metricsOpen ? "접기" : "펼치기"}
+              {hasAppsSnapshot && (
+                <ChevronDown size={15} className={`transition-transform ${metricsOpen ? "rotate-180" : ""}`} />
+              )}
             </span>
-          </div>
-          <span className="flex items-center gap-1 text-[12px] font-bold text-muted-foreground shrink-0">
-            {metricsOpen ? "접기" : "펼치기"}
-            <ChevronDown size={15} className={`transition-transform ${metricsOpen ? "rotate-180" : ""}`} />
-          </span>
-        </button>
+          </button>
+          {(metricsState === "error" || metricsState === "stale") && (
+            <div className="flex items-center px-6 pb-4 sm:py-2 sm:pl-0">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                isLoading={isAppsValidating}
+                onClick={() => void mutateApps()}
+              >
+                <RefreshCw aria-hidden="true" /> 다시 시도
+              </Button>
+            </div>
+          )}
+        </div>
 
-        {metricsOpen && (
+        {metricsOpen && hasAppsSnapshot && (
           <div className="px-6 pb-6 pt-5 border-t border-muted flex flex-col gap-6">
-            {/* 핵심 지표 5칸 — 클릭 시 파이프라인으로 */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              {[
-                { label: "신규 유입 (금일)", value: String(stats.today), sub: "명", icon: Users, color: "text-info" },
-                { label: "총 누적 인재풀", value: stats.total.toLocaleString(), sub: "명", icon: Database, color: "text-chart-3" },
-                { label: "AI 스크리닝 진행", value: String(stats.screening), sub: "건", icon: MousePointerClick, color: "text-warning-strong" },
-                { label: "스크리닝 완료", value: String(stats.interview), sub: "명", icon: MessageSquare, color: "text-copilot" },
-                { label: "확정 인력", value: String(stats.passed), sub: "건", icon: CheckCircle2, color: "text-success" },
-              ].map((k, i) => (
-                <button type="button" key={i} className="rounded-lg border border-border-strong bg-surface-raised p-4 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => router.push('/pipeline')}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <k.icon size={16} className={`${k.color}`} />
-                    <span className="text-[12px] text-muted-foreground font-medium">{k.label}</span>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-[26px] font-extrabold leading-none tracking-tight text-foreground">{k.value}</span>
-                    <span className="text-[12px] text-muted-foreground font-medium">{k.sub}</span>
-                  </div>
-                </button>
-              ))}
+            <div>
+              <div className="mb-3">
+                <h3 className="text-[13px] font-bold text-foreground">지원자 상태</h3>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">현재 지원자 상태를 채용 흐름 순서로 보여드려요.</p>
+              </div>
+              <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                {metricTiles.map((metric) => <DashboardMetricTileView key={metric.id} metric={metric} />)}
+              </dl>
             </div>
 
             {/* 유입 추이(2/3) + 스크리닝·온보딩 현황(1/3) */}
@@ -640,7 +729,7 @@ export function Dashboard() {
               {/* 스크리닝 · 온보딩 현황 (실데이터) */}
               <div className="border border-border-strong rounded-lg p-5 flex flex-col">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                  <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-muted-foreground" /> 스크리닝 · 온보딩 현황</h3>
+                  <h3 className="text-[14px] font-bold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-muted-foreground" /> AI 대화 단계 · 온보딩</h3>
                   <button onClick={() => router.push('/live')} className="text-[12px] font-bold text-info hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">지원자 운영으로</button>
                 </div>
 
