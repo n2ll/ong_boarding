@@ -104,7 +104,7 @@ export function ReplyQueueCard({
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
   const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
   const idsKey = previewTargets.map((a) => a.id).join(",");
-  // 매니저가 답장해도 last_message_at(=inbound 시각)은 그대로여서 조회 대상 집합이 바뀌지 않는다 →
+  // 매니저가 답장하면 last_message_at도 갱신되지만 idsKey는 ID 집합만 담아 값이 그대로다 →
   // idsKey만 보면 미리보기가 영원히 stale이고 처리한 건이 큐·대시보드에 계속 남는다. 명시적 재조회 신호를 둔다.
   const [previewNonce, setPreviewNonce] = useState(0);
   const [previewLoad, setPreviewLoad] = useState<{

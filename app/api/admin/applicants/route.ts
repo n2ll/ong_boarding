@@ -7,7 +7,7 @@ import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { gatherLiveJobLinks } from "@/lib/candidate-links";
-import { gatherMessagePreviews, RECENT_MANUAL_MS } from "@/lib/message-preview";
+import { gatherMessagePreviews, livePreviewTargetIds } from "@/lib/message-preview";
 import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
 
 export const dynamic = "force-dynamic";
@@ -309,37 +309,32 @@ export async function GET(req: NextRequest) {
   //
   // 조회 대상은 클라이언트의 previewTargets와 **같은 규칙**으로 고른다. 규칙이 갈라지면
   // 목록에 뜨는 사람과 미리보기가 있는 사람이 어긋나 배지가 빈다.
-  const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
-  const recentCut = Date.now() - RECENT_MANUAL_MS;
-  const isBase = (a: Record<string, unknown>) => {
-    const stage = a.agent_stage as string | null;
-    return (Boolean(stage) && stage !== "abort") || ACTIVE_STATUSES.has(a.status as string);
-  };
-  const activityAt = (a: Record<string, unknown>) =>
-    new Date((a.last_message_at as string) ?? (a.created_at as string) ?? 0).getTime();
-
   // 메시지 이력이 있는 전원을 대상에 넣는다(기간 무제한) — 미답 판정(마지막 메시지가 inbound)은
   // 미리보기가 있어야만 가능해서, 여기서 14일로 자르면 오래 방치된 미답이 화면에서 사라진다.
-  // recentCut은 '이력은 없지만 최근 활동한 사람'을 추가로 포함하는 보조 조건으로만 남는다.
-  const base = safe.filter((a) => isBase(a) || a.last_message_at != null || activityAt(a) > recentCut);
-  // 상한 — 실측 이력 보유자 211명(2026-08). 500이면 당분간 잘릴 일이 없고,
-  // 잘리기 시작하면 아래 로그가 먼저 알린다.
-  const PREVIEW_TARGET_CAP = 500;
-  const targets =
-    base.length <= PREVIEW_TARGET_CAP
-      ? base
-      : [...base].sort((x, y) => activityAt(y) - activityAt(x)).slice(0, PREVIEW_TARGET_CAP);
-  if (base.length > PREVIEW_TARGET_CAP) {
-    console.error(`[applicants scope=live] 미리보기 대상 ${base.length}명이 상한 ${PREVIEW_TARGET_CAP}을 넘어 오래된 쪽이 잘렸다 — 오래 방치된 미답이 목록에서 빠질 수 있다.`);
-  }
+  // 최근 활동 조건은 '이력은 없지만 최근 생성된 사람'을 추가로 포함하는 보조 조건으로만 남는다.
+  // 사람 수 상한은 두지 않는다. 최근순 500명으로 자르던 방식은 가장 오래 기다린 미답부터
+  // 없앴고, with_manual 합집합 때문에 실제 쿼리 크기도 제한하지 못했다. 쿼리 단위의 상한은
+  // gatherMessagePreviews가 250명 묶음으로 보장한다.
+  const targetIds = livePreviewTargetIds(safe);
 
-  // with_manual — '발신만 있고 회신을 기다리는 대화'는 applicants 컬럼만으로 못 찾는다.
-  // 매니저 발신은 last_message_at을 올리지 않으므로 서버가 messages를 직접 뒤져 합집합을 만든다.
-  const previews = await gatherMessagePreviews(
-    supabase,
-    targets.map((a) => a.id),
-    { withManual: true },
-  );
+  // last_message_at은 DB 트리거가 방향과 무관하게 갱신하므로 메시지 이력 보유자는 위 targets에
+  // 전부 들어간다(운영 검증 2026-08-24: 1,454행·213명, 실제 최신 메시지와 불일치 0명).
+  // messages에 기록되지 못한 불명확 수동 발송은 manual_message_attention이 별도로 보존한다.
+  // 미리보기 어느 묶음이든 실패하면 0건으로 위장하지 않고 503으로 올려 기존 재시도 UI를 쓴다.
+  let previews: Awaited<ReturnType<typeof gatherMessagePreviews>>;
+  try {
+    previews = await gatherMessagePreviews(
+      supabase,
+      targetIds,
+      { requireComplete: true },
+    );
+  } catch (error) {
+    console.error("[applicants scope=live] preview query failed", error);
+    return NextResponse.json(
+      { error: "대화 상태를 확인하지 못했어요." },
+      { status: 503 },
+    );
+  }
   const manualMessageAttention = await manualMessageAttentionPromise!;
 
   return NextResponse.json({

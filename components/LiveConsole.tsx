@@ -67,6 +67,7 @@ import {
   type ManualMessageAttentionItem,
 } from "@/lib/admin/manual-message-attention";
 import {
+  liveReplyCompletionContextIsCurrent,
   liveReplyQueuePosition,
   liveReplySelectionAfterCompletion,
   nextLiveReplyApplicantId,
@@ -210,8 +211,8 @@ const ACTIVE_STATUSES = new Set(["스크리닝 중", "스크리닝 완료"]);
 
 // 목록 기본 통과 조건: (1) 활성 대화(agent_stage) (2) 스크리닝 status.
 // applicants.unread_count는 판정에서 뺐다 — 그 값은 '스레드를 아직 열지 않았다'는 신호라(트리거가 inbound마다 +1,
-// 열람 시 0으로 리셋) 열람만으로 목록에서 빠지는 부작용이 있었다. 답장 온 풀 응답자는 아래 최근 inbound
-// (last_message_at, RECENT_INBOUND_MS) 조건으로 들어오고, 미답 판정은 '마지막 메시지가 inbound'로 한다.
+// 열람 시 0으로 리셋) 열람만으로 목록에서 빠지는 부작용이 있었다. last_message_at은 방향과 무관한
+// 마지막 메시지 시각이고, 실제 미답 판정은 서버 미리보기의 '마지막 메시지가 inbound'를 쓴다.
 function isBaseChat(a: Applicant): boolean {
   return (!!a.agent_stage && a.agent_stage !== "abort") || ACTIVE_STATUSES.has(a.status);
 }
@@ -220,9 +221,7 @@ function isBaseChat(a: Applicant): boolean {
 // '답 대기'(매니저 발신 후 회신 대기) 대화가 목록에 남는 기간으로도 함께 쓴다.
 const RECENT_INBOUND_MS = 14 * 24 * 60 * 60 * 1000;
 
-// 미리보기 조회 대상 상한 — 목록 후보가 많아져도 최근 활동순 상위만 조회(URL 길이·메시지 스캔 부하 방지)
-// 미리보기 대상 선정 규칙(활동 14일·상한 150)은 서버로 옮겼다 —
-// app/api/admin/applicants/route.ts 의 scope=live 분기가 같은 값을 쓴다.
+// 미리보기 대상은 서버가 전부 고르고, URL·DB 부하는 사람을 버리는 상한이 아니라 ID 묶음 조회로 제한한다.
 
 // 빈 미리보기 — 매 렌더 새 객체를 만들면 이 값에 의존하는 useMemo가 계속 무효화된다.
 const EMPTY_PREVIEWS: Record<number, LastMessagePreview> = {};
@@ -455,8 +454,7 @@ export function LiveConsole() {
     [isUnanswered, previewById]
   );
   const unansweredCount = useMemo(() => chats.filter(isUnanswered).length, [chats, isUnanswered]);
-  // 카드 시각·정렬 기준 — 마지막 메시지 시각(미리보기)과 last_message_at(inbound 수신 시각) 중 더 최근.
-  // 매니저 발신은 last_message_at을 갱신하지 않아, 미리보기 시각이 있어야 답 대기 시간도 정확히 계산된다.
+  // 카드 시각·정렬 기준 — 둘 다 마지막 메시지 시각이지만, 갱신 사이의 짧은 불일치에도 최신값을 택한다.
   const lastActivityAt = useCallback(
     (c: Applicant): string | null => {
       const pv = previewById[c.id]?.created_at ?? null;
@@ -527,7 +525,7 @@ export function LiveConsole() {
   //
   // 예전에는 목록이 도착한 뒤 그 안의 id로 /api/admin/messages/preview를 한 번 더 불렀다.
   // 그런데 위 `chats`의 통과 조건이 그 두 번째 응답에 걸려 있어서, 화면에 처음 뜨는 명단과
-  // 1초 뒤 명단이 서로 달랐다. 대상 선정 규칙(활동 14일·상한 150)은 서버로 옮겼다
+  // 1초 뒤 명단이 서로 달랐다. 대상 선정과 무손실 ID 묶음 조회는 서버로 옮겼다
   // (app/api/admin/applicants/route.ts — 클라이언트와 같은 규칙이어야 한다).
 
   // 실시간 갱신(③): DB 트리거가 messages/job_candidates 변경 시 'live-console' 토픽으로
@@ -973,18 +971,22 @@ export function LiveConsole() {
     [visibleChats, isUnanswered, previewById],
   );
   const replyQueuePosition = liveReplyQueuePosition(actionableReplyIds, selectedChatId);
-  const replyQueueEligible = activeTab === "all" && replyQueuePosition.current > 0;
+  const replyQueueEligible = appsState === "ready"
+    && activeTab === "all"
+    && replyQueuePosition.current > 0;
   const nextReplyApplicantId = replyQueueEligible
     ? nextLiveReplyApplicantId(actionableReplyIds, selectedChatId)
     : null;
   const replyQueueContextKey = `${activeTab}:${search.trim().toLowerCase()}`;
   const replyNavigationStateRef = useRef({
+    appsState,
     activeTab,
     selectedChatId,
     actionableReplyIds,
     contextKey: replyQueueContextKey,
   });
   replyNavigationStateRef.current = {
+    appsState,
     activeTab,
     selectedChatId,
     actionableReplyIds,
@@ -992,7 +994,12 @@ export function LiveConsole() {
   };
   const handleReplyQueueItemCompleted = useCallback((completedApplicantId: number, startedContextKey: string) => {
     const current = replyNavigationStateRef.current;
-    if (current.activeTab !== "all" || current.contextKey !== startedContextKey) return;
+    if (!liveReplyCompletionContextIsCurrent({
+      collectionState: current.appsState,
+      activeTab: current.activeTab,
+      currentContextKey: current.contextKey,
+      startedContextKey,
+    })) return;
     const selection = liveReplySelectionAfterCompletion({
       orderedActionableIds: current.actionableReplyIds,
       selectedApplicantId: current.selectedChatId,

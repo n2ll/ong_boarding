@@ -49,6 +49,17 @@ export function liveReplySelectionAfterCompletion(input: {
   };
 }
 
+export function liveReplyCompletionContextIsCurrent(input: {
+  collectionState: "loading" | "error" | "empty" | "ready";
+  activeTab: string;
+  currentContextKey: string;
+  startedContextKey: string;
+}): boolean {
+  return input.collectionState === "ready"
+    && input.activeTab === "all"
+    && input.currentContextKey === input.startedContextKey;
+}
+
 export function liveReplyQueuePosition(
   orderedActionableIds: number[],
   currentApplicantId: number | null,

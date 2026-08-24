@@ -19,6 +19,12 @@ type LiveReplyNavigationModule = {
     resumeSucceeded: boolean;
     pauseOutcomeKind: "paused" | "ambiguous" | "changed" | "none" | "unknown";
   }) => boolean;
+  liveReplyCompletionContextIsCurrent?: (input: {
+    collectionState: "loading" | "error" | "empty" | "ready";
+    activeTab: string;
+    currentContextKey: string;
+    startedContextKey: string;
+  }) => boolean;
 };
 
 async function loadModule(): Promise<LiveReplyNavigationModule> {
@@ -65,6 +71,30 @@ test("a late completion never replaces a conversation the manager already select
     selectedApplicantId: 12,
     completedApplicantId: 12,
   }), { applicantId: null, applied: true, completedAll: true });
+});
+
+test("a stale reply completion is ignored while the live collection is unavailable", async () => {
+  const { liveReplyCompletionContextIsCurrent } = await loadModule();
+
+  assert.equal(typeof liveReplyCompletionContextIsCurrent, "function");
+  assert.equal(liveReplyCompletionContextIsCurrent!({
+    collectionState: "error",
+    activeTab: "all",
+    currentContextKey: "all:",
+    startedContextKey: "all:",
+  }), false);
+  assert.equal(liveReplyCompletionContextIsCurrent!({
+    collectionState: "ready",
+    activeTab: "all",
+    currentContextKey: "all:",
+    startedContextKey: "all:",
+  }), true);
+  assert.equal(liveReplyCompletionContextIsCurrent!({
+    collectionState: "ready",
+    activeTab: "intervention",
+    currentContextKey: "intervention:",
+    startedContextKey: "all:",
+  }), false);
 });
 
 test("reply queue position is human-readable and excludes passive conversations", async () => {

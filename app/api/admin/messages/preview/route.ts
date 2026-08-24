@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
     const previews = await gatherMessagePreviews(supabase, ids, {
       withManual,
       throwOnCoreError: true,
+      requireComplete: withManual,
     });
     return NextResponse.json({ previews });
   } catch (error) {
