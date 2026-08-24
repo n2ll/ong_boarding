@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { dashboardQueuePreview, oldestUntouchedReplyDays } from "@/lib/admin/dashboard-priority";
+import { fetchMessagePreviews } from "@/lib/admin/message-preview-request";
 
 /**
  * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
@@ -104,46 +105,53 @@ export function ReplyQueueCard({
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)
   const [previewById, setPreviewById] = useState<Record<number, Preview>>({});
   const idsKey = previewTargets.map((a) => a.id).join(",");
+  const previewSnapshotKey = previewTargets
+    .map((a) => `${a.id}:${a.last_message_at ?? ""}`)
+    .join(",");
   // 매니저가 답장하면 last_message_at도 갱신되지만 idsKey는 ID 집합만 담아 값이 그대로다 →
   // idsKey만 보면 미리보기가 영원히 stale이고 처리한 건이 큐·대시보드에 계속 남는다. 명시적 재조회 신호를 둔다.
   const [previewNonce, setPreviewNonce] = useState(0);
+  const previewRequestKey = `${previewSnapshotKey}|${previewNonce}|${retrySignal}`;
+  const hasData = data !== undefined;
   const [previewLoad, setPreviewLoad] = useState<{
     key: string;
     state: "loading" | "error" | "ready";
   }>({ key: "", state: "loading" });
   useEffect(() => {
-    if (!data) {
-      setPreviewLoad({ key: idsKey, state: "loading" });
+    if (!hasData) {
+      setPreviewLoad({ key: previewRequestKey, state: "loading" });
       return;
     }
     if (!idsKey) {
       setPreviewById({});
-      setPreviewLoad({ key: "", state: "ready" });
+      setPreviewLoad({ key: previewRequestKey, state: "ready" });
       return;
     }
-    let cancelled = false;
+    let active = true;
+    const controller = new AbortController();
     setPreviewById({});
-    setPreviewLoad({ key: idsKey, state: "loading" });
-    (async () => {
-      try {
-        const res = await fetch(`/api/admin/messages/preview?ids=${idsKey}`);
-        if (!res.ok) throw new Error(`preview ${res.status}`);
-        const json = await res.json();
-        if (cancelled) return;
-        setPreviewById(json.previews ?? {});
-        setPreviewLoad({ key: idsKey, state: "ready" });
-      } catch {
-        if (!cancelled) setPreviewLoad({ key: idsKey, state: "error" });
+    setPreviewLoad({ key: previewRequestKey, state: "loading" });
+    void fetchMessagePreviews(
+      idsKey.split(",").map(Number),
+      { signal: controller.signal },
+    ).then((previews) => {
+      if (!active) return;
+      setPreviewById(previews);
+      setPreviewLoad({ key: previewRequestKey, state: "ready" });
+    }).catch(() => {
+      if (active && !controller.signal.aborted) {
+        setPreviewLoad({ key: previewRequestKey, state: "error" });
       }
-    })();
+    });
     return () => {
-      cancelled = true;
+      active = false;
+      controller.abort();
     };
-  }, [data, idsKey, previewNonce, retrySignal]);
+  }, [hasData, idsKey, previewRequestKey]);
 
   // 이 값은 마지막 메시지 방향을 판정하는 필수 데이터다. 아직 확인 전이거나 실패한 상태를
   // 빈 큐로 축약하면 대시보드가 거짓으로 "할 일 없음"을 보여주므로 별도 상태로 유지한다.
-  const previewState = !data || previewLoad.key !== idsKey ? "loading" : previewLoad.state;
+  const previewState = !hasData || previewLoad.key !== previewRequestKey ? "loading" : previewLoad.state;
 
   // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound'.
   const allItems = useMemo(() => {
@@ -173,8 +181,12 @@ export function ReplyQueueCard({
   }, [allItems, jobTitleById]);
   // 선택 공고가 큐에서 사라지면 전체로 되돌린다.
   useEffect(() => {
-    if (jobFilter !== "all" && !jobOptions.some((o) => o.id === jobFilter)) setJobFilter("all");
-  }, [jobFilter, jobOptions]);
+    if (
+      previewState === "ready"
+      && jobFilter !== "all"
+      && !jobOptions.some((o) => o.id === jobFilter)
+    ) setJobFilter("all");
+  }, [jobFilter, jobOptions, previewState]);
 
   const items = jobFilter === "all" ? allItems : allItems.filter((it) => it.current_job_id === jobFilter);
   const queuePreview = dashboardQueuePreview(items);
@@ -209,7 +221,10 @@ export function ReplyQueueCard({
     return () => clearInterval(t);
   }, []);
 
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detailSelection, setDetailSelection] = useState<{
+    applicantId: number;
+    jobId: number | null;
+  } | null>(null);
 
   // 빈 큐는 헤더+한 줄로 접는다 — 0건 카드가 설명문으로 자리를 차지하지 않게(2026-08-18 합의)
   const collapsed = !error && !!data && previewState === "ready" && items.length === 0;
@@ -339,7 +354,10 @@ export function ReplyQueueCard({
                 </div>
 
                 <button
-                  onClick={() => setDetailId(it.id)}
+                  onClick={() => setDetailSelection({
+                    applicantId: it.id,
+                    jobId: it.current_job_id ?? null,
+                  })}
                   className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <MessageSquare size={13} /> 대화 열기
@@ -365,16 +383,16 @@ export function ReplyQueueCard({
       {/* 상세 드로어를 대화 탭으로 바로 열어 매니저가 즉시 응대.
           매니저가 답장하면 '마지막 메시지'가 발신으로 바뀌므로, 닫힐 때/변경 시 목록을 재검증해 큐에서 빠지게 한다. */}
       <ApplicantDetailPanel
-        isOpen={detailId != null}
+        isOpen={detailSelection != null}
         onClose={() => {
-          setDetailId(null);
+          setDetailSelection(null);
           void mutate();
           setPreviewNonce((n) => n + 1);
         }}
-        applicantId={detailId}
+        applicantId={detailSelection?.applicantId ?? null}
         /* 진행 중 공고 포인터를 함께 넘긴다 — 없으면 여러 공고를 진행하는 사람에게 AI 끄기·재개가
            '어느 공고인지 골라 주세요'(409)로 막히는데, 이 화면엔 공고 선택기가 없다. */
-        jobId={items.find((i) => i.id === detailId)?.current_job_id ?? null}
+        jobId={detailSelection?.jobId ?? null}
         initialTab="chat"
         onChanged={() => {
           void mutate();

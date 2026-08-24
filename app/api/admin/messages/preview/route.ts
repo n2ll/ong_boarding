@@ -1,5 +1,6 @@
 /**
  * GET /api/admin/messages/preview?ids=1,2,3[&with_manual=1]
+ * POST /api/admin/messages/preview { ids: [1, 2, 3] }
  *
  * 주어진 지원자들의 "마지막 메시지" 본문/방향/발신주체 + "마지막 inbound 시각"을 가볍게 반환한다.
  *
@@ -15,18 +16,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { gatherMessagePreviews } from "@/lib/message-preview";
+import { parsePreviewRequestIds } from "@/lib/admin/message-preview-request";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const idsParam = url.searchParams.get("ids") ?? "";
-  const withManual = url.searchParams.get("with_manual") === "1";
-  const ids = idsParam
-    .split(",")
-    .map((s) => Number(s.trim()))
-    .filter((n) => Number.isFinite(n));
-
+async function previewResponse(ids: number[], withManual: boolean) {
   if (ids.length === 0 && !withManual) {
     return NextResponse.json({ previews: {} });
   }
@@ -46,4 +40,40 @@ export async function GET(req: NextRequest) {
       { status: 503 },
     );
   }
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const idsParam = url.searchParams.get("ids") ?? "";
+  const withManual = url.searchParams.get("with_manual") === "1";
+  const ids = idsParam
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n));
+
+  return previewResponse(ids, withManual);
+}
+
+export async function POST(req: NextRequest) {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "요청 형식을 확인해 주세요." }, { status: 400 });
+  }
+
+  const idsValue = body && typeof body === "object" && "ids" in body
+    ? (body as { ids?: unknown }).ids
+    : undefined;
+  const parsed = parsePreviewRequestIds(idsValue);
+  if (!parsed.ok) {
+    const error = parsed.status === 413
+      ? "한 번에 확인할 지원자가 너무 많아요."
+      : "지원자 목록을 확인해 주세요.";
+    return NextResponse.json({ error }, { status: parsed.status });
+  }
+
+  // POST는 대시보드의 명시 ID 조회 전용이다. with_manual 탐색을 각 클라이언트 묶음마다
+  // 반복하면 최근 outbound 전량을 중복 스캔하므로, 호환 GET에서만 그 옵션을 유지한다.
+  return previewResponse(parsed.ids, false);
 }
