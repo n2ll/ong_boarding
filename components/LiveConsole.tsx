@@ -61,6 +61,7 @@ import {
 } from "@/lib/admin/manager-panel-layout";
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
 import { liveConversationJobContext } from "@/lib/admin/live-job-context";
+import { liveHandoffGroupFocus } from "@/lib/admin/live-handoff-navigation";
 import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
 import {
   indexManualMessageAttention,
@@ -821,11 +822,18 @@ export function LiveConsole() {
         setAutoAdvanceDeferred(true);
         return;
       }
-      if (nextId !== selectedChatId) setSelectedChatId(nextId);
+      if (nextId !== selectedChatId) {
+        const nextFocus = liveHandoffGroupFocus(handoffGroups, nextId);
+        focusApplicantIdRef.current = nextFocus?.applicantId ?? null;
+        focusUnscopedDraftRef.current = false;
+        focusJobIdRef.current = nextFocus?.jobId ?? null;
+        focusLinkRef.current = nextFocus?.jobLink ?? null;
+        setSelectedChatId(nextId);
+      }
       setAutoAdvanceDeferred(false);
     }
     previousHandoffIdsRef.current = handoffApplicantIds;
-  }, [activeTab, applicantDetailDirty, handoffApplicantIds, selectedChatId]);
+  }, [activeTab, applicantDetailDirty, handoffApplicantIds, handoffGroups, selectedChatId]);
 
   useEffect(() => {
     if (activeTab === "confirm") {

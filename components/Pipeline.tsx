@@ -40,6 +40,10 @@ import {
 } from "@/lib/admin/pipeline-row";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+import {
+  getPipelineApplicantNavigation,
+  recoverPipelineApplicantSelection,
+} from "@/lib/admin/pipeline-navigation";
 import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
@@ -404,16 +408,23 @@ export function Pipeline() {
   const [sel, setSel] = useState<{ applicantId: number; wantJobId: number | null } | null>(null);
   const selectedApplicantId = sel?.applicantId ?? null;
   const applicantUnsavedGuard = useApplicantDetailUnsavedGuard(selectedApplicantId);
+  const previousSuccessfulNavigationIdsRef = useRef<number[]>([]);
+  const [applicantNavigationAnnouncement, setApplicantNavigationAnnouncement] = useState("");
+  const [applicantNavigationFocusRequestId, setApplicantNavigationFocusRequestId] = useState(0);
   const openApplicant = (id: number, wantJobId: number | null = null) => {
     if (id === selectedApplicantId) {
       if (wantJobId !== sel?.wantJobId && applicantUnsavedGuard.isDirty) {
         toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
         return;
       }
+      setApplicantNavigationAnnouncement("");
       setSel({ applicantId: id, wantJobId });
       return;
     }
-    void applicantUnsavedGuard.requestTransition(() => setSel({ applicantId: id, wantJobId }));
+    void applicantUnsavedGuard.requestTransition(() => {
+      setApplicantNavigationAnnouncement("");
+      setSel({ applicantId: id, wantJobId });
+    });
   };
   const [view, setView] = useState<PipelineView>(() => pipelineViewFromSearch(searchParams.toString()));
   const changeView = (next: PipelineView) => {
@@ -1249,6 +1260,12 @@ export function Pipeline() {
       default: return created(b) - created(a);                       // 최근 등록순 (API 기본 순서와 동일)
     }
   });
+  const filteredApplicantIds = filteredCards.map((card) => Number(card.id));
+  const filteredApplicantIdsKey = filteredApplicantIds.join(",");
+  const applicantNavigation = getPipelineApplicantNavigation(
+    filteredApplicantIds,
+    selectedApplicantId,
+  );
 
   // 조건을 통과한 카드 id — 칸반 컬럼·지도가 리스트와 같은 모집단을 쓰게 한다(정렬 전 집합이라 순서 무관).
   const filteredIdSet = new Set(postFilteredCards.map((c) => c.id));
@@ -1266,7 +1283,82 @@ export function Pipeline() {
   const filterSignature = `${filteredCards.length}:${filteredCards[0]?.id ?? ""}:${sortMode}`;
   useEffect(() => {
     setVisibleCount(ROWS_PER_CHUNK);
+    setApplicantNavigationAnnouncement("");
   }, [filterSignature]);
+
+  const revealApplicantRow = (applicantId: number) => {
+    const index = filteredApplicantIds.indexOf(applicantId);
+    if (index < 0) return;
+    const requiredCount = Math.ceil((index + 1) / ROWS_PER_CHUNK) * ROWS_PER_CHUNK;
+    setVisibleCount((current) => Math.max(current, requiredCount));
+  };
+
+  const navigateToApplicant = (applicantId: number, label: string) => {
+    return applicantUnsavedGuard.requestTransition(() => {
+      revealApplicantRow(applicantId);
+      setSel({ applicantId, wantJobId: null });
+      const position = filteredApplicantIds.indexOf(applicantId) + 1;
+      const applicantName = filteredCards.find((card) => Number(card.id) === applicantId)?.name;
+      setApplicantNavigationAnnouncement(
+        `${label}${applicantName ? ` ${applicantName} 지원자,` : ""} 현재 조건 ${position} / ${filteredApplicantIds.length}`,
+      );
+    }).then((outcome) => outcome === "proceeded");
+  };
+
+  // 최신 목록에서 실제로 삭제된 지원자만 자동 복구한다. 필터로 잠깐 조건 밖이 됐거나
+  // SWR 재검증이 실패한 경우에는 상세를 그대로 둔다. 미저장 편집 중이면 기존 자동 전환
+  // 계약대로 조용히 보류하고, 저장·취소 뒤 같은 정상 스냅샷으로 다시 계산한다.
+  useEffect(() => {
+    const latestApplicants = applicantsData?.data;
+    if (!latestApplicants || applicantsError || rawApplicants !== latestApplicants) return;
+
+    const currentIds = filteredApplicantIdsKey
+      ? filteredApplicantIdsKey.split(",").map(Number)
+      : [];
+    if (selectedApplicantId == null) {
+      previousSuccessfulNavigationIdsRef.current = currentIds;
+      return;
+    }
+    if (latestApplicants.some((applicant) => applicant.id === selectedApplicantId)) {
+      previousSuccessfulNavigationIdsRef.current = currentIds;
+      return;
+    }
+
+    const recoveredId = recoverPipelineApplicantSelection(
+      previousSuccessfulNavigationIdsRef.current,
+      currentIds,
+      selectedApplicantId,
+      "success",
+    );
+    // 조건 밖에서 열려 이전 순서가 없던 대상까지 실제로 삭제됐다면 패널을 닫는다.
+    const nextId = recoveredId === selectedApplicantId ? null : recoveredId;
+    void applicantUnsavedGuard.requestTransition(() => {
+      if (nextId == null) {
+        setSel(null);
+      } else {
+        const nextIndex = currentIds.indexOf(nextId);
+        const requiredCount = Math.ceil((nextIndex + 1) / ROWS_PER_CHUNK) * ROWS_PER_CHUNK;
+        setVisibleCount((current) => Math.max(current, requiredCount));
+        setApplicantNavigationFocusRequestId((current) => current + 1);
+        setSel({ applicantId: nextId, wantJobId: null });
+        const position = nextIndex + 1;
+        const applicantName = latestApplicants.find((applicant) => applicant.id === nextId)?.name;
+        setApplicantNavigationAnnouncement(
+          `목록에서 제외된 지원자의 다음 대상을 열었어요.${applicantName ? ` ${applicantName} 지원자,` : ""} 현재 조건 ${position} / ${currentIds.length}`,
+        );
+      }
+    }, "automatic").then((outcome) => {
+      if (outcome === "proceeded") previousSuccessfulNavigationIdsRef.current = currentIds;
+    });
+  }, [
+    applicantUnsavedGuard.isDirty,
+    applicantUnsavedGuard.requestTransition,
+    applicantsData?.data,
+    applicantsError,
+    filteredApplicantIdsKey,
+    rawApplicants,
+    selectedApplicantId,
+  ]);
   // 목록 끝이 화면에 들어오면 다음 분량을 붙인다.
   useEffect(() => {
     const el = moreRef.current;
@@ -2326,7 +2418,12 @@ export function Pipeline() {
                       return (
                         <tr
                           key={c.id}
-                          onClick={() => openApplicant(Number(c.id))}
+                          onClick={(event) => {
+                            event.currentTarget
+                              .querySelector<HTMLElement>("[data-applicant-row-trigger]")
+                              ?.focus();
+                            openApplicant(Number(c.id));
+                          }}
                           // 스플릿 뷰에서 지금 상세로 보고 있는 사람 — 목록에서 자리를 잃지 않게 왼쪽에 표시를 남긴다.
                           aria-current={Number(c.id) === selectedApplicantId ? "true" : undefined}
                           className={`border-b border-muted last:border-0 transition-colors hover:bg-background cursor-pointer group ${isSelected ? 'bg-yellow-50 hover:bg-yellow-50' : 'bg-card'} ${Number(c.id) === selectedApplicantId ? 'shadow-[inset_3px_0_0_0_var(--foreground)]' : ''}`}
@@ -2342,7 +2439,19 @@ export function Pipeline() {
                                 {c.name.charAt(0)}
                               </div>
                               <div>
-                                <div className="text-[14px] font-bold text-foreground">{c.name}{c.age > 0 && <span className="text-[13px] font-medium text-muted-foreground ml-1">{c.age}세</span>}</div>
+                                <button
+                                  type="button"
+                                  data-applicant-row-trigger={c.id}
+                                  aria-label={`${c.name} 지원자 상세 열기`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openApplicant(Number(c.id));
+                                  }}
+                                  className="rounded text-left text-[14px] font-bold text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                >
+                                  {c.name}
+                                  {c.age > 0 && <span className="ml-1 text-[13px] font-medium text-muted-foreground">{c.age}세</span>}
+                                </button>
                                 {/* 이름 아래 한 줄 — 공고가 2건 이상이면 공고별 칩으로 바꾼다.
                                     '공고지원 · 스크리닝' 한 개는 가장 최근 공고 하나만 말해줘서, 여러 자리에
                                     붙은 분이 한 자리만 진행 중인 것처럼 보였다. 칩을 누르면 그 공고 기준으로 상세가 열린다.
@@ -2763,6 +2872,27 @@ export function Pipeline() {
         }
         onDirtyChange={applicantUnsavedGuard.reportDirty}
         onChanged={loadApplicants}
+        navigation={{
+          position: applicantNavigation.current,
+          total: applicantNavigation.total,
+          canPrevious: applicantNavigation.previousId != null,
+          canNext: applicantNavigation.nextId != null,
+          onPrevious: () => applicantNavigation.previousId == null
+            ? Promise.resolve(false)
+            : navigateToApplicant(applicantNavigation.previousId, "이전 지원자로 이동했어요."),
+          onNext: () => applicantNavigation.nextId == null
+            ? Promise.resolve(false)
+            : navigateToApplicant(applicantNavigation.nextId, "다음 지원자로 이동했어요."),
+          onFirstResult: applicantNavigation.outsideFilter && filteredApplicantIds[0] != null
+            ? () => navigateToApplicant(filteredApplicantIds[0], "현재 조건의 첫 지원자로 이동했어요.")
+            : undefined,
+          announcement: applicantNavigationAnnouncement || undefined,
+          focusRequestId: applicantNavigationFocusRequestId || undefined,
+        }}
+        resolveReturnFocus={(applicantId) => (
+          document.querySelector<HTMLElement>(`[data-applicant-row-trigger="${applicantId}"]`)
+          ?? document.querySelector<HTMLElement>('[aria-label="이름·연락처·근무지·지역 검색"]')
+        )}
       />
 
       {/* Modals for Bulk Actions */}

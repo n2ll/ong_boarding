@@ -154,7 +154,17 @@ export function nextQueueApplicantId(
   currentIds: number[],
   selectedId: number | null,
 ): number | null {
-  if (selectedId == null || !previousIds.includes(selectedId)) return selectedId;
+  if (selectedId == null) return selectedId;
+  const selectedIndex = previousIds.indexOf(selectedId);
+  if (selectedIndex < 0) return selectedId;
   if (currentIds.includes(selectedId)) return selectedId;
+
+  const currentSet = new Set(currentIds);
+  for (let index = selectedIndex + 1; index < previousIds.length; index += 1) {
+    if (currentSet.has(previousIds[index])) return previousIds[index];
+  }
+  for (let index = selectedIndex - 1; index >= 0; index -= 1) {
+    if (currentSet.has(previousIds[index])) return previousIds[index];
+  }
   return currentIds[0] ?? null;
 }

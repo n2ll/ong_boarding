@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import {
   X, Phone, MessageSquare, Ban, Loader2, Check, CheckCircle2, Circle, ChevronDown,
   Building2, MapPin, Save, UserCheck, Clock, Sparkles, Zap, RotateCcw, CircleAlert,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -39,6 +40,7 @@ import {
   type ApplicantDetailDirtyState,
 } from "./useApplicantDetailUnsavedGuard";
 import { useAdminUnsavedNavigation } from "./AdminUnsavedNavigation";
+import { createApplicantNavigationFocusCoordinator } from "@/lib/admin/applicant-detail-navigation";
 
 // ──────────────────────────────────────────────────────────────────────────
 // 타입
@@ -146,6 +148,22 @@ interface Detail {
   suntop?: { done: boolean; scheduled: boolean; events: SuntopEvent[] } | null;
   ongmanaging?: OngmanagingDetail | null;
   blacklisted?: boolean;
+}
+
+export interface ApplicantDetailNavigation {
+  /** 현재 조건 안에서의 1-based 위치. null이면 현재 지원자가 조건 밖이다. */
+  position: number | null;
+  total: number;
+  canPrevious: boolean;
+  canNext: boolean;
+  /** 실제 전환이 완료된 경우에만 true. 취소·보류 시 포커스 의도를 버린다. */
+  onPrevious: () => Promise<boolean>;
+  onNext: () => Promise<boolean>;
+  onFirstResult?: () => Promise<boolean>;
+  /** 화면 위치 문구와 별도로 보조기기에 알릴 전환 결과. */
+  announcement?: string;
+  /** 버튼이 아닌 자동 복구가 지원자를 바꿀 때 제목으로 초점을 옮기는 1회성 번호. */
+  focusRequestId?: number;
 }
 
 /** 관심 공고 배지용 제목 축약 */
@@ -361,6 +379,7 @@ export function ApplicantDetailContent({
   onOpenChat,
   onChanged,
   detail: externalDetail,
+  loading: externalLoading,
   reload: externalReload,
   autoOpenConfirm,
   onAutoOpenConfirmConsumed,
@@ -377,6 +396,8 @@ export function ApplicantDetailContent({
   onOpenChat?: () => void;
   onChanged?: () => void;
   detail?: Detail | null;
+  /** 부모가 detail을 소유할 때의 로딩 상태. null detail을 실패로 오인하지 않게 함께 넘긴다. */
+  loading?: boolean;
   reload?: () => void;
   /** 이 지원자(id 일치)의 확정 모달을 자동으로 연다 — '확정 대기' 큐의 확정 버튼이 이 패널의 확정 모달을
    *  쓰게 해서 지점·슬롯·시작일 없이 확정되던 '빠른 확정' 경로를 없앤다. 상세 로드 후에 1회만 열고,
@@ -402,7 +423,7 @@ export function ApplicantDetailContent({
   );
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
   const reload = externalReload ?? local.reload;
-  const loading = externalDetail !== undefined ? false : local.loading;
+  const loading = externalDetail !== undefined ? (externalLoading ?? false) : local.loading;
   // 확정 모달 외부 오픈 — openConfirm은 아래(상세 로드 이후 구간)에서 정의되므로 최신 함수를 ref로 받는다.
   // 상세가 로드되기 전에는 확정 대상 후보를 알 수 없어 열지 않고, 로드되면 그때 연다.
   const openConfirmRef = useRef<(seedJobId?: number | null) => void>(() => {});
@@ -1841,6 +1862,8 @@ export function ApplicantDetailPanel({
   autoOpenConfirm,
   onAutoOpenConfirmConsumed,
   onDirtyChange,
+  navigation,
+  resolveReturnFocus,
   docked = false,
   dockedClassName = "right-4 top-[92px] bottom-4 w-[520px] z-40",
 }: {
@@ -1867,9 +1890,20 @@ export function ApplicantDetailPanel({
   onAutoOpenConfirmConsumed?: () => void;
   /** 도킹된 부모 목록에서 다른 지원자를 누를 때도 같은 미저장 가드를 적용한다. */
   onDirtyChange?: (state: ApplicantDetailDirtyState) => void;
+  /** 현재 목록 조건 안에서 상세 패널을 닫지 않고 이전·다음 지원자로 이동한다. */
+  navigation?: ApplicantDetailNavigation;
+  /** 패널을 닫을 때 현재 지원자의 목록 행으로 초점을 돌려준다. */
+  resolveReturnFocus?: (applicantId: number) => HTMLElement | null;
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);
   const panelRef = useRef<HTMLDivElement>(null);
+  const panelTitleRef = useRef<HTMLHeadingElement>(null);
+  const previousButtonRef = useRef<HTMLButtonElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const navigationFocusCoordinatorRef = useRef(createApplicantNavigationFocusCoordinator());
+  const previousFocusRequestIdRef = useRef(navigation?.focusRequestId);
+  const previousApplicantIdRef = useRef(applicantId);
+  const lastOpenApplicantIdRef = useRef<number | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const { detail, loading, reload } = useApplicantDetail(isOpen ? applicantId : null);
@@ -1900,11 +1934,37 @@ export function ApplicantDetailPanel({
         : null;
       requestAnimationFrame(() => panelRef.current?.focus());
     } else if (!isOpen && wasOpenRef.current) {
-      const returnTarget = returnFocusRef.current;
+      const currentApplicantId = lastOpenApplicantIdRef.current;
+      const returnTarget = currentApplicantId == null
+        ? returnFocusRef.current
+        : resolveReturnFocus?.(currentApplicantId) ?? returnFocusRef.current;
       requestAnimationFrame(() => returnTarget?.focus());
     }
+    if (isOpen && applicantId != null) lastOpenApplicantIdRef.current = applicantId;
     wasOpenRef.current = isOpen;
-  }, [isOpen]);
+  }, [applicantId, isOpen, resolveReturnFocus]);
+
+  useEffect(() => {
+    const applicantChanged = previousApplicantIdRef.current !== applicantId;
+    previousApplicantIdRef.current = applicantId;
+    if (!applicantChanged) return;
+
+    const focusTitleWithoutDirection = navigation?.focusRequestId != null
+      && navigation.focusRequestId !== previousFocusRequestIdRef.current;
+    previousFocusRequestIdRef.current = navigation?.focusRequestId;
+    const focusTarget = navigationFocusCoordinatorRef.current.consume(
+      navigation?.canPrevious ?? false,
+      navigation?.canNext ?? false,
+      focusTitleWithoutDirection,
+    );
+    if (focusTarget === null) return;
+
+    requestAnimationFrame(() => {
+      if (focusTarget === "previous") previousButtonRef.current?.focus();
+      else if (focusTarget === "next") nextButtonRef.current?.focus();
+      else panelTitleRef.current?.focus();
+    });
+  }, [applicantId, navigation?.canNext, navigation?.canPrevious, navigation?.focusRequestId]);
 
   const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (docked) return;
@@ -1994,7 +2054,7 @@ export function ApplicantDetailPanel({
               <div className="w-12 h-12 rounded-2xl bg-muted text-gray-700 flex items-center justify-center font-bold text-[18px] shadow-inner">{a?.name?.charAt(0) ?? "?"}</div>
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <h2 id="applicant-detail-panel-title" className="text-[20px] font-extrabold text-foreground">{a?.name ?? "지원자"}</h2>
+                  <h2 ref={panelTitleRef} id="applicant-detail-panel-title" tabIndex={-1} className="text-[20px] font-extrabold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm">{a?.name ?? "지원자"}</h2>
                   {age && <span className="text-[12px] font-medium text-muted-foreground bg-white px-2 py-0.5 rounded-full border border-border-strong">{age}세</span>}
                   {a && <ApplicantStatusBadge status={a.status} />}
                 </div>
@@ -2011,6 +2071,64 @@ export function ApplicantDetailPanel({
             </div>
             <button aria-label="지원자 상세 닫기" onClick={() => void requestPanelTransition(onClose)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-2 hover:bg-gray-200 rounded-lg transition-colors text-muted-foreground hover:text-foreground"><X size={20} /></button>
           </div>
+
+          {navigation && (
+            <div
+              role="group"
+              aria-label="현재 조건의 지원자 이동"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,auto)_minmax(0,1fr)] items-center gap-3 border-b border-border-strong bg-card px-4 py-2.5 shrink-0"
+            >
+              <button
+                ref={previousButtonRef}
+                type="button"
+                disabled={!navigation.canPrevious}
+                onClick={() => {
+                  void navigationFocusCoordinatorRef.current.request("previous", navigation.onPrevious);
+                }}
+                className="justify-self-start inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border-strong bg-background px-3 text-[13px] font-bold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:border-border disabled:bg-muted/50 disabled:text-muted-foreground disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+              >
+                <ChevronLeft aria-hidden="true" size={16} />
+                이전
+              </button>
+
+              <div className="min-w-0 text-center">
+                <div className="text-[13px] font-extrabold tabular-nums text-foreground">
+                  {navigation.position === null
+                    ? "현재 조건 밖"
+                    : `${navigation.position.toLocaleString("ko-KR")} / ${navigation.total.toLocaleString("ko-KR")}`}
+                </div>
+                {navigation.position === null && navigation.total > 0 && navigation.onFirstResult && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigationFocusCoordinatorRef.current.request("next", navigation.onFirstResult!);
+                    }}
+                    className="mt-0.5 rounded px-1 py-0.5 text-[12px] font-bold text-info underline decoration-info/40 underline-offset-2 hover:decoration-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    첫 결과로 이동
+                  </button>
+                )}
+                <span className="sr-only" aria-live="polite" aria-atomic="true">
+                  {navigation.announcement ?? (navigation.position === null
+                    ? "현재 지원자는 현재 조건 밖입니다."
+                    : `현재 조건의 지원자 ${navigation.position}번째, 전체 ${navigation.total}명`)}
+                </span>
+              </div>
+
+              <button
+                ref={nextButtonRef}
+                type="button"
+                disabled={!navigation.canNext}
+                onClick={() => {
+                  void navigationFocusCoordinatorRef.current.request("next", navigation.onNext);
+                }}
+                className="justify-self-end inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border-strong bg-background px-3 text-[13px] font-bold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:border-border disabled:bg-muted/50 disabled:text-muted-foreground disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+              >
+                다음
+                <ChevronRight aria-hidden="true" size={16} />
+              </button>
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex border-b border-border-strong bg-white shrink-0 px-3">
@@ -2034,6 +2152,7 @@ export function ApplicantDetailPanel({
                 variant="drawer"
                 onOpenChat={() => { void requestPanelTransition(() => setTab("chat")); }}
                 detail={detail}
+                loading={loading}
                 reload={() => { reload(); onChanged?.(); }}
                 onChanged={onChanged}
                 onDirtyChange={reportPanelDirty}

@@ -122,15 +122,27 @@ test("changing one pipeline core filter preserves the other filter from the curr
   assert.equal(combined.searchParams.get("availability"), "즉시가능");
 });
 
-test("a completed queue item advances to the next applicant", () => {
-  const nextQueueApplicantId = (adminNav as Record<string, unknown>)
-    .nextQueueApplicantId as
-    | ((previousIds: number[], currentIds: number[], selectedId: number | null) => number | null)
-    | undefined;
+const nextQueueApplicantId = (adminNav as Record<string, unknown>)
+  .nextQueueApplicantId as
+  | ((previousIds: number[], currentIds: number[], selectedId: number | null) => number | null)
+  | undefined;
 
+test("a completed queue item advances to the next surviving applicant", () => {
   assert.equal(typeof nextQueueApplicantId, "function");
   assert.equal(nextQueueApplicantId!([11, 12, 13], [12, 13], 11), 12);
+  assert.equal(nextQueueApplicantId!([11, 12, 13], [11, 13], 12), 13);
+  assert.equal(nextQueueApplicantId!([11, 12, 13], [99, 11, 13], 12), 13);
+});
+
+test("a completed last queue item falls back to the nearest previous applicant", () => {
+  assert.equal(nextQueueApplicantId!([11, 12, 13], [11, 12], 13), 12);
+});
+
+test("queue refresh preserves a valid or externally opened selection", () => {
   assert.equal(nextQueueApplicantId!([11, 12], [11, 12], 11), 11);
-  assert.equal(nextQueueApplicantId!([11], [], 11), null);
   assert.equal(nextQueueApplicantId!([11, 12], [11, 12], 99), 99);
+});
+
+test("queue completion clears the selection when no work remains", () => {
+  assert.equal(nextQueueApplicantId!([11], [], 11), null);
 });

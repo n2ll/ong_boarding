@@ -51,7 +51,7 @@ test("reply completion continues with remaining work from any starting point", a
   assert.equal(nextLiveReplyApplicantId!([], 12), null);
 });
 
-test("a late completion never replaces a conversation the manager already selected", async () => {
+test("reply completion advances from an already removed current row but preserves a changed selection", async () => {
   const { liveReplySelectionAfterCompletion } = await loadModule();
 
   assert.equal(typeof liveReplySelectionAfterCompletion, "function");
@@ -64,7 +64,12 @@ test("a late completion never replaces a conversation the manager already select
     orderedActionableIds: [8, 19],
     selectedApplicantId: 12,
     completedApplicantId: 12,
-  }), { applicantId: 12, applied: false, completedAll: false });
+  }), { applicantId: 8, applied: true, completedAll: false });
+  assert.deepEqual(liveReplySelectionAfterCompletion!({
+    orderedActionableIds: [],
+    selectedApplicantId: 12,
+    completedApplicantId: 12,
+  }), { applicantId: null, applied: true, completedAll: true });
   assert.deepEqual(liveReplySelectionAfterCompletion!({
     orderedActionableIds: [12, 8, 19],
     selectedApplicantId: 19,

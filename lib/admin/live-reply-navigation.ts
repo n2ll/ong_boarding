@@ -40,13 +40,6 @@ export function liveReplySelectionAfterCompletion(input: {
       completedAll: false,
     };
   }
-  if (!input.orderedActionableIds.includes(input.completedApplicantId)) {
-    return {
-      applicantId: input.selectedApplicantId,
-      applied: false,
-      completedAll: false,
-    };
-  }
   const applicantId = nextLiveReplyApplicantId(
     input.orderedActionableIds,
     input.completedApplicantId,
