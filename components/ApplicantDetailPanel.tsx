@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { calcAge, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
-import { isLiveLinkResolved } from "@/lib/candidate-links";
+import { isLiveLinkResolved, type LiveJobLink } from "@/lib/candidate-links";
+import type { ConversationJobContext } from "@/lib/conversation-thread-view";
 import { ConversationThread } from "./ConversationThread";
 import { useConfirm } from "./ConfirmDialog";
 import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
@@ -198,29 +199,56 @@ const AVAILABILITY_OPTIONS = ["즉시가능", "이번주가능", "휴면"];
 function useApplicantDetail(applicantId: number | null) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failedApplicantId, setFailedApplicantId] = useState<number | null>(null);
+  const requestSequenceRef = useRef(0);
 
   const reload = useCallback(async () => {
+    const requestSequence = ++requestSequenceRef.current;
     if (applicantId == null) {
       setDetail(null);
+      setLoading(false);
+      setFailedApplicantId(null);
       return;
     }
     setLoading(true);
+    setFailedApplicantId(null);
     try {
       const res = await fetch(`/api/admin/applicants/${applicantId}`);
       const json = await res.json();
-      if (res.ok) setDetail(json as Detail);
+      if (requestSequenceRef.current !== requestSequence) return;
+      const nextDetail = json as Detail;
+      if (res.ok && nextDetail.applicant?.id === applicantId) {
+        setDetail(nextDetail);
+      } else {
+        setDetail(null);
+        setFailedApplicantId(applicantId);
+      }
     } catch {
-      // 무시 — UI는 로딩 상태 유지
+      if (requestSequenceRef.current === requestSequence) {
+        setDetail(null);
+        setFailedApplicantId(applicantId);
+      }
     } finally {
-      setLoading(false);
+      if (requestSequenceRef.current === requestSequence) setLoading(false);
     }
   }, [applicantId]);
 
   useEffect(() => {
-    reload();
+    void reload();
+    return () => {
+      requestSequenceRef.current += 1;
+    };
   }, [reload]);
 
-  return { detail, loading, reload };
+  const ownedDetail = detail?.applicant.id === applicantId ? detail : null;
+  const awaitingCurrentApplicant = applicantId !== null
+    && ownedDetail === null
+    && failedApplicantId !== applicantId;
+  return {
+    detail: ownedDetail,
+    loading: loading || (detail !== null && ownedDetail === null) || awaitingCurrentApplicant,
+    reload,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -336,7 +364,7 @@ export function ApplicantDetailContent({
   /** 표시 기준 공고를 부모가 들고 있을 때(드로어) — 상세 탭과 대화 탭이 같은 공고를 보게 한다.
    *  주지 않으면(응대 화면) 이 컴포넌트가 내부 state로 관리한다. */
   focusJobId?: number | null;
-  onFocusJobChange?: (jobId: number | null) => void;
+  onFocusJobChange?: (jobId: number | null, job?: LiveJobLink) => void;
   variant?: "panel" | "drawer";
   /** 드로어 상세에서 사람이 직접 답해야 할 때 대화 탭으로 바로 전환한다. */
   onOpenChat?: () => void;
@@ -360,7 +388,9 @@ export function ApplicantDetailContent({
   // 부모가 표시 기준 공고를 들고 있으면 그 값을 쓴다(드로어: 상세 탭·대화 탭이 같은 공고를 봐야 한다).
   const controlled = onFocusJobChange != null;
   const focusOverride = controlled ? (focusJobIdProp ?? null) : focusOverrideLocal;
-  const setFocusOverride = (v: number | null) => (controlled ? onFocusJobChange!(v) : setFocusOverrideLocal(v));
+  const setFocusOverride = (v: number | null, job?: LiveJobLink) => (
+    controlled ? onFocusJobChange!(v, job) : setFocusOverrideLocal(v)
+  );
   const detail = externalDetail !== undefined ? externalDetail : local.detail;
   const reload = externalReload ?? local.reload;
   const loading = externalDetail !== undefined ? false : local.loading;
@@ -457,7 +487,18 @@ export function ApplicantDetailContent({
     return <div className="p-6 text-[13px] text-muted-foreground text-center">불러오는 중…</div>;
   }
   if (!detail) {
-    return <div className="p-6 text-[13px] text-muted-foreground text-center">정보를 불러오지 못했어요</div>;
+    return (
+      <div role="alert" className="flex flex-col items-center gap-3 p-6 text-center">
+        <p className="text-[13px] text-muted-foreground">정보를 불러오지 못했어요</p>
+        <button
+          type="button"
+          onClick={() => void reload()}
+          className="min-h-10 rounded-lg border border-border-strong bg-card px-3 text-[13px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          다시 시도
+        </button>
+      </div>
+    );
   }
 
   const a = detail.applicant;
@@ -1190,13 +1231,27 @@ export function ApplicantDetailContent({
                     role={selectable ? "button" : undefined}
                     tabIndex={selectable ? 0 : undefined}
                     aria-pressed={selectable ? isFocus : undefined}
-                    onClick={selectable ? () => setFocusOverride(c.job_id) : undefined}
+                    onClick={selectable ? () => setFocusOverride(c.job_id, {
+                      job_id: c.job_id,
+                      title: isSystemJobTitle(c.job_title ?? "") ? "공고 미지정 (내부 처리용)" : c.job_title ?? `공고 #${c.job_id}`,
+                      branch: c.job_branch,
+                      agent_stage: c.agent_stage,
+                      created_at: c.created_at,
+                      stage_updated_at: null,
+                    }) : undefined}
                     onKeyDown={
                       selectable
                         ? (e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              setFocusOverride(c.job_id);
+                              setFocusOverride(c.job_id, {
+                                job_id: c.job_id,
+                                title: isSystemJobTitle(c.job_title ?? "") ? "공고 미지정 (내부 처리용)" : c.job_title ?? `공고 #${c.job_id}`,
+                                branch: c.job_branch,
+                                agent_stage: c.agent_stage,
+                                created_at: c.created_at,
+                                stage_updated_at: null,
+                              });
                             }
                           }
                         : undefined
@@ -1734,7 +1789,7 @@ export function ApplicantDetailPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
-  const { detail, reload } = useApplicantDetail(isOpen ? applicantId : null);
+  const { detail, loading, reload } = useApplicantDetail(isOpen ? applicantId : null);
   // 표시 기준 공고를 드로어가 들고 있는다 — 상세 탭에서 공고를 바꾼 뒤 '대화 내역'으로 넘어가면
   // 예전엔 부르는 화면이 준 jobId로 되돌아가, 매니저가 보고 있는 공고와 **다른 공고로 답장**이 적재됐다.
   const [focusJobId, setFocusJobId] = useState<number | null>(jobId);
@@ -1798,6 +1853,26 @@ export function ApplicantDetailPanel({
 
   const a = detail?.applicant;
   const age = a ? calcAge(a.birth_date) : null;
+  const focusedConversationCandidate = focusJobId == null
+    ? null
+    : detail?.candidates.find((candidate) => candidate.job_id === focusJobId) ?? null;
+  const drawerJobContext: ConversationJobContext = focusJobId == null
+    ? { state: "ready", scope: "general", job: null }
+    : !detail
+      ? { state: "loading" }
+      : focusedConversationCandidate
+        ? {
+            state: "ready",
+            scope: "job",
+            job: {
+              id: focusedConversationCandidate.job_id,
+              title: isSystemJobTitle(focusedConversationCandidate.job_title ?? "")
+                ? "공고 미지정 (내부 처리용)"
+                : focusedConversationCandidate.job_title ?? `공고 #${focusedConversationCandidate.job_id}`,
+              branch: focusedConversationCandidate.job_branch,
+            },
+          }
+        : { state: "error" };
 
   return (
     <>
@@ -1883,14 +1958,27 @@ export function ApplicantDetailPanel({
                 applicantName={a.name}
                 phone={a.phone}
                 jobId={focusJobId}
+                jobContext={drawerJobContext}
+                onJobContextRetry={reload}
                 smsOptOutAt={a.sms_opt_out_at}
                 agentMode={drawerAgentMode}
                 onAgentModeRetry={() => { void mutateKillMode(); }}
                 onChanged={() => { reload(); onChanged?.(); }}
                 className="flex-1 min-h-0"
               />
-            ) : (
+            ) : loading ? (
               <div className="p-6 text-[13px] text-muted-foreground text-center">불러오는 중…</div>
+            ) : (
+              <div role="alert" className="flex flex-col items-center gap-3 p-6 text-center">
+                <p className="text-[13px] text-muted-foreground">정보를 불러오지 못했어요</p>
+                <button
+                  type="button"
+                  onClick={() => void reload()}
+                  className="min-h-10 rounded-lg border border-border-strong bg-card px-3 text-[13px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  다시 시도
+                </button>
+              </div>
             )}
           </div>
         </motion.div>

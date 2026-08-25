@@ -163,7 +163,7 @@ test("the unscoped live tab passes an explicit draft scope into the conversation
   ]);
 
   assert.match(thread, /draftScope\?:\s*"all"\s*\|\s*"unscoped"/);
-  assert.match(live, /selectedJobId\s*===\s*null[\s\S]*?pending_draft_job_id\s*===\s*null[\s\S]*?"unscoped"/);
+  assert.match(live, /currentSelectedJobId\s*===\s*null[\s\S]*?pending_draft_job_id\s*===\s*null[\s\S]*?"unscoped"/);
   assert.match(live, /<ConversationThread[\s\S]*?draftScope=\{/);
   assert.match(thread, /agentPresentation\.kind\s*===\s*"unscoped"[\s\S]*?role="status"[\s\S]*?agentPresentation\.notice/);
 });

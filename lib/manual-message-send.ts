@@ -13,6 +13,40 @@ export interface ManualMessageFingerprint {
   draftWasEdited: boolean;
 }
 
+export type ManualMessageFailureCode =
+  | "job_scope_mismatch"
+  | "job_scope_unavailable"
+  | "recipient_mismatch"
+  | "recipient_unavailable"
+  | "applicant_required";
+
+export function manualMessageRecipientEligibility(
+  request: { applicantId: number | null; phone: string },
+  lookup: { phone: string | null; failed: boolean },
+):
+  | { ok: true }
+  | { ok: false; reason: "applicant_required" | "lookup_failed" | "mismatch" } {
+  if (request.applicantId === null) return { ok: false, reason: "applicant_required" };
+  if (lookup.failed) return { ok: false, reason: "lookup_failed" };
+  const requestedPhone = request.phone.replace(/[^0-9]/g, "");
+  const storedPhone = (lookup.phone ?? "").replace(/[^0-9]/g, "");
+  return requestedPhone && requestedPhone === storedPhone
+    ? { ok: true }
+    : { ok: false, reason: "mismatch" };
+}
+
+export function manualMessageJobBindingEligibility(
+  request: { applicantId: number | null; jobId: number | null },
+  lookup: { found: boolean; failed: boolean },
+):
+  | { ok: true }
+  | { ok: false; reason: "applicant_required" | "lookup_failed" | "mismatch" } {
+  if (request.jobId === null) return { ok: true };
+  if (request.applicantId === null) return { ok: false, reason: "applicant_required" };
+  if (lookup.failed) return { ok: false, reason: "lookup_failed" };
+  return lookup.found ? { ok: true } : { ok: false, reason: "mismatch" };
+}
+
 export interface ManualMessageDraftRecord {
   applicant_id: number | null;
   job_id: number | null;
@@ -52,6 +86,7 @@ export interface ManualMessageDeliveryResult<TMessage> {
   message: TMessage | null;
   conflict?: boolean;
   providerError?: string;
+  failureCode?: ManualMessageFailureCode;
 }
 
 interface DeliverManualMessageArgs<TMessage> {
@@ -64,6 +99,7 @@ interface DeliverManualMessageArgs<TMessage> {
         success: false;
         failureKind?: "declared" | "unknown";
         error?: string;
+        failureCode?: ManualMessageFailureCode;
         messageId?: never;
       }
   >;
@@ -308,6 +344,7 @@ export async function deliverManualMessage<TMessage>({
       deduplicated: false,
       message: null,
       providerError: detail,
+      ...(providerResult.failureCode ? { failureCode: providerResult.failureCode } : {}),
     };
   }
 

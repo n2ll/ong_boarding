@@ -5,6 +5,8 @@ import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety
 import {
   deliverManualMessage,
   manualDraftSendEligibility,
+  manualMessageJobBindingEligibility,
+  manualMessageRecipientEligibility,
   manualMessagePostprocessResult,
   type ExistingManualMessageRequest,
   type ManualMessageFingerprint,
@@ -194,6 +196,92 @@ export async function POST(req: NextRequest) {
             };
           }
         }
+        let recipientLookup: { phone: string | null; failed: boolean } = {
+          phone: null,
+          failed: false,
+        };
+        if (applicantId !== null) {
+          try {
+            const recipient = await supabase
+              .from("applicants")
+              .select("phone")
+              .eq("id", applicantId)
+              .maybeSingle();
+            recipientLookup = {
+              phone: typeof recipient.data?.phone === "string" ? recipient.data.phone : null,
+              failed: Boolean(recipient.error),
+            };
+            if (recipient.error) {
+              console.error("[manual message recipient validation error]", recipient.error);
+            }
+          } catch (error) {
+            console.error("[manual message recipient validation exception]", error);
+            recipientLookup = { phone: null, failed: true };
+          }
+        }
+        const recipientEligibility = manualMessageRecipientEligibility(
+          { applicantId, phone: targetPhone },
+          recipientLookup,
+        );
+        if (!recipientEligibility.ok) {
+          const failureCode = recipientEligibility.reason === "mismatch"
+            ? "recipient_mismatch" as const
+            : recipientEligibility.reason === "lookup_failed"
+              ? "recipient_unavailable" as const
+              : "applicant_required" as const;
+          return {
+            success: false as const,
+            failureKind: "declared" as const,
+            failureCode,
+            error: recipientEligibility.reason === "mismatch"
+              ? "화면의 연락처가 현재 지원자 정보와 일치하지 않아 문자를 보내지 않았습니다. 대화를 새로고침해주세요."
+              : recipientEligibility.reason === "lookup_failed"
+                ? "지원자 연락처를 확인하지 못해 문자를 보내지 않았습니다. 잠시 뒤 다시 시도해주세요."
+                : "지원자 정보를 확인할 수 없어 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
+          };
+        }
+        if (!draftId && jobId !== null) {
+          let lookup = { found: false, failed: false };
+          if (applicantId !== null) {
+            try {
+              const binding = await supabase
+                .from("job_candidates")
+                .select("id")
+                .eq("applicant_id", applicantId)
+                .eq("job_id", jobId)
+                .limit(1)
+                .maybeSingle();
+              lookup = {
+                found: Boolean(binding.data),
+                failed: Boolean(binding.error),
+              };
+              if (binding.error) {
+                console.error("[manual message job binding validation error]", binding.error);
+              }
+            } catch (error) {
+              console.error("[manual message job binding validation exception]", error);
+              lookup = { found: false, failed: true };
+            }
+          }
+          const eligibility = manualMessageJobBindingEligibility({ applicantId, jobId }, lookup);
+          if (!eligibility.ok) {
+            const failureCode = eligibility.reason === "mismatch"
+              ? "job_scope_mismatch" as const
+              : eligibility.reason === "lookup_failed"
+                ? "job_scope_unavailable" as const
+                : "applicant_required" as const;
+            return {
+              success: false as const,
+              failureKind: "declared" as const,
+              failureCode,
+              error: eligibility.reason === "mismatch"
+                ? "선택한 공고가 이 지원자와 연결되어 있지 않아 문자를 보내지 않았습니다. 대화를 새로고침해주세요."
+                : eligibility.reason === "lookup_failed"
+                  ? "지원자와 공고 연결을 확인하지 못해 문자를 보내지 않았습니다. 잠시 뒤 다시 시도해주세요."
+                  : "지원자 정보를 확인할 수 없어 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
+            };
+          }
+        }
         return sendSms(
           targetPhone,
           messageBody,
@@ -328,6 +416,76 @@ export async function POST(req: NextRequest) {
       );
     }
     if (delivery.delivery === "failed") {
+      if (delivery.failureCode === "job_scope_mismatch") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "job_scope_mismatch",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: delivery.retryable,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 409 },
+        );
+      }
+      if (delivery.failureCode === "job_scope_unavailable") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "job_scope_unavailable",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: delivery.retryable,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 503 },
+        );
+      }
+      if (delivery.failureCode === "recipient_mismatch") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "recipient_mismatch",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: delivery.retryable,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 409 },
+        );
+      }
+      if (delivery.failureCode === "recipient_unavailable") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "recipient_unavailable",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: delivery.retryable,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 503 },
+        );
+      }
+      if (delivery.failureCode === "applicant_required") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "applicant_required",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: delivery.retryable,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 400 },
+        );
+      }
       return NextResponse.json(
         {
           success: false,

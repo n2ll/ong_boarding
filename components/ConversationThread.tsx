@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback, useRef } from "react";
-import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban, ArrowRight } from "lucide-react";
+import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban, ArrowRight, BriefcaseBusiness, LockKeyhole } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Switch } from "./ui/switch";
@@ -31,7 +31,9 @@ import {
 } from "@/lib/manual-message-composer-storage";
 import {
   conversationAgentPresentation,
+  conversationJobContextPresentation,
   conversationMessagesView,
+  type ConversationJobContext,
 } from "@/lib/conversation-thread-view";
 import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
 import { pendingDraftMatchesScope } from "@/lib/admin/pending-draft-scope";
@@ -184,6 +186,10 @@ interface ConversationThreadProps {
   jobId?: number | null;
   /** jobId가 없을 때 미지정 초안만 조회할지, 전체 공고의 최신 초안을 조회할지 구분 */
   draftScope?: "all" | "unscoped";
+  /** 발송 결과가 귀속될 공고의 신뢰 상태. loading/error에서는 오발송 방지를 위해 작성창을 잠근다. */
+  jobContext: ConversationJobContext;
+  /** 공고 맥락 조회 실패를 작성창 바로 위에서 복구 */
+  onJobContextRetry?: () => void;
   /** 전역 AI 응답 모드의 원격 신뢰 상태 — 불확실한 값을 auto/off로 추정하지 않는다. */
   agentMode: AdminAgentModeView;
   /** AI 모드 조회 실패를 대화 맥락에서 바로 복구할 수 있게 한다. */
@@ -235,6 +241,8 @@ export function ConversationThread({
   phone,
   jobId = null,
   draftScope = "all",
+  jobContext,
+  onJobContextRetry,
   agentMode,
   onAgentModeRetry,
   smsOptOutAt = null,
@@ -445,8 +453,9 @@ export function ConversationThread({
           : oldest;
       }, null)
     : null;
+  const jobContextCopy = conversationJobContextPresentation(jobContext);
   const agentPresentation = conversationAgentPresentation({
-    scopeReady,
+    scopeReady: scopeReady && jobContextCopy.sendReady,
     draftScope,
     agentStage,
   });
@@ -495,7 +504,7 @@ export function ConversationThread({
         : "bg-warning-soft border-warning/30 text-warning-strong";
   // 로컬 AI가 이미 멈췄거나, 최신 전역 상태가 off/draft임이 확인된 경우만 직접 발송한다.
   // cached+error에서 예전 off/draft를 믿으면 실제 auto와 매니저 답장이 겹칠 수 있다.
-  const canSend = scopeReady && (!isAiEnabled || agentModeAllowsManualSend(agentMode));
+  const canSend = scopeReady && jobContextCopy.sendReady && (!isAiEnabled || agentModeAllowsManualSend(agentMode));
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
@@ -533,7 +542,10 @@ export function ConversationThread({
   // 빠른 템플릿 변수 치환 — #{이름}/#{공고명}/#{지점}/#{맞춤링크}(bulk-send 문법 통일).
   // 값이 없는 변수는 토큰을 그대로 남기고 목록으로 돌려줘 경고 토스트의 근거로 쓴다.
   const fillTemplateVars = (text: string): { filled: string; unresolved: string[] } => {
-    const job = jobId != null ? currentJobsMap[jobId] : undefined;
+    const contextJob = jobContext.state === "ready" && jobContext.scope === "job"
+      ? jobContext.job
+      : undefined;
+    const job = contextJob ?? (jobId != null ? currentJobsMap[jobId] : undefined);
     const values: Record<string, string | null> = {
       "#{이름}": (applicantName || "지원자").trim() || "지원자",
       "#{공고명}": job?.title?.trim() || null,
@@ -1312,6 +1324,7 @@ export function ConversationThread({
               </div>
             )}
             <textarea
+              aria-describedby="sms-job-context"
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
               disabled={draftBusy || !draftComposerReady}
@@ -1327,11 +1340,11 @@ export function ConversationThread({
             <div className="flex items-center justify-end gap-2 mt-3">
               <button onClick={handleIgnoreDraft} disabled={draftBusy || !draftComposerReady} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
               {onQueueItemCompleted && (
-                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
+                <button aria-describedby="sms-job-context" onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
                   검수 발송만
                 </button>
               )}
-              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+              <button aria-describedby="sms-job-context" onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {onQueueItemCompleted ? (hasNextQueueItem ? "검수 발송 후 다음" : "검수 발송하고 완료") : "검수 후 발송"}
                 {onQueueItemCompleted && !draftBusy && <ArrowRight size={15} />}
@@ -1343,7 +1356,73 @@ export function ConversationThread({
 
       {/* 입력 영역 */}
       <div className="p-5 bg-card border-t border-border-strong shrink-0">
-        {!scopeReady && messagesLoadError ? (
+        <div
+          id="sms-job-context"
+          role={jobContextCopy.kind === "error" ? "alert" : "status"}
+          aria-live={jobContextCopy.kind === "error" ? "assertive" : "polite"}
+          aria-atomic="true"
+          className={`mb-3 flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border px-3.5 py-2.5 ${
+            jobContextCopy.kind === "error"
+              ? "border-error/30 bg-error-soft"
+              : jobContextCopy.kind === "loading"
+                ? "border-border-strong bg-background"
+                : jobContextCopy.kind === "job"
+                  ? "border-info/25 bg-info-soft"
+                  : "border-warning/30 bg-warning-soft"
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-card ${
+              jobContextCopy.kind === "error"
+                ? "border-error/30 text-error-strong"
+                : jobContextCopy.kind === "loading"
+                  ? "border-border-strong text-muted-foreground"
+                  : jobContextCopy.kind === "job"
+                    ? "border-info/25 text-info-strong"
+                    : "border-warning/30 text-warning-strong"
+            }`}>
+              {jobContextCopy.kind === "loading"
+                ? <Loader2 aria-hidden="true" size={16} className="animate-spin" />
+                : jobContextCopy.sendReady
+                  ? <BriefcaseBusiness aria-hidden="true" size={16} />
+                  : <LockKeyhole aria-hidden="true" size={16} />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className={`shrink-0 text-[12px] font-extrabold ${
+                  jobContextCopy.kind === "error"
+                    ? "text-error-strong"
+                    : jobContextCopy.kind === "job"
+                      ? "text-info-strong"
+                      : jobContextCopy.kind === "loading"
+                        ? "text-muted-foreground"
+                        : "text-warning-strong"
+                }`}>{jobContextCopy.label}</span>
+                <span className="truncate text-[14px] font-extrabold text-foreground" title={jobContextCopy.title}>
+                  {jobContextCopy.title}
+                </span>
+              </div>
+              <div className="mt-0.5 truncate text-[12px] font-medium leading-4 text-muted-foreground" title={jobContextCopy.detail}>
+                {jobContextCopy.detail}
+              </div>
+            </div>
+          </div>
+          {jobContextCopy.kind === "error" && onJobContextRetry && (
+            <button
+              type="button"
+              onClick={onJobContextRetry}
+              className="min-h-9 shrink-0 rounded-lg border border-error/30 bg-card px-3 text-[12px] font-bold text-error-strong outline-none hover:bg-error-soft focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              다시 확인
+            </button>
+          )}
+        </div>
+
+        {!jobContextCopy.sendReady ? (
+          <div className="flex min-h-[54px] items-center justify-center gap-2 text-[13px] font-semibold text-muted-foreground">
+            <LockKeyhole aria-hidden="true" size={16} /> 발송 대상 공고를 확인한 뒤 입력할 수 있어요.
+          </div>
+        ) : !scopeReady && messagesLoadError ? (
           <div className="flex min-h-[54px] items-center justify-center gap-3 text-[13px] font-semibold text-error">
             <span>대화와 발송 상태를 불러오지 못했어요.</span>
             <button
@@ -1385,6 +1464,7 @@ export function ConversationThread({
             <div className={`min-w-0 flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
                 aria-label="지원자에게 보낼 문자"
+                aria-describedby="sms-job-context"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 disabled={sending || !manualComposerReady}
@@ -1403,6 +1483,7 @@ export function ConversationThread({
             </div>
             <button
               aria-label={onQueueItemCompleted ? "문자만 발송" : "문자 발송"}
+              aria-describedby="sms-job-context"
               title={onQueueItemCompleted ? "현재 문자를 발송하고 이 대화에 머뭅니다" : undefined}
               onClick={() => void handleSendMessage(false)}
               disabled={sending || !inputValue.trim()}
@@ -1412,6 +1493,7 @@ export function ConversationThread({
             </button>
             {onQueueItemCompleted && (!isPaused || resumeTarget === null) && (
               <button
+                aria-describedby="sms-job-context"
                 onClick={() => void handleSendMessage(true)}
                 disabled={sending || !inputValue.trim()}
                 title={resumeTarget === null && isPaused ? "AI는 재개하지 않고, 발송이 완전히 기록된 뒤 답장 큐만 처리합니다" : hasNextQueueItem ? "발송이 완전히 기록된 뒤 다음 답장 대상으로 이동합니다" : "발송이 완전히 기록되면 답장 큐 처리를 마칩니다"}
@@ -1422,6 +1504,7 @@ export function ConversationThread({
             )}
             {isPaused && resumeTarget !== null && (
               <button
+                aria-describedby="sms-job-context"
                 onClick={() => void handleSendAndResume(Boolean(onQueueItemCompleted))}
                 disabled={sending || !inputValue.trim()}
                 title={onQueueItemCompleted ? (hasNextQueueItem ? `발송과 ${resumeTargetLabel} 재개가 모두 성공한 뒤 다음 답장 대상으로 이동합니다` : `발송과 ${resumeTargetLabel} 재개가 모두 성공하면 답장 큐 처리를 마칩니다`) : `발송 성공 후 ${resumeTargetLabel}를 즉시 재개합니다`}

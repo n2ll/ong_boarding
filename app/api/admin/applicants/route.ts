@@ -274,8 +274,16 @@ export async function GET(req: NextRequest) {
     // 배지에 쓰는 집합은 응대 화면 탭·상세 포커스와 **같은 함수**여야 해서 여기서 따로 계산한다
     // (목록에 3건이라 적혀 있으면 열었을 때 탭도 3개 — lib/candidate-links.ts).
     const { links, error: linkErr } = linkRes;
+    if (linkErr && liveScope) {
+      console.error("[applicants] job_links 조회 실패", linkErr);
+      // 실시간 응대에서는 이 값을 []로 축약하면 실제 공고 0건과 조회 실패를 구분할 수 없고,
+      // 매니저 문자가 job_id 없이 저장될 수 있다. 목록 전체를 재시도 상태로 올려 fail-closed한다.
+      return NextResponse.json(
+        { error: "공고 연결 정보를 확인하지 못했어요." },
+        { status: 503 },
+      );
+    }
     if (linkErr) {
-      // 배지가 없어도 목록은 쓸 수 있다 — 500으로 올리지 않고 로그만 남긴다.
       console.error("[applicants] job_links 조회 실패", linkErr);
     }
     if (!dashboardScope) {

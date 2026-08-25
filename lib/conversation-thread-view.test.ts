@@ -18,6 +18,22 @@ type ConversationThreadViewModule = {
     isAiEnabled: boolean;
     notice: string | null;
   };
+  conversationJobContextPresentation?: (input:
+    | { state: "loading" }
+    | { state: "error" }
+    | {
+        state: "ready";
+        scope: "job";
+        job: { id: number; title: string; branch: string | null };
+      }
+    | { state: "ready"; scope: "general" | "unscoped-draft"; job: null }
+  ) => {
+    kind: "loading" | "error" | "job" | "general" | "unscoped-draft";
+    label: string;
+    title: string;
+    detail: string;
+    sendReady: boolean;
+  };
 };
 
 async function loadModule(): Promise<ConversationThreadViewModule> {
@@ -70,6 +86,78 @@ test("an unscoped draft never exposes or inherits a job-level AI state", async (
       hasActiveFlow: false,
       isAiEnabled: false,
       notice: "AI 상태는 공고별로 관리돼요. 공고 탭에서 확인·변경하세요.",
+    },
+  );
+});
+
+test("the composer names the exact job that will own the outgoing message", async () => {
+  const { conversationJobContextPresentation } = await loadModule();
+
+  assert.equal(typeof conversationJobContextPresentation, "function");
+  assert.deepEqual(
+    conversationJobContextPresentation!({
+      state: "ready",
+      scope: "job",
+      job: { id: 31, title: "강남 새벽 배송", branch: "강남" },
+    }),
+    {
+      kind: "job",
+      label: "발송 대상 공고",
+      title: "강남 새벽 배송",
+      detail: "강남 · 공고 #31 · 이 공고의 대화 기록으로 저장됩니다.",
+      sendReady: true,
+    },
+  );
+});
+
+test("job context lookup uncertainty locks the composer instead of guessing", async () => {
+  const { conversationJobContextPresentation } = await loadModule();
+
+  assert.equal(typeof conversationJobContextPresentation, "function");
+  assert.deepEqual(
+    conversationJobContextPresentation!({ state: "loading" }),
+    {
+      kind: "loading",
+      label: "발송 대상 확인 중",
+      title: "공고 맥락을 확인하고 있어요",
+      detail: "확인이 끝날 때까지 문자 발송을 잠급니다.",
+      sendReady: false,
+    },
+  );
+  assert.deepEqual(
+    conversationJobContextPresentation!({ state: "error" }),
+    {
+      kind: "error",
+      label: "발송 대상 확인 실패",
+      title: "어느 공고의 대화인지 확인할 수 없어요",
+      detail: "오발송을 막기 위해 문자 발송을 잠갔습니다.",
+      sendReady: false,
+    },
+  );
+});
+
+test("intentional jobless contexts remain explicit instead of looking like a selected job", async () => {
+  const { conversationJobContextPresentation } = await loadModule();
+
+  assert.equal(typeof conversationJobContextPresentation, "function");
+  assert.deepEqual(
+    conversationJobContextPresentation!({ state: "ready", scope: "general", job: null }),
+    {
+      kind: "general",
+      label: "발송 대상",
+      title: "공고 미지정 · 일반 대화",
+      detail: "특정 공고에 연결하지 않고 지원자 대화로 저장됩니다.",
+      sendReady: true,
+    },
+  );
+  assert.deepEqual(
+    conversationJobContextPresentation!({ state: "ready", scope: "unscoped-draft", job: null }),
+    {
+      kind: "unscoped-draft",
+      label: "검수 대상",
+      title: "공고 미지정 AI 초안",
+      detail: "공고를 추정하지 않고 이 초안만 검수해 발송합니다.",
+      sendReady: true,
     },
   );
 });

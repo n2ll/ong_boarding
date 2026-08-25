@@ -30,6 +30,18 @@ interface ExistingOutboxRequest {
 }
 
 type ManualMessageModule = {
+  manualMessageRecipientEligibility?: (
+    request: { applicantId: number | null; phone: string },
+    lookup: { phone: string | null; failed: boolean },
+  ) =>
+    | { ok: true }
+    | { ok: false; reason: "applicant_required" | "lookup_failed" | "mismatch" };
+  manualMessageJobBindingEligibility?: (
+    request: { applicantId: number | null; jobId: number | null },
+    lookup: { found: boolean; failed: boolean },
+  ) =>
+    | { ok: true }
+    | { ok: false; reason: "applicant_required" | "lookup_failed" | "mismatch" };
   validateManualMessageIdempotencyKey?: (
     value: unknown
   ) => { ok: true; key: string } | { ok: false; reason: "required" | "invalid" };
@@ -55,7 +67,13 @@ type ManualMessageModule = {
       | { kind: "conflict" }
       | { kind: "error" }
     >;
-    send: () => Promise<{ success: boolean; messageId?: string; error?: string }>;
+    send: () => Promise<{
+      success: boolean;
+      messageId?: string;
+      error?: string;
+      failureKind?: "declared" | "unknown";
+      failureCode?: "job_scope_mismatch" | "job_scope_unavailable" | "recipient_mismatch" | "recipient_unavailable" | "applicant_required";
+    }>;
     markUnknown: (error: string) => Promise<void>;
     markFailed: (error: string) => Promise<boolean>;
     markSent: (providerMessageId: string | null) => Promise<boolean>;
@@ -68,6 +86,7 @@ type ManualMessageModule = {
     message: TMessage | null;
     conflict?: boolean;
     providerError?: string;
+    failureCode?: "job_scope_mismatch" | "job_scope_unavailable" | "recipient_mismatch" | "recipient_unavailable" | "applicant_required";
   }>;
   manualMessageClientResolution?: (
     response: Record<string, unknown>,
@@ -105,6 +124,40 @@ async function loadModule(): Promise<ManualMessageModule> {
   }
 }
 
+test("every manual SMS is bound to the selected applicant's canonical phone number", async () => {
+  const { manualMessageRecipientEligibility } = await loadModule();
+  assert.equal(typeof manualMessageRecipientEligibility, "function");
+
+  assert.deepEqual(
+    manualMessageRecipientEligibility!(
+      { applicantId: 7, phone: "010-1234-5678" },
+      { phone: "01012345678", failed: false },
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(
+    manualMessageRecipientEligibility!(
+      { applicantId: 7, phone: "010-9999-9999" },
+      { phone: "01012345678", failed: false },
+    ),
+    { ok: false, reason: "mismatch" },
+  );
+  assert.deepEqual(
+    manualMessageRecipientEligibility!(
+      { applicantId: 7, phone: "01012345678" },
+      { phone: null, failed: true },
+    ),
+    { ok: false, reason: "lookup_failed" },
+  );
+  assert.deepEqual(
+    manualMessageRecipientEligibility!(
+      { applicantId: null, phone: "01012345678" },
+      { phone: null, failed: false },
+    ),
+    { ok: false, reason: "applicant_required" },
+  );
+});
+
 const request: RequestFingerprint = {
   applicantId: 17,
   phone: "01012345678",
@@ -114,6 +167,67 @@ const request: RequestFingerprint = {
   draftId: null,
   draftWasEdited: false,
 };
+
+test("job-bound manual messages require an exact applicant relationship while general messages remain allowed", async () => {
+  const { manualMessageJobBindingEligibility } = await loadModule();
+  assert.equal(typeof manualMessageJobBindingEligibility, "function");
+
+  assert.deepEqual(
+    manualMessageJobBindingEligibility!({ applicantId: 17, jobId: null }, { found: false, failed: true }),
+    { ok: true },
+  );
+  assert.deepEqual(
+    manualMessageJobBindingEligibility!({ applicantId: null, jobId: 31 }, { found: true, failed: false }),
+    { ok: false, reason: "applicant_required" },
+  );
+  assert.deepEqual(
+    manualMessageJobBindingEligibility!({ applicantId: 17, jobId: 31 }, { found: false, failed: true }),
+    { ok: false, reason: "lookup_failed" },
+  );
+  assert.deepEqual(
+    manualMessageJobBindingEligibility!({ applicantId: 17, jobId: 31 }, { found: false, failed: false }),
+    { ok: false, reason: "mismatch" },
+  );
+  assert.deepEqual(
+    manualMessageJobBindingEligibility!({ applicantId: 17, jobId: 31 }, { found: true, failed: false }),
+    { ok: true },
+  );
+});
+
+test("a declared job-scope guard failure is persisted without recording a message", async () => {
+  const { deliverManualMessage } = await loadModule();
+  assert.equal(typeof deliverManualMessage, "function");
+
+  let failedWrites = 0;
+  let records = 0;
+  const result = await deliverManualMessage!({
+    key: "request-job-scope",
+    request,
+    claim: async () => ({ kind: "claimed" }),
+    send: async () => ({
+      success: false,
+      failureKind: "declared",
+      failureCode: "job_scope_mismatch",
+      error: "지원자와 공고 연결이 일치하지 않습니다.",
+    }),
+    markUnknown: async () => {},
+    markFailed: async () => { failedWrites += 1; return true; },
+    markSent: async () => true,
+    record: async () => { records += 1; return { id: "must-not-record" }; },
+  });
+
+  assert.equal(failedWrites, 1);
+  assert.equal(records, 0);
+  assert.deepEqual(result, {
+    delivery: "failed",
+    recorded: false,
+    retryable: true,
+    deduplicated: false,
+    message: null,
+    providerError: "지원자와 공고 연결이 일치하지 않습니다.",
+    failureCode: "job_scope_mismatch",
+  });
+});
 
 function existingOutbox(overrides: Partial<ExistingOutboxRequest> = {}): ExistingOutboxRequest {
   return {
@@ -656,7 +770,7 @@ test("manual message postprocessing is claimed and completed in one database tra
   assert.match(migration, /client_request_id\s*=\s*p_idempotency_key/i);
   assert.match(migration, /revoke execute on function public\.complete_manual_message_postprocess/i);
   assert.match(route, /\.rpc\(\s*"complete_manual_message_postprocess"/);
-  assert.doesNotMatch(route, /\.from\("job_candidates"\)[\s\S]*?\.update\(/);
+  assert.doesNotMatch(route, /\.from\("job_candidates"\)\s*\.update\(/);
   assert.doesNotMatch(route, /\.from\("message_drafts"\)\s*\.update\(/);
 });
 
@@ -690,4 +804,46 @@ test("manual draft postprocessing is isolated to the request job", async () => {
   assert.match(route, /manualDraftSendEligibility\([\s\S]*?idempotencyKey\)/i);
   assert.match(route, /rpc\("fail_manual_message_send_request"/i);
   assert.match(route, /retryable:\s*delivery\.retryable/i);
+});
+
+test("a new non-draft send verifies applicant-job ownership before contacting the SMS provider", async () => {
+  const route = await readFile(
+    new URL("../app/api/admin/messages/send/route.ts", import.meta.url),
+    "utf8",
+  );
+  const sendBoundary = route.slice(
+    route.indexOf("send: async () =>"),
+    route.indexOf("markUnknown: async"),
+  );
+
+  assert.match(sendBoundary, /!draftId\s*&&\s*jobId\s*!==\s*null/);
+  assert.match(
+    sendBoundary,
+    /\.from\("job_candidates"\)[\s\S]*?\.eq\("applicant_id",\s*applicantId\)[\s\S]*?\.eq\("job_id",\s*jobId\)/,
+  );
+  assert.ok(sendBoundary.indexOf('.from("job_candidates")') < sendBoundary.indexOf("return sendSms("));
+  assert.match(route, /job_scope_mismatch[\s\S]*?status:\s*409/);
+  assert.match(route, /job_scope_unavailable[\s\S]*?status:\s*503/);
+  assert.match(route, /applicant_required[\s\S]*?status:\s*400/);
+  assert.doesNotMatch(route, /\.from\("job_candidates"\)\s*\.update\(/);
+});
+
+test("every new send verifies the recipient phone owner before contacting the SMS provider", async () => {
+  const route = await readFile(
+    new URL("../app/api/admin/messages/send/route.ts", import.meta.url),
+    "utf8",
+  );
+  const sendBoundary = route.slice(
+    route.indexOf("send: async () =>"),
+    route.indexOf("markUnknown: async"),
+  );
+
+  assert.match(
+    sendBoundary,
+    /\.from\("applicants"\)[\s\S]*?\.select\("phone"\)[\s\S]*?\.eq\("id",\s*applicantId\)/,
+  );
+  assert.match(sendBoundary, /manualMessageRecipientEligibility/);
+  assert.ok(sendBoundary.indexOf('.from("applicants")') < sendBoundary.indexOf("return sendSms("));
+  assert.match(route, /recipient_mismatch[\s\S]*?status:\s*409/);
+  assert.match(route, /recipient_unavailable[\s\S]*?status:\s*503/);
 });

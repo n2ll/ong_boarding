@@ -59,6 +59,7 @@ import {
   validManagerDetailOverlayApplicantId,
 } from "@/lib/admin/manager-panel-layout";
 import { liveModeNotice, liveQueueSummary } from "@/lib/admin/live-layout";
+import { liveConversationJobContext } from "@/lib/admin/live-job-context";
 import { orderLiveQueueItems, type LiveQueuePriority } from "@/lib/admin/live-queue-order";
 import {
   indexManualMessageAttention,
@@ -354,9 +355,22 @@ export function LiveConsole() {
   // 멀티-잡: 선택된 지원자가 동시에 진행 중인 공고들 + 현재 보고 있는 공고
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [activeJobsStatus, setActiveJobsStatus] = useState<{
+    applicantId: number | null;
+    state: "idle" | "loading" | "error" | "ready";
+    source: "none" | "list" | "endpoint";
+  }>({ applicantId: null, state: "idle", source: "none" });
+  const [activeJobsReloadKey, setActiveJobsReloadKey] = useState(0);
+  const forceActiveJobsReloadRef = useRef(false);
+  const activeJobsSelectionRevisionRef = useRef(0);
+  const selectLiveJob = useCallback((jobId: number | null) => {
+    activeJobsSelectionRevisionRef.current += 1;
+    setSelectedJobId(jobId);
+  }, []);
   // 인계 작업 큐(paused 후보) + 카테고리 필터 + 큐에서 선택한 공고 포커스용
   const [handoffCat, setHandoffCat] = useState<string>("all");
   // 인계 큐에서 특정 공고로 포커스해 열 때 사용(ref라 effect 재실행을 유발하지 않음)
+  const focusApplicantIdRef = useRef<number | null>(null);
   const focusJobIdRef = useRef<number | null>(null);
   const focusUnscopedDraftRef = useRef(false);
   // 그 공고가 '살아있는 결속' 밖일 때(시스템 더미·마감 공고의 paused 건) 탭에 끼워 넣을 링크.
@@ -395,10 +409,13 @@ export function LiveConsole() {
   // 위 scope=live로 응답이 22KB(gzip)로 줄어서 이제 이 주기를 감당할 수 있다(예전 95KB).
   const { data: appsData, error: appsError, isValidating: appsValidating, mutate: mutateApps } = useSWR<LiveApplicantsResponse>("/api/admin/applicants?scope=live", { refreshInterval: 60_000 });
   const appsState = remoteCollectionState({ items: appsData?.data, error: appsError });
+  const appsFailed = Boolean(appsError);
   // 대화를 고를 때 목록의 최신 스냅샷을 읽되, 목록이 갱신됐다는 이유로 선택 로직이 다시 돌지는
   // 않게 한다. 의존성에 appsData를 넣으면 새 문자가 들어와 목록이 갱신될 때마다 매니저가 골라둔
   // 공고 탭이 풀린다.
   const appsRef = useRef<{ data?: Applicant[] } | undefined>(undefined);
+  const appsFailedRef = useRef(appsFailed);
+  appsFailedRef.current = appsFailed;
   useEffect(() => {
     appsRef.current = appsData;
   }, [appsData]);
@@ -553,9 +570,25 @@ export function LiveConsole() {
     if (selectedChatId == null) {
       setActiveJobs([]);
       setSelectedJobId(null);
+      setActiveJobsStatus({ applicantId: null, state: "idle", source: "none" });
+      focusApplicantIdRef.current = null;
+      focusJobIdRef.current = null;
+      focusLinkRef.current = null;
       focusUnscopedDraftRef.current = false;
       return;
     }
+    const applicantId = selectedChatId;
+    const selectionRevision = activeJobsSelectionRevisionRef.current;
+    const ownsFocusIntent = focusApplicantIdRef.current === applicantId;
+    if (!ownsFocusIntent) {
+      focusApplicantIdRef.current = null;
+      focusJobIdRef.current = null;
+      focusLinkRef.current = null;
+      focusUnscopedDraftRef.current = false;
+    }
+    setActiveJobs([]);
+    setSelectedJobId(null);
+    setActiveJobsStatus({ applicantId, state: "loading", source: "none" });
     // 사람을 바꾸는 즉시 앞사람의 공고 선택을 버린다.
     // 예전엔 여기서 비우지 않아, B를 눌러도 /active-jobs 응답이 오기 전까지 selectedJobId가
     // A의 공고 번호 그대로였다. 그 상태로 대화창이 먼저 뜨면서 'B에게 있지도 않은 공고'로
@@ -566,21 +599,37 @@ export function LiveConsole() {
     // 이건 '매니저가 지목한 예외 탭'이고 살아있는 결속의 정의가 아니다(목록 배지 = 탭 수 불변식 유지).
     // 인계 큐에서 특정 공고를 골라 들어왔으면 그 공고로 포커스, 아니면 **대화가 진행 중인 공고**를 먼저.
     // (탭에 관심만 누른 공고까지 들어오면서, 먼저 생겼다는 이유로 빈 대화창이 기본이 되는 걸 막는다.)
-    const apply = (jobs: ActiveJob[]) => {
-      if (focusUnscopedDraftRef.current) {
+    const apply = (
+      jobs: ActiveJob[],
+      source: "list" | "endpoint",
+      preserveSelection = false,
+    ) => {
+      if (preserveSelection) {
+        setActiveJobs((current) => [
+          ...jobs,
+          ...current.filter((job) => !jobs.some((freshJob) => freshJob.job_id === job.job_id)),
+        ]);
+        setActiveJobsStatus({ applicantId, state: "ready", source });
+        return;
+      }
+      if (ownsFocusIntent && focusUnscopedDraftRef.current) {
         setActiveJobs(jobs);
         setSelectedJobId(null);
+        setActiveJobsStatus({ applicantId, state: "ready", source });
         focusUnscopedDraftRef.current = false;
+        focusApplicantIdRef.current = null;
         focusJobIdRef.current = null;
         focusLinkRef.current = null;
         return;
       }
-      const wanted = focusJobIdRef.current;
-      const extra = focusLinkRef.current;
+      const wanted = ownsFocusIntent ? focusJobIdRef.current : null;
+      const extra = ownsFocusIntent ? focusLinkRef.current : null;
       const merged =
         wanted != null && extra != null && !jobs.some((j) => j.job_id === wanted) ? [...jobs, extra] : jobs;
       setActiveJobs(merged);
       setSelectedJobId(defaultFocusJobId(merged, wanted));
+      setActiveJobsStatus({ applicantId, state: "ready", source });
+      focusApplicantIdRef.current = null;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
     };
@@ -588,30 +637,55 @@ export function LiveConsole() {
     // 목록이 이미 같은 값을 실어 보냈으면 서버에 다시 묻지 않는다 — 대화 클릭마다 왕복 1회가 빠지고,
     // 공고 선택이 즉시 정해지므로 대화 내역 조회도 한 번으로 끝난다(예전엔 '전체'로 한 번, 공고가
     // 정해진 뒤 또 한 번이었다). 목록에 아직 없는 사람(딥링크 등)만 예전 경로로 물어본다.
-    const fromList = (appsRef.current?.data ?? []).find((a) => a.id === selectedChatId)?.job_links;
-    if (fromList) {
-      apply(fromList);
+    const fromList = (appsRef.current?.data ?? []).find((a) => a.id === applicantId)?.job_links;
+    const forceReload = forceActiveJobsReloadRef.current;
+    forceActiveJobsReloadRef.current = false;
+    if (!forceReload && !appsFailedRef.current && Array.isArray(fromList)) {
+      apply(fromList, "list");
       return;
     }
 
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/admin/applicants/${selectedChatId}/active-jobs`);
+        const res = await fetch(`/api/admin/applicants/${applicantId}/active-jobs`);
         const json = await res.json();
+        if (!res.ok) throw new Error(typeof json.error === "string" ? json.error : "active jobs fetch failed");
+        if (!Array.isArray(json.jobs)) throw new Error("active jobs response is invalid");
         if (cancelled) return;
-        apply((json.jobs ?? []) as ActiveJob[]);
+        apply(
+          json.jobs as ActiveJob[],
+          "endpoint",
+          activeJobsSelectionRevisionRef.current !== selectionRevision,
+        );
       } catch {
         if (!cancelled) {
-          setActiveJobs([]);
-          setSelectedJobId(null);
+          if (activeJobsSelectionRevisionRef.current === selectionRevision) {
+            setActiveJobs([]);
+            setSelectedJobId(null);
+          }
+          setActiveJobsStatus({ applicantId, state: "error", source: "endpoint" });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedChatId]);
+  }, [selectedChatId, activeJobsReloadKey]);
+
+  // SWR는 재검증 실패 시 이전 목록 데이터를 유지한다. 그 캐시에서 공고 문맥을 정했다면
+  // 실패 순간에는 발송을 잠그고, 지원자별 endpoint로 한 번 더 확인해야 한다.
+  useEffect(() => {
+    if (
+      appsFailed
+      && selectedChatId != null
+      && activeJobsStatus.applicantId === selectedChatId
+      && activeJobsStatus.source === "list"
+    ) {
+      forceActiveJobsReloadRef.current = true;
+      setActiveJobsReloadKey((current) => current + 1);
+    }
+  }, [appsFailed, selectedChatId, activeJobsStatus.applicantId, activeJobsStatus.source]);
 
   // 선택한 사람이 목록 필터에서 빠져도(확정 직후 상태 변화·14일 넘은 대화 등) 열어둔 상세는 유지한다 —
   // 확정 후 "오른쪽 상세에서 만남장소를 보내세요"라고 안내했는데 패널이 사라지던 문제 방어.
@@ -619,10 +693,31 @@ export function LiveConsole() {
     chats.find((c) => c.id === selectedChatId) ??
     (appsData?.data ?? []).find((c) => c.id === selectedChatId) ??
     null;
+  const activeJobsBelongToChat = activeChat != null && activeJobsStatus.applicantId === activeChat.id;
+  const currentActiveJobs = activeJobsBelongToChat ? activeJobs : [];
+  const currentSelectedJobId = activeJobsBelongToChat ? selectedJobId : null;
+  const activeJobsLoadState = appsFailed && activeJobsStatus.source === "list"
+    ? "loading"
+    : activeJobsStatus.state;
   const isUnscopedDraftContext = activeChat != null
-    && selectedJobId === null
+    && activeJobsLoadState === "ready"
+    && currentSelectedJobId === null
     && previewById[activeChat.id]?.pending_draft === true
     && previewById[activeChat.id]?.pending_draft_job_id === null;
+  const conversationJobContext = activeChat == null
+    ? { state: "loading" as const }
+    : liveConversationJobContext({
+        activeApplicantId: activeChat.id,
+        ownerApplicantId: activeJobsStatus.applicantId,
+        loadState: activeJobsLoadState,
+        jobs: currentActiveJobs,
+        selectedJobId: currentSelectedJobId,
+        unscopedDraft: isUnscopedDraftContext,
+      });
+  const retryActiveJobs = useCallback(() => {
+    forceActiveJobsReloadRef.current = true;
+    setActiveJobsReloadKey((current) => current + 1);
+  }, []);
 
   const showDetailPanel = shouldShowManagerDetailPanel({
     hasActiveChat: activeChat != null,
@@ -688,6 +783,7 @@ export function LiveConsole() {
   // 기본 공고 탭을 열어 카드가 없는 것처럼 보이는 멀티-잡 단절을 막는다.
   const selectChatForReply = useCallback((applicantId: number | null) => {
     if (applicantId === null) {
+      focusApplicantIdRef.current = null;
       focusUnscopedDraftRef.current = false;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
@@ -698,11 +794,13 @@ export function LiveConsole() {
     const preview = previewById[applicantId];
     const draftJobId = preview?.pending_draft_job_id;
     if (preview?.pending_draft === true && draftJobId === null) {
+      focusApplicantIdRef.current = applicantId;
       focusUnscopedDraftRef.current = true;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
       if (applicantId === selectedChatId) {
-        setSelectedJobId(null);
+        selectLiveJob(null);
+        focusApplicantIdRef.current = null;
         focusUnscopedDraftRef.current = false;
       } else {
         setSelectedChatId(applicantId);
@@ -710,6 +808,7 @@ export function LiveConsole() {
       return;
     }
     if (typeof draftJobId !== "number") {
+      focusApplicantIdRef.current = null;
       focusUnscopedDraftRef.current = false;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
@@ -725,26 +824,39 @@ export function LiveConsole() {
       created_at: null,
       stage_updated_at: null,
     };
+    focusApplicantIdRef.current = applicantId;
     focusJobIdRef.current = draftJobId;
     focusLinkRef.current = draftLink;
     if (applicantId === selectedChatId) {
       setActiveJobs((previous) => previous.some((job) => job.job_id === draftJobId)
         ? previous
         : [...previous, draftLink]);
-      setSelectedJobId(draftJobId);
+      selectLiveJob(draftJobId);
+      focusApplicantIdRef.current = null;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
       return;
     }
     setSelectedChatId(applicantId);
-  }, [previewById, selectedChatId]);
+  }, [previewById, selectedChatId, selectLiveJob]);
 
   const leaveUnscopedDraftContext = useCallback(() => {
-    setSelectedJobId((current) => current === null ? defaultFocusJobId(activeJobs, null) : current);
-  }, [activeJobs]);
+    activeJobsSelectionRevisionRef.current += 1;
+    setSelectedJobId((current) => current === null ? defaultFocusJobId(currentActiveJobs, null) : current);
+  }, [currentActiveJobs]);
+
+  const handleDetailJobFocus = useCallback((jobId: number | null, job?: ActiveJob) => {
+    if (jobId != null && job) {
+      setActiveJobs((current) => current.some((item) => item.job_id === jobId)
+        ? current
+        : [...current, job]);
+    }
+    selectLiveJob(jobId);
+  }, [selectLiveJob]);
 
   // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
   const selectHandoff = (h: Handoff) => {
+    focusApplicantIdRef.current = h.applicant_id;
     focusUnscopedDraftRef.current = false;
     focusJobIdRef.current = h.job_id;
     // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
@@ -755,7 +867,8 @@ export function LiveConsole() {
       // 그 공고가 탭 목록에 없으면(마감·시스템 공고) 함께 끼워 넣는다 — 없으면 탭 바에서 사라진 채
       // 선택만 바뀌어, 매니저가 어느 공고로 답장하는지 화면에서 확인할 수 없다.
       setActiveJobs((prev) => (prev.some((j) => j.job_id === h.job_id) ? prev : [...prev, focusLinkRef.current!]));
-      setSelectedJobId(h.job_id);
+      selectLiveJob(h.job_id);
+      focusApplicantIdRef.current = null;
       focusJobIdRef.current = null;
       focusLinkRef.current = null;
     } else {
@@ -1389,43 +1502,42 @@ export function LiveConsole() {
 
           {/* 멀티-잡 공고 선택 탭 — 동시에 2개 이상 공고를 진행 중일 때만 노출.
               공고별로 스레드/체크리스트/AI 토글이 분리되어, "어느 공고가 매니저 전환됐는지"가 정확히 보인다. */}
-          {(activeJobs.length > 1 || (
+          {(currentActiveJobs.length > 1 || (
             previewById[activeChat.id]?.pending_draft === true
             && previewById[activeChat.id]?.pending_draft_job_id === null
           )) && (
             <div className="shrink-0 bg-card border-b border-border-strong px-6 py-2 flex items-center gap-2 overflow-x-auto">
               <span className="text-[12px] font-bold text-muted-foreground shrink-0">
-                붙어 있는 공고 {activeJobs.length}건 · 탭 전환
-                {activeJobs.some((j) => j.agent_stage == null) && (
+                대화 공고 {currentActiveJobs.length}건 · 탭 전환
+                {currentActiveJobs.some((j) => j.agent_stage == null) && (
                   <span className="ml-1 font-medium">(관심만 누른 자리 포함)</span>
                 )}
               </span>
               {previewById[activeChat.id]?.pending_draft === true
                 && previewById[activeChat.id]?.pending_draft_job_id === null && (
                 <button
-                  onClick={() => setSelectedJobId(null)}
-                  aria-pressed={selectedJobId === null}
+                  onClick={() => selectLiveJob(null)}
+                  aria-pressed={currentSelectedJobId === null}
                   className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
-                    selectedJobId === null
+                    currentSelectedJobId === null
                       ? "bg-foreground text-white shadow-sm"
                       : "bg-warning-soft border border-warning/35 text-warning-strong hover:bg-yellow-50"
                   }`}
                   title="공고 귀속을 안전하게 판정할 수 없는 초안입니다. 내용을 확인한 뒤 처리하세요."
                 >
                   공고 미지정 초안
-                  <span className={`text-[12px] font-bold px-1.5 py-0.5 rounded-full ${selectedJobId === null ? "bg-gray-700 text-white" : "bg-yellow-50 text-warning-strong"}`}>확인 필요</span>
+                  <span className={`text-[12px] font-bold px-1.5 py-0.5 rounded-full ${currentSelectedJobId === null ? "bg-gray-700 text-white" : "bg-yellow-50 text-warning-strong"}`}>확인 필요</span>
                 </button>
               )}
-              {activeJobs.map((j) => {
-                const selected = selectedJobId === j.job_id;
+              {currentActiveJobs.map((j) => {
+                const selected = currentSelectedJobId === j.job_id;
                 const paused = j.agent_stage === "paused";
                 // 아직 대화가 없는 자리(관심만 누름) — 'AI'로 적으면 응대가 돌고 있다는 거짓 신호가 된다.
                 const interestOnly = j.agent_stage == null;
-                const label = (j.branch && j.branch.trim()) || j.title;
                 return (
                   <button
                     key={j.job_id}
-                    onClick={() => setSelectedJobId(j.job_id)}
+                    onClick={() => selectLiveJob(j.job_id)}
                     aria-pressed={selected}
                     className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
                       selected
@@ -1438,7 +1550,8 @@ export function LiveConsole() {
                         : `${j.title} — 클릭해 이 공고 대화로 전환`
                     }
                   >
-                    {label}
+                    <span className="max-w-[220px] truncate">{j.title}</span>
+                    {j.branch && <span className={selected ? "text-gray-300" : "text-muted-foreground"}>· {j.branch}</span>}
                     <span
                       className={`text-[12px] font-bold px-1.5 py-0.5 rounded-full ${
                         interestOnly
@@ -1464,8 +1577,10 @@ export function LiveConsole() {
             applicantId={activeChat.id}
             applicantName={activeChat.name}
             phone={activeChat.phone}
-            jobId={selectedJobId}
+            jobId={currentSelectedJobId}
             draftScope={isUnscopedDraftContext ? "unscoped" : "all"}
+            jobContext={conversationJobContext}
+            onJobContextRetry={retryActiveJobs}
             agentMode={globalAgentMode}
             onAgentModeRetry={() => { void mutateKillMode(); }}
             smsOptOutAt={activeChat.sms_opt_out_at ?? null}
@@ -1587,7 +1702,9 @@ export function LiveConsole() {
           <ApplicantDetailContent
             key={activeChat.id}
             applicantId={activeChat.id}
-            jobId={selectedJobId}
+            jobId={currentSelectedJobId}
+            focusJobId={currentSelectedJobId}
+            onFocusJobChange={handleDetailJobFocus}
             variant="panel"
             onChanged={handleChanged}
             autoOpenConfirm={confirmSignal}
