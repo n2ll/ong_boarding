@@ -472,11 +472,13 @@ const LEGACY_LOCATION_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: 
 
 const VEHICLE_REQUIREMENTS: Array<ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean }> = [
   { field: "ownVehicle", message: "자차 보유 여부를 선택해주세요.", isValid: (form) => form.ownVehicle === "있음" || form.ownVehicle === "없음" },
-  { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) },
 ];
 
 const VEHICLE_TYPE_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
-  { field: "vehicleType", message: "보유 차종을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) };
+  { field: "vehicleType", message: "배송에 사용할 차량 모델명을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) };
+
+const LICENSE_TYPE_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
+  { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) };
 
 const SELF_OWNERSHIP_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
   { field: "selfOwnership", message: "본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) };
@@ -500,6 +502,7 @@ function applicationRequirements(
         ...baseRequirements.slice(0, 4),
         ...VEHICLE_REQUIREMENTS,
         ...(form.ownVehicle === "있음" ? [VEHICLE_TYPE_REQUIREMENT] : []),
+        LICENSE_TYPE_REQUIREMENT,
         ...baseRequirements.slice(4),
         SELF_OWNERSHIP_REQUIREMENT,
       ]

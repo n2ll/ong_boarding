@@ -79,11 +79,13 @@ const BASE_REQUIREMENTS: ApplicantRequirement[] = [
   { field: "phone", message: "연락처를 정확히 입력해주세요.", isValid: (form) => /^\d{10,11}$/.test(form.phone) },
   { field: "location", message: APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE, isValid: (form) => isValidApplicantRoadAddress(form.location) },
   { field: "ownVehicle", message: "자차 보유 여부를 선택해주세요.", isValid: (form) => form.ownVehicle === "있음" || form.ownVehicle === "없음" },
-  { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) },
 ];
 
 const VEHICLE_TYPE_REQUIREMENT: ApplicantRequirement =
-  { field: "vehicleType", message: "보유 차종을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) };
+  { field: "vehicleType", message: "배송에 사용할 차량 모델명을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) };
+
+const LICENSE_TYPE_REQUIREMENT: ApplicantRequirement =
+  { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) };
 
 const FINAL_REQUIREMENTS: ApplicantRequirement[] = [
   { field: "branch1", message: "희망 지점을 선택해주세요.", isValid: (form) => Boolean(form.branch1) },
@@ -96,6 +98,7 @@ function applicantRequirements(form: ApplicantFormData): ApplicantRequirement[] 
   return [
     ...BASE_REQUIREMENTS,
     ...(form.ownVehicle === "있음" ? [VEHICLE_TYPE_REQUIREMENT] : []),
+    LICENSE_TYPE_REQUIREMENT,
     ...FINAL_REQUIREMENTS,
   ];
 }

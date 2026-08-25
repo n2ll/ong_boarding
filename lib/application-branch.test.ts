@@ -260,7 +260,15 @@ test("the applicant UI renders branches only from an explicit server-backed cont
   assert.match(page, /도로명 주소 직접 입력/);
   assert.match(page, /주소 검색이 어렵다면 도로명 주소 직접 입력/);
   assert.match(page, /min-h-12 min-w-12/);
-  assert.match(page, /예: 모닝 \/ 아반떼 \/ 스타렉스 \/ 포터/);
-  assert.match(page, /배송에 사용할 차량 모델명을 입력해주세요/);
+  assert.match(page, /aria-controls=\{opt === "있음" && form\.ownVehicle === "있음" \? "field-vehicleType" : undefined\}/);
+  assert.match(page, /aria-expanded=\{opt === "있음" \? form\.ownVehicle === "있음" : undefined\}/);
+  assert.match(page, /배송에 사용할 차종\(모델명\)/);
+  assert.match(page, /예: 모닝, 아반떼, 스타렉스, 포터/);
+  assert.match(page, /실제 배송에 사용할 차량의 모델명을 입력해주세요/);
+  const vehicleTypeFieldIndex = page.indexOf('id="field-vehicleType"');
+  const licenseTypeFieldIndex = page.indexOf('id="field-licenseType"');
+  assert.notEqual(vehicleTypeFieldIndex, -1, "the conditional vehicle model field must exist");
+  assert.notEqual(licenseTypeFieldIndex, -1, "the license field must exist");
+  assert.ok(vehicleTypeFieldIndex < licenseTypeFieldIndex, "the vehicle model field must appear before the license field");
   assert.match(page, /<p role="alert" id=\{fieldErrorId\(field\)\}/);
 });

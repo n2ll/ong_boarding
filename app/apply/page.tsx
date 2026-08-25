@@ -1508,10 +1508,10 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           <div className="flex items-start gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">2</span>
             <div>
-              <h2 className="text-[18px] font-extrabold text-foreground">차량·면허</h2>
+              <h2 className="text-[18px] font-extrabold text-foreground">차량·운전면허</h2>
               <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">
                 {vehicleRequired
-                  ? "현재 보유한 차량과 면허 정보를 알려주세요."
+                  ? "배송에 사용할 차량과 운전면허 정보를 알려주세요."
                   : "이 공고는 본인 차량이나 운전면허 없이 지원할 수 있어요."}
               </p>
             </div>
@@ -1528,6 +1528,8 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                       key={opt}
                       type="button"
                       aria-pressed={form.ownVehicle === opt}
+                      aria-controls={opt === "있음" && form.ownVehicle === "있음" ? "field-vehicleType" : undefined}
+                      aria-expanded={opt === "있음" ? form.ownVehicle === "있음" : undefined}
                       {...fieldA11y("ownVehicle")}
                       onClick={() => setOwnVehicle(opt)}
                       className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-gray-700 hover:border-foreground/50"}`}
@@ -1538,6 +1540,26 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 </div>
                 <FieldError field="ownVehicle" issue={validationIssue} />
               </div>
+
+              {form.ownVehicle === "있음" && (
+                <div id="field-vehicleType">
+                  <label htmlFor="vehicleType" className={labelCls}>배송에 사용할 차종(모델명){requiredMark}</label>
+                  <input
+                    id="vehicleType"
+                    name="vehicleType"
+                    aria-required="true"
+                    {...fieldA11y("vehicleType", "vehicleType-help")}
+                    className={fieldInputClass("vehicleType")}
+                    value={form.vehicleType}
+                    onChange={(event) => set("vehicleType", event.target.value)}
+                    placeholder="예: 모닝, 아반떼, 스타렉스, 포터"
+                  />
+                  <p id="vehicleType-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+                    실제 배송에 사용할 차량의 모델명을 입력해주세요.
+                  </p>
+                  <FieldError field="vehicleType" issue={validationIssue} />
+                </div>
+              )}
 
               {/* 운전면허 */}
               <div id="field-licenseType">
@@ -1550,26 +1572,6 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 </select>
                 <FieldError field="licenseType" issue={validationIssue} />
               </div>
-
-              {form.ownVehicle === "있음" && (
-                <div id="field-vehicleType">
-                  <label htmlFor="vehicleType" className={labelCls}>보유 차종{requiredMark}</label>
-                  <input
-                    id="vehicleType"
-                    name="vehicleType"
-                    aria-required="true"
-                    {...fieldA11y("vehicleType", "vehicleType-help")}
-                    className={fieldInputClass("vehicleType")}
-                    value={form.vehicleType}
-                    onChange={(event) => set("vehicleType", event.target.value)}
-                    placeholder="예: 모닝 / 아반떼 / 스타렉스 / 포터"
-                  />
-                  <p id="vehicleType-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
-                    배송에 사용할 차량 모델명을 입력해주세요.
-                  </p>
-                  <FieldError field="vehicleType" issue={validationIssue} />
-                </div>
-              )}
             </>
           ) : (
             <div className="rounded-2xl border border-success/20 bg-success-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-success-strong">

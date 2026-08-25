@@ -241,7 +241,19 @@ test("vehicle type is required only after the applicant says they own a vehicle"
   assert.deepEqual(validateApplicantForm!({
     ...otherwiseComplete,
     ownVehicle: "있음",
-  }), { field: "vehicleType", message: "보유 차종을 입력해주세요." });
+    licenseType: "",
+    vehicleType: "",
+  }), { field: "vehicleType", message: "배송에 사용할 차량 모델명을 입력해주세요." });
+  assert.deepEqual(validateApplicantForm!({
+    ...otherwiseComplete,
+    ownVehicle: "있음",
+    licenseType: "",
+    vehicleType: "포터",
+  }), { field: "licenseType", message: "운전면허 종류를 선택해주세요." });
+  assert.deepEqual(validateApplicantForm!({
+    ...otherwiseComplete,
+    ownVehicle: "있음",
+  }), { field: "vehicleType", message: "배송에 사용할 차량 모델명을 입력해주세요." });
   assert.equal(validateApplicantForm!({
     ...otherwiseComplete,
     ownVehicle: "없음",
