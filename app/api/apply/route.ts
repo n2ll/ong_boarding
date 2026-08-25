@@ -2,10 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendNotification, sendSms } from "@/lib/solapi";
 import { geocodeAddress } from "@/lib/kakao-geocode";
-import { ensureDanggeunSystemJob } from "@/lib/agent/danggeun-job";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
+import {
+  APPLICATION_BRANCH_UNASSIGNED,
+  applicationActiveFixedBranchName,
+  applicationBranchContext,
+  applicationBranchName,
+  applicationBranchReceiptLine,
+  applicationSourceRequiresBranchChoice,
+  applicationUsesLegacyBmartFlow,
+  resolveApplicationBranchSubmission,
+  type ApplicationBranchContext,
+} from "@/lib/application-branch";
+import { normalizeApplicantRoadAddress } from "@/lib/applicant-form";
+import {
+  normalizeTallySelfOwnership,
+  normalizeTallyVehicleOwnership,
+} from "@/lib/tally-webhook";
 import {
   applicationFilterPasses,
   applicationInitialMessagePlan,
@@ -40,7 +55,7 @@ import {
 } from "@/lib/application-server-replay";
 
 const APPLICATION_REPLAY_APPLICANT_FIELDS = [
-  "id", "name", "phone", "branch", "work_hours", "source", "status", "note", "birth_date", "own_vehicle", "license_type",
+  "id", "name", "phone", "branch", "branch1", "branch2", "work_hours", "source", "status", "note", "birth_date", "own_vehicle", "license_type",
   "vehicle_type", "self_ownership", "filter_pass", "available_slots",
   "available_slots_updated_at", "application_submission_id",
   "application_request_fingerprint", "application_auto_engagement_required",
@@ -51,6 +66,8 @@ interface ApplicationReplayApplicant {
   name: string;
   phone: string;
   branch: string | null;
+  branch1: string | null;
+  branch2: string | null;
   work_hours: string | null;
   source: string | null;
   status: string | null;
@@ -128,6 +145,11 @@ export async function POST(req: NextRequest) {
     let publicJobOpen: boolean | null = jobRequested ? null : false;
     let jobVehicleRequired: boolean | null = null;
     let vehicleRequired = true;
+    let branchContext: ApplicationBranchContext = { mode: "none" };
+    let resolvedBranch = {
+      branch1: APPLICATION_BRANCH_UNASSIGNED,
+      branch2: null as string | null,
+    };
     const submittedForm = {
       name: typeof name === "string" ? name : "",
       birthDate: typeof birthDate === "string" ? birthDate : "",
@@ -150,6 +172,24 @@ export async function POST(req: NextRequest) {
       source: typeof source === "string" ? source : "direct",
       jobId: jobRequested ? realJobId : null,
     });
+    const normalizedLocation = normalizeApplicantRoadAddress(submittedForm.location);
+    const trustedInternal = isTrustedApplicationInternalRequest({
+      source,
+      submissionId,
+      requestFingerprint: submissionFingerprint,
+      providedSignature: req.headers.get(APPLICATION_INTERNAL_HEADER),
+      secret: process.env.TALLY_SIGNING_SECRET?.trim() || null,
+    });
+    const canonicalSubmittedForm = trustedInternal
+      ? {
+          ...submittedForm,
+          ownVehicle: normalizeTallyVehicleOwnership(submittedForm.ownVehicle),
+          vehicleType: normalizeTallyVehicleOwnership(submittedForm.ownVehicle) === "있음"
+            ? submittedForm.vehicleType
+            : "",
+          selfOwnership: normalizeTallySelfOwnership(submittedForm.selfOwnership),
+        }
+      : submittedForm;
 
     // 현재 공고를 다시 심사하기 전에 submission key의 영구 매핑부터 해석한다.
     // 이미 저장된 같은 payload replay는 공고가 이후 변경·삭제되어도 최초 접수를 되돌리지 않는다.
@@ -254,11 +294,11 @@ export async function POST(req: NextRequest) {
       sameAttemptApplicant: false,
     });
     if (replayPreflightPlan.requiresJobPreflight) {
-      // 새 제출만 현재 공고의 공개 상태와 차량 조건을 검증한다.
+      // 새 제출만 현재 공고의 공개 상태와 차량·지점 조건을 검증한다.
       if (jobRequested) {
         const { data: requestedJob, error: requestedJobError } = await supabase
           .from("jobs")
-          .select("id, title, status, closes_at, exposure, recruit_mode, vehicle_required")
+          .select("id, title, status, closes_at, exposure, recruit_mode, vehicle_required, branch, branch_id, client_id")
           .eq("id", realJobId)
           .maybeSingle();
         if (requestedJobError) {
@@ -283,6 +323,101 @@ export async function POST(req: NextRequest) {
           }
           publicJobOpen = availability === "open";
           jobVehicleRequired = requestedJob.vehicle_required !== false;
+
+          let fixedBranch: string | null = null;
+          if (typeof requestedJob.branch_id === "number") {
+            let fixedBranchQuery = supabase
+              .from("branches")
+              .select("name, active, client_id")
+              .eq("id", requestedJob.branch_id)
+              .eq("active", true);
+            if (typeof requestedJob.client_id === "number") {
+              fixedBranchQuery = fixedBranchQuery.eq("client_id", requestedJob.client_id);
+            }
+            const { data: canonicalBranch, error: canonicalBranchError } = await fixedBranchQuery
+              .maybeSingle();
+            fixedBranch = applicationActiveFixedBranchName({
+              name: typeof canonicalBranch?.name === "string" ? canonicalBranch.name : null,
+              active: canonicalBranch?.active === true,
+              clientId: typeof canonicalBranch?.client_id === "number" ? canonicalBranch.client_id : null,
+              jobClientId: typeof requestedJob.client_id === "number" ? requestedJob.client_id : null,
+            });
+            if (canonicalBranchError || !fixedBranch) {
+              return NextResponse.json(
+                {
+                  error: "공고의 근무지 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.",
+                  retryable: true,
+                },
+                { status: 503 },
+              );
+            }
+          } else {
+            const legacyBranchName = applicationBranchName(
+              typeof requestedJob.branch === "string" ? requestedJob.branch : null,
+            );
+            if (legacyBranchName) {
+              if (typeof requestedJob.client_id !== "number") {
+                return NextResponse.json(
+                  {
+                    error: "공고의 근무지 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.",
+                    retryable: true,
+                  },
+                  { status: 503 },
+                );
+              }
+              const { data: canonicalBranch, error: canonicalBranchError } = await supabase
+                .from("branches")
+                .select("name, active, client_id")
+                .eq("client_id", requestedJob.client_id)
+                .eq("name", legacyBranchName)
+                .eq("active", true)
+                .maybeSingle();
+              fixedBranch = applicationActiveFixedBranchName({
+                name: typeof canonicalBranch?.name === "string" ? canonicalBranch.name : null,
+                active: canonicalBranch?.active === true,
+                clientId: typeof canonicalBranch?.client_id === "number" ? canonicalBranch.client_id : null,
+                jobClientId: requestedJob.client_id,
+              });
+              if (canonicalBranchError || !fixedBranch) {
+                return NextResponse.json(
+                  {
+                    error: "공고의 근무지 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.",
+                    retryable: true,
+                  },
+                  { status: 503 },
+                );
+              }
+            }
+          }
+
+          let activeBranches: string[] = [];
+          if (!fixedBranch && typeof requestedJob.client_id === "number") {
+            const { data: branchRows, error: branchRowsError } = await supabase
+              .from("branches")
+              .select("name")
+              .eq("client_id", requestedJob.client_id)
+              .eq("active", true)
+              .order("sort_order", { ascending: true });
+            if (branchRowsError) {
+              return NextResponse.json(
+                {
+                  error: "공고의 선택 가능한 근무지를 확인하지 못했습니다. 잠시 후 다시 제출해주세요.",
+                  retryable: true,
+                },
+                { status: 503 },
+              );
+            }
+            activeBranches = (branchRows ?? [])
+              .map((branch) => applicationBranchName(
+                typeof branch.name === "string" ? branch.name : null,
+              ))
+              .filter((branch): branch is string => branch !== null);
+          }
+          branchContext = applicationBranchContext({
+            fixedBranch,
+            allowChoice: !fixedBranch && activeBranches.length > 0,
+            activeBranches,
+          });
         } else {
           return NextResponse.json(
             {
@@ -292,10 +427,70 @@ export async function POST(req: NextRequest) {
             { status: 409 },
           );
         }
+      } else {
+        const sourceRequiresBranchChoice = applicationSourceRequiresBranchChoice(
+          typeof source === "string" ? source : "direct",
+        );
+        if (sourceRequiresBranchChoice) {
+          const { data: branchClients, error: branchClientsError } = await supabase
+            .from("clients")
+            .select("id")
+            .eq("client_type", "baemin_bmart")
+            .eq("active", true);
+          if (branchClientsError) {
+            return NextResponse.json(
+              { error: "지원 가능한 지점 범위를 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", retryable: true },
+              { status: 503 },
+            );
+          }
+          const clientIds = (branchClients ?? [])
+            .map((client) => Number(client.id))
+            .filter((clientId) => Number.isInteger(clientId) && clientId > 0);
+          let activeBranches: string[] = [];
+          if (clientIds.length > 0) {
+            const { data: branchRows, error: branchRowsError } = await supabase
+              .from("branches")
+              .select("name")
+              .in("client_id", clientIds)
+              .eq("active", true)
+              .order("sort_order", { ascending: true });
+            if (branchRowsError) {
+              return NextResponse.json(
+                { error: "지원 가능한 지점 목록을 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", retryable: true },
+                { status: 503 },
+              );
+            }
+            activeBranches = (branchRows ?? [])
+              .map((branch) => applicationBranchName(
+                typeof branch.name === "string" ? branch.name : null,
+              ))
+              .filter((branch): branch is string => branch !== null);
+          }
+          if (sourceRequiresBranchChoice && activeBranches.length === 0) {
+            return NextResponse.json(
+              {
+                error: "현재 선택 가능한 지점이 없습니다. 받으신 문자에 답장해 문의해주세요.",
+                code: "APPLICATION_CONTEXT_CHANGED",
+              },
+              { status: 409 },
+            );
+          }
+          branchContext = applicationBranchContext({
+            fixedBranch: null,
+            allowChoice: true,
+            activeBranches,
+          });
+        }
       }
 
       vehicleRequired = applicationVehicleRequired({ jobRequested, jobVehicleRequired });
-      const validationIssue = validateApplicationSubmission(submittedForm, vehicleRequired);
+      const branchChoiceRequired = branchContext.mode === "choice";
+      const validationIssue = validateApplicationSubmission(
+        canonicalSubmittedForm,
+        vehicleRequired,
+        branchChoiceRequired,
+        !trustedInternal,
+      );
       if (validationIssue) {
         return NextResponse.json(
           {
@@ -306,6 +501,21 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+      const branchResolution = resolveApplicationBranchSubmission(branchContext, {
+        branch1: canonicalSubmittedForm.branch1,
+        branch2: canonicalSubmittedForm.branch2,
+      });
+      if (!branchResolution.ok) {
+        return NextResponse.json(
+          {
+            error: branchResolution.message,
+            field: branchResolution.field,
+            code: "APPLICATION_CONTEXT_CHANGED",
+          },
+          { status: 400 },
+        );
+      }
+      resolvedBranch = branchResolution;
     } else if (jobRequested) {
       // 후보 연결 복구는 아래 원자 RPC가 현재 공고 상태를 다시 잠가 판단한다.
       publicJobOpen = true;
@@ -327,13 +537,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const trustedInternal = isTrustedApplicationInternalRequest({
-      source,
-      submissionId,
-      requestFingerprint: submissionFingerprint,
-      providedSignature: req.headers.get(APPLICATION_INTERNAL_HEADER),
-      secret: process.env.TALLY_SIGNING_SECRET?.trim() || null,
-    });
     const clientIp = trustedApplicationClientIp(
       req as NextRequest & { ip?: unknown },
       process.env.VERCEL === "1",
@@ -441,6 +644,16 @@ export async function POST(req: NextRequest) {
       existingSource: typeof existingRow?.source === "string" ? existingRow.source : null,
       existingStatus: typeof existingRow?.status === "string" ? existingRow.status : null,
     });
+    if (branchContext.mode === "none" && updateMode && existingRow) {
+      const preservedBranch1 = applicationBranchName(existingRow.branch1)
+        ?? applicationBranchName(existingRow.branch);
+      if (preservedBranch1) {
+        resolvedBranch = {
+          branch1: preservedBranch1,
+          branch2: applicationBranchName(existingRow.branch2),
+        };
+      }
+    }
     // triage가 먼저 만든 배민 임시 행의 첫 폼 완성만 자동 흐름을 시작한다.
     // direct를 포함한 나머지 active 행은 '스크리닝 전'이어도 재제출이므로 재발송하지 않는다.
     const freshAutoEngagementRequired = shouldStartApplicationAutoEngagement({
@@ -468,15 +681,18 @@ export async function POST(req: NextRequest) {
     const filterPass = replayPlan.kind === "accepted_replay"
       ? replayPlan.filterPass === true
       : applicationFilterPasses({
-          ownVehicle,
+          ownVehicle: canonicalSubmittedForm.ownVehicle,
           licenseType,
-          selfOwnership,
+          selfOwnership: canonicalSubmittedForm.selfOwnership,
           vehicleRequired,
         });
 
-    // source='danggeun'/'baemin'은 AI가 자동 응대 → 스크리닝 중. 그 외는 매니저 대기 → 스크리닝 전.
-    const autoEngages = source === "danggeun" || source === "baemin";
-    const autoStatus = !filterPass ? "부적합" : (autoEngages ? "스크리닝 중" : "스크리닝 전");
+    // source는 유입 채널이다. 화주사 근거가 있는 레거시 배민 비마트 흐름만 자동 스크리닝한다.
+    const legacyBmartIntake = !jobRequested && applicationUsesLegacyBmartFlow({
+      source: typeof source === "string" ? source : "direct",
+      branch: resolvedBranch.branch1,
+    });
+    const autoStatus = !filterPass ? "부적합" : (legacyBmartIntake ? "스크리닝 중" : "스크리닝 전");
     const operationalFields = applicationOperationalFieldsForSubmission({
       updateMode,
       isDuplicate,
@@ -497,8 +713,8 @@ export async function POST(req: NextRequest) {
     });
 
     // ── 주소 지오코딩 (실패해도 저장 진행) ─────────────────
-    const geo = replayPlan.persistsApplicant && location?.trim()
-      ? await geocodeAddress(location)
+    const geo = replayPlan.persistsApplicant && normalizedLocation
+      ? await geocodeAddress(normalizedLocation)
       : null;
 
     // ── Supabase에 저장 (UPDATE or INSERT) ─────────────────
@@ -507,12 +723,16 @@ export async function POST(req: NextRequest) {
       name,
       birth_date: birthDate,
       phone,
-      location,
-      own_vehicle: applicationOptionalAnswer({ submitted: ownVehicle, existing: existingRow?.own_vehicle, required: vehicleRequired }),
+      location: normalizedLocation,
+      own_vehicle: applicationOptionalAnswer({ submitted: canonicalSubmittedForm.ownVehicle, existing: existingRow?.own_vehicle, required: vehicleRequired }),
       license_type: applicationOptionalAnswer({ submitted: licenseType, existing: existingRow?.license_type, required: vehicleRequired }),
-      vehicle_type: applicationOptionalAnswer({ submitted: vehicleType, existing: existingRow?.vehicle_type, required: vehicleRequired }),
-      branch1,
-      branch2: branch2 || null,
+      vehicle_type: !vehicleRequired
+        ? applicationOptionalAnswer({ submitted: canonicalSubmittedForm.vehicleType, existing: existingRow?.vehicle_type, required: false })
+        : canonicalSubmittedForm.ownVehicle === "있음"
+          ? applicationOptionalAnswer({ submitted: canonicalSubmittedForm.vehicleType, existing: existingRow?.vehicle_type, required: true })
+          : "미확인",
+      branch1: resolvedBranch.branch1,
+      branch2: resolvedBranch.branch2,
       work_hours: Array.isArray(workHours) ? workHours.join(", ") : workHours,
       // 폼을 다시 제출하면 그게 **가장 최신 본인 답**이다 — 예전 대화에서 AI가 채운 자기 신고를 비운다.
       // 안 비우면 판정이 available_slots를 절대 우선해서(applicantAvailableSlots) 방금 고른 시간대가 무시된다.
@@ -521,9 +741,9 @@ export async function POST(req: NextRequest) {
       introduction: introduction?.trim() || null,
       experience: experience || null,
       available_date: availableDate,
-      self_ownership: applicationOptionalAnswer({ submitted: selfOwnership, existing: existingRow?.self_ownership, required: vehicleRequired }),
+      self_ownership: applicationOptionalAnswer({ submitted: canonicalSubmittedForm.selfOwnership, existing: existingRow?.self_ownership, required: vehicleRequired }),
       source: operationalFields.source,
-      branch: branch1,
+      branch: resolvedBranch.branch1,
       status: updateMode
         ? applicationStatusForSubmission(existingRow?.status ?? null, autoStatus)
         : autoStatus,
@@ -536,7 +756,7 @@ export async function POST(req: NextRequest) {
       sido: geo?.sido ?? null,
       sigungu: geo?.sigungu ?? null,
       bname: geo?.bname ?? null,
-      road_address: geo?.road_address ?? null,
+      road_address: trustedInternal ? geo?.road_address ?? null : normalizedLocation,
       application_submission_id: submissionId,
       application_request_fingerprint: submissionFingerprint,
       application_auto_engagement_required: autoEngagementRequired,
@@ -622,13 +842,18 @@ export async function POST(req: NextRequest) {
 
     const jobContextId = jobRequested ? realJobId : null;
     const startAutoEngagement = autoEngagementRequired && replayPlan.repairsMissingSideEffects;
+    const insertedBranchName = applicationBranchName(inserted.branch);
+    const insertedLegacyBmartIntake = !jobRequested && applicationUsesLegacyBmartFlow({
+      source: inserted.source ?? "direct",
+      branch: insertedBranchName,
+    });
     const initialMessagePlan = applicationInitialMessagePlan({
       startAutoEngagement,
       existingRequest: existingInitialMessageRequest,
     });
 
     // ── 자동 발송 ──────
-    // source='danggeun'이면 매니저가 저장한 시작 멘트를, 그 외엔 기본 접수 안내를 보낸다.
+    // 화주사 근거가 있는 레거시 비마트 흐름은 전용 시작 멘트를, 그 외엔 기본 접수 안내를 보낸다.
     // 둘 다 prompt_examples 테이블의 'system_message' 카테고리에서 매니저가 편집 가능.
     // active 재제출은 새 발송을 선점하지 않는다. 같은 제출 key의 outbox가 있을 때만 기록 복구를 시도한다.
     let initialMessageDelivery: ApplicationSubmissionResult["initialMessageDelivery"] = "not_sent";
@@ -638,13 +863,14 @@ export async function POST(req: NextRequest) {
         year: "numeric", month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit",
       });
+      const branchReceiptLine = applicationBranchReceiptLine(inserted.branch);
       const defaultReceived = [
         "[옹고잉 배송원 지원 접수 안내]",
         "",
         `${inserted.name}님, 안녕하세요.`,
         "옹고잉 배송원 지원서가 정상 접수되었습니다.",
         "",
-        `▶ 지원지점: ${inserted.branch ?? ""}`,
+        ...(branchReceiptLine ? [branchReceiptLine] : []),
         `▶ 접수일시: ${receivedAt}`,
         "",
         "서류 검토 후 영업일 기준 1~2일 내",
@@ -662,7 +888,7 @@ export async function POST(req: NextRequest) {
       if (initialMessagePlan === "replay") {
         sendBody = existingInitialMessageRequest!.body;
         sentByLabel = existingInitialMessageRequest!.sent_by;
-      } else if (inserted.source === "danggeun" || inserted.source === "baemin") {
+      } else if (insertedLegacyBmartIntake) {
         // 배민 비마트 임시중단 기간엔 배민 유입만 'baemin_start'(중단·인재풀 동의)로 시작 멘트를 바꾼다.
         // 플래그가 꺼져 있으면(=재개) 배민도 평시대로 danggeun_start를 공유한다.
         const baeminSuspended =
@@ -674,7 +900,7 @@ export async function POST(req: NextRequest) {
           // 시작 멘트 {{이름}}/{{지점}}/{{시간대}} 치환
           const filledStart = fillTemplate(startMsg, {
             이름: inserted.name,
-            지점: inserted.branch ?? "",
+            지점: insertedBranchName ?? "",
             시간대: shortWorkHours(inserted.work_hours),
           });
           const suspendedFallback = [
@@ -688,7 +914,7 @@ export async function POST(req: NextRequest) {
           );
           if (!resolvedStart) throw new Error("unsafe automated start message");
           sendBody = resolvedStart;
-          sentByLabel = inserted.source === "baemin" ? "baemin-start" : "danggeun-start";
+          sentByLabel = "baemin-start";
           useTemplate = "danggeun";
         } else {
           // DB에 시작 멘트 미저장 — 폴백으로 접수 안내
@@ -697,7 +923,7 @@ export async function POST(req: NextRequest) {
           const filledStored = stored
             ? fillTemplate(stored, {
                 이름: inserted.name,
-                지점: inserted.branch ?? "",
+                지점: insertedBranchName ?? "",
                 접수일시: receivedAt,
               })
             : null;
@@ -711,7 +937,7 @@ export async function POST(req: NextRequest) {
         const filledStored = stored
           ? fillTemplate(stored, {
               이름: inserted.name,
-              지점: inserted.branch ?? "",
+              지점: insertedBranchName ?? "",
               접수일시: receivedAt,
             })
           : null;
@@ -819,7 +1045,7 @@ export async function POST(req: NextRequest) {
             "APPLY_RECEIVED",
             {
               "#{이름}": inserted.name,
-              "#{지점}": inserted.branch ?? "",
+              "#{지점}": insertedBranchName ?? "",
               "#{접수일시}": receivedAt,
             },
             sendBody,
@@ -930,15 +1156,12 @@ export async function POST(req: NextRequest) {
       console.error("[apply notify exception]", notifyErr);
     }
 
-    // source='danggeun' 또는 'baemin'으로 들어온 폼 지원자는 자동 AI 응대 흐름에 올린다.
-    // (배민은 SMS 인입 → 폼 발송 → 폼 제출 시점에 비로소 job_candidates 생성)
+    // 화주사 근거가 있는 레거시 배민 비마트 지원자만 자동 AI 응대 흐름에 올린다.
+    // SMS 인입 → 폼 발송 → 폼 제출 시점에 비로소 job_candidates를 생성한다.
     // outbox 이전에 중단된 replay도 아래 upsert로 시스템 후보 존재를 복구한다.
-    if (startAutoEngagement && (inserted.source === "danggeun" || inserted.source === "baemin")) {
+    if (startAutoEngagement && insertedLegacyBmartIntake) {
       try {
-        const isBaeminFlow = inserted.source === "baemin";
-        const sysJobId = isBaeminFlow
-          ? await ensureBaeminSystemJob(supabase)
-          : await ensureDanggeunSystemJob(supabase);
+        const sysJobId = await ensureBaeminSystemJob(supabase);
         // 희망시간대에 '주말'이 없으면 평일 슬롯 → 공휴일 업무 확인 자동 통과
         const isWeekendSlot = String(inserted.work_hours ?? "").includes("주말");
         // agent_stage는 항상 'screening' 시작 — UI에 단계가 정상적으로 보이도록.

@@ -61,7 +61,7 @@ test("required progress starts at zero and ignores optional answers", async () =
       introduction: "성실하게 일하겠습니다.",
       marketingConsent: true,
     }),
-    { completed: 0, total: 11, percent: 0 },
+    { completed: 0, total: 10, percent: 0 },
   );
 });
 
@@ -98,6 +98,56 @@ test("birth date validation accepts only real YYMMDD calendar dates", async () =
   for (const value of ["60010", "196001", "991332", "000230", "생년월일"]) {
     assert.equal(isValidApplicantBirthDate!(value), false, `${value} should be invalid`);
   }
+});
+
+test("residence accepts only a road-name address without unit details", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const isValidApplicantRoadAddress = applicantFormModule.isValidApplicantRoadAddress as
+    | ((value: string) => boolean)
+    | undefined;
+
+  assert.equal(typeof isValidApplicantRoadAddress, "function");
+  for (const value of [
+    "서울 강남구 테헤란로 123",
+    "서울 서초구 서초대로77길 54",
+    "서울특별시 영등포구 영등포로 지하405",
+    "광주광역시 동구 4.19로 7",
+    "제주특별자치도 제주시 1100로 3348",
+  ]) {
+    assert.equal(isValidApplicantRoadAddress!(value), true, `${value} should be valid`);
+  }
+  for (const value of [
+    "서울 강남구 역삼동",
+    "서울 101동 강남대로 123",
+    "서울 101동1001호 강남대로 123",
+    "서울 지하1층 강남대로 123",
+    "서울 강남구 테헤란로 123 101동 1001호",
+    "서울 강남구 테헤란로 123 3층",
+  ]) {
+    assert.equal(isValidApplicantRoadAddress!(value), false, `${value} should be invalid`);
+  }
+});
+
+test("postcode selection accepts only the provider's road-address field", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const applicantRoadAddressFromPostcode = applicantFormModule.applicantRoadAddressFromPostcode as
+    | ((value: unknown) => string | null)
+    | undefined;
+
+  assert.equal(typeof applicantRoadAddressFromPostcode, "function");
+  assert.equal(applicantRoadAddressFromPostcode!({
+    roadAddress: " 서울 강남구 테헤란로 123 ",
+    address: "서울 강남구 역삼동 123",
+  }), "서울 강남구 테헤란로 123");
+  assert.equal(applicantRoadAddressFromPostcode!({
+    roadAddress: "",
+    autoRoadAddress: "서울 서초구 서초대로77길 54",
+  }), null);
+  assert.equal(applicantRoadAddressFromPostcode!({
+    roadAddress: "",
+    address: "서울 강남구 역삼동 123",
+  }), null);
+  assert.equal(applicantRoadAddressFromPostcode!(null), null);
 });
 
 test("validation explains how to recover from an impossible birth date", async () => {
@@ -151,7 +201,7 @@ test("a complete valid form reaches 100 percent and passes validation", async ()
     name: "김지원",
     birthDate: "600101",
     phone: "01012345678",
-    location: "서울시 강남구",
+    location: "서울 강남구 테헤란로 123",
     ownVehicle: "있음",
     licenseType: "1종 보통",
     vehicleType: "승용차",
@@ -165,4 +215,39 @@ test("a complete valid form reaches 100 percent and passes validation", async ()
   assert.equal(typeof validateApplicantForm, "function");
   assert.deepEqual(applicantFormProgress!(completeForm), { completed: 11, total: 11, percent: 100 });
   assert.equal(validateApplicantForm!(completeForm), null);
+});
+
+test("vehicle type is required only after the applicant says they own a vehicle", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const applicantFormProgress = applicantFormModule.applicantFormProgress as
+    | ((form: ApplicantFormData) => { completed: number; total: number; percent: number })
+    | undefined;
+  const validateApplicantForm = applicantFormModule.validateApplicantForm as
+    | ((form: ApplicantFormData) => { field: keyof ApplicantFormData; message: string } | null)
+    | undefined;
+  const otherwiseComplete: ApplicantFormData = {
+    ...EMPTY_FORM,
+    name: "김지원",
+    birthDate: "600101",
+    phone: "01012345678",
+    location: "서울 강남구 테헤란로 123",
+    licenseType: "1종 보통",
+    branch1: "강남점",
+    workHours: ["평일 오전"],
+    availableDate: "2026-08-20",
+    selfOwnership: "문제 없음",
+  };
+
+  assert.deepEqual(validateApplicantForm!({
+    ...otherwiseComplete,
+    ownVehicle: "있음",
+  }), { field: "vehicleType", message: "보유 차종을 입력해주세요." });
+  assert.equal(validateApplicantForm!({
+    ...otherwiseComplete,
+    ownVehicle: "없음",
+  }), null);
+  assert.deepEqual(applicantFormProgress!({
+    ...otherwiseComplete,
+    ownVehicle: "없음",
+  }), { completed: 10, total: 10, percent: 100 });
 });

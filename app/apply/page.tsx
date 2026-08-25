@@ -2,22 +2,28 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, BriefcaseBusiness, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, BriefcaseBusiness, CheckCircle2, ChevronDown, FileText, Loader2, MapPin, RefreshCw, Search, X } from "lucide-react";
 import Image from "next/image";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 import {
   applyJobLoadErrorDescription,
   applyJobIntent,
   applySubmissionJobContext,
+  isApplicationBranchContextReady,
   shouldShowApplyForm,
   type ApplyJobLoadState,
 } from "@/lib/apply-job-flow";
 import {
   APPLICANT_BIRTH_DATE_ERROR_MESSAGE,
+  APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
+  applicantRoadAddressFromPostcode,
   isValidApplicantBirthDate,
+  isValidApplicantRoadAddress,
   type ApplicantFormData,
   type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
+import { embedApplicantPostcode } from "@/lib/applicant-postcode";
+import { applicationSourceRequiresBranchChoice } from "@/lib/application-branch";
 import {
   applicationFormDraftContentKey,
   applicationFormDraftStorageKey,
@@ -51,8 +57,67 @@ const TIMESLOTS = [
 
 const LICENSE_TYPES = ["1종 보통", "2종 보통", "1종 대형", "없음"];
 const APPLICATION_REQUEST_TIMEOUT_MS = 15_000;
+const KAKAO_POSTCODE_SCRIPT_ID = "kakao-postcode-script";
+const KAKAO_POSTCODE_SCRIPT_URL = "https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+
+interface KakaoPostcodeOptions {
+  oncomplete: (data: unknown) => void;
+  onclose?: () => void;
+  onresize?: (size: { height?: number }) => void;
+  width?: string;
+  height?: string;
+  maxSuggestItems?: number;
+}
+
+interface KakaoPostcodeInstance {
+  embed: (element: HTMLElement) => void;
+}
+
+declare global {
+  interface Window {
+    kakao?: {
+      Postcode?: new (options: KakaoPostcodeOptions) => KakaoPostcodeInstance;
+    };
+  }
+}
+
+let kakaoPostcodeScriptPromise: Promise<void> | null = null;
+
+function loadKakaoPostcodeScript(): Promise<void> {
+  if (window.kakao?.Postcode) return Promise.resolve();
+  if (kakaoPostcodeScriptPromise) return kakaoPostcodeScriptPromise;
+
+  const promise = new Promise<void>((resolve, reject) => {
+    const existing = document.getElementById(KAKAO_POSTCODE_SCRIPT_ID) as HTMLScriptElement | null;
+    const script = existing ?? document.createElement("script");
+    const timeout = window.setTimeout(() => reject(new Error("postcode script timeout")), 10_000);
+    const finish = () => {
+      window.clearTimeout(timeout);
+      if (window.kakao?.Postcode) resolve();
+      else reject(new Error("postcode constructor missing"));
+    };
+    script.addEventListener("load", finish, { once: true });
+    script.addEventListener("error", () => {
+      window.clearTimeout(timeout);
+      reject(new Error("postcode script failed"));
+    }, { once: true });
+    if (!existing) {
+      script.id = KAKAO_POSTCODE_SCRIPT_ID;
+      script.src = KAKAO_POSTCODE_SCRIPT_URL;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  });
+  kakaoPostcodeScriptPromise = promise.catch((error) => {
+    kakaoPostcodeScriptPromise = null;
+    document.getElementById(KAKAO_POSTCODE_SCRIPT_ID)?.remove();
+    throw error;
+  });
+  return kakaoPostcodeScriptPromise;
+}
 
 type FormState = ApplicantFormData;
+type ApplyFormIssue = ApplicantValidationIssue | { field: "branch2"; message: string };
 
 const INITIAL: FormState = {
   name: "",
@@ -72,7 +137,7 @@ const INITIAL: FormState = {
   marketingConsent: false,
 };
 
-const REQUIRED_APPLICATION_FIELDS = new Set<ApplicantValidationIssue["field"]>([
+const APPLICATION_ERROR_FIELDS = new Set<ApplyFormIssue["field"]>([
   "name",
   "birthDate",
   "phone",
@@ -81,6 +146,7 @@ const REQUIRED_APPLICATION_FIELDS = new Set<ApplicantValidationIssue["field"]>([
   "licenseType",
   "vehicleType",
   "branch1",
+  "branch2",
   "workHours",
   "availableDate",
   "selfOwnership",
@@ -127,11 +193,11 @@ function FieldError({
   issue,
 }: {
   field: keyof FormState;
-  issue: ApplicantValidationIssue | null;
+  issue: ApplyFormIssue | null;
 }) {
   if (issue?.field !== field) return null;
   return (
-    <p id={fieldErrorId(field)} className="mt-2 flex items-start gap-1.5 text-[15px] font-bold leading-relaxed text-error-strong">
+    <p role="alert" id={fieldErrorId(field)} className="mt-2 flex items-start gap-1.5 text-[15px] font-bold leading-relaxed text-error-strong">
       <AlertCircle size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <span>{issue.message}</span>
     </p>
@@ -142,6 +208,8 @@ interface JobContext {
   id: number;
   title: string;
   branch: string | null;
+  branch_mode: "none" | "fixed" | "choice";
+  branches: string[];
   client_name: string | null;
   recruiting: boolean;
   vehicle_required: boolean;
@@ -160,10 +228,21 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
   const [form, setForm] = useState<FormState>(INITIAL);
   const [branches, setBranches] = useState<string[]>([]);
+  const [branchListLoadState, setBranchListLoadState] = useState<ApplyJobLoadState>(
+    jobIntent.kind === "general"
+      && applicationSourceRequiresBranchChoice(source)
+      ? "loading"
+      : "idle",
+  );
+  const [branchListLoadAttempt, setBranchListLoadAttempt] = useState(0);
+  const [addressLookupState, setAddressLookupState] = useState<"idle" | "loading" | "error">("idle");
+  const [addressSearchOpen, setAddressSearchOpen] = useState(false);
+  const [addressManualEntry, setAddressManualEntry] = useState(false);
+  const [addressSearchHeight, setAddressSearchHeight] = useState(430);
   const [submitting, setSubmitting] = useState(false);
   const [submittingReplay, setSubmittingReplay] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [validationIssue, setValidationIssue] = useState<ApplicantValidationIssue | null>(null);
+  const [validationIssue, setValidationIssue] = useState<ApplyFormIssue | null>(null);
   const [submissionResult, setSubmissionResult] = useState<ApplicationSubmissionResult | null>(null);
   const [job, setJob] = useState<JobContext | null>(null);
   const [jobLoadState, setJobLoadState] = useState<ApplyJobLoadState>(
@@ -172,7 +251,6 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const [jobLoadAttempt, setJobLoadAttempt] = useState(0);
   const [jobLoadTimedOut, setJobLoadTimedOut] = useState(false);
   const [generalOptIn, setGeneralOptIn] = useState(false);
-  const [manualBranchEntry, setManualBranchEntry] = useState({ branch1: false, branch2: false });
   const [draftReady, setDraftReady] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [recoveryFormVisible, setRecoveryFormVisible] = useState(false);
@@ -183,6 +261,11 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const submitInFlightRef = useRef(false);
   const successTitleRef = useRef<HTMLHeadingElement>(null);
   const retryJobButtonRef = useRef<HTMLButtonElement>(null);
+  const retryBranchesButtonRef = useRef<HTMLButtonElement>(null);
+  const addressLookupButtonRef = useRef<HTMLButtonElement>(null);
+  const locationInputRef = useRef<HTMLInputElement>(null);
+  const addressSearchContainerRef = useRef<HTMLDivElement>(null);
+  const secondBranchDetailsRef = useRef<HTMLDetailsElement>(null);
   const jobTitleRef = useRef<HTMLHeadingElement>(null);
   const unavailableJobTitleRef = useRef<HTMLHeadingElement>(null);
   const jobLoadingTitleRef = useRef<HTMLHeadingElement>(null);
@@ -191,7 +274,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const generalJobStatusRef = useRef<HTMLParagraphElement>(null);
   const resetDraftTriggerRef = useRef<HTMLButtonElement>(null);
   const keepEditingRef = useRef<HTMLButtonElement>(null);
-  const pendingServerValidationRef = useRef<ApplicantValidationIssue | null>(null);
+  const pendingServerValidationRef = useRef<ApplyFormIssue | null>(null);
 
   const verifiedJob = job?.id === jobId ? job : null;
   const currentJobContext = applySubmissionJobContext({
@@ -213,7 +296,43 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const replayUiActive = pendingSubmissionReplay && (!submitting || submittingReplay);
   const submissionJobId = submissionContext.jobId;
   const vehicleRequired = submissionContext.vehicleRequired;
-  const defaultBranch = verifiedJob?.branch || prefillBranch || "";
+  const legacySourceBranchChoice = (jobIntent.kind === "general" || generalOptIn)
+    && applicationSourceRequiresBranchChoice(source);
+  const legacyBranchLookupRequired = legacySourceBranchChoice;
+  const verifiedLegacyBranch = legacySourceBranchChoice && prefillBranch?.trim()
+    && branches.includes(prefillBranch.trim())
+    ? prefillBranch.trim()
+    : null;
+  const jobBranchContextActive = currentSubmissionJobId !== null && verifiedJob !== null;
+  const branchContextReady = isApplicationBranchContextReady({
+    intent: jobIntent,
+    generalOptIn,
+    jobLoadState,
+    jobBranchContextActive,
+    branchLookupRequired: legacyBranchLookupRequired,
+    branchListLoadState,
+  });
+  const branchMode: JobContext["branch_mode"] = jobBranchContextActive
+    ? verifiedJob.branch_mode
+    : verifiedLegacyBranch
+      ? "fixed"
+      : legacySourceBranchChoice
+        ? "choice"
+        : "none";
+  const branchOptions = jobBranchContextActive && verifiedJob.branch_mode === "choice"
+    ? verifiedJob.branches
+    : branches;
+  const branchOptionsKey = branchOptions.join("\u0000");
+  const fixedBranch = jobBranchContextActive && verifiedJob.branch_mode === "fixed"
+    ? verifiedJob.branch
+    : verifiedLegacyBranch;
+  const branchChoiceRequired = branchMode === "choice";
+  const branchContextLoading = legacyBranchLookupRequired && branchListLoadState === "loading";
+  const branchChoicesLoading = legacySourceBranchChoice && branchListLoadState === "loading";
+  const branchChoicesUnavailable = legacySourceBranchChoice
+    && (branchListLoadState === "error"
+      || (branchListLoadState === "loaded" && branchOptions.length === 0));
+  const defaultBranch = fixedBranch || "";
   const currentApplyFormAvailable = shouldShowApplyForm({
     intent: jobIntent,
     loadState: jobLoadState,
@@ -223,8 +342,14 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const applicationModeChoiceRequired = recoverySessionActive
     && !pendingSubmissionReplay
     && !currentApplyFormAvailable;
-  const waitingForApplicationContext = applicationModeChoiceRequired
-    && jobLoadState === "loading";
+  const waitingForApplicationContext = (applicationModeChoiceRequired
+    && jobLoadState === "loading") || branchContextLoading || branchChoicesUnavailable;
+
+  useEffect(() => {
+    void loadKakaoPostcodeScript().catch(() => {
+      // 주소 찾기 버튼에서 재시도하며, 선로딩 실패만으로 폼 전체 오류를 띄우지 않는다.
+    });
+  }, []);
 
   // 공고 지원 링크(?job=ID)로 들어오면 공고 맥락을 불러와 헤더에 표기하고 지점을 미리 채운다.
   useEffect(() => {
@@ -255,13 +380,20 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           return;
         }
         const j = json.job as JobContext;
-        if (cancelled || !j || j.id !== jobId) {
+        if (
+          cancelled
+          || !j
+          || j.id !== jobId
+          || !["none", "fixed", "choice"].includes(j.branch_mode)
+          || !Array.isArray(j.branches)
+          || (j.branch_mode === "fixed" && !j.branch?.trim())
+          || (j.branch_mode === "choice" && j.branches.length === 0)
+        ) {
           if (!cancelled) setJobLoadState("error");
           return;
         }
         setJob(j);
         setJobLoadState("loaded");
-        if (j.branch) setForm((prev) => (prev.branch1 ? prev : { ...prev, branch1: j.branch as string }));
       } catch (loadError) {
         if (!cancelled) {
           setJobLoadTimedOut(isRequestTimeoutError(loadError));
@@ -275,26 +407,37 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   }, [jobId, jobIntent.kind, jobLoadAttempt]);
 
   useEffect(() => {
+    setBranches([]);
+    if (!legacyBranchLookupRequired) {
+      setBranchListLoadState("idle");
+      return;
+    }
+    let cancelled = false;
+    setBranchListLoadState("loading");
     (async () => {
       try {
-        const json = await requestWithTimeout(async (signal) => {
+        const { res, json } = await requestWithTimeout(async (signal) => {
           const res = await fetch("/api/branches", { signal });
-          return res.ok ? await res.json() : null;
+          const json = res.ok ? await res.json() : null;
+          return { res, json };
         }, APPLICATION_REQUEST_TIMEOUT_MS);
-        if (!json) return;
-        setBranches((json.branches ?? []) as string[]);
+        if (cancelled) return;
+        if (!res.ok || !json || !Array.isArray(json.branches)) {
+          setBranchListLoadState("error");
+          return;
+        }
+        setBranches(json.branches.filter((branch: unknown): branch is string => (
+          typeof branch === "string" && Boolean(branch.trim())
+        )));
+        setBranchListLoadState("loaded");
       } catch {
-        /* 지점 목록 못 불러와도 직접 입력 가능 */
+        if (!cancelled) setBranchListLoadState("error");
       }
     })();
-  }, []);
-
-  // 공고별 지원 링크(?branch=지점명)로 들어오면 희망 지점 1순위를 미리 채운다.
-  useEffect(() => {
-    if (prefillBranch) {
-      setForm((prev) => (prev.branch1 ? prev : { ...prev, branch1: prefillBranch }));
-    }
-  }, [prefillBranch]);
+    return () => {
+      cancelled = true;
+    };
+  }, [branchListLoadAttempt, legacyBranchLookupRequired]);
 
   useEffect(() => {
     const snapshot = readApplicationFormDraftSnapshot(draftScope, getDraftStorage());
@@ -317,6 +460,52 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     }
     setDraftReady(true);
   }, [draftScope.branch, draftScope.job, draftScope.source, prefillBranch]);
+
+  useEffect(() => {
+    if (!draftReady || pendingSubmissionReplay || !branchContextReady) return;
+    if (branchMode === "fixed" && fixedBranch) {
+      setForm((current) => current.branch1 === fixedBranch && !current.branch2
+        ? current
+        : { ...current, branch1: fixedBranch, branch2: "" });
+      return;
+    }
+    if (branchMode === "none") {
+      setForm((current) => !current.branch1 && !current.branch2
+        ? current
+        : { ...current, branch1: "", branch2: "" });
+      return;
+    }
+    const choicesReady = jobBranchContextActive || branchListLoadState === "loaded";
+    if (!choicesReady) return;
+    const validBranches = branchOptionsKey ? branchOptionsKey.split("\u0000") : [];
+    setForm((current) => {
+      const branch1 = validBranches.includes(current.branch1) ? current.branch1 : "";
+      const branch2 = validBranches.includes(current.branch2) && current.branch2 !== branch1
+        ? current.branch2
+        : "";
+      return branch1 === current.branch1 && branch2 === current.branch2
+        ? current
+        : { ...current, branch1, branch2 };
+    });
+  }, [
+    branchListLoadState,
+    branchContextReady,
+    branchMode,
+    branchOptionsKey,
+    draftReady,
+    fixedBranch,
+    jobBranchContextActive,
+    pendingSubmissionReplay,
+  ]);
+
+  useEffect(() => {
+    if (!draftReady || pendingSubmissionReplay || form.ownVehicle === "있음" || !form.vehicleType) {
+      return;
+    }
+    setForm((current) => current.ownVehicle !== "있음" && current.vehicleType
+      ? { ...current, vehicleType: "" }
+      : current);
+  }, [draftReady, form.ownVehicle, form.vehicleType, pendingSubmissionReplay]);
 
   useEffect(() => {
     if (!draftReady) return;
@@ -391,6 +580,33 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   }, [jobLoadAttempt, jobLoadState]);
 
   useEffect(() => {
+    if (branchListLoadAttempt === 0) return;
+    const pendingIssue = pendingServerValidationRef.current;
+    if (branchListLoadState === "loaded" && branches.length > 0) {
+      pendingServerValidationRef.current = null;
+      requestAnimationFrame(() => {
+        if (pendingIssue?.field === "branch2") secondBranchDetailsRef.current?.setAttribute("open", "");
+        const field = pendingIssue
+          ? document.getElementById(`field-${pendingIssue.field}`)
+          : null;
+        const target = field?.querySelector<HTMLElement>("input, select, textarea, button")
+          ?? document.getElementById("field-branch1")?.querySelector<HTMLElement>("select")
+          ?? retryBranchesButtonRef.current;
+        target?.scrollIntoView({ behavior: "auto", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (
+      branchListLoadState === "error"
+      || (branchListLoadState === "loaded" && branches.length === 0)
+    ) {
+      pendingServerValidationRef.current = null;
+      requestAnimationFrame(() => retryBranchesButtonRef.current?.focus({ preventScroll: true }));
+    }
+  }, [branchListLoadAttempt, branchListLoadState, branches.length]);
+
+  useEffect(() => {
     if (!submissionResult) return;
     window.scrollTo({ top: 0, behavior: "auto" });
     requestAnimationFrame(() => successTitleRef.current?.focus({ preventScroll: true }));
@@ -403,10 +619,28 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const setManualBranch = (key: "branch1" | "branch2", value: string) => {
+  const setPrimaryBranch = (value: string) => {
     if (submitInFlightRef.current) return;
-    setManualBranchEntry((current) => ({ ...current, [key]: true }));
-    set(key, value);
+    setError(null);
+    if (validationIssue?.field === "branch1") setValidationIssue(null);
+    setForm((current) => ({
+      ...current,
+      branch1: value,
+      branch2: current.branch2 === value ? "" : current.branch2,
+    }));
+  };
+
+  const setOwnVehicle = (value: string) => {
+    if (submitInFlightRef.current) return;
+    setError(null);
+    if (validationIssue?.field === "ownVehicle" || validationIssue?.field === "vehicleType") {
+      setValidationIssue(null);
+    }
+    setForm((current) => ({
+      ...current,
+      ownVehicle: value,
+      vehicleType: value === "있음" ? current.vehicleType : "",
+    }));
   };
 
   const toggleWorkHour = (value: string) => {
@@ -429,9 +663,9 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     pendingServerValidationRef.current = null;
     removeApplicationFormDraftSnapshot(draftScope, getDraftStorage());
     setForm(initialForm(defaultBranch));
+    setAddressManualEntry(false);
     setError(null);
     setValidationIssue(null);
-    setManualBranchEntry({ branch1: false, branch2: false });
     setDraftRestored(false);
     setRecoveryFormVisible(false);
     setResetConfirming(false);
@@ -472,6 +706,101 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     setJobLoadAttempt((attempt) => attempt + 1);
   };
 
+  const retryBranchLookup = () => {
+    setError(null);
+    setBranchListLoadAttempt((attempt) => attempt + 1);
+  };
+
+  const closeAddressSearch = () => {
+    setAddressSearchOpen(false);
+    addressSearchContainerRef.current?.replaceChildren();
+    requestAnimationFrame(() => addressLookupButtonRef.current?.focus({ preventScroll: true }));
+  };
+
+  const enableManualAddressEntry = () => {
+    if (submitInFlightRef.current) return;
+    setAddressManualEntry(true);
+    setAddressLookupState("idle");
+    requestAnimationFrame(() => locationInputRef.current?.focus({ preventScroll: true }));
+  };
+
+  const openRoadAddressLookup = async () => {
+    if (submitInFlightRef.current || addressLookupState === "loading") return;
+    setError(null);
+    setAddressLookupState("loading");
+    try {
+      await loadKakaoPostcodeScript();
+      const Postcode = window.kakao?.Postcode;
+      if (!Postcode) throw new Error("postcode constructor missing");
+      setAddressSearchOpen(true);
+      requestAnimationFrame(() => {
+        const container = addressSearchContainerRef.current;
+        const recoverFromEmbedFailure = () => {
+          setAddressLookupState("error");
+          setAddressSearchOpen(false);
+          container?.replaceChildren();
+          requestAnimationFrame(() => addressLookupButtonRef.current?.focus({ preventScroll: true }));
+        };
+        if (!container) {
+          recoverFromEmbedFailure();
+          return;
+        }
+        container.replaceChildren();
+        const embedded = embedApplicantPostcode({
+          container,
+          create: () => new Postcode({
+            oncomplete: (data) => {
+              const roadAddress = applicantRoadAddressFromPostcode(data);
+              setAddressSearchOpen(false);
+              container.replaceChildren();
+              if (!roadAddress) {
+                setAddressLookupState("idle");
+                setValidationIssue({
+                  field: "location",
+                  message: "도로명 주소가 제공되는 검색 결과를 선택해주세요.",
+                });
+                requestAnimationFrame(() => addressLookupButtonRef.current?.focus({ preventScroll: true }));
+                return;
+              }
+              setAddressLookupState("idle");
+              setAddressManualEntry(false);
+              setError(null);
+              setValidationIssue((current) => current?.field === "location" ? null : current);
+              setForm((current) => ({ ...current, location: roadAddress }));
+              requestAnimationFrame(() => {
+                const next = document.querySelector<HTMLElement>("#field-ownVehicle button")
+                  ?? document.querySelector<HTMLElement>("#field-workHours button");
+                next?.scrollIntoView({ behavior: "auto", block: "center" });
+                next?.focus({ preventScroll: true });
+              });
+            },
+            onclose: () => {
+              setAddressSearchOpen(false);
+              container.replaceChildren();
+              setAddressLookupState("idle");
+              requestAnimationFrame(() => addressLookupButtonRef.current?.focus({ preventScroll: true }));
+            },
+            onresize: (size) => {
+              if (typeof size.height === "number" && Number.isFinite(size.height)) {
+                setAddressSearchHeight(Math.min(520, Math.max(360, Math.ceil(size.height))));
+              }
+            },
+            width: "100%",
+            height: "100%",
+            maxSuggestItems: 5,
+          }),
+          onError: recoverFromEmbedFailure,
+        });
+        if (!embedded) return;
+        setAddressLookupState("idle");
+      });
+    } catch {
+      setAddressLookupState("error");
+      setAddressSearchOpen(false);
+      requestAnimationFrame(() => addressLookupButtonRef.current?.focus({ preventScroll: true }));
+    }
+  };
+
   const abandonSubmissionAttemptForContextChange = (response: unknown) => {
     const record = response && typeof response === "object"
       ? response as Record<string, unknown>
@@ -480,8 +809,8 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       ? record.error
       : "지원 조건이 변경되어 현재 상태를 다시 확인해야 해요.";
     const responseField = typeof record?.field === "string"
-      && REQUIRED_APPLICATION_FIELDS.has(record.field as ApplicantValidationIssue["field"])
-      ? record.field as ApplicantValidationIssue["field"]
+      && APPLICATION_ERROR_FIELDS.has(record.field as ApplyFormIssue["field"])
+      ? record.field as ApplyFormIssue["field"]
       : null;
     const issue = responseField
       ? { field: responseField, message: responseMessage }
@@ -508,13 +837,21 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       persistedDraftKeyRef.current = null;
     }
 
-    if (jobIntent.kind === "job") {
+    if (jobIntent.kind === "job" && !generalOptIn) {
       setJob(null);
       setJobLoadTimedOut(false);
       setJobLoadState("loading");
       setJobLoadAttempt((attempt) => attempt + 1);
+    } else if (
+      legacyBranchLookupRequired
+      && (responseField === null || responseField === "branch1" || responseField === "branch2")
+    ) {
+      setBranches([]);
+      setBranchListLoadState("loading");
+      setBranchListLoadAttempt((attempt) => attempt + 1);
     } else if (issue) {
       requestAnimationFrame(() => {
+        if (issue.field === "branch2") secondBranchDetailsRef.current?.setAttribute("open", "");
         const field = document.getElementById(`field-${issue.field}`);
         field?.scrollIntoView({ behavior: "auto", block: "center" });
         field?.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
@@ -524,6 +861,13 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
   const handleSubmit = async () => {
     if (submitInFlightRef.current) return;
+    if (branchContextLoading || branchChoicesUnavailable) {
+      setError(branchContextLoading
+        ? "지원 가능한 지점을 확인하고 있어요. 잠시만 기다려주세요."
+        : "지원 가능한 지점을 확인하지 못했어요. 다시 불러와주세요.");
+      requestAnimationFrame(() => retryBranchesButtonRef.current?.focus({ preventScroll: true }));
+      return;
+    }
     if (applicationModeChoiceRequired) {
       const target = jobLoadState === "loading"
         ? jobLoadingTitleRef.current
@@ -534,7 +878,9 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       target?.focus({ preventScroll: true });
       return;
     }
-    const issue = validateApplicationSubmission(form, vehicleRequired);
+    const issue = pendingSubmissionReplay
+      ? null
+      : validateApplicationSubmission(form, vehicleRequired, branchChoiceRequired);
     if (issue) {
       setError(issue.message);
       setValidationIssue(issue);
@@ -620,7 +966,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     }
   };
 
-  const progress = applicationSubmissionProgress(form, vehicleRequired);
+  const progress = applicationSubmissionProgress(form, vehicleRequired, branchChoiceRequired);
   const showApplyForm = recoverySessionActive || currentApplyFormAvailable;
   const hasUnavailableJobLink = !replayUiActive
     && (jobIntent.kind === "invalid" || jobLoadState === "unavailable");
@@ -935,6 +1281,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={progress.percent}
+              aria-valuetext={`필수 ${progress.total}개 중 ${progress.completed}개 완료`}
             >
               <div className="h-full rounded-full bg-brand-yellow transition-[width] motion-reduce:transition-none" style={{ width: `${progress.percent}%` }} />
             </div>
@@ -998,9 +1345,97 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
           {/* 거주지 */}
           <div id="field-location">
-            <label htmlFor="location" className={labelCls}>거주지 주소{requiredMark}</label>
-            <input id="location" name="location" autoComplete="street-address" aria-required="true" {...fieldA11y("location")} className={fieldInputClass("location")} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="예: 서울시 강남구 역삼동" />
+            <label htmlFor="location" className={labelCls}>거주지 도로명 주소{requiredMark}</label>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+              <div className="relative min-w-0">
+                <MapPin aria-hidden="true" size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  ref={locationInputRef}
+                  id="location"
+                  name="location"
+                  autoComplete="address-line1"
+                  aria-required="true"
+                  readOnly={!addressManualEntry}
+                  {...fieldA11y("location", "location-help")}
+                  className={fieldInputClass("location", addressManualEntry ? "pl-11" : "cursor-default pl-11")}
+                  value={form.location}
+                  onChange={(event) => set("location", event.target.value)}
+                  onBlur={() => {
+                    if (form.location && !isValidApplicantRoadAddress(form.location)) {
+                      setValidationIssue({
+                        field: "location",
+                        message: APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
+                      });
+                    }
+                  }}
+                  placeholder={addressManualEntry
+                    ? "예: 서울 강남구 테헤란로 123"
+                    : "주소 찾기로 선택해주세요"}
+                />
+              </div>
+              <button
+                ref={addressLookupButtonRef}
+                type="button"
+                aria-controls="road-address-search"
+                aria-expanded={addressSearchOpen}
+                disabled={addressLookupState === "loading" || submitting}
+                onClick={openRoadAddressLookup}
+                className="inline-flex min-h-12 items-center justify-center gap-1.5 rounded-2xl border border-foreground bg-foreground px-4 text-[15px] font-extrabold text-white transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+              >
+                {addressLookupState === "loading"
+                  ? <Loader2 aria-hidden="true" size={18} className="animate-spin motion-reduce:animate-none" />
+                  : <Search aria-hidden="true" size={18} />}
+                {form.location ? "다시 찾기" : "주소 찾기"}
+              </button>
+            </div>
+            <p id="location-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+              {addressManualEntry
+                ? "도로명과 건물번호까지만 입력해주세요. 아파트 동·호수나 층은 받지 않아요."
+                : "검색 결과의 도로명과 건물번호만 저장합니다. 아파트 동·호수나 층은 받지 않아요."}
+            </p>
+            {addressLookupState === "error" && (
+              <div className="mt-2 rounded-xl border border-error/20 bg-error-soft px-3 py-3">
+                <p role="alert" className="flex items-start gap-1.5 text-[15px] font-bold leading-relaxed text-error-strong">
+                  <AlertCircle aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
+                  주소 검색을 열지 못했어요. 다시 시도하거나 도로명 주소를 직접 입력해주세요.
+                </p>
+                {!addressManualEntry && (
+                  <button
+                    type="button"
+                    onClick={enableManualAddressEntry}
+                    className="mt-2 inline-flex min-h-11 items-center rounded-xl border border-error/30 bg-card px-3 text-[15px] font-extrabold text-error-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    도로명 주소 직접 입력
+                  </button>
+                )}
+              </div>
+            )}
             <FieldError field="location" issue={validationIssue} />
+            <div
+              id="road-address-search"
+              role="region"
+              aria-label="도로명 주소 검색"
+              className={addressSearchOpen
+                ? "mt-3 overflow-hidden rounded-2xl border border-border-strong bg-card shadow-sm"
+                : "hidden"}
+            >
+              <div className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4">
+                <span className="text-[15px] font-extrabold text-foreground">도로명 주소 검색</span>
+                <button
+                  type="button"
+                  onClick={closeAddressSearch}
+                  aria-label="주소 검색 닫기"
+                  className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X aria-hidden="true" size={20} />
+                </button>
+              </div>
+              <div
+                ref={addressSearchContainerRef}
+                style={{ height: `${addressSearchHeight}px` }}
+                className="w-full bg-white"
+              />
+            </div>
           </div>
         </div>
 
@@ -1029,7 +1464,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                       type="button"
                       aria-pressed={form.ownVehicle === opt}
                       {...fieldA11y("ownVehicle")}
-                      onClick={() => set("ownVehicle", opt)}
+                      onClick={() => setOwnVehicle(opt)}
                       className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.ownVehicle === opt ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-gray-700 hover:border-foreground/50"}`}
                     >
                       {opt}
@@ -1051,12 +1486,25 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 <FieldError field="licenseType" issue={validationIssue} />
               </div>
 
-              {/* 이동 수단 */}
-              <div id="field-vehicleType">
-                <label htmlFor="vehicleType" className={labelCls}>이동 수단{requiredMark}</label>
-                <input id="vehicleType" name="vehicleType" aria-required="true" {...fieldA11y("vehicleType")} className={fieldInputClass("vehicleType")} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)} placeholder="예: 오토바이 / 승용차" />
-                <FieldError field="vehicleType" issue={validationIssue} />
-              </div>
+              {form.ownVehicle === "있음" && (
+                <div id="field-vehicleType">
+                  <label htmlFor="vehicleType" className={labelCls}>보유 차종{requiredMark}</label>
+                  <input
+                    id="vehicleType"
+                    name="vehicleType"
+                    aria-required="true"
+                    {...fieldA11y("vehicleType", "vehicleType-help")}
+                    className={fieldInputClass("vehicleType")}
+                    value={form.vehicleType}
+                    onChange={(event) => set("vehicleType", event.target.value)}
+                    placeholder="예: 모닝 / 아반떼 / 스타렉스 / 포터"
+                  />
+                  <p id="vehicleType-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+                    배송에 사용할 차량 모델명을 입력해주세요.
+                  </p>
+                  <FieldError field="vehicleType" issue={validationIssue} />
+                </div>
+              )}
             </>
           ) : (
             <div className="rounded-2xl border border-success/20 bg-success-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-success-strong">
@@ -1070,52 +1518,106 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">3</span>
             <div>
               <h2 className="text-[18px] font-extrabold text-foreground">희망 근무·정산 조건</h2>
-              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">원하는 근무지와 시간, 시작 가능일을 선택해주세요.</p>
+              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">
+                {branchMode === "fixed"
+                  ? jobBranchContextActive
+                    ? "이 공고의 근무지를 확인하고, 가능한 시간과 시작일을 알려주세요."
+                    : "안내받은 근무지를 확인하고, 가능한 시간과 시작일을 알려주세요."
+                  : branchMode === "choice"
+                    ? "실제 운영 중인 지점과 가능한 시간, 시작일을 선택해주세요."
+                    : "원하는 근무 시간과 시작 가능일을 선택해주세요."}
+              </p>
             </div>
           </div>
 
-          {/* 희망 지점 */}
-          <div id="field-branch1">
-            <label htmlFor="branch1" className={labelCls}>희망 지점 (1순위){requiredMark}</label>
-            {branches.length > 0 && !manualBranchEntry.branch1 ? (
-              <select id="branch1" name="branch1" aria-required="true" {...fieldA11y("branch1")} className={fieldInputClass("branch1")} value={form.branch1} onChange={(e) => set("branch1", e.target.value)}>
-                <option value="">선택해주세요</option>
-                {form.branch1 && !branches.includes(form.branch1) && (
-                  <option value={form.branch1}>{form.branch1}</option>
-                )}
-                {branches.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            ) : (
-              <input id="branch1" name="branch1" aria-required="true" {...fieldA11y("branch1")} className={fieldInputClass("branch1")} value={form.branch1} onChange={(e) => setManualBranch("branch1", e.target.value)} placeholder="희망 지점을 입력해주세요" />
-            )}
-            <FieldError field="branch1" issue={validationIssue} />
-          </div>
+          {branchMode === "fixed" && fixedBranch && (
+            <dl className="rounded-2xl border border-info/20 bg-info-soft px-4 py-4">
+              <dt className="text-[14px] font-bold text-info-strong">지원 근무지</dt>
+              <dd className="mt-1 text-[18px] font-extrabold text-foreground">{fixedBranch}</dd>
+              <dd className="mt-1 text-[14px] font-medium leading-relaxed text-muted-foreground">
+                {jobBranchContextActive
+                  ? "공고에 정해진 근무지라 지원서에서 따로 선택하지 않아도 됩니다."
+                  : "안내 링크에 정해진 근무지라 지원서에서 따로 선택하지 않아도 됩니다."}
+              </dd>
+            </dl>
+          )}
 
-          {/* 희망 지점 2순위 */}
-          <details className="group overflow-hidden rounded-2xl border border-border bg-muted/30">
-            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[15px] font-bold text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              <span>다른 희망 지점 추가 <span className="font-medium text-muted-foreground">(선택)</span></span>
-              <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
-            </summary>
-            <div className="border-t border-border px-4 pb-4 pt-3">
-              <label htmlFor="branch2" className={labelCls}>희망 지점 (2순위)</label>
-              {branches.length > 0 && !manualBranchEntry.branch2 ? (
-                <select id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => set("branch2", e.target.value)}>
-                  <option value="">선택 안 함</option>
-                  {form.branch2 && !branches.includes(form.branch2) && (
-                    <option value={form.branch2}>{form.branch2}</option>
-                  )}
-                  {branches.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
+          {branchMode === "choice" && (
+            <div id="field-branch1">
+              {branchChoicesLoading ? (
+                <div role="status" aria-live="polite" className="flex min-h-16 items-center gap-3 rounded-2xl border border-border bg-muted/30 px-4 py-3">
+                  <Loader2 size={20} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
+                  <span className="text-[15px] font-bold text-foreground">지원 가능한 지점을 확인하고 있어요.</span>
+                </div>
+              ) : branchChoicesUnavailable ? (
+                <div role="alert" className="rounded-2xl border border-warning/30 bg-warning-soft px-4 py-4">
+                  <p className="text-[15px] font-bold leading-relaxed text-warning-strong">
+                    지원 가능한 지점을 확인하지 못했어요. 임의의 지점을 입력하지 않고 목록을 다시 확인합니다.
+                  </p>
+                  <button
+                    ref={retryBranchesButtonRef}
+                    type="button"
+                    onClick={retryBranchLookup}
+                    className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-warning/30 bg-card px-4 text-[15px] font-extrabold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <RefreshCw size={18} aria-hidden="true" /> 지점 다시 불러오기
+                  </button>
+                </div>
               ) : (
-                <input id="branch2" name="branch2" className={inputCls} value={form.branch2} onChange={(e) => setManualBranch("branch2", e.target.value)} placeholder="두 번째 희망 지점을 입력해주세요" />
+                <>
+                  <label htmlFor="branch1" className={labelCls}>희망 지점 (1순위){requiredMark}</label>
+                  <select
+                    id="branch1"
+                    name="branch1"
+                    aria-required="true"
+                    {...fieldA11y("branch1", "branch1-help")}
+                    className={fieldInputClass("branch1")}
+                    value={form.branch1}
+                    onChange={(event) => setPrimaryBranch(event.target.value)}
+                  >
+                    <option value="">선택해주세요</option>
+                    {hasSubmissionAttempt && form.branch1 && !branchOptions.includes(form.branch1) && (
+                      <option value={form.branch1}>{form.branch1}</option>
+                    )}
+                    {branchOptions.map((branch) => (
+                      <option key={branch} value={branch}>{branch}</option>
+                    ))}
+                  </select>
+                  <p id="branch1-help" className="mt-2 text-[14px] leading-relaxed text-muted-foreground">
+                    해당 화주사에서 실제 운영 중인 지점만 표시합니다.
+                  </p>
+                  <FieldError field="branch1" issue={validationIssue} />
+
+                  <details ref={secondBranchDetailsRef} className="group mt-4 overflow-hidden rounded-2xl border border-border bg-muted/30">
+                    <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[15px] font-bold text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                      <span>다른 희망 지점 추가 <span className="font-medium text-muted-foreground">(선택)</span></span>
+                      <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+                    </summary>
+                    <div id="field-branch2" className="border-t border-border px-4 pb-4 pt-3">
+                      <label htmlFor="branch2" className={labelCls}>희망 지점 (2순위)</label>
+                      <select
+                        id="branch2"
+                        name="branch2"
+                        {...fieldA11y("branch2")}
+                        className={fieldInputClass("branch2")}
+                        value={form.branch2}
+                        onChange={(event) => set("branch2", event.target.value)}
+                      >
+                        <option value="">선택 안 함</option>
+                        {hasSubmissionAttempt && form.branch2 && !branchOptions.includes(form.branch2) && (
+                          <option value={form.branch2}>{form.branch2}</option>
+                        )}
+                        {branchOptions.filter((branch) => branch !== form.branch1).map((branch) => (
+                          <option key={branch} value={branch}>{branch}</option>
+                        ))}
+                      </select>
+                      <FieldError field="branch2" issue={validationIssue} />
+                    </div>
+                  </details>
+                </>
               )}
             </div>
-          </details>
+          )}
 
           {/* 희망 근무 시간대 */}
           <div id="field-workHours">
@@ -1216,7 +1718,11 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             ? <Loader2 size={20} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
             : null}
           {waitingForApplicationContext
-            ? "공고 확인 중…"
+            ? branchContextLoading
+              ? "근무지 확인 중…"
+              : branchChoicesUnavailable
+                ? "지점 확인 필요"
+                : "공고 확인 중…"
             : submitting
             ? submittingReplay ? "접수 결과 확인 중…" : "제출 중…"
             : applicationModeChoiceRequired

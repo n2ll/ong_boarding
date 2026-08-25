@@ -28,6 +28,14 @@ type ApplyJobFlowModule = {
     vehicleRequired: boolean;
     generalOptIn: boolean;
   }) => { jobId: number | null; vehicleRequired: boolean };
+  isApplicationBranchContextReady?: (input: {
+    intent: ApplyJobIntent;
+    generalOptIn: boolean;
+    jobLoadState: "idle" | "loading" | "loaded" | "unavailable" | "error";
+    jobBranchContextActive: boolean;
+    branchLookupRequired: boolean;
+    branchListLoadState: "idle" | "loading" | "loaded" | "unavailable" | "error";
+  }) => boolean;
 };
 
 async function loadApplyJobFlowModule(): Promise<ApplyJobFlowModule> {
@@ -138,4 +146,43 @@ test("a job lookup failure gives a concrete recovery path without asserting the 
   assert.match(retryableCopy, /다시 불러와/);
   assert.match(retryableCopy, /문자에 답장/);
   assert.doesNotMatch(`${timeoutCopy} ${retryableCopy}`, /마감|바뀐 것은 아니에요/);
+});
+
+test("branch answers are not normalized before their server context is ready", async () => {
+  const { isApplicationBranchContextReady } = await loadApplyJobFlowModule();
+  const jobIntent: ApplyJobIntent = { kind: "job", id: 42 };
+
+  assert.equal(typeof isApplicationBranchContextReady, "function");
+  assert.equal(isApplicationBranchContextReady!({
+    intent: jobIntent,
+    generalOptIn: false,
+    jobLoadState: "loading",
+    jobBranchContextActive: false,
+    branchLookupRequired: false,
+    branchListLoadState: "idle",
+  }), false);
+  assert.equal(isApplicationBranchContextReady!({
+    intent: jobIntent,
+    generalOptIn: false,
+    jobLoadState: "loaded",
+    jobBranchContextActive: true,
+    branchLookupRequired: false,
+    branchListLoadState: "idle",
+  }), true);
+  assert.equal(isApplicationBranchContextReady!({
+    intent: { kind: "general" },
+    generalOptIn: false,
+    jobLoadState: "idle",
+    jobBranchContextActive: false,
+    branchLookupRequired: true,
+    branchListLoadState: "loading",
+  }), false);
+  assert.equal(isApplicationBranchContextReady!({
+    intent: { kind: "general" },
+    generalOptIn: false,
+    jobLoadState: "idle",
+    jobBranchContextActive: false,
+    branchLookupRequired: true,
+    branchListLoadState: "loaded",
+  }), true);
 });

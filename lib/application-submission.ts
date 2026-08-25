@@ -1,6 +1,8 @@
 import {
   APPLICANT_BIRTH_DATE_ERROR_MESSAGE,
+  APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
   isValidApplicantBirthDate,
+  isValidApplicantRoadAddress,
   type ApplicantFormData,
   type ApplicantValidationIssue,
 } from "./applicant-form.ts";
@@ -459,45 +461,73 @@ const BASE_REQUIREMENTS: Array<ApplicantValidationIssue & { isValid: (form: Appl
   { field: "name", message: "이름을 입력해주세요.", isValid: (form) => Boolean(form.name.trim()) },
   { field: "birthDate", message: APPLICANT_BIRTH_DATE_ERROR_MESSAGE, isValid: (form) => isValidApplicantBirthDate(form.birthDate) },
   { field: "phone", message: "연락처를 정확히 입력해주세요.", isValid: (form) => /^\d{10,11}$/.test(form.phone) },
-  { field: "location", message: "거주지 주소를 입력해주세요.", isValid: (form) => Boolean(form.location.trim()) },
+  { field: "location", message: APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE, isValid: (form) => isValidApplicantRoadAddress(form.location) },
   { field: "branch1", message: "희망 지점을 선택해주세요.", isValid: (form) => Boolean(form.branch1) },
   { field: "workHours", message: "희망 근무 시간대를 1개 이상 선택해주세요.", isValid: (form) => form.workHours.length > 0 },
   { field: "availableDate", message: "근무 가능 시작일을 선택해주세요.", isValid: (form) => Boolean(form.availableDate) },
 ];
 
+const LEGACY_LOCATION_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
+  { field: "location", message: "거주지 주소를 입력해주세요.", isValid: (form) => Boolean(form.location.trim()) };
+
 const VEHICLE_REQUIREMENTS: Array<ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean }> = [
-  { field: "ownVehicle", message: "자차 보유 여부를 선택해주세요.", isValid: (form) => Boolean(form.ownVehicle) },
+  { field: "ownVehicle", message: "자차 보유 여부를 선택해주세요.", isValid: (form) => form.ownVehicle === "있음" || form.ownVehicle === "없음" },
   { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) },
-  { field: "vehicleType", message: "이동 수단을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) },
 ];
+
+const VEHICLE_TYPE_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
+  { field: "vehicleType", message: "보유 차종을 입력해주세요.", isValid: (form) => Boolean(form.vehicleType.trim()) };
 
 const SELF_OWNERSHIP_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
   { field: "selfOwnership", message: "본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) };
 
-function applicationRequirements(vehicleRequired: boolean) {
+function applicationRequirements(
+  form: ApplicantFormData,
+  vehicleRequired: boolean,
+  branchRequired: boolean,
+  roadAddressRequired: boolean,
+) {
+  const locationRequirements = roadAddressRequired
+    ? BASE_REQUIREMENTS
+    : BASE_REQUIREMENTS.map((requirement) => (
+        requirement.field === "location" ? LEGACY_LOCATION_REQUIREMENT : requirement
+      ));
+  const baseRequirements = branchRequired
+    ? locationRequirements
+    : locationRequirements.filter((requirement) => requirement.field !== "branch1");
   return vehicleRequired
     ? [
-        ...BASE_REQUIREMENTS.slice(0, 4),
+        ...baseRequirements.slice(0, 4),
         ...VEHICLE_REQUIREMENTS,
-        ...BASE_REQUIREMENTS.slice(4),
+        ...(form.ownVehicle === "있음" ? [VEHICLE_TYPE_REQUIREMENT] : []),
+        ...baseRequirements.slice(4),
         SELF_OWNERSHIP_REQUIREMENT,
       ]
-    : BASE_REQUIREMENTS;
+    : baseRequirements;
 }
 
 export function validateApplicationSubmission(
   form: ApplicantFormData,
   vehicleRequired: boolean,
+  branchRequired = true,
+  roadAddressRequired = true,
 ): ApplicantValidationIssue | null {
-  const invalid = applicationRequirements(vehicleRequired).find((requirement) => !requirement.isValid(form));
+  const invalid = applicationRequirements(
+    form,
+    vehicleRequired,
+    branchRequired,
+    roadAddressRequired,
+  ).find((requirement) => !requirement.isValid(form));
   return invalid ? { field: invalid.field, message: invalid.message } : null;
 }
 
 export function applicationSubmissionProgress(
   form: ApplicantFormData,
   vehicleRequired: boolean,
+  branchRequired = true,
+  roadAddressRequired = true,
 ): { completed: number; total: number; percent: number } {
-  const requirements = applicationRequirements(vehicleRequired);
+  const requirements = applicationRequirements(form, vehicleRequired, branchRequired, roadAddressRequired);
   const completed = requirements.filter((requirement) => requirement.isValid(form)).length;
   const total = requirements.length;
   return {

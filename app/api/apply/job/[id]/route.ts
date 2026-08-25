@@ -7,6 +7,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import {
+  applicationActiveFixedBranchName,
+  applicationBranchContext,
+  applicationBranchName,
+} from "@/lib/application-branch";
 import { applyJobIntent, classifyApplyJobLookup } from "@/lib/apply-job-flow";
 import { publicJobAvailability } from "@/lib/public-job";
 import { createServiceClient } from "@/lib/supabase";
@@ -55,19 +60,111 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   let clientName: string | null = null;
   if (job.client_id) {
-    const { data: client } = await supabase
+    const { data: client, error: clientError } = await supabase
       .from("clients")
       .select("name")
       .eq("id", job.client_id)
       .maybeSingle();
+    if (clientError) {
+      return NextResponse.json(
+        { error: "공고의 화주사 정보를 확인하지 못했습니다.", retryable: true },
+        { status: 503 },
+      );
+    }
     clientName = (client?.name as string | undefined) ?? null;
   }
+
+  let fixedBranch: string | null = null;
+  if (typeof job.branch_id === "number") {
+    let fixedBranchQuery = supabase
+      .from("branches")
+      .select("name, active, client_id")
+      .eq("id", job.branch_id)
+      .eq("active", true);
+    if (typeof job.client_id === "number") {
+      fixedBranchQuery = fixedBranchQuery.eq("client_id", job.client_id);
+    }
+    const { data: branch, error: branchError } = await fixedBranchQuery
+      .maybeSingle();
+    fixedBranch = applicationActiveFixedBranchName({
+      name: typeof branch?.name === "string" ? branch.name : null,
+      active: branch?.active === true,
+      clientId: typeof branch?.client_id === "number" ? branch.client_id : null,
+      jobClientId: typeof job.client_id === "number" ? job.client_id : null,
+    });
+    if (branchError || !fixedBranch) {
+      return NextResponse.json(
+        { error: "공고의 근무지 정보를 확인하지 못했습니다.", retryable: true },
+        { status: 503 },
+      );
+    }
+  } else {
+    const legacyBranchName = applicationBranchName(
+      typeof job.branch === "string" ? job.branch : null,
+    );
+    if (legacyBranchName) {
+      if (typeof job.client_id !== "number") {
+        return NextResponse.json(
+          { error: "공고의 근무지 정보를 확인하지 못했습니다.", retryable: true },
+          { status: 503 },
+        );
+      }
+      const { data: branch, error: branchError } = await supabase
+        .from("branches")
+        .select("name, active, client_id")
+        .eq("client_id", job.client_id)
+        .eq("name", legacyBranchName)
+        .eq("active", true)
+        .maybeSingle();
+      fixedBranch = applicationActiveFixedBranchName({
+        name: typeof branch?.name === "string" ? branch.name : null,
+        active: branch?.active === true,
+        clientId: typeof branch?.client_id === "number" ? branch.client_id : null,
+        jobClientId: job.client_id,
+      });
+      if (branchError || !fixedBranch) {
+        return NextResponse.json(
+          { error: "공고의 근무지 정보를 확인하지 못했습니다.", retryable: true },
+          { status: 503 },
+        );
+      }
+    }
+  }
+
+  let branches: string[] = [];
+  if (!fixedBranch && typeof job.client_id === "number") {
+    const { data: branchRows, error: branchesError } = await supabase
+      .from("branches")
+      .select("name")
+      .eq("client_id", job.client_id)
+      .eq("active", true)
+      .order("sort_order", { ascending: true });
+    if (branchesError) {
+      return NextResponse.json(
+        { error: "선택 가능한 근무지를 확인하지 못했습니다.", retryable: true },
+        { status: 503 },
+      );
+    }
+    branches = (branchRows ?? [])
+      .map((branch) => applicationBranchName(
+        typeof branch.name === "string" ? branch.name : null,
+      ))
+      .filter((branch): branch is string => branch !== null);
+  }
+
+  const branchContext = applicationBranchContext({
+    fixedBranch,
+    allowChoice: branches.length > 0,
+    activeBranches: branches,
+  });
 
   return NextResponse.json({
     job: {
       id: job.id,
       title: job.title,
-      branch: job.branch ?? null,
+      branch: branchContext.mode === "fixed" ? branchContext.branch : null,
+      branch_mode: branchContext.mode,
+      branches: branchContext.mode === "choice" ? branchContext.branches : [],
       client_name: clientName,
       recruiting: availability === "open",
       vehicle_required: job.vehicle_required !== false,

@@ -11,6 +11,8 @@ type TallyWebhookModule = {
     rawPayload: string;
   }) => string;
   blocksTallyFallback?: (status: number, errorBody: unknown) => boolean;
+  normalizeTallyVehicleOwnership?: (value: string) => "있음" | "없음" | "";
+  normalizeTallySelfOwnership?: (value: string) => "문제 없음" | "문제 있음" | "";
 };
 
 async function loadTallyWebhookModule(): Promise<TallyWebhookModule> {
@@ -85,6 +87,44 @@ test("the Tally adapter supplies its stable UUID to the canonical apply route", 
   assert.match(route, /data\?:\s*\{[\s\S]*submissionId\?:\s*string/);
   assert.match(route, /fetch\(`\$\{req\.nextUrl\.origin\}\/api\/apply`/);
   assert.match(route, /body:\s*JSON\.stringify\(applyBody\)/);
+});
+
+test("Tally keeps legacy raw labels in its durable fingerprint and canonicalizes only after trust", async () => {
+  const {
+    normalizeTallyVehicleOwnership,
+    normalizeTallySelfOwnership,
+  } = await loadTallyWebhookModule();
+
+  assert.equal(typeof normalizeTallyVehicleOwnership, "function");
+  assert.equal(typeof normalizeTallySelfOwnership, "function");
+  assert.equal(normalizeTallyVehicleOwnership!("네"), "있음");
+  assert.equal(normalizeTallyVehicleOwnership!("예"), "있음");
+  assert.equal(normalizeTallyVehicleOwnership!("아니요"), "없음");
+  assert.equal(normalizeTallyVehicleOwnership!(""), "");
+  assert.equal(normalizeTallySelfOwnership!("네, 이상 없습니다"), "문제 없음");
+  assert.equal(normalizeTallySelfOwnership!("아니요"), "문제 있음");
+  assert.equal(normalizeTallySelfOwnership!(""), "");
+
+  const route = await readFile(
+    new URL("../app/api/webhooks/tally/route.ts", import.meta.url),
+    "utf8",
+  );
+  const applyRoute = await readFile(
+    new URL("../app/api/apply/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(route, /const ownVehicle = pick\(fields, "자차"\)/);
+  assert.match(route, /const vehicleType = pick\(fields, "차량 종류"\)/);
+  assert.match(route, /const selfOwnership = pick\(fields, "본인 계좌"\)/);
+  assert.ok(
+    route.indexOf("const requestFingerprint") < route.indexOf("const canonicalOwnVehicle"),
+    "the already-deployed raw Tally payload must retain its durable fingerprint",
+  );
+  assert.match(applyRoute, /const canonicalSubmittedForm = trustedInternal/);
+  assert.ok(
+    applyRoute.indexOf("const trustedInternal") < applyRoute.indexOf("const canonicalSubmittedForm"),
+    "Tally labels may be normalized only after the signed raw fingerprint is trusted",
+  );
 });
 
 test("a generic JSON 503 from canonical apply blocks the direct Tally fallback", async () => {

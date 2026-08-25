@@ -53,3 +53,18 @@ export function applySubmissionJobContext(input: {
     vehicleRequired: input.vehicleRequired,
   };
 }
+
+export function isApplicationBranchContextReady(input: {
+  intent: ApplyJobIntent;
+  generalOptIn: boolean;
+  jobLoadState: ApplyJobLoadState;
+  jobBranchContextActive: boolean;
+  branchLookupRequired: boolean;
+  branchListLoadState: ApplyJobLoadState;
+}): boolean {
+  if (!input.generalOptIn && input.intent.kind === "job") {
+    return input.jobLoadState === "loaded" && input.jobBranchContextActive;
+  }
+  if (!input.generalOptIn && input.intent.kind === "invalid") return false;
+  return !input.branchLookupRequired || input.branchListLoadState === "loaded";
+}

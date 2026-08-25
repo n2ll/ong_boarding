@@ -155,10 +155,14 @@ type ApplicationSubmissionModule = {
   validateApplicationSubmission?: (
     form: ApplicantFormData,
     vehicleRequired: boolean,
+    branchRequired?: boolean,
+    roadAddressRequired?: boolean,
   ) => { field: keyof ApplicantFormData; message: string } | null;
   applicationSubmissionProgress?: (
     form: ApplicantFormData,
     vehicleRequired: boolean,
+    branchRequired?: boolean,
+    roadAddressRequired?: boolean,
   ) => { completed: number; total: number; percent: number };
   applicationCompletionKind?: (outcome: JobApplicationOutcome) =>
     | "job_linked"
@@ -215,7 +219,7 @@ const completeForm: ApplicantFormData = {
   name: "김지원",
   birthDate: "600101",
   phone: "01012345678",
-  location: "서울시 강남구",
+  location: "서울 강남구 테헤란로 123",
   ownVehicle: "있음",
   licenseType: "2종 보통",
   vehicleType: "승용차",
@@ -771,6 +775,27 @@ test("a real job without a vehicle requirement skips the legacy vehicle trio", a
   }, vehicleRequired), { completed: 6, total: 7, percent: 86 });
 });
 
+test("branchless applications exclude a hidden branch field from validation and progress", async () => {
+  const {
+    validateApplicationSubmission,
+    applicationSubmissionProgress,
+  } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.equal(typeof applicationSubmissionProgress, "function");
+  const branchless = { ...completeForm, branch1: "", branch2: "" };
+
+  assert.equal(validateApplicationSubmission!(branchless, false, false), null);
+  assert.deepEqual(
+    applicationSubmissionProgress!(branchless, false, false),
+    { completed: 6, total: 6, percent: 100 },
+  );
+  assert.deepEqual(validateApplicationSubmission!(branchless, false, true), {
+    field: "branch1",
+    message: "희망 지점을 선택해주세요.",
+  });
+});
+
 test("submission validation rejects impossible birth dates and excludes them from progress", async () => {
   const {
     validateApplicationSubmission,
@@ -813,6 +838,58 @@ test("general and vehicle-required applications retain the legacy vehicle gate",
     field: "ownVehicle",
     message: "자차 보유 여부를 선택해주세요.",
   });
+});
+
+test("vehicle type is required only for applicants who own a vehicle", async () => {
+  const { validateApplicationSubmission, applicationSubmissionProgress } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.equal(typeof applicationSubmissionProgress, "function");
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    ownVehicle: "있음",
+    vehicleType: "",
+  }, true), {
+    field: "vehicleType",
+    message: "보유 차종을 입력해주세요.",
+  });
+  assert.equal(validateApplicationSubmission!({
+    ...completeForm,
+    ownVehicle: "없음",
+    vehicleType: "",
+  }, true), null);
+  assert.deepEqual(applicationSubmissionProgress!({
+    ...completeForm,
+    ownVehicle: "없음",
+    vehicleType: "",
+  }, true), { completed: 10, total: 10, percent: 100 });
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    ownVehicle: "예",
+    vehicleType: "",
+  }, true), {
+    field: "ownVehicle",
+    message: "자차 보유 여부를 선택해주세요.",
+  });
+});
+
+test("submission rejects non-road addresses and detailed unit information", async () => {
+  const { validateApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  for (const location of [
+    "서울 강남구 역삼동",
+    "서울 강남구 테헤란로 123 101동 1001호",
+  ]) {
+    assert.deepEqual(validateApplicationSubmission!({ ...completeForm, location }, true), {
+      field: "location",
+      message: "도로명과 건물번호까지만 입력해주세요. 예: 서울 강남구 테헤란로 123 (동·호수 제외)",
+    });
+  }
+  assert.equal(validateApplicationSubmission!({
+    ...completeForm,
+    location: "서울 강남구 역삼동",
+  }, true, true, false), null);
 });
 
 test("vehicle-required validation follows the visible form order", async () => {

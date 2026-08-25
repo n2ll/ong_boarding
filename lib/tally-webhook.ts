@@ -1,5 +1,19 @@
 import { createHash } from "node:crypto";
 
+export function normalizeTallyVehicleOwnership(value: string): "있음" | "없음" | "" {
+  const normalized = value.trim();
+  if (normalized === "있음" || normalized === "네" || normalized === "예") return "있음";
+  if (normalized === "없음" || normalized === "아니요" || normalized === "아니오") return "없음";
+  return "";
+}
+
+export function normalizeTallySelfOwnership(value: string): "문제 없음" | "문제 있음" | "" {
+  const normalized = value.trim();
+  if (normalized === "문제 없음" || normalized.startsWith("네")) return "문제 없음";
+  if (normalized === "문제 있음" || normalized.startsWith("아니")) return "문제 있음";
+  return "";
+}
+
 export function blocksTallyFallback(status: number, errorBody: unknown): boolean {
   if (status === 429 || status === 503) return true;
   if (!errorBody || typeof errorBody !== "object") return false;

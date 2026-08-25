@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddress } from "@/lib/kakao-geocode";
-import { sendSms } from "@/lib/solapi";
 import { ensureDanggeunSystemJob } from "@/lib/agent/danggeun-job";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
@@ -10,6 +9,7 @@ import { gatherLiveJobLinks } from "@/lib/candidate-links";
 import { gatherMessagePreviews, livePreviewTargetIds } from "@/lib/message-preview";
 import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
 import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
+import { applicationBranchName, applicationUsesLegacyBmartFlow } from "@/lib/application-branch";
 
 export const dynamic = "force-dynamic";
 
@@ -409,9 +409,16 @@ export async function POST(req: NextRequest) {
     row.branch1 = branch1 || null;
     row.branch = row.branch ?? (branch1 || null);
     row.source = row.source ?? "manual";
-    // 기본 상태: 당근·배민(자동 AI 응대) → '스크리닝 중', 그 외 → '스크리닝 전'
+    const manualLegacyBmartFlow = applicationUsesLegacyBmartFlow({
+      source: typeof row.source === "string" ? row.source : "manual",
+      branch: applicationBranchName(
+        typeof row.branch === "string" ? row.branch : typeof row.branch1 === "string" ? row.branch1 : null,
+      ),
+    });
+    const danggeunPractice = row.source === "danggeun_practice";
+    // source는 유입 채널이다. 연습 모드와 화주사 근거가 있는 비마트 흐름만 자동 응대한다.
     if (!row.status) {
-      row.status = (row.source === "danggeun" || row.source === "danggeun_practice" || row.source === "baemin")
+      row.status = (danggeunPractice || manualLegacyBmartFlow)
         ? "스크리닝 중"
         : "스크리닝 전";
     }
@@ -445,12 +452,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 자동 흐름 트리거:
-    //   - 당근/연습용 당근: 시작 멘트 SMS 발송 + job_candidates 생성 (당근은 매니저가 먼저 보냄)
+    //   - 연습용 당근: 시작 멘트 시뮬레이션 + job_candidates 생성
     //   - 배민: 시작 멘트 SMS 발송 X (지원자가 먼저 보냄) + job_candidates만 생성
     //   - 기타 source(manual/facebook/naver/direct): 자동 흐름 없음
     const source = data.source as string | null;
-    const isDanggeun = source === "danggeun" || source === "danggeun_practice";
-    const isBaemin = source === "baemin";
+    const isDanggeun = source === "danggeun_practice";
+    const isBaemin = manualLegacyBmartFlow;
     const isWeekendSlot = String(data.work_hours ?? "").includes("주말");
     const screeningAutoTrue: Record<string, boolean> = {
       프로모션_종료가능성_안내: true,
@@ -465,7 +472,7 @@ export async function POST(req: NextRequest) {
         if (startMsg) {
           const filledStored = fillTemplate(startMsg, {
             이름: data.name ?? "",
-            지점: data.branch ?? data.branch1 ?? "",
+            지점: applicationBranchName(data.branch ?? data.branch1) ?? "",
             시간대: shortWorkHours(data.work_hours ?? null),
           });
           const fallback = `${data.name || "지원자"}님, 지원 등록 감사합니다. 몇 가지 정보를 확인한 뒤 매니저가 별도로 안내드리겠습니다. 현재는 근무 확정 상태가 아닙니다.`;
@@ -474,14 +481,7 @@ export async function POST(req: NextRequest) {
             console.error("[applicants POST] unsafe danggeun start text blocked");
             throw new Error("unsafe automated start message");
           }
-          let messageId: string | null = null;
-          if (source === "danggeun") {
-            const r = await sendSms(data.phone, filled);
-            if (!r.success) {
-              console.error("[applicants POST] danggeun start SMS fail", r.error);
-            }
-            messageId = r.messageId ?? null;
-          }
+          // 연습 모드는 외부 SMS를 보내지 않는다.
 
           let jobIdForMsg: number | null = null;
           try {
@@ -505,9 +505,9 @@ export async function POST(req: NextRequest) {
             applicant_phone: data.phone,
             direction: "outbound",
             body: filled,
-            status: source === "danggeun" ? "sent" : "simulated",
-            sent_by: source === "danggeun" ? "danggeun-start" : "danggeun-practice-start",
-            solapi_msg_id: messageId,
+            status: "simulated",
+            sent_by: "danggeun-practice-start",
+            solapi_msg_id: null,
             message_type: "sms",
             job_id: jobIdForMsg,
           });

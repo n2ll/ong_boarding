@@ -18,7 +18,12 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
-import { blocksTallyFallback, tallySubmissionUuid } from "@/lib/tally-webhook";
+import {
+  blocksTallyFallback,
+  normalizeTallySelfOwnership,
+  normalizeTallyVehicleOwnership,
+  tallySubmissionUuid,
+} from "@/lib/tally-webhook";
 import { applicationSubmissionPayloadDigest } from "@/lib/application-submission";
 import {
   APPLICATION_INTERNAL_HEADER,
@@ -108,6 +113,8 @@ export async function POST(req: NextRequest) {
   const sigungu = pick(fields, "시/군/구");
   const addrRest = pick(fields, "나머지 주소");
   const location = [sido, sigungu, addrRest].filter(Boolean).join(" ");
+  // 이 세 값은 기존 배포부터 제출 지문에 원문 라벨 그대로 포함됐다.
+  // 재전송 호환성을 위해 /api/apply에 원문을 서명해 보내고, 신뢰 확인 뒤 그 안에서만 정규화한다.
   const ownVehicle = pick(fields, "자차");
   const licenseType = pick(fields, "운전면허");
   const vehicleType = pick(fields, "차량 종류");
@@ -149,6 +156,9 @@ export async function POST(req: NextRequest) {
     source: "homepage",
     jobId: null,
   });
+  const canonicalOwnVehicle = normalizeTallyVehicleOwnership(ownVehicle);
+  const canonicalVehicleType = canonicalOwnVehicle === "있음" ? vehicleType : "";
+  const canonicalSelfOwnership = normalizeTallySelfOwnership(selfOwnership);
   const applyBody = {
     ...applicationForm,
     source: "homepage",
@@ -207,13 +217,13 @@ export async function POST(req: NextRequest) {
         phone,
         birth_date: birthDate || "",
         location: location || "",
-        own_vehicle: ownVehicle || "",
+        own_vehicle: canonicalOwnVehicle,
         license_type: licenseType || "",
-        vehicle_type: vehicleType || "",
+        vehicle_type: canonicalVehicleType,
         branch1: "미지정",
         work_hours: workHours.join(", "),
         experience: experience || null,
-        self_ownership: selfOwnership || "",
+        self_ownership: canonicalSelfOwnership,
         available_date: availableDate || null,
         sido: sido || null,
         sigungu: sigungu || null,
