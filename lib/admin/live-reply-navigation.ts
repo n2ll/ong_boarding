@@ -6,6 +6,15 @@ export type LiveReplySendResolutionKind =
   | "failed"
   | "not_attempted";
 
+export type LiveReplyManualTransitionKind = "context-change" | "detail-close";
+
+export function liveReplyDeferredCompletionAfterManualTransition<T>(input: {
+  deferredCompletion: T | null;
+  transitionKind: LiveReplyManualTransitionKind;
+}): T | null {
+  return input.transitionKind === "detail-close" ? input.deferredCompletion : null;
+}
+
 export function nextLiveReplyApplicantId(
   orderedActionableIds: number[],
   currentApplicantId: number | null,

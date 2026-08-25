@@ -8,6 +8,7 @@ import { useBranchScope } from "@/lib/branch-scope";
 import { nextSearchDialogFocusIndex } from "@/lib/admin/search-dialog";
 import { topbarCollectionState } from "@/lib/admin/topbar-state";
 import { Button } from "@/components/ui/button";
+import { useAdminUnsavedNavigation } from "@/components/AdminUnsavedNavigation";
 
 interface TopbarProps {
   crumb: string;
@@ -21,6 +22,7 @@ interface BranchOpt { id: number; name: string; active: boolean }
 
 export function Topbar({ crumb, pageTitle }: TopbarProps) {
   const router = useRouter();
+  const { requestNavigation } = useAdminUnsavedNavigation();
   const { branch: scopeBranch, setBranch: setScopeBranch } = useBranchScope();
 
   const [branchOpen, setBranchOpen] = useState(false);
@@ -56,6 +58,13 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     setSearchError(false);
     requestAnimationFrame(() => returnTarget?.focus());
   }, []);
+
+  const navigate = useCallback((href: string, beforeNavigation?: () => void) => {
+    void requestNavigation(() => {
+      beforeNavigation?.();
+      router.push(href);
+    });
+  }, [requestNavigation, router]);
 
   // 스크롤 에지 — 콘텐츠가 유리 밑을 지나가기 시작하면 그림자를 한 단 올려 분리감을 준다.
   // (Apple scroll edge effect의 최소 구현 — 유리 자체는 정지, 그림자만 변한다)
@@ -162,12 +171,10 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   };
 
   const goApplicant = (a: ApplicantHit) => {
-    closeSearch();
-    router.push(`/pipeline?q=${encodeURIComponent(a.name || a.phone || "")}`);
+    navigate(`/pipeline?q=${encodeURIComponent(a.name || a.phone || "")}`, closeSearch);
   };
   const goJob = (j: JobHit) => {
-    closeSearch();
-    router.push(`/jobs?q=${encodeURIComponent(j.title)}`);
+    navigate(`/jobs?q=${encodeURIComponent(j.title)}`, closeSearch);
   };
 
   const pickBranch = (name: string | null) => {
@@ -318,8 +325,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                     <button
                       key={n.id}
                       onClick={() => {
-                        setNotifOpen(false);
-                        router.push(n.path);
+                        navigate(n.path, () => setNotifOpen(false));
                       }}
                       className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 px-3.5 py-2.5 border-b border-background hover:bg-background transition-colors text-left"
                     >
@@ -336,8 +342,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                 <div className="border-t border-border-glass bg-white/45 p-2">
                   <button
                     onClick={() => {
-                      setNotifOpen(false);
-                      router.push(notices[0].path);
+                      navigate(notices[0].path, () => setNotifOpen(false));
                     }}
                     className="w-full flex items-center justify-center gap-1.5 rounded-2xl bg-foreground px-3 py-2 text-[13px] font-bold text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -349,7 +354,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
           )}
         </div>
 
-        <Button variant="brand" className="shrink-0 rounded-full" aria-label="공고 등록" onClick={() => router.push("/jobs?new=1")}>
+        <Button variant="brand" className="shrink-0 rounded-full" aria-label="공고 등록" onClick={() => navigate("/jobs?new=1")}>
           <Plus size={18} strokeWidth={2.5} />
           <span className="hidden sm:inline">공고 등록</span>
         </Button>

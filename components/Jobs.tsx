@@ -17,6 +17,7 @@ import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/l
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
 import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
 import { PageShell } from "@/components/ui/page-shell";
+import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 import { jobCandidateBoardPolicy, jobOperationMeta, jobOperationsSummary, type JobOperationInput, type JobOperationTone } from "@/lib/admin/job-operations";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
@@ -713,6 +714,14 @@ export function Jobs() {
   // 보드 정렬 — 추천순(즉시가능 → 거리 → 지원일) / 최신순(API 순서 = created_at desc).
   const [candSort, setCandSort] = useState<"recommended" | "recent">("recommended");
   const [selectedApplicantId, setSelectedApplicantId] = useState<number | null>(null);
+  const applicantUnsavedGuard = useApplicantDetailUnsavedGuard(selectedApplicantId);
+  const selectApplicant = (applicantId: number) => {
+    if (applicantId === selectedApplicantId) return;
+    void applicantUnsavedGuard.requestTransition(() => {
+      setConfirmSignal(null);
+      setSelectedApplicantId(applicantId);
+    });
+  };
   // 확정 모달 자동 오픈 신호 — 보드 카드의 '확정' 버튼이 지원자 상세를 열면서 확정 모달까지 바로 띄운다.
   // (예전엔 보드 → 카드 → 상세 → 핵심 액션 '확정' 3홉이라 공고 화면에서 확정이 보이지 않았다.)
   // 확정 대기 큐(LiveConsole)와 같은 규약: n은 단조 증가 시퀀스(신호가 소비되어 null이 돼도 되돌아가지 않게
@@ -720,18 +729,24 @@ export function Jobs() {
   const confirmSignalSeq = useRef(0);
   const [confirmSignal, setConfirmSignal] = useState<{ id: number; n: number; jobId?: number | null } | null>(null);
   const openConfirmFor = (applicantId: number, jobId: number | null) => {
-    setSelectedApplicantId(applicantId);
-    confirmSignalSeq.current += 1;
-    setConfirmSignal({ id: applicantId, n: confirmSignalSeq.current, jobId });
-    // 확정 모달은 상세 드로어 안에 있어, 상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다.
-    // 잠시 뒤에도 안 열렸으면 원인을 알려주고 신호를 버린다(잔존 신호가 나중에 저절로 모달을 여는 것도 막는다).
-    window.setTimeout(() => {
-      setConfirmSignal((cur) => {
-        if (!cur || cur.n !== confirmSignalSeq.current) return cur; // 이미 소비됐거나 더 최신 신호가 있음
-        toast.error("상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.");
-        return null;
-      });
-    }, 6000);
+    if (applicantId === selectedApplicantId && applicantUnsavedGuard.isDirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
+    void applicantUnsavedGuard.requestTransition(() => {
+      setSelectedApplicantId(applicantId);
+      confirmSignalSeq.current += 1;
+      setConfirmSignal({ id: applicantId, n: confirmSignalSeq.current, jobId });
+      // 확정 모달은 상세 드로어 안에 있어, 상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다.
+      // 잠시 뒤에도 안 열렸으면 원인을 알려주고 신호를 버린다(잔존 신호가 나중에 저절로 모달을 여는 것도 막는다).
+      window.setTimeout(() => {
+        setConfirmSignal((cur) => {
+          if (!cur || cur.n !== confirmSignalSeq.current) return cur; // 이미 소비됐거나 더 최신 신호가 있음
+          toast.error("상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.");
+          return null;
+        });
+      }, 6000);
+    });
   };
   const [candBusyId, setCandBusyId] = useState<number | null>(null);
   const [dispatching, setDispatching] = useState(false);
@@ -743,11 +758,14 @@ export function Jobs() {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
 
-  const closeCandidateBoard = useCallback(() => {
+  const closeCandidateBoardNow = useCallback(() => {
     setCandPanel(null);
     setConfirmSignal(null);
     setSelectedApplicantId(null);
   }, []);
+  const closeCandidateBoard = useCallback(() => {
+    void applicantUnsavedGuard.requestTransition(closeCandidateBoardNow);
+  }, [applicantUnsavedGuard, closeCandidateBoardNow]);
   const handleCandidateBoardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const focusables = Array.from(
       candidateBoardRef.current?.querySelectorAll<HTMLElement>(
@@ -3330,7 +3348,7 @@ export function Jobs() {
                               : "border-border-strong hover:border-gray-300"
                           }`}
                         >
-                          <button aria-current={c.applicant_id === selectedApplicantId ? "true" : undefined} onClick={() => setSelectedApplicantId(c.applicant_id)} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left">
+                          <button aria-current={c.applicant_id === selectedApplicantId ? "true" : undefined} onClick={() => selectApplicant(c.applicant_id)} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2.5 min-w-0">
                                 <div className="w-9 h-9 rounded-lg bg-muted text-gray-700 flex items-center justify-center font-bold text-[14px] shrink-0">{a?.name?.charAt(0) ?? "?"}</div>
@@ -3491,6 +3509,7 @@ export function Jobs() {
         onClose={() => { setSelectedApplicantId(null); setConfirmSignal(null); }}
         applicantId={selectedApplicantId}
         jobId={candPanel?.jobId ?? null}
+        onDirtyChange={applicantUnsavedGuard.reportDirty}
         autoOpenConfirm={confirmSignal}
         onAutoOpenConfirmConsumed={() => setConfirmSignal(null)}
         onChanged={() => { if (candPanel) loadCandidates(candPanel.jobId); loadJobs(); }}

@@ -14,6 +14,12 @@ type ManagerPanelLayoutModule = {
     overlayApplicantId: number | null;
     canDock: boolean;
   }) => number | null;
+  liveDetailOverlayApplicantIdAfterDockChange?: (input: {
+    selectedApplicantId: number | null;
+    overlayApplicantId: number | null;
+    wasDocked: boolean;
+    canDock: boolean;
+  }) => number | null;
   managerPanelKeyboardAction?: (input: {
     key: string;
     shiftKey: boolean;
@@ -107,6 +113,30 @@ test("detail overlay intent is discarded after queue advance or docking", async 
   assert.equal(validManagerDetailOverlayApplicantId!({
     selectedApplicantId: 10,
     overlayApplicantId: 10,
+    canDock: true,
+  }), null);
+});
+
+test("a docked live detail becomes the same applicant overlay before narrowing the viewport", async () => {
+  const { liveDetailOverlayApplicantIdAfterDockChange } = await loadModule();
+
+  assert.equal(typeof liveDetailOverlayApplicantIdAfterDockChange, "function");
+  assert.equal(liveDetailOverlayApplicantIdAfterDockChange!({
+    selectedApplicantId: 42,
+    overlayApplicantId: null,
+    wasDocked: true,
+    canDock: false,
+  }), 42);
+  assert.equal(liveDetailOverlayApplicantIdAfterDockChange!({
+    selectedApplicantId: null,
+    overlayApplicantId: null,
+    wasDocked: true,
+    canDock: false,
+  }), null);
+  assert.equal(liveDetailOverlayApplicantIdAfterDockChange!({
+    selectedApplicantId: 42,
+    overlayApplicantId: 42,
+    wasDocked: false,
     canDock: true,
   }), null);
 });

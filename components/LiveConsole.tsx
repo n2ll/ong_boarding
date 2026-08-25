@@ -53,6 +53,7 @@ import { nextQueueApplicantId } from "@/lib/admin/nav";
 import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
 import {
   LIVE_DETAIL_DOCK_MIN_WIDTH,
+  liveDetailOverlayApplicantIdAfterDockChange,
   managerPanelKeyboardAction,
   shouldDockLiveDetailPanel,
   shouldShowManagerDetailPanel,
@@ -69,15 +70,18 @@ import {
 } from "@/lib/admin/manual-message-attention";
 import {
   liveReplyCompletionContextIsCurrent,
+  liveReplyDeferredCompletionAfterManualTransition,
   liveReplyQueuePosition,
   liveReplySelectionAfterCompletion,
   nextLiveReplyApplicantId,
+  type LiveReplyManualTransitionKind,
 } from "@/lib/admin/live-reply-navigation";
 import {
   agentModePresentation,
   agentModeView,
   type AdminAgentModeResponse,
 } from "@/lib/admin/agent-mode-view";
+import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
@@ -295,30 +299,70 @@ export function LiveConsole() {
   const urlTab: OperationsTab =
     tabParam === "confirm" || tabParam === "intervention" || tabParam === "inbox" ? tabParam : "all";
   const [activeTab, setActiveTabState] = useState<OperationsTab>(urlTab);
+  const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const selectedChatIdRef = useRef<number | null>(selectedChatId);
+  selectedChatIdRef.current = selectedChatId;
+  const [detailOverlayApplicantId, setDetailOverlayApplicantId] = useState<number | null>(null);
+  const detailWasDockedRef = useRef(false);
   const [canDockDetail, setCanDockDetail] = useState(false);
   useEffect(() => {
     const media = window.matchMedia(`(min-width: ${LIVE_DETAIL_DOCK_MIN_WIDTH}px)`);
-    const update = () => setCanDockDetail(shouldDockLiveDetailPanel(window.innerWidth));
+    const update = () => {
+      const nextCanDock = shouldDockLiveDetailPanel(window.innerWidth);
+      setDetailOverlayApplicantId((current) => liveDetailOverlayApplicantIdAfterDockChange({
+        selectedApplicantId: selectedChatIdRef.current,
+        overlayApplicantId: current,
+        wasDocked: detailWasDockedRef.current,
+        canDock: nextCanDock,
+      }));
+      detailWasDockedRef.current = nextCanDock;
+      setCanDockDetail(nextCanDock);
+    };
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  // URL → 상태: 사이드바 '확정할 지원자'·대시보드 CTA처럼 쿼리만 바뀌는 이동에도 탭이 따라간다
-  // (쿼리 변경은 리마운트가 아니라 re-render라 useState 초기값만으로는 반영되지 않는다).
-  useEffect(() => {
-    setActiveTabState(urlTab);
-  }, [urlTab]);
   // 상태 → URL: router.replace는 RSC 왕복을 유발해 (a) 응답까지 탭이 안 바뀌고 (b) 그 요청이 실패하면
   // 전체 페이지 리로드로 폴백해 작성 중인 문자 초안·편집이 날아간다. 탭은 즉시 바꾸고 URL만 얕게 맞춘다
   // (Next 14는 history.replaceState를 패치해 useSearchParams도 함께 갱신한다.)
-  const setActiveTab = useCallback((t: OperationsTab) => {
+  const applyActiveTab = useCallback((t: OperationsTab) => {
     setActiveTabState(t);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", t === "all" ? "/live" : `/live?tab=${t}`);
     }
   }, []);
-  const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
-  const [detailOverlayApplicantId, setDetailOverlayApplicantId] = useState<number | null>(null);
+  const [autoAdvanceDeferred, setAutoAdvanceDeferred] = useState(false);
+  const deferredReplyCompletionRef = useRef<{ applicantId: number; contextKey: string } | null>(null);
+  const {
+    isDirty: applicantDetailDirty,
+    reportDirty: reportApplicantDetailDirty,
+    requestTransition: requestApplicantDetailTransition,
+  } = useApplicantDetailUnsavedGuard(selectedChatId);
+  const requestManualApplicantTransition = useCallback((
+    transition: () => void | Promise<void>,
+    transitionKind: LiveReplyManualTransitionKind = "context-change",
+  ) => (
+    requestApplicantDetailTransition(() => {
+      deferredReplyCompletionRef.current = liveReplyDeferredCompletionAfterManualTransition({
+        deferredCompletion: deferredReplyCompletionRef.current,
+        transitionKind,
+      });
+      if (deferredReplyCompletionRef.current === null) setAutoAdvanceDeferred(false);
+      return transition();
+    })
+  ), [requestApplicantDetailTransition]);
+  const setActiveTab = useCallback((t: OperationsTab) => {
+    if (t === activeTab) return;
+    void requestManualApplicantTransition(() => applyActiveTab(t));
+  }, [activeTab, applyActiveTab, requestManualApplicantTransition]);
+  // URL 쿼리만 바뀌는 딥링크도 상세 본문을 언마운트할 수 있으므로 동일한 미저장 가드를 거친다.
+  useEffect(() => {
+    if (urlTab === activeTab) return;
+    void requestManualApplicantTransition(() => applyActiveTab(urlTab)).then((outcome) => {
+      if (outcome !== "cancelled" && outcome !== "ignored") return;
+      window.history.replaceState(null, "", activeTab === "all" ? "/live" : `/live?tab=${activeTab}`);
+    });
+  }, [activeTab, applyActiveTab, requestManualApplicantTransition, urlTab]);
   useEffect(() => {
     setDetailOverlayApplicantId((current) => validManagerDetailOverlayApplicantId({
       selectedApplicantId: selectedChatId,
@@ -344,11 +388,16 @@ export function LiveConsole() {
     });
     if (action === null) return;
     event.preventDefault();
-    if (action === "close") setDetailOverlayApplicantId(null);
+    if (action === "close") {
+      void requestManualApplicantTransition(
+        () => setDetailOverlayApplicantId(null),
+        "detail-close",
+      );
+    }
     else if (action === "focus-first") focusables[0]?.focus();
     else if (action === "focus-last") focusables[focusables.length - 1]?.focus();
     else detailPanelRef.current?.focus();
-  }, [canDockDetail]);
+  }, [canDockDetail, requestManualApplicantTransition]);
   const previousHandoffIdsRef = useRef<number[]>([]);
   const previousConfirmIdsRef = useRef<number[]>([]);
   const [search, setSearch] = useState("");
@@ -696,6 +745,14 @@ export function LiveConsole() {
   const activeJobsBelongToChat = activeChat != null && activeJobsStatus.applicantId === activeChat.id;
   const currentActiveJobs = activeJobsBelongToChat ? activeJobs : [];
   const currentSelectedJobId = activeJobsBelongToChat ? selectedJobId : null;
+  const requestLiveJobSelection = useCallback((nextJobId: number | null) => {
+    if (nextJobId === currentSelectedJobId) return;
+    if (applicantDetailDirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
+    selectLiveJob(nextJobId);
+  }, [applicantDetailDirty, currentSelectedJobId, selectLiveJob]);
   const activeJobsLoadState = appsFailed && activeJobsStatus.source === "list"
     ? "loading"
     : activeJobsStatus.state;
@@ -760,18 +817,28 @@ export function LiveConsole() {
   useEffect(() => {
     if (activeTab === "intervention") {
       const nextId = nextQueueApplicantId(previousHandoffIdsRef.current, handoffApplicantIds, selectedChatId);
+      if (nextId !== selectedChatId && applicantDetailDirty) {
+        setAutoAdvanceDeferred(true);
+        return;
+      }
       if (nextId !== selectedChatId) setSelectedChatId(nextId);
+      setAutoAdvanceDeferred(false);
     }
     previousHandoffIdsRef.current = handoffApplicantIds;
-  }, [activeTab, handoffApplicantIds, selectedChatId]);
+  }, [activeTab, applicantDetailDirty, handoffApplicantIds, selectedChatId]);
 
   useEffect(() => {
     if (activeTab === "confirm") {
       const nextId = nextQueueApplicantId(previousConfirmIdsRef.current, confirmApplicantIds, selectedChatId);
+      if (nextId !== selectedChatId && applicantDetailDirty) {
+        setAutoAdvanceDeferred(true);
+        return;
+      }
       if (nextId !== selectedChatId) setSelectedChatId(nextId);
+      setAutoAdvanceDeferred(false);
     }
     previousConfirmIdsRef.current = confirmApplicantIds;
-  }, [activeTab, confirmApplicantIds, selectedChatId]);
+  }, [activeTab, applicantDetailDirty, confirmApplicantIds, selectedChatId]);
   // 카테고리 칩에 쓸 집계
   const catCounts = handoffs.reduce<Record<string, number>>((acc, h) => {
     acc[h.category] = (acc[h.category] ?? 0) + 1;
@@ -781,7 +848,7 @@ export function LiveConsole() {
 
   // 초안 대기 카드는 그 초안이 속한 공고로 연다. 목록 배지만 '초안 검토'인데 다른
   // 기본 공고 탭을 열어 카드가 없는 것처럼 보이는 멀티-잡 단절을 막는다.
-  const selectChatForReply = useCallback((applicantId: number | null) => {
+  const applyChatForReply = useCallback((applicantId: number | null) => {
     if (applicantId === null) {
       focusApplicantIdRef.current = null;
       focusUnscopedDraftRef.current = false;
@@ -840,6 +907,18 @@ export function LiveConsole() {
     setSelectedChatId(applicantId);
   }, [previewById, selectedChatId, selectLiveJob]);
 
+  const selectChatForReply = useCallback((applicantId: number | null) => {
+    if (applicantId === selectedChatId) {
+      if (applicantDetailDirty) {
+        toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+        return;
+      }
+      applyChatForReply(applicantId);
+      return;
+    }
+    void requestManualApplicantTransition(() => applyChatForReply(applicantId));
+  }, [applicantDetailDirty, applyChatForReply, requestManualApplicantTransition, selectedChatId]);
+
   const leaveUnscopedDraftContext = useCallback(() => {
     activeJobsSelectionRevisionRef.current += 1;
     setSelectedJobId((current) => current === null ? defaultFocusJobId(currentActiveJobs, null) : current);
@@ -856,24 +935,28 @@ export function LiveConsole() {
 
   // 큐에서 한 건 선택 → 해당 지원자 대화 + 그 공고로 포커스
   const selectHandoff = (h: Handoff) => {
-    focusApplicantIdRef.current = h.applicant_id;
-    focusUnscopedDraftRef.current = false;
-    focusJobIdRef.current = h.job_id;
-    // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
-    focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null, stage_updated_at: h.paused_at ?? null };
-    if (h.applicant_id === selectedChatId) {
-      // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
-      // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
-      // 그 공고가 탭 목록에 없으면(마감·시스템 공고) 함께 끼워 넣는다 — 없으면 탭 바에서 사라진 채
-      // 선택만 바뀌어, 매니저가 어느 공고로 답장하는지 화면에서 확인할 수 없다.
-      setActiveJobs((prev) => (prev.some((j) => j.job_id === h.job_id) ? prev : [...prev, focusLinkRef.current!]));
-      selectLiveJob(h.job_id);
-      focusApplicantIdRef.current = null;
-      focusJobIdRef.current = null;
-      focusLinkRef.current = null;
-    } else {
-      setSelectedChatId(h.applicant_id);
+    if (h.applicant_id === selectedChatId && applicantDetailDirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
     }
+    void requestManualApplicantTransition(() => {
+      focusApplicantIdRef.current = h.applicant_id;
+      focusUnscopedDraftRef.current = false;
+      focusJobIdRef.current = h.job_id;
+      // 큐의 branch는 지원자 지점이 섞여 오므로 탭 라벨은 공고명으로만 만든다.
+      focusLinkRef.current = { job_id: h.job_id, title: h.job_title, branch: null, agent_stage: "paused", created_at: null, stage_updated_at: h.paused_at ?? null };
+      if (h.applicant_id === selectedChatId) {
+        // 이미 보고 있는 지원자의 '다른 공고' 인계를 고른 경우: selectedChatId가 그대로라
+        // active-jobs 로딩 effect가 재실행되지 않으므로 공고 탭을 직접 전환한다.
+        setActiveJobs((prev) => (prev.some((j) => j.job_id === h.job_id) ? prev : [...prev, focusLinkRef.current!]));
+        selectLiveJob(h.job_id);
+        focusApplicantIdRef.current = null;
+        focusJobIdRef.current = null;
+        focusLinkRef.current = null;
+      } else {
+        setSelectedChatId(h.applicant_id);
+      }
+    });
   };
 
   // '처리 완료' — 전화·문자로 직접 해결한 인계 건을 큐에서 내보낸다(AI는 계속 정지).
@@ -1030,22 +1113,25 @@ export function LiveConsole() {
   // 큐의 '확정'은 상세 패널의 확정 모달을 연다 — 예전엔 여기서 status만 바꾸는 '빠른 확정'이라
   // 지점·슬롯·시작일이 비어 확정 데이터 품질이 경로마다 갈렸다. 이제 어디서 확정하든 같은 정보를 받는다.
   const openConfirmFor = (p: ConfirmPending) => {
-    setSelectedChatId(p.applicant_id);
-    if (!canDockDetail) setDetailOverlayApplicantId(p.applicant_id);
-    confirmSignalSeq.current += 1;
-    // 큐 카드가 고른 대상 공고(jobId)를 함께 넘긴다 — 큐는 '진행단계 우선', 모달 기본 시드는 '최신 링크'라
-    // 열린 링크가 2개 이상이면 카드에 보인 공고와 모달 선택이 어긋나 다른 공고로 확정될 수 있다
-    // (충원율·라인 경험·집결지 오귀속). 매니저가 카드에서 본 그 공고가 시드가 되게 한다.
-    setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current, jobId: p.job_id ?? null });
-    // 확정 모달은 우측 상세 패널 안에 있어, 목록·상세 조회가 실패하면 아무 일도 안 일어난 것처럼 보인다
-    // (예전 빠른 확정은 직접 PATCH라 실패 토스트가 떴다). 잠시 뒤에도 안 열렸으면 원인을 알려준다.
-    window.setTimeout(() => {
-      setConfirmSignal((cur) => {
-        if (!cur || cur.id !== p.applicant_id) return cur; // 이미 열려 소비됐음
-        toast.error(`${p.name}님 상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.`);
-        return null;
-      });
-    }, 6000);
+    if (p.applicant_id === selectedChatId && applicantDetailDirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
+    void requestManualApplicantTransition(() => {
+      setSelectedChatId(p.applicant_id);
+      if (!canDockDetail) setDetailOverlayApplicantId(p.applicant_id);
+      confirmSignalSeq.current += 1;
+      // 큐 카드가 고른 대상 공고(jobId)를 함께 넘긴다 — 큐는 '진행단계 우선', 모달 기본 시드는 '최신 링크'라
+      // 열린 링크가 2개 이상이면 카드에 보인 공고와 모달 선택이 어긋나 다른 공고로 확정될 수 있다.
+      setConfirmSignal({ id: p.applicant_id, n: confirmSignalSeq.current, jobId: p.job_id ?? null });
+      window.setTimeout(() => {
+        setConfirmSignal((cur) => {
+          if (!cur || cur.id !== p.applicant_id) return cur; // 이미 열려 소비됐음
+          toast.error(`${p.name}님 상세를 불러오지 못해 확정 창을 열 수 없었어요. 새로고침 후 다시 시도해 주세요.`);
+          return null;
+        });
+      }, 6000);
+    });
   };
 
   // 목록 필터 + 우선순위 정렬 — 미답(빨강) > 초안 대기(⚡) > 답 대기(⏱) > 나머지.
@@ -1110,7 +1196,7 @@ export function LiveConsole() {
     actionableReplyIds,
     contextKey: replyQueueContextKey,
   };
-  const handleReplyQueueItemCompleted = useCallback((completedApplicantId: number, startedContextKey: string) => {
+  const applyReplyQueueItemCompleted = useCallback((completedApplicantId: number, startedContextKey: string) => {
     const current = replyNavigationStateRef.current;
     if (!liveReplyCompletionContextIsCurrent({
       collectionState: current.appsState,
@@ -1124,15 +1210,34 @@ export function LiveConsole() {
       completedApplicantId,
     });
     if (!selection.applied) return;
-    selectChatForReply(selection.applicantId);
+    applyChatForReply(selection.applicantId);
     if (selection.completedAll) toast.success("지금 답할 대화를 모두 처리했어요.");
-  }, [selectChatForReply]);
+  }, [applyChatForReply]);
+
+  const handleReplyQueueItemCompleted = useCallback((completedApplicantId: number, startedContextKey: string) => {
+    if (applicantDetailDirty) {
+      deferredReplyCompletionRef.current = { applicantId: completedApplicantId, contextKey: startedContextKey };
+      setAutoAdvanceDeferred(true);
+      return;
+    }
+    applyReplyQueueItemCompleted(completedApplicantId, startedContextKey);
+  }, [applicantDetailDirty, applyReplyQueueItemCompleted]);
+
+  useEffect(() => {
+    if (applicantDetailDirty || !deferredReplyCompletionRef.current) return;
+    const deferred = deferredReplyCompletionRef.current;
+    deferredReplyCompletionRef.current = null;
+    setAutoAdvanceDeferred(false);
+    applyReplyQueueItemCompleted(deferred.applicantId, deferred.contextKey);
+  }, [applicantDetailDirty, applyReplyQueueItemCompleted]);
 
   const openApplicantFromInbox = useCallback(async (applicantId: number, tab: "all" | "intervention") => {
-    setActiveTab(tab);
-    await Promise.all([mutateApps(), mutateHandoffs()]);
-    setSelectedChatId(applicantId);
-  }, [mutateApps, mutateHandoffs, setActiveTab]);
+    await requestManualApplicantTransition(async () => {
+      applyActiveTab(tab);
+      await Promise.all([mutateApps(), mutateHandoffs()]);
+      setSelectedChatId(applicantId);
+    });
+  }, [applyActiveTab, mutateApps, mutateHandoffs, requestManualApplicantTransition]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
@@ -1192,6 +1297,13 @@ export function LiveConsole() {
           )}
         </div>
       ) : null}
+
+      {autoAdvanceDeferred && applicantDetailDirty && (
+        <div role="status" aria-live="polite" className="flex shrink-0 items-center gap-2 border-b border-warning/35 bg-warning-soft px-4 py-2 text-[12px] font-bold text-warning-strong lg:px-5">
+          <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
+          목록이 갱신됐어요. 변경사항을 저장하거나 변경을 취소하면 다음 지원자로 이동합니다.
+        </div>
+      )}
 
       {activeTab === "inbox" ? (
         <div id="operations-panel" role="tabpanel" aria-labelledby="operations-tab-inbox" className="flex min-h-0 flex-1">
@@ -1357,7 +1469,7 @@ export function LiveConsole() {
               const selected = selectedChatId === p.applicant_id;
               return (
                 <div key={p.applicant_id} className={`rounded-2xl transition-all ${selected ? "bg-card border border-brand-yellow shadow-sm ring-1 ring-brand-yellow" : "bg-card border border-transparent hover:border-border-strong"}`}>
-                  <button onClick={() => setSelectedChatId(p.applicant_id)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
+                  <button onClick={() => { if (p.applicant_id !== selectedChatId) void requestManualApplicantTransition(() => setSelectedChatId(p.applicant_id)); }} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left p-3.5 pb-2 cursor-pointer">
                     <div className="flex items-center justify-between mb-1.5">
                       <Badge variant="stage-screening">스크리닝 완료 · 확정 전</Badge>
                       {p.baemin_id && <span className="text-[12px] font-bold text-muted-foreground">ID {p.baemin_id}</span>}
@@ -1516,7 +1628,7 @@ export function LiveConsole() {
               {previewById[activeChat.id]?.pending_draft === true
                 && previewById[activeChat.id]?.pending_draft_job_id === null && (
                 <button
-                  onClick={() => selectLiveJob(null)}
+                  onClick={() => requestLiveJobSelection(null)}
                   aria-pressed={currentSelectedJobId === null}
                   className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
                     currentSelectedJobId === null
@@ -1537,7 +1649,7 @@ export function LiveConsole() {
                 return (
                   <button
                     key={j.job_id}
-                    onClick={() => selectLiveJob(j.job_id)}
+                    onClick={() => requestLiveJobSelection(j.job_id)}
                     aria-pressed={selected}
                     className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background shrink-0 cursor-pointer px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
                       selected
@@ -1647,7 +1759,7 @@ export function LiveConsole() {
               const d = Math.max(0, Math.floor((Date.now() - new Date(lastActivityAt(oldest) ?? 0).getTime()) / 86400000));
               return (
                 <button
-                  onClick={() => setSelectedChatId(oldest.id)}
+                  onClick={() => selectChatForReply(oldest.id)}
                   className="w-full rounded-2xl border border-border-strong bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className="text-[12px] font-bold text-muted-foreground">가장 오래 기다린 대화 열기</div>
@@ -1669,7 +1781,7 @@ export function LiveConsole() {
           <button
             type="button"
             aria-label="지원자 상세 닫기"
-            onClick={() => setDetailOverlayApplicantId(null)}
+            onClick={() => { void requestManualApplicantTransition(() => setDetailOverlayApplicantId(null), "detail-close"); }}
             className="fixed inset-0 z-40 bg-scrim"
           />
         )}
@@ -1690,7 +1802,7 @@ export function LiveConsole() {
               variant="ghost"
               size="icon"
               aria-label="지원자 상세 닫기"
-              onClick={() => setDetailOverlayApplicantId(null)}
+              onClick={() => { void requestManualApplicantTransition(() => setDetailOverlayApplicantId(null), "detail-close"); }}
               className="absolute right-2 top-2 z-10 border border-border-strong bg-card shadow-sm"
             >
               <X aria-hidden="true" size={17} />
@@ -1707,6 +1819,7 @@ export function LiveConsole() {
             onFocusJobChange={handleDetailJobFocus}
             variant="panel"
             onChanged={handleChanged}
+            onDirtyChange={reportApplicantDetailDirty}
             autoOpenConfirm={confirmSignal}
             onAutoOpenConfirmConsumed={() => setConfirmSignal(null)}
           />

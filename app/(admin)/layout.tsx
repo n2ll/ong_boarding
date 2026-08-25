@@ -7,6 +7,7 @@ import { Topbar } from "@/components/Topbar";
 import { Toaster } from "@/components/ui/sonner";
 import { BranchScopeProvider } from "@/lib/branch-scope";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import { AdminUnsavedNavigationProvider } from "@/components/AdminUnsavedNavigation";
 import { jsonFetcher } from "@/lib/swr";
 import { resolveHeader } from "@/lib/admin/nav";
 
@@ -28,6 +29,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     >
       <BranchScopeProvider>
         <ConfirmProvider>
+        <AdminUnsavedNavigationProvider>
         {/*
           Ongboarding UI System 셸 — 종이 배경 위에 도크·헤더·본문이 떠 있다.
           도크는 fixed라 본문이 LG에서 104px, 1440px 이상에서 272px 자리를 비켜준다.
@@ -64,6 +66,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <MobileNav />
           <Toaster position="bottom-right" richColors />
         </div>
+        </AdminUnsavedNavigationProvider>
         </ConfirmProvider>
       </BranchScopeProvider>
     </SWRConfig>

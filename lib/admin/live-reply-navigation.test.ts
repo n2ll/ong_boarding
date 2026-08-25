@@ -25,6 +25,10 @@ type LiveReplyNavigationModule = {
     currentContextKey: string;
     startedContextKey: string;
   }) => boolean;
+  liveReplyDeferredCompletionAfterManualTransition?: <T>(input: {
+    deferredCompletion: T | null;
+    transitionKind: "context-change" | "detail-close";
+  }) => T | null;
 };
 
 async function loadModule(): Promise<LiveReplyNavigationModule> {
@@ -128,4 +132,19 @@ test("send-and-resume advances only after both operations succeed", async () => 
   assert.equal(typeof shouldAdvanceLiveReplyAfterSend, "function");
   assert.equal(shouldAdvanceLiveReplyAfterSend!({ requested: true, resolutionKind: "sent", resumeRequired: true, resumeSucceeded: false, pauseOutcomeKind: "unknown" }), false);
   assert.equal(shouldAdvanceLiveReplyAfterSend!({ requested: true, resolutionKind: "sent", resumeRequired: true, resumeSucceeded: true, pauseOutcomeKind: "unknown" }), true);
+});
+
+test("closing only the applicant detail preserves a deferred reply completion", async () => {
+  const { liveReplyDeferredCompletionAfterManualTransition } = await loadModule();
+  const deferred = { applicantId: 42, contextKey: "all:" };
+
+  assert.equal(typeof liveReplyDeferredCompletionAfterManualTransition, "function");
+  assert.equal(liveReplyDeferredCompletionAfterManualTransition!({
+    deferredCompletion: deferred,
+    transitionKind: "detail-close",
+  }), deferred);
+  assert.equal(liveReplyDeferredCompletionAfterManualTransition!({
+    deferredCompletion: deferred,
+    transitionKind: "context-change",
+  }), null);
 });

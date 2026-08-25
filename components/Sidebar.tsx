@@ -15,6 +15,7 @@ import {
 import { NAV_ITEMS, type NavItem } from "@/lib/admin/nav";
 import { mobileNavigationGridClass } from "@/lib/admin/mobile-navigation";
 import { LogoMark } from "./Logo";
+import { useAdminUnsavedNavigation } from "./AdminUnsavedNavigation";
 
 /**
  * 앱 도크 — Ongboarding UI System의 셸.
@@ -26,6 +27,7 @@ import { LogoMark } from "./Logo";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { requestNavigation } = useAdminUnsavedNavigation();
   // 확정 대기 큐 건수 — useSWR로 Dashboard·LiveConsole과 캐시 공유(중복 폴링 방지). 소스=confirm/pending.
   const { data: cpData } = useSWR<{ total?: number; pending?: unknown[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   const confirmPending = cpData?.total ?? cpData?.pending?.length ?? 0;
@@ -50,7 +52,7 @@ export function Sidebar() {
     return null;
   };
 
-  const signOut = async () => {
+  const performSignOut = async () => {
     try {
       // Supabase 클라이언트를 누를 때 받아온다.
       // 사이드바는 모든 어드민 화면에 붙어 있는데 정적 import면 로그아웃 버튼 하나 때문에
@@ -62,6 +64,10 @@ export function Sidebar() {
       /* 세션 정리 실패해도 로그인 페이지로 — 미들웨어가 재검증 */
     }
     window.location.href = "/login";
+  };
+
+  const signOut = () => {
+    void requestNavigation(performSignOut);
   };
 
   return (

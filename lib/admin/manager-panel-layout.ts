@@ -26,6 +26,17 @@ export function validManagerDetailOverlayApplicantId(input: {
   return input.overlayApplicantId;
 }
 
+export function liveDetailOverlayApplicantIdAfterDockChange(input: {
+  selectedApplicantId: number | null;
+  overlayApplicantId: number | null;
+  wasDocked: boolean;
+  canDock: boolean;
+}): number | null {
+  if (input.canDock) return null;
+  if (input.wasDocked) return input.selectedApplicantId;
+  return validManagerDetailOverlayApplicantId(input);
+}
+
 export type ManagerPanelKeyboardAction =
   | "close"
   | "focus-first"

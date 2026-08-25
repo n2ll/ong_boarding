@@ -40,6 +40,7 @@ import {
 } from "@/lib/admin/pipeline-row";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
+import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
 function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number; bytes: number } {
@@ -402,7 +403,18 @@ export function Pipeline() {
   // 그 공고에 결속이 없으면 패널이 기본(최신)으로 되돌린다.
   const [sel, setSel] = useState<{ applicantId: number; wantJobId: number | null } | null>(null);
   const selectedApplicantId = sel?.applicantId ?? null;
-  const openApplicant = (id: number, wantJobId: number | null = null) => setSel({ applicantId: id, wantJobId });
+  const applicantUnsavedGuard = useApplicantDetailUnsavedGuard(selectedApplicantId);
+  const openApplicant = (id: number, wantJobId: number | null = null) => {
+    if (id === selectedApplicantId) {
+      if (wantJobId !== sel?.wantJobId && applicantUnsavedGuard.isDirty) {
+        toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+        return;
+      }
+      setSel({ applicantId: id, wantJobId });
+      return;
+    }
+    void applicantUnsavedGuard.requestTransition(() => setSel({ applicantId: id, wantJobId }));
+  };
   const [view, setView] = useState<PipelineView>(() => pipelineViewFromSearch(searchParams.toString()));
   const changeView = (next: PipelineView) => {
     setView(next);
@@ -2749,6 +2761,7 @@ export function Pipeline() {
             ?.current_job_id ??
             null)
         }
+        onDirtyChange={applicantUnsavedGuard.reportDirty}
         onChanged={loadApplicants}
       />
 

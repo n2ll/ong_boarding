@@ -33,6 +33,12 @@ import {
   agentModeView,
   type AdminAgentModeResponse,
 } from "@/lib/admin/agent-mode-view";
+import { updateApplicantDetailDraft } from "@/lib/admin/applicant-detail-unsaved";
+import {
+  useApplicantDetailUnsavedGuard,
+  type ApplicantDetailDirtyState,
+} from "./useApplicantDetailUnsavedGuard";
+import { useAdminUnsavedNavigation } from "./AdminUnsavedNavigation";
 
 // ──────────────────────────────────────────────────────────────────────────
 // 타입
@@ -358,6 +364,7 @@ export function ApplicantDetailContent({
   reload: externalReload,
   autoOpenConfirm,
   onAutoOpenConfirmConsumed,
+  onDirtyChange,
 }: {
   applicantId: number;
   jobId?: number | null;
@@ -377,6 +384,8 @@ export function ApplicantDetailContent({
    *  (패널은 applicantId가 key라 지원자 전환 시 리마운트되므로 단순 카운터로는 신호가 유실된다.) */
   autoOpenConfirm?: { id: number; n: number; jobId?: number | null } | null;
   onAutoOpenConfirmConsumed?: () => void;
+  /** 부모 목록이 지원자 전환 전에 미저장 편집을 보호할 수 있게 현재 편집 상태를 올린다. */
+  onDirtyChange?: (state: ApplicantDetailDirtyState) => void;
 }) {
   const local = useApplicantDetail(externalDetail !== undefined ? null : applicantId);
   // 패널 안에서 매니저가 직접 고른 표시 공고. null이면 부르는 화면이 준 jobId를 따른다.
@@ -409,12 +418,13 @@ export function ApplicantDetailContent({
   }, [autoOpenConfirm, applicantId, detail, onAutoOpenConfirmConsumed]);
 
   const confirm = useConfirm();
+  const { reportApplicantDirty } = useAdminUnsavedNavigation();
   // '확정 지점' 드롭다운 소스 — 활성 지점(화주사 결속). 자유텍스트 오타로 충원율 집계가 누락되던 문제(A5) 방지.
   const { data: branchesApi } = useSWR<{ data?: { id: number; name: string; client_id: number | null; active: boolean }[] }>("/api/admin/branches");
   const allBranches = branchesApi?.data ?? [];
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Partial<ApplicantFull>>({});
-  const [dirty, setDirty] = useState(false);
+  const managedFieldsDirty = Object.keys(edit).length > 0;
   // 확정 모달: 확정 시점에 슬롯을 함께 받아 confirmed_slot 공백을 방지한다.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmSlots, setConfirmSlots] = useState<string[]>([]);
@@ -440,6 +450,8 @@ export function ApplicantDetailContent({
   const [suntopClient, setSuntopClient] = useState("");
   const [suntopLine, setSuntopLine] = useState("");
   const [suntopSchedAt, setSuntopSchedAt] = useState("");
+  const suntopDraftDirty = suntopFormOpen && Boolean(suntopClient || suntopLine || suntopSchedAt);
+  const dirty = managedFieldsDirty || suntopDraftDirty;
   // 시간대 되돌리기 진행 플래그 — 쓰는 곳(clearAvailableSlots)은 아래쪽이지만 선언은 반드시 여기,
   // 상세 로딩·실패 조기 return보다 **위**에 둔다. 핸들러 옆에 두면 상세가 도착한 렌더에서만
   // 호출돼 훅 개수가 렌더마다 달라지고, React가 그 순간 화면을 통째로 날린다(#310).
@@ -447,12 +459,27 @@ export function ApplicantDetailContent({
 
   useEffect(() => {
     setEdit({});
-    setDirty(false);
     setSectionOpen({});
     setSuntopFormOpen(false);
     setSuntopClient("");
     setSuntopLine("");
+    setSuntopSchedAt("");
   }, [applicantId]);
+
+  useEffect(() => {
+    const state = {
+      applicantId,
+      applicantName: detail?.applicant.name,
+      dirty,
+    };
+    onDirtyChange?.(state);
+    reportApplicantDirty(state);
+  }, [applicantId, detail?.applicant.name, dirty, onDirtyChange, reportApplicantDirty]);
+
+  // 패널 자체를 닫거나 다른 지원자로 교체할 때 전역 SPA 이탈 가드에 오래된 draft가 남지 않게 한다.
+  useEffect(() => {
+    return () => reportApplicantDirty({ applicantId, dirty: false });
+  }, [applicantId, reportApplicantDirty]);
 
   // '다른 라인 활동' — 옹매니징 활성계약·지난달정산 또는 옹고잉 실배차 신호.
   // 인재풀 목록에서 '활동중' 배지를 뺀 뒤(B5) 이 값을 볼 곳이 없어져서, 한 사람 기준으로 여기서 확인한다.
@@ -527,6 +554,14 @@ export function ApplicantDetailContent({
   // (기본값을 '최신'에서 바꾸지 않는다 — 확정 모달·후속 발송의 대상이 조용히 달라지면 안 된다.)
   const focusJobId = focusOverride ?? jobId;
   const focusCand = (focusJobId != null ? cands.find((c) => c.job_id === focusJobId) : cands[0]) ?? null;
+  const requestFocusJobChange = (nextJobId: number | null, job?: LiveJobLink) => {
+    if (nextJobId === focusJobId) return;
+    if (dirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
+    setFocusOverride(nextJobId, job);
+  };
   // 이 목록은 **이력**이라 종료·마감·시스템 공고까지 다 보여준다. 하지만 "지금 붙어 있는 자리 N건"을
   // 셀 때는 인력풀 목록 칩·응대 화면 탭과 **같은 판정**을 써야 한다 — 안 그러면 목록 1건 · 탭 1건 ·
   // 상세 2건으로 갈려서, 이 커밋이 세우려던 불변식이 정작 확정이 일어나는 화면에서 깨진다.
@@ -542,8 +577,11 @@ export function ApplicantDetailContent({
     (k in edit ? (edit[k] as ApplicantFull[K]) : a[k]);
 
   const setField = <K extends keyof ApplicantFull>(k: K, v: ApplicantFull[K]) => {
-    setEdit((p) => ({ ...p, [k]: v }));
-    setDirty(true);
+    if (busy) return;
+    const kind = k === "guide_sent" || k === "kakao_channel_friend"
+      ? "nullable-boolean"
+      : "text";
+    setEdit((current) => updateApplicantDetailDraft(current, k, a[k], v, kind));
   };
 
   const toggleSlot = (slot: string) => {
@@ -573,8 +611,6 @@ export function ApplicantDetailContent({
         return false;
       }
       toast.success(msg);
-      setEdit({});
-      setDirty(false);
       await reload();
       onChanged?.();
       return true;
@@ -661,10 +697,22 @@ export function ApplicantDetailContent({
     }
   };
 
-  const saveFields = () => {
-    if (!dirty) return;
-    patch(edit, "저장했어요.");
+  const saveFields = async () => {
+    if (!managedFieldsDirty) return;
+    const submitted = { ...edit };
+    const ok = await patch(submitted, "저장했어요.");
+    if (!ok) return;
+    // 저장 중 새로 입력한 값까지 함께 지우지 않고, 실제 전송한 draft만 소비한다.
+    setEdit((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(submitted) as (keyof ApplicantFull)[]) {
+        if (Object.is(current[key], submitted[key])) delete next[key];
+      }
+      return next;
+    });
   };
+
+  const discardFields = () => setEdit({});
 
   // 대화로 채워진 시간대 되돌리기 — 이 값이 노출 규칙 판정의 1순위라, 잘못 채워지면 매니저가
   // 지울 수단이 있어야 한다(없으면 그 사람이 여러 공고에서 조용히 빠진 채 고착된다).
@@ -713,6 +761,10 @@ export function ApplicantDetailContent({
   // seedJobId: 외부(확정 대기 큐)에서 '그 카드가 보여준 공고'를 지정해 열 때 사용 — 열린 링크가 여러 개면
   // 큐(진행단계 우선)와 이 모달(최신 링크)의 기본 선택이 달라 다른 공고로 확정되는 오귀속이 생긴다.
   const openConfirm = (seedJobId?: number | null) => {
+    if (dirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
     setConfirmSlots(
       String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
     );
@@ -759,6 +811,10 @@ export function ApplicantDetailContent({
   // 투입 확정 취소 — 잘못된 공고로 확정했을 때 정정. 서버가 공고 결속·확정 필드 해제 + 그 공고 AI 재개.
   const doUnconfirm = async () => {
     if (busy) return;
+    if (dirty) {
+      toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
+      return;
+    }
     const ok = await confirm({
       title: "투입 확정을 취소할까요?",
       description: `${a.name}님의 확정을 취소해요. 대상 공고 결속·시작일·확정 지점이 해제되고, 그 공고의 AI 응대가 다시 시작돼요.`,
@@ -870,7 +926,15 @@ export function ApplicantDetailContent({
     setSuntopSchedAt("");
     setSuntopFormOpen(true);
   };
+  const discardSuntopForm = () => {
+    if (busy) return;
+    setSuntopFormOpen(false);
+    setSuntopClient("");
+    setSuntopLine("");
+    setSuntopSchedAt("");
+  };
   const recordSuntop = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/admin/applicants/${a.id}/suntop`, {
@@ -1231,7 +1295,7 @@ export function ApplicantDetailContent({
                     role={selectable ? "button" : undefined}
                     tabIndex={selectable ? 0 : undefined}
                     aria-pressed={selectable ? isFocus : undefined}
-                    onClick={selectable ? () => setFocusOverride(c.job_id, {
+                    onClick={selectable ? () => requestFocusJobChange(c.job_id, {
                       job_id: c.job_id,
                       title: isSystemJobTitle(c.job_title ?? "") ? "공고 미지정 (내부 처리용)" : c.job_title ?? `공고 #${c.job_id}`,
                       branch: c.job_branch,
@@ -1244,7 +1308,7 @@ export function ApplicantDetailContent({
                         ? (e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              setFocusOverride(c.job_id, {
+                              requestFocusJobChange(c.job_id, {
                                 job_id: c.job_id,
                                 title: isSystemJobTitle(c.job_title ?? "") ? "공고 미지정 (내부 처리용)" : c.job_title ?? `공고 #${c.job_id}`,
                                 branch: c.job_branch,
@@ -1418,7 +1482,7 @@ export function ApplicantDetailContent({
                   {SLOTS.map((s) => {
                     const on = String(val("confirmed_slot") ?? "").split(",").map((x) => x.trim()).includes(s);
                     return (
-                      <button key={s} onClick={() => toggleSlot(s)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}>{s}</button>
+                      <button key={s} onClick={() => toggleSlot(s)} disabled={busy} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-2.5 py-1 rounded-full text-[12px] font-bold transition-all disabled:opacity-40 ${on ? "bg-brand-yellow text-foreground" : "bg-background border border-border-strong text-muted-foreground"}`}>{s}</button>
                     );
                   })}
                 </div>
@@ -1430,7 +1494,7 @@ export function ApplicantDetailContent({
               {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-bold text-muted-foreground">확정 지점</span>
-                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} disabled={busy} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
                     <option value="">미지정</option>
                     {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
                     {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
@@ -1439,18 +1503,18 @@ export function ApplicantDetailContent({
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-bold text-muted-foreground">근무 시작일</span>
-                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} disabled={busy} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
               </label>
               {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
               {!detailInternal && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-bold text-muted-foreground">배민 커넥트 ID</span>
-                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} disabled={busy} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
                 </label>
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-bold text-muted-foreground">온보딩 통화</span>
-                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background">
+                <select value={callStatus} onChange={(e) => setField("onboarding_call_status", e.target.value)} disabled={busy} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background disabled:opacity-50">
                   <option value="">미지정</option>
                   {legacyCallStatus && <option value={callStatus}>{callStatus}</option>}
                   {CALL_STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1461,7 +1525,7 @@ export function ApplicantDetailContent({
                   가용성
                   {a.availability_updated_at && <span className="font-medium"> · 확인: {relTime(a.availability_updated_at)}</span>}
                 </span>
-                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background">
+                <select value={String(val("availability") ?? "")} onChange={(e) => setField("availability", e.target.value)} disabled={busy} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-input-background disabled:opacity-50">
                   <option value="">미확인</option>
                   {AVAILABILITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -1474,11 +1538,11 @@ export function ApplicantDetailContent({
                 <span className="text-[12px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
                 {!suntopFormOpen ? (
                   <div className="flex items-center gap-2">
-                    <button onClick={() => openSuntopForm("scheduled")} className="text-[12px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">+ 예정</button>
-                    <button onClick={() => openSuntopForm("done")} className="text-[12px] font-bold text-success-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">+ 완료</button>
+                    <button onClick={() => openSuntopForm("scheduled")} disabled={busy} className="text-[12px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:opacity-40">+ 예정</button>
+                    <button onClick={() => openSuntopForm("done")} disabled={busy} className="text-[12px] font-bold text-success-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:opacity-40">+ 완료</button>
                   </div>
                 ) : (
-                  <button onClick={() => setSuntopFormOpen(false)} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[12px] font-bold text-muted-foreground hover:underline rounded">닫기</button>
+                  <button type="button" onClick={discardSuntopForm} disabled={busy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[12px] font-bold text-muted-foreground hover:underline rounded disabled:opacity-40">입력 취소</button>
                 )}
               </div>
               {/* 3단계 진행 표시 — 예정 → 완료 → 투입(status='확정인력') */}
@@ -1510,11 +1574,11 @@ export function ApplicantDetailContent({
                 <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-background border border-border-strong">
                   <div className="text-[12px] font-bold text-gray-700">{suntopStage === "scheduled" ? "선탑 예정 등록" : "선탑 완료 기록"}</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
-                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                    <input value={suntopClient} onChange={(e) => setSuntopClient(e.target.value)} disabled={busy} placeholder="화주사 (예: 도시락)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
+                    <input value={suntopLine} onChange={(e) => setSuntopLine(e.target.value)} disabled={busy} placeholder="라인·지역 (예: 강남)" className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
                   </div>
                   {suntopStage === "scheduled" && (
-                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} className="w-full border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                    <input type="date" value={suntopSchedAt} onChange={(e) => setSuntopSchedAt(e.target.value)} disabled={busy} className="w-full border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
                   )}
                   <button onClick={recordSuntop} disabled={busy} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full py-1.5 rounded-lg text-[12px] font-bold text-white disabled:opacity-50 flex justify-center items-center gap-1.5 ${suntopStage === "scheduled" ? "bg-yellow-700 hover:bg-warning-strong" : "bg-success-strong hover:bg-success-strong"}`}>
                     {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {suntopStage === "scheduled" ? "선탑 예정으로 기록" : "선탑 완료로 기록"}
@@ -1525,21 +1589,37 @@ export function ApplicantDetailContent({
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} className="accent-brand-yellow w-4 h-4" />
+                <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} disabled={busy} className="accent-brand-yellow w-4 h-4 disabled:opacity-50" />
                 <span className="text-[12px] font-semibold text-gray-700">{detailInternal ? "앱 안내 전달" : "가이드 전달"}</span>
               </label>
               {/* 카카오 채널 친구는 배민 온보딩 단계 — internal 라인엔 표시하지 않는다. */}
               {!detailInternal && (
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} className="accent-brand-yellow w-4 h-4" />
+                  <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} disabled={busy} className="accent-brand-yellow w-4 h-4 disabled:opacity-50" />
                   <span className="text-[12px] font-semibold text-gray-700">카카오 채널 친구</span>
                 </label>
               )}
             </div>
 
-            <button onClick={saveFields} disabled={!dirty || busy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full bg-foreground hover:bg-gray-800 text-white py-2 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-40 transition-colors">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 저장
-            </button>
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
+              <button
+                type="button"
+                onClick={discardFields}
+                disabled={!managedFieldsDirty || busy}
+                className="min-h-10 rounded-2xl border border-border-strong bg-card px-4 text-[13px] font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+              >
+                변경 취소
+              </button>
+              <button
+                type="button"
+                data-applicant-unsaved-focus={applicantId}
+                onClick={() => void saveFields()}
+                disabled={!managedFieldsDirty || busy}
+                className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 w-full bg-foreground hover:bg-gray-800 text-white px-4 rounded-2xl text-[13px] font-bold flex justify-center items-center gap-1.5 disabled:opacity-40 transition-colors"
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 변경 저장
+              </button>
+            </div>
           </div>
         </CollapsibleSection>
       </div>
@@ -1760,6 +1840,7 @@ export function ApplicantDetailPanel({
   initialTab = "detail",
   autoOpenConfirm,
   onAutoOpenConfirmConsumed,
+  onDirtyChange,
   docked = false,
   dockedClassName = "right-4 top-[92px] bottom-4 w-[520px] z-40",
 }: {
@@ -1784,12 +1865,18 @@ export function ApplicantDetailPanel({
   /** 열면서 확정 모달까지 바로 띄우는 신호 — 공고 탭 보드의 '확정' 버튼용(본문 컴포넌트로 그대로 전달). */
   autoOpenConfirm?: { id: number; n: number; jobId?: number | null } | null;
   onAutoOpenConfirmConsumed?: () => void;
+  /** 도킹된 부모 목록에서 다른 지원자를 누를 때도 같은 미저장 가드를 적용한다. */
+  onDirtyChange?: (state: ApplicantDetailDirtyState) => void;
 }) {
   const [tab, setTab] = useState<"detail" | "chat">(initialTab);
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const { detail, loading, reload } = useApplicantDetail(isOpen ? applicantId : null);
+  const {
+    reportDirty: reportPanelDirty,
+    requestTransition: requestPanelTransition,
+  } = useApplicantDetailUnsavedGuard(applicantId, onDirtyChange);
   // 표시 기준 공고를 드로어가 들고 있는다 — 상세 탭에서 공고를 바꾼 뒤 '대화 내역'으로 넘어가면
   // 예전엔 부르는 화면이 준 jobId로 되돌아가, 매니저가 보고 있는 공고와 **다른 공고로 답장**이 적재됐다.
   const [focusJobId, setFocusJobId] = useState<number | null>(jobId);
@@ -1823,7 +1910,7 @@ export function ApplicantDetailPanel({
     if (docked) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      void requestPanelTransition(onClose);
       return;
     }
     if (event.key !== "Tab") return;
@@ -1847,7 +1934,7 @@ export function ApplicantDetailPanel({
       event.preventDefault();
       first.focus();
     }
-  }, [docked, onClose]);
+  }, [docked, onClose, requestPanelTransition]);
 
   if (!isOpen || applicantId == null) return null;
 
@@ -1879,7 +1966,7 @@ export function ApplicantDetailPanel({
       {/* 스플릿 뷰에서는 스크림을 깔지 않는다 — 목록을 계속 만질 수 있어야 한다. */}
       {!docked && (
         <AnimatePresence>
-          <motion.div aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
+          <motion.div aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => void requestPanelTransition(onClose)} className="fixed inset-0 bg-scrim z-40 backdrop-blur-[3px]" />
         </AnimatePresence>
       )}
       <AnimatePresence>
@@ -1922,7 +2009,7 @@ export function ApplicantDetailPanel({
                 </div>
               </div>
             </div>
-            <button aria-label="지원자 상세 닫기" onClick={onClose} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-2 hover:bg-gray-200 rounded-lg transition-colors text-muted-foreground hover:text-foreground"><X size={20} /></button>
+            <button aria-label="지원자 상세 닫기" onClick={() => void requestPanelTransition(onClose)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-2 hover:bg-gray-200 rounded-lg transition-colors text-muted-foreground hover:text-foreground"><X size={20} /></button>
           </div>
 
           {/* Tabs */}
@@ -1931,7 +2018,7 @@ export function ApplicantDetailPanel({
               { id: "detail" as const, label: "상세 정보", icon: <Check size={14} /> },
               { id: "chat" as const, label: "대화 내역", icon: <MessageSquare size={14} /> },
             ].map((t) => (
-              <button key={t.id} onClick={() => setTab(t.id)} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-3 text-[13px] font-bold border-b-2 -mb-px transition-colors ${tab === t.id ? "border-brand-yellow text-foreground" : "border-transparent text-muted-foreground hover:text-muted-foreground"}`}>{t.icon} {t.label}</button>
+              <button key={t.id} onClick={() => { if (t.id !== tab) void requestPanelTransition(() => setTab(t.id)); }} className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center gap-1.5 px-4 py-3 text-[13px] font-bold border-b-2 -mb-px transition-colors ${tab === t.id ? "border-brand-yellow text-foreground" : "border-transparent text-muted-foreground hover:text-muted-foreground"}`}>{t.icon} {t.label}</button>
             ))}
           </div>
 
@@ -1939,15 +2026,17 @@ export function ApplicantDetailPanel({
           <div className="flex-1 min-h-0 flex flex-col">
             {tab === "detail" ? (
               <ApplicantDetailContent
+                key={applicantId}
                 applicantId={applicantId}
                 jobId={jobId}
                 focusJobId={focusJobId}
                 onFocusJobChange={setFocusJobId}
                 variant="drawer"
-                onOpenChat={() => setTab("chat")}
+                onOpenChat={() => { void requestPanelTransition(() => setTab("chat")); }}
                 detail={detail}
                 reload={() => { reload(); onChanged?.(); }}
                 onChanged={onChanged}
+                onDirtyChange={reportPanelDirty}
                 autoOpenConfirm={autoOpenConfirm}
                 onAutoOpenConfirmConsumed={onAutoOpenConfirmConsumed}
               />
