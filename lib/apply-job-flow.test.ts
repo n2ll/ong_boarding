@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 type ApplyJobIntent =
@@ -8,13 +7,27 @@ type ApplyJobIntent =
   | { kind: "invalid" };
 
 type ApplyJobFlowModule = {
+  applyJobLoadErrorDescription?: (timedOut: boolean) => string;
   applyJobIntent?: (raw: string | null) => ApplyJobIntent;
+  classifyApplyJobLookup?: <T>(
+    job: T | null,
+    error: unknown,
+  ) =>
+    | { kind: "found"; job: T }
+    | { kind: "missing"; status: 404 }
+    | { kind: "retryable"; status: 503 };
   shouldShowApplyForm?: (input: {
     intent: ApplyJobIntent;
     loadState: "idle" | "loading" | "loaded" | "unavailable" | "error";
     recruiting: boolean | null;
     generalOptIn: boolean;
   }) => boolean;
+  applySubmissionJobContext?: (input: {
+    verifiedJobId: number | null;
+    recruiting: boolean;
+    vehicleRequired: boolean;
+    generalOptIn: boolean;
+  }) => { jobId: number | null; vehicleRequired: boolean };
 };
 
 async function loadApplyJobFlowModule(): Promise<ApplyJobFlowModule> {
@@ -32,9 +45,26 @@ test("a malformed job link is not silently treated as a general application", as
   assert.equal(typeof applyJobIntent, "function");
   assert.deepEqual(applyJobIntent!(null), { kind: "general" });
   assert.deepEqual(applyJobIntent!("42"), { kind: "job", id: 42 });
-  for (const raw of ["", "0", "-4", "3.5", "abc"]) {
+  for (const raw of ["", "0", "-4", "3.5", "abc", "9007199254740993"]) {
     assert.deepEqual(applyJobIntent!(raw), { kind: "invalid" });
   }
+});
+
+test("a job lookup query failure is retryable instead of masquerading as missing", async () => {
+  const { classifyApplyJobLookup } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof classifyApplyJobLookup, "function");
+  assert.deepEqual(
+    classifyApplyJobLookup!(null, { message: "database unavailable" }),
+    { kind: "retryable", status: 503 },
+  );
+});
+
+test("an actual missing job remains not found", async () => {
+  const { classifyApplyJobLookup } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof classifyApplyJobLookup, "function");
+  assert.deepEqual(classifyApplyJobLookup!(null, null), { kind: "missing", status: 404 });
 });
 
 test("a job-linked form stays hidden until an open job is verified", async () => {
@@ -73,11 +103,39 @@ test("general applications remain available through an explicit fallback choice"
   }), true);
 });
 
-test("a job lookup timeout reports uncertainty instead of asserting the job is unchanged", async () => {
-  const page = await readFile(new URL("../app/apply/page.tsx", import.meta.url), "utf8");
-  const timeoutCopy = page.match(/\{jobLoadTimedOut\s*\?\s*"([^"]+)"\s*:\s*"인터넷 연결/)?.[1] ?? "";
+test("an explicit general fallback keeps winning if the linked job later becomes available", async () => {
+  const { applySubmissionJobContext } = await loadApplyJobFlowModule();
 
-  assert.match(timeoutCopy, /공고 상태를 확인하지 못했어요/);
+  assert.equal(typeof applySubmissionJobContext, "function");
+  assert.deepEqual(applySubmissionJobContext!({
+    verifiedJobId: 42,
+    recruiting: true,
+    vehicleRequired: false,
+    generalOptIn: true,
+  }), { jobId: null, vehicleRequired: true });
+  assert.deepEqual(applySubmissionJobContext!({
+    verifiedJobId: 42,
+    recruiting: true,
+    vehicleRequired: false,
+    generalOptIn: false,
+  }), { jobId: 42, vehicleRequired: false });
+  assert.deepEqual(applySubmissionJobContext!({
+    verifiedJobId: 42,
+    recruiting: false,
+    vehicleRequired: false,
+    generalOptIn: false,
+  }), { jobId: null, vehicleRequired: true });
+});
+
+test("a job lookup failure gives a concrete recovery path without asserting the job is unavailable", async () => {
+  const { applyJobLoadErrorDescription } = await loadApplyJobFlowModule();
+  assert.equal(typeof applyJobLoadErrorDescription, "function");
+
+  const timeoutCopy = applyJobLoadErrorDescription!(true);
+  const retryableCopy = applyJobLoadErrorDescription!(false);
+  assert.match(timeoutCopy, /확인 시간이 길어지고 있어요/);
   assert.match(timeoutCopy, /다시 불러오/);
-  assert.doesNotMatch(timeoutCopy, /바뀐 것은 아니에요/);
+  assert.match(retryableCopy, /다시 불러와/);
+  assert.match(retryableCopy, /문자에 답장/);
+  assert.doesNotMatch(`${timeoutCopy} ${retryableCopy}`, /마감|바뀐 것은 아니에요/);
 });

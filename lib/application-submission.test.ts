@@ -30,21 +30,42 @@ interface ExistingApplicationMessageRequest {
   auto_engagement_required: boolean;
 }
 
+interface ApplicationSubmissionAttempt {
+  fingerprint: string;
+  id: string;
+  jobId: number | null;
+  vehicleRequired: boolean;
+}
+
+interface ApplicationSubmissionContext {
+  jobId: number | null;
+  vehicleRequired: boolean;
+  reusesAttempt: boolean;
+}
+
 type ApplicationSubmissionModule = {
   validateApplicationSubmissionId?: (
     value: unknown,
   ) => { ok: true; id: string } | { ok: false; reason: "required" | "invalid" };
   nextApplicationSubmissionAttempt?: (
-    current: { fingerprint: string; id: string } | null,
+    current: ApplicationSubmissionAttempt | null,
     request: ApplicantFormData & { source: string; jobId: number | null },
+    vehicleRequired: boolean,
     createId: () => string,
-  ) => { fingerprint: string; id: string };
-  prepareApplicationSubmission?: (
-    current: { fingerprint: string; id: string } | null,
+  ) => ApplicationSubmissionAttempt;
+  resolveApplicationSubmissionContext?: (
+    current: ApplicationSubmissionAttempt | null,
     request: ApplicantFormData & { source: string; jobId: number | null },
+    vehicleRequired: boolean,
+  ) => ApplicationSubmissionContext;
+  prepareApplicationSubmission?: (
+    current: ApplicationSubmissionAttempt | null,
+    request: ApplicantFormData & { source: string; jobId: number | null },
+    vehicleRequired: boolean,
     createId: () => string,
   ) => {
-    attempt: { fingerprint: string; id: string };
+    attempt: ApplicationSubmissionAttempt;
+    context: ApplicationSubmissionContext;
     payload: ApplicantFormData & { source: string; jobId: number | null; submissionId: string };
   };
   applicationSubmissionPayloadFingerprint?: (
@@ -53,6 +74,7 @@ type ApplicationSubmissionModule = {
   applicationSubmissionPayloadDigest?: (
     request: ApplicantFormData & { source: string; jobId: number | null },
   ) => Promise<string>;
+  shouldAbandonApplicationSubmissionAttempt?: (response: unknown) => boolean;
   shouldStartApplicationAutoEngagement?: (input: {
     updateMode: boolean;
     existingSource: string | null;
@@ -255,12 +277,14 @@ test("a response-loss retry reuses the same application submission UUID", async 
   let sequence = 0;
   const createId = () => `submission-${++sequence}`;
   const request = { ...completeForm, source: "direct", jobId: 31 };
-  const first = nextApplicationSubmissionAttempt!(null, request, createId);
-  const retry = nextApplicationSubmissionAttempt!(first, { ...request }, createId);
-  const edited = nextApplicationSubmissionAttempt!(retry, { ...request, branch1: "서초점" }, createId);
+  const first = nextApplicationSubmissionAttempt!(null, request, false, createId);
+  const retry = nextApplicationSubmissionAttempt!(first, { ...request }, false, createId);
+  const edited = nextApplicationSubmissionAttempt!(retry, { ...request, branch1: "서초점" }, false, createId);
 
   assert.deepEqual(retry, first);
   assert.equal(first.id, "submission-1");
+  assert.equal(first.jobId, 31);
+  assert.equal(first.vehicleRequired, false);
   assert.equal(edited.id, "submission-2");
 });
 
@@ -271,17 +295,141 @@ test("the browser-ready payload carries the durable UUID and rotates it with any
   let sequence = 0;
   const createId = () => `submission-${++sequence}`;
   const request = { ...completeForm, source: "direct", jobId: 31 };
-  const first = prepareApplicationSubmission!(null, request, createId);
-  const retry = prepareApplicationSubmission!(first.attempt, { ...request }, createId);
+  const first = prepareApplicationSubmission!(null, request, false, createId);
+  const retry = prepareApplicationSubmission!(first.attempt, { ...request }, false, createId);
   const edited = prepareApplicationSubmission!(retry.attempt, {
     ...request,
     introduction: "주 5일 근무를 희망합니다.",
-  }, createId);
+  }, false, createId);
 
   assert.equal(first.payload.submissionId, "submission-1");
   assert.equal(retry.payload.submissionId, "submission-1");
   assert.equal(edited.payload.submissionId, "submission-2");
   assert.deepEqual(first.payload, { ...request, submissionId: "submission-1" });
+});
+
+test("an unchanged retry keeps the original job and validation context when the current job becomes unavailable", async () => {
+  const {
+    prepareApplicationSubmission,
+    resolveApplicationSubmissionContext,
+    validateApplicationSubmission,
+  } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof prepareApplicationSubmission, "function");
+  assert.equal(typeof resolveApplicationSubmissionContext, "function");
+  assert.equal(typeof validateApplicationSubmission, "function");
+  let sequence = 0;
+  const createId = () => `submission-${++sequence}`;
+  const noVehicleForm = {
+    ...completeForm,
+    ownVehicle: "",
+    licenseType: "",
+    vehicleType: "",
+    selfOwnership: "",
+  };
+  const first = prepareApplicationSubmission!(
+    null,
+    { ...noVehicleForm, source: "direct", jobId: 31 },
+    false,
+    createId,
+  );
+  const currentRequest = { ...noVehicleForm, source: "direct", jobId: null };
+  const context = resolveApplicationSubmissionContext!(first.attempt, currentRequest, true);
+  const retry = prepareApplicationSubmission!(first.attempt, currentRequest, true, createId);
+
+  assert.deepEqual(context, { jobId: 31, vehicleRequired: false, reusesAttempt: true });
+  assert.equal(validateApplicationSubmission!(noVehicleForm, context.vehicleRequired), null);
+  assert.equal(retry.payload.submissionId, "submission-1");
+  assert.equal(retry.payload.jobId, 31);
+  assert.deepEqual(retry.context, context);
+});
+
+test("editing a recovered application rotates the UUID and adopts the current job context", async () => {
+  const { prepareApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof prepareApplicationSubmission, "function");
+  let sequence = 0;
+  const createId = () => `submission-${++sequence}`;
+  const first = prepareApplicationSubmission!(
+    null,
+    { ...completeForm, source: "direct", jobId: 31 },
+    false,
+    createId,
+  );
+  const edited = prepareApplicationSubmission!(first.attempt, {
+    ...completeForm,
+    source: "direct",
+    jobId: null,
+    introduction: "내용을 수정했습니다.",
+  }, true, createId);
+
+  assert.equal(edited.payload.submissionId, "submission-2");
+  assert.equal(edited.payload.jobId, null);
+  assert.deepEqual(edited.context, { jobId: null, vehicleRequired: true, reusesAttempt: false });
+});
+
+test("editing the recovered source rotates the UUID and adopts the current context", async () => {
+  const { prepareApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof prepareApplicationSubmission, "function");
+  let sequence = 0;
+  const createId = () => `submission-${++sequence}`;
+  const first = prepareApplicationSubmission!(
+    null,
+    { ...completeForm, source: "direct", jobId: 31 },
+    false,
+    createId,
+  );
+  const edited = prepareApplicationSubmission!(first.attempt, {
+    ...completeForm,
+    source: "baemin",
+    jobId: null,
+  }, true, createId);
+
+  assert.equal(edited.payload.submissionId, "submission-2");
+  assert.equal(edited.payload.jobId, null);
+  assert.equal(edited.attempt.vehicleRequired, true);
+});
+
+test("an unchanged general-application retry does not attach a newly loaded job", async () => {
+  const { prepareApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof prepareApplicationSubmission, "function");
+  let sequence = 0;
+  const createId = () => `submission-${++sequence}`;
+  const first = prepareApplicationSubmission!(
+    null,
+    { ...completeForm, source: "direct", jobId: null },
+    true,
+    createId,
+  );
+  const retry = prepareApplicationSubmission!(first.attempt, {
+    ...completeForm,
+    source: "direct",
+    jobId: 31,
+  }, false, createId);
+
+  assert.equal(retry.payload.submissionId, "submission-1");
+  assert.equal(retry.payload.jobId, null);
+  assert.deepEqual(retry.context, { jobId: null, vehicleRequired: true, reusesAttempt: true });
+});
+
+test("only an explicit server context rejection abandons the local submission attempt", async () => {
+  const { shouldAbandonApplicationSubmissionAttempt } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof shouldAbandonApplicationSubmissionAttempt, "function");
+  assert.equal(shouldAbandonApplicationSubmissionAttempt!({
+    code: "APPLICATION_CONTEXT_CHANGED",
+  }), true);
+  for (const response of [
+    null,
+    {},
+    { code: "APPLICATION_RATE_LIMITED" },
+    { code: "APPLICATION_SUBMISSION_CONFLICT" },
+    { error: "temporary failure" },
+  ]) {
+    assert.equal(shouldAbandonApplicationSubmissionAttempt!(response), false);
+  }
 });
 
 test("the durable fingerprint covers the complete submitted application payload", async () => {

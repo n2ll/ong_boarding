@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { applyJobIntent, classifyApplyJobLookup } from "@/lib/apply-job-flow";
 import { publicJobAvailability } from "@/lib/public-job";
 import { createServiceClient } from "@/lib/supabase";
 
@@ -14,21 +15,30 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params;
-  const id = Number(routeParams.id);
-  if (!Number.isFinite(id)) {
+  const intent = applyJobIntent(routeParams.id);
+  if (intent.kind !== "job") {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
+  const id = intent.id;
 
   const supabase = createServiceClient();
-  const { data: job, error } = await supabase
+  const { data, error } = await supabase
     .from("jobs")
     .select("id, title, branch, status, closes_at, client_id, branch_id, exposure, recruit_mode, vehicle_required")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
-  if (error || !job) {
+  const lookup = classifyApplyJobLookup(data, error);
+  if (lookup.kind === "retryable") {
+    return NextResponse.json(
+      { error: "공고 정보를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
+      { status: lookup.status },
+    );
+  }
+  if (lookup.kind === "missing") {
     return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
   }
+  const job = lookup.job;
 
   const availability = publicJobAvailability({
     title: typeof job.title === "string" ? job.title : null,

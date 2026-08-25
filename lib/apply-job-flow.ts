@@ -5,10 +5,28 @@ export type ApplyJobIntent =
 
 export type ApplyJobLoadState = "idle" | "loading" | "loaded" | "unavailable" | "error";
 
+export type ApplyJobLookup<T> =
+  | { kind: "found"; job: T }
+  | { kind: "missing"; status: 404 }
+  | { kind: "retryable"; status: 503 };
+
+export function classifyApplyJobLookup<T>(job: T | null, error: unknown): ApplyJobLookup<T> {
+  if (error) return { kind: "retryable", status: 503 };
+  if (!job) return { kind: "missing", status: 404 };
+  return { kind: "found", job };
+}
+
+export function applyJobLoadErrorDescription(timedOut: boolean): string {
+  return timedOut
+    ? "확인 시간이 길어지고 있어요. 잠시 후 다시 불러오거나 공고 없이 일반 지원서를 작성할 수 있어요."
+    : "잠시 후 다시 불러와주세요. 계속되지 않으면 받으신 문자에 답장해 알려주세요.";
+}
+
 export function applyJobIntent(raw: string | null): ApplyJobIntent {
   if (raw === null) return { kind: "general" };
   if (!/^[1-9]\d*$/.test(raw)) return { kind: "invalid" };
-  return { kind: "job", id: Number(raw) };
+  const id = Number(raw);
+  return Number.isSafeInteger(id) ? { kind: "job", id } : { kind: "invalid" };
 }
 
 export function shouldShowApplyForm(input: {
@@ -19,4 +37,19 @@ export function shouldShowApplyForm(input: {
 }): boolean {
   if (input.intent.kind === "general" || input.generalOptIn) return true;
   return input.loadState === "loaded" && input.recruiting === true;
+}
+
+export function applySubmissionJobContext(input: {
+  verifiedJobId: number | null;
+  recruiting: boolean;
+  vehicleRequired: boolean;
+  generalOptIn: boolean;
+}): { jobId: number | null; vehicleRequired: boolean } {
+  if (input.generalOptIn || !input.recruiting || input.verifiedJobId === null) {
+    return { jobId: null, vehicleRequired: true };
+  }
+  return {
+    jobId: input.verifiedJobId,
+    vehicleRequired: input.vehicleRequired,
+  };
 }

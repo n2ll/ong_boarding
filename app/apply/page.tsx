@@ -6,7 +6,9 @@ import { AlertCircle, BriefcaseBusiness, CheckCircle2, ChevronDown, FileText, Lo
 import Image from "next/image";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 import {
+  applyJobLoadErrorDescription,
   applyJobIntent,
+  applySubmissionJobContext,
   shouldShowApplyForm,
   type ApplyJobLoadState,
 } from "@/lib/apply-job-flow";
@@ -15,11 +17,23 @@ import {
   type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
 import {
+  applicationFormDraftContentKey,
+  applicationFormDraftStorageKey,
+  hasApplicationFormDraftContent,
+  readApplicationFormDraftSnapshot,
+  removeApplicationFormDraftSnapshot,
+  removeApplicationFormDraftSnapshotIfContentKey,
+  writeApplicationFormDraftSnapshot,
+  type ApplicationFormDraftScope,
+} from "@/lib/application-form-draft-storage";
+import {
   applicationCompletionKind,
   applicationInitialMessageUiState,
   applicationSubmissionProgress,
   isApplicationSubmissionResult,
   prepareApplicationSubmission,
+  resolveApplicationSubmissionContext,
+  shouldAbandonApplicationSubmissionAttempt,
   validateApplicationSubmission,
   type ApplicationSubmissionAttempt,
   type ApplicationSubmissionResult,
@@ -56,6 +70,20 @@ const INITIAL: FormState = {
   marketingConsent: false,
 };
 
+const REQUIRED_APPLICATION_FIELDS = new Set<ApplicantValidationIssue["field"]>([
+  "name",
+  "birthDate",
+  "phone",
+  "location",
+  "ownVehicle",
+  "licenseType",
+  "vehicleType",
+  "branch1",
+  "workHours",
+  "availableDate",
+  "selfOwnership",
+]);
+
 // SOURCE_LABELS에 정의된 소스만 허용하고, 알 수 없는 값은 'direct'로 처리한다.
 function normalizeSource(raw: string | null): string {
   if (raw && Object.prototype.hasOwnProperty.call(SOURCE_LABELS, raw)) return raw;
@@ -64,6 +92,18 @@ function normalizeSource(raw: string | null): string {
 
 function digits(raw: string, max: number): string {
   return raw.replace(/\D/g, "").slice(0, max);
+}
+
+function getDraftStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function initialForm(branch: string | null): FormState {
+  return { ...INITIAL, branch1: branch ?? "" };
 }
 
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
@@ -100,17 +140,21 @@ interface JobContext {
   vehicle_required: boolean;
 }
 
-function ApplyForm() {
-  const searchParams = useSearchParams();
-  const source = normalizeSource(searchParams.get("source"));
-  const prefillBranch = searchParams.get("branch");
-  const jobParam = searchParams.get("job");
+interface ApplyFormProps {
+  source: string;
+  prefillBranch: string | null;
+  jobParam: string | null;
+  draftScope: ApplicationFormDraftScope;
+}
+
+function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormProps) {
   const jobIntent = applyJobIntent(jobParam);
   const jobId = jobIntent.kind === "job" ? jobIntent.id : null;
 
   const [form, setForm] = useState<FormState>(INITIAL);
   const [branches, setBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingReplay, setSubmittingReplay] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationIssue, setValidationIssue] = useState<ApplicantValidationIssue | null>(null);
   const [submissionResult, setSubmissionResult] = useState<ApplicationSubmissionResult | null>(null);
@@ -122,13 +166,62 @@ function ApplyForm() {
   const [jobLoadTimedOut, setJobLoadTimedOut] = useState(false);
   const [generalOptIn, setGeneralOptIn] = useState(false);
   const [manualBranchEntry, setManualBranchEntry] = useState({ branch1: false, branch2: false });
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [recoveryFormVisible, setRecoveryFormVisible] = useState(false);
+  const [resetConfirming, setResetConfirming] = useState(false);
   const submissionAttemptRef = useRef<ApplicationSubmissionAttempt | null>(null);
+  const persistedDraftKeyRef = useRef<string | null>(null);
+  const completedDraftKeyRef = useRef<string | null>(null);
+  const submitInFlightRef = useRef(false);
   const successTitleRef = useRef<HTMLHeadingElement>(null);
+  const retryJobButtonRef = useRef<HTMLButtonElement>(null);
+  const jobTitleRef = useRef<HTMLHeadingElement>(null);
+  const unavailableJobTitleRef = useRef<HTMLHeadingElement>(null);
+  const jobLoadingTitleRef = useRef<HTMLHeadingElement>(null);
+  const applicationModeActionRef = useRef<HTMLButtonElement>(null);
+  const generalApplicationTitleRef = useRef<HTMLHeadingElement>(null);
+  const generalJobStatusRef = useRef<HTMLParagraphElement>(null);
+  const resetDraftTriggerRef = useRef<HTMLButtonElement>(null);
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
+  const pendingServerValidationRef = useRef<ApplicantValidationIssue | null>(null);
+
+  const verifiedJob = job?.id === jobId ? job : null;
+  const currentJobContext = applySubmissionJobContext({
+    verifiedJobId: verifiedJob?.id ?? null,
+    recruiting: verifiedJob?.recruiting === true,
+    vehicleRequired: verifiedJob?.vehicle_required !== false,
+    generalOptIn,
+  });
+  const currentSubmissionJobId = currentJobContext.jobId;
+  const currentVehicleRequired = currentJobContext.vehicleRequired;
+  const submissionContext = resolveApplicationSubmissionContext(
+    submissionAttemptRef.current,
+    { ...form, source, jobId: currentSubmissionJobId },
+    currentVehicleRequired,
+  );
+  const pendingSubmissionReplay = submissionContext.reusesAttempt;
+  const hasSubmissionAttempt = submissionAttemptRef.current !== null;
+  const recoverySessionActive = recoveryFormVisible || hasSubmissionAttempt;
+  const replayUiActive = pendingSubmissionReplay && (!submitting || submittingReplay);
+  const submissionJobId = submissionContext.jobId;
+  const vehicleRequired = submissionContext.vehicleRequired;
+  const defaultBranch = verifiedJob?.branch || prefillBranch || "";
+  const currentApplyFormAvailable = shouldShowApplyForm({
+    intent: jobIntent,
+    loadState: jobLoadState,
+    recruiting: verifiedJob?.recruiting ?? null,
+    generalOptIn,
+  });
+  const applicationModeChoiceRequired = recoverySessionActive
+    && !pendingSubmissionReplay
+    && !currentApplyFormAvailable;
+  const waitingForApplicationContext = applicationModeChoiceRequired
+    && jobLoadState === "loading";
 
   // 공고 지원 링크(?job=ID)로 들어오면 공고 맥락을 불러와 헤더에 표기하고 지점을 미리 채운다.
   useEffect(() => {
     setJob(null);
-    setGeneralOptIn(false);
     if (jobIntent.kind === "general") {
       setJobLoadState("idle");
       setJobLoadTimedOut(false);
@@ -197,23 +290,118 @@ function ApplyForm() {
   }, [prefillBranch]);
 
   useEffect(() => {
+    const snapshot = readApplicationFormDraftSnapshot(draftScope, getDraftStorage());
+    if (snapshot) {
+      setForm(snapshot.form);
+      setGeneralOptIn(snapshot.generalOptIn);
+      submissionAttemptRef.current = snapshot.submissionAttempt;
+      setRecoveryFormVisible(snapshot.submissionAttempt !== null);
+      persistedDraftKeyRef.current = applicationFormDraftContentKey(
+        snapshot.form,
+        snapshot.generalOptIn,
+        snapshot.submissionAttempt,
+      );
+      setDraftRestored(hasApplicationFormDraftContent(
+        snapshot.form,
+        false,
+        snapshot.submissionAttempt,
+        initialForm(prefillBranch),
+      ));
+    }
+    setDraftReady(true);
+  }, [draftScope.branch, draftScope.job, draftScope.source, prefillBranch]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const storage = getDraftStorage();
+    if (submissionResult) {
+      const completedDraftKey = completedDraftKeyRef.current;
+      if (
+        completedDraftKey
+        && removeApplicationFormDraftSnapshotIfContentKey(draftScope, completedDraftKey, storage)
+      ) {
+        persistedDraftKeyRef.current = null;
+      }
+      return;
+    }
+    const submissionAttempt = submissionAttemptRef.current;
+    if (!hasApplicationFormDraftContent(
+      form,
+      generalOptIn,
+      submissionAttempt,
+      initialForm(defaultBranch),
+    )) {
+      removeApplicationFormDraftSnapshot(draftScope, storage);
+      persistedDraftKeyRef.current = null;
+      return;
+    }
+    const contentKey = applicationFormDraftContentKey(form, generalOptIn, submissionAttempt);
+    if (contentKey === persistedDraftKeyRef.current) return;
+    const saved = writeApplicationFormDraftSnapshot(draftScope, {
+      form,
+      generalOptIn,
+      submissionAttempt,
+      savedAt: Date.now(),
+    }, storage);
+    if (saved) persistedDraftKeyRef.current = contentKey;
+  }, [
+    defaultBranch,
+    draftReady,
+    draftScope.branch,
+    draftScope.job,
+    draftScope.source,
+    form,
+    generalOptIn,
+    submissionResult,
+  ]);
+
+  useEffect(() => {
+    if (jobLoadAttempt === 0) return;
+    const pendingIssue = pendingServerValidationRef.current;
+    if (pendingIssue && jobLoadState === "loaded") {
+      pendingServerValidationRef.current = null;
+      requestAnimationFrame(() => {
+        const field = document.getElementById(`field-${pendingIssue.field}`);
+        const target = field?.querySelector<HTMLElement>("input, select, textarea, button")
+          ?? jobTitleRef.current;
+        target?.scrollIntoView({ behavior: "auto", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (pendingIssue && (jobLoadState === "error" || jobLoadState === "unavailable")) {
+      pendingServerValidationRef.current = null;
+    }
+    if (jobLoadState === "error") {
+      requestAnimationFrame(() => retryJobButtonRef.current?.focus({ preventScroll: true }));
+    } else if (jobLoadState === "loaded") {
+      requestAnimationFrame(() => jobTitleRef.current?.focus({ preventScroll: true }));
+    } else if (jobLoadState === "unavailable") {
+      requestAnimationFrame(() => unavailableJobTitleRef.current?.focus({ preventScroll: true }));
+    }
+  }, [jobLoadAttempt, jobLoadState]);
+
+  useEffect(() => {
     if (!submissionResult) return;
     window.scrollTo({ top: 0, behavior: "auto" });
     requestAnimationFrame(() => successTitleRef.current?.focus({ preventScroll: true }));
   }, [submissionResult]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    if (submitInFlightRef.current) return;
     setError(null);
     if (validationIssue?.field === key) setValidationIssue(null);
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const setManualBranch = (key: "branch1" | "branch2", value: string) => {
+    if (submitInFlightRef.current) return;
     setManualBranchEntry((current) => ({ ...current, [key]: true }));
     set(key, value);
   };
 
   const toggleWorkHour = (value: string) => {
+    if (submitInFlightRef.current) return;
     setError(null);
     if (validationIssue?.field === "workHours") setValidationIssue(null);
     setForm((prev) => ({
@@ -224,7 +412,119 @@ function ApplyForm() {
     }));
   };
 
+  const resetDraft = () => {
+    if (submitInFlightRef.current) return;
+    submissionAttemptRef.current = null;
+    persistedDraftKeyRef.current = null;
+    completedDraftKeyRef.current = null;
+    pendingServerValidationRef.current = null;
+    removeApplicationFormDraftSnapshot(draftScope, getDraftStorage());
+    setForm(initialForm(defaultBranch));
+    setError(null);
+    setValidationIssue(null);
+    setManualBranchEntry({ branch1: false, branch2: false });
+    setDraftRestored(false);
+    setRecoveryFormVisible(false);
+    setResetConfirming(false);
+    requestAnimationFrame(() => {
+      const target = document.getElementById("name")
+        ?? (jobLoadState === "loading" ? jobLoadingTitleRef.current : null)
+        ?? (jobLoadState === "error" ? retryJobButtonRef.current : null)
+        ?? applicationModeActionRef.current
+        ?? unavailableJobTitleRef.current
+        ?? jobTitleRef.current;
+      target?.scrollIntoView({ behavior: "auto", block: "center" });
+      target?.focus({ preventScroll: true });
+    });
+  };
+
+  const showResetConfirmation = () => {
+    setResetConfirming(true);
+    requestAnimationFrame(() => keepEditingRef.current?.focus({ preventScroll: true }));
+  };
+
+  const cancelResetConfirmation = () => {
+    setResetConfirming(false);
+    requestAnimationFrame(() => resetDraftTriggerRef.current?.focus({ preventScroll: true }));
+  };
+
+  const continueAsGeneralApplication = () => {
+    setError(null);
+    setGeneralOptIn(true);
+    requestAnimationFrame(() => {
+      const target = generalJobStatusRef.current ?? generalApplicationTitleRef.current;
+      target?.scrollIntoView({ behavior: "auto", block: "center" });
+      target?.focus({ preventScroll: true });
+    });
+  };
+
+  const retryJobLookup = () => {
+    setError(null);
+    setJobLoadAttempt((attempt) => attempt + 1);
+  };
+
+  const abandonSubmissionAttemptForContextChange = (response: unknown) => {
+    const record = response && typeof response === "object"
+      ? response as Record<string, unknown>
+      : null;
+    const responseMessage = typeof record?.error === "string"
+      ? record.error
+      : "지원 조건이 변경되어 현재 상태를 다시 확인해야 해요.";
+    const responseField = typeof record?.field === "string"
+      && REQUIRED_APPLICATION_FIELDS.has(record.field as ApplicantValidationIssue["field"])
+      ? record.field as ApplicantValidationIssue["field"]
+      : null;
+    const issue = responseField
+      ? { field: responseField, message: responseMessage }
+      : null;
+
+    submissionAttemptRef.current = null;
+    setRecoveryFormVisible(true);
+    setError(`${responseMessage} 작성한 내용은 그대로 저장했어요.`);
+    setValidationIssue(issue);
+    pendingServerValidationRef.current = issue;
+
+    const storage = getDraftStorage();
+    const contentKey = applicationFormDraftContentKey(form, generalOptIn, null);
+    const saved = writeApplicationFormDraftSnapshot(draftScope, {
+      form,
+      generalOptIn,
+      submissionAttempt: null,
+      savedAt: Date.now(),
+    }, storage);
+    if (saved) {
+      persistedDraftKeyRef.current = contentKey;
+    } else {
+      removeApplicationFormDraftSnapshot(draftScope, storage);
+      persistedDraftKeyRef.current = null;
+    }
+
+    if (jobIntent.kind === "job") {
+      setJob(null);
+      setJobLoadTimedOut(false);
+      setJobLoadState("loading");
+      setJobLoadAttempt((attempt) => attempt + 1);
+    } else if (issue) {
+      requestAnimationFrame(() => {
+        const field = document.getElementById(`field-${issue.field}`);
+        field?.scrollIntoView({ behavior: "auto", block: "center" });
+        field?.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
+      });
+    }
+  };
+
   const handleSubmit = async () => {
+    if (submitInFlightRef.current) return;
+    if (applicationModeChoiceRequired) {
+      const target = jobLoadState === "loading"
+        ? jobLoadingTitleRef.current
+        : jobLoadState === "error"
+          ? retryJobButtonRef.current
+          : applicationModeActionRef.current;
+      target?.scrollIntoView({ behavior: "auto", block: "center" });
+      target?.focus({ preventScroll: true });
+      return;
+    }
     const issue = validateApplicationSubmission(form, vehicleRequired);
     if (issue) {
       setError(issue.message);
@@ -238,14 +538,25 @@ function ApplyForm() {
     }
     setError(null);
     setValidationIssue(null);
+    submitInFlightRef.current = true;
+    setSubmittingReplay(pendingSubmissionReplay);
     setSubmitting(true);
     try {
       const prepared = prepareApplicationSubmission(
         submissionAttemptRef.current,
-        { ...form, source, jobId: submissionJobId },
+        { ...form, source, jobId: currentSubmissionJobId },
+        currentVehicleRequired,
         () => crypto.randomUUID(),
       );
       submissionAttemptRef.current = prepared.attempt;
+      const preparedDraftKey = applicationFormDraftContentKey(form, generalOptIn, prepared.attempt);
+      const saved = writeApplicationFormDraftSnapshot(draftScope, {
+        form,
+        generalOptIn,
+        submissionAttempt: prepared.attempt,
+        savedAt: Date.now(),
+      }, getDraftStorage());
+      if (saved) persistedDraftKeyRef.current = preparedDraftKey;
       const { res, json } = await requestWithTimeout(async (signal) => {
         const res = await fetch("/api/apply", {
           method: "POST",
@@ -257,6 +568,10 @@ function ApplyForm() {
         return { res, json };
       }, APPLICATION_REQUEST_TIMEOUT_MS);
       if (!res.ok) {
+        if (shouldAbandonApplicationSubmissionAttempt(json)) {
+          abandonSubmissionAttemptForContextChange(json);
+          return;
+        }
         if (res.status === 429) {
           const retryAfter = Number(
             json.retryAfterSeconds ?? res.headers.get("Retry-After"),
@@ -276,27 +591,30 @@ function ApplyForm() {
         setError("접수 결과를 확인하지 못했어요. 잠시 후 다시 시도해주세요.");
         return;
       }
+      completedDraftKeyRef.current = preparedDraftKey;
+      if (removeApplicationFormDraftSnapshotIfContentKey(
+        draftScope,
+        preparedDraftKey,
+        getDraftStorage(),
+      )) {
+        persistedDraftKeyRef.current = null;
+      }
       setSubmissionResult(json);
     } catch (submitError) {
       setError(isRequestTimeoutError(submitError)
         ? "응답이 늦어 접수 결과를 확인하지 못했어요. 같은 내용으로 다시 시도하면 중복 접수 없이 상태를 다시 확인합니다."
         : "인터넷 연결을 확인한 뒤 같은 내용으로 다시 시도해주세요. 제출 내용이 같으면 중복 접수되지 않아요.");
     } finally {
+      submitInFlightRef.current = false;
       setSubmitting(false);
+      setSubmittingReplay(false);
     }
   };
 
-  const verifiedJob = job?.id === jobId ? job : null;
-  const submissionJobId = verifiedJob?.recruiting ? verifiedJob.id : null;
-  const vehicleRequired = verifiedJob?.recruiting ? verifiedJob.vehicle_required !== false : true;
   const progress = applicationSubmissionProgress(form, vehicleRequired);
-  const showApplyForm = shouldShowApplyForm({
-    intent: jobIntent,
-    loadState: jobLoadState,
-    recruiting: verifiedJob?.recruiting ?? null,
-    generalOptIn,
-  });
-  const hasUnavailableJobLink = jobIntent.kind === "invalid" || jobLoadState === "unavailable";
+  const showApplyForm = recoverySessionActive || currentApplyFormAvailable;
+  const hasUnavailableJobLink = !replayUiActive
+    && (jobIntent.kind === "invalid" || jobLoadState === "unavailable");
   const invalidField = validationIssue?.field ?? null;
   const fieldA11y = (field: keyof FormState) => ({
     "aria-invalid": invalidField === field ? true : undefined,
@@ -376,7 +694,11 @@ function ApplyForm() {
             <h1 className="text-[18px] font-extrabold text-foreground">배송원 지원</h1>
           </div>
           <p className="text-[16px] text-muted-foreground">
-            {showApplyForm ? (
+            {replayUiActive ? (
+              <>이전에 보낸 지원서의 접수 결과를 다시 확인할게요.</>
+            ) : applicationModeChoiceRequired ? (
+              <>수정한 내용은 저장되어 있어요. 위에서 지원 방식을 확인해주세요.</>
+            ) : showApplyForm ? (
               <>아래 항목을 작성해주세요. <span className="text-error-strong">*</span> 표시는 필수입니다.</>
             ) : (
               <>문자로 받으신 공고 상태를 먼저 확인할게요.</>
@@ -384,45 +706,43 @@ function ApplyForm() {
           </p>
         </div>
 
-        {jobIntent.kind === "job" && jobLoadState === "loading" && (
+        {!replayUiActive && jobIntent.kind === "job" && jobLoadState === "loading" && (
           <section role="status" aria-live="polite" className="mb-6 flex items-center gap-3 rounded-2xl border border-border-strong bg-card px-5 py-5 shadow-sm">
-            <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong" />
+            <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
             <div className="text-left">
-              <h2 className="text-[16px] font-extrabold text-foreground">지원할 공고를 확인하고 있어요</h2>
+              <h2 ref={jobLoadingTitleRef} tabIndex={-1} className="text-[16px] font-extrabold text-foreground">지원할 공고를 확인하고 있어요</h2>
               <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">확인되면 지원서를 바로 보여드릴게요.</p>
             </div>
           </section>
         )}
 
-        {!generalOptIn && jobLoadState === "error" && (
-          <section role="alert" className="mb-6 rounded-2xl border border-error/30 bg-card px-5 py-5 shadow-sm">
+        {!replayUiActive && !generalOptIn && jobLoadState === "error" && (
+          <section role="alert" className="mb-6 rounded-2xl border border-warning/30 bg-card px-5 py-5 shadow-sm">
             <div className="flex items-start gap-3">
-              <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-error-strong" />
+              <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-strong" />
               <div>
-                <h2 className="text-[17px] font-extrabold text-foreground">
-                  {jobLoadTimedOut ? "공고 확인 시간이 길어지고 있어요" : "공고 정보를 불러오지 못했어요"}
-                </h2>
+                <h2 className="text-[17px] font-extrabold text-foreground">공고 상태를 확인하지 못했어요</h2>
                 <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">
-                  {jobLoadTimedOut
-                    ? "공고 상태를 확인하지 못했어요. 잠시 후 다시 불러오거나 다른 일자리 지원서를 작성할 수 있어요."
-                    : "인터넷 연결을 확인한 뒤 다시 시도해주세요."}
+                  {applyJobLoadErrorDescription(jobLoadTimedOut)}
                 </p>
               </div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               <button
+                ref={retryJobButtonRef}
                 type="button"
-                onClick={() => setJobLoadAttempt((attempt) => attempt + 1)}
+                onClick={retryJobLookup}
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-foreground px-4 text-[16px] font-extrabold text-white transition-colors hover:bg-foreground/90 active:bg-foreground/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 <RefreshCw size={18} aria-hidden="true" /> 다시 불러오기
               </button>
               <button
+                ref={applicationModeActionRef}
                 type="button"
-                onClick={() => setGeneralOptIn(true)}
+                onClick={continueAsGeneralApplication}
                 className="min-h-12 rounded-2xl border border-control-border bg-card px-4 text-[16px] font-bold text-foreground transition-colors hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                다른 일자리 지원하기
+                공고 없이 일반 지원서 작성
               </button>
             </div>
           </section>
@@ -433,13 +753,14 @@ function ApplyForm() {
             <div className="flex items-start gap-3">
               <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-error-strong" />
               <div>
-                <h2 className="text-[17px] font-extrabold text-foreground">이 공고 링크를 확인할 수 없어요</h2>
+                <h2 ref={unavailableJobTitleRef} tabIndex={-1} className="text-[17px] font-extrabold text-foreground">이 공고 링크를 확인할 수 없어요</h2>
                 <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">주소가 잘못됐거나 더 이상 공개되지 않는 공고일 수 있어요.</p>
               </div>
             </div>
             <button
+              ref={applicationModeActionRef}
               type="button"
-              onClick={() => setGeneralOptIn(true)}
+              onClick={continueAsGeneralApplication}
               className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-yellow px-4 text-[16px] font-extrabold text-foreground shadow-brand transition-colors hover:bg-yellow-500 active:bg-yellow-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <FileText size={18} aria-hidden="true" /> 다른 일자리 지원서 작성하기
@@ -458,27 +779,32 @@ function ApplyForm() {
                 <div className={`text-[13px] font-extrabold ${verifiedJob.recruiting ? "text-warning-strong" : "text-error-strong"}`}>
                   {verifiedJob.recruiting ? "모집 중인 공고" : "모집이 마감된 공고"}
                 </div>
-                <h2 className="mt-1 text-[18px] font-extrabold leading-snug text-foreground">{verifiedJob.title}</h2>
+                <h2 ref={jobTitleRef} tabIndex={-1} className="mt-1 text-[18px] font-extrabold leading-snug text-foreground">{verifiedJob.title}</h2>
                 <p className="mt-1 text-[14px] text-muted-foreground">
                   {[verifiedJob.client_name, verifiedJob.branch].filter(Boolean).join(" · ") || "옹고잉 배송원"}
                 </p>
               </div>
             </div>
-            {verifiedJob.recruiting ? (
-              <p className="mt-4 rounded-xl border border-success/20 bg-success-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-success-strong">
-                아래 지원서를 제출하면 이 공고에 지원 의사가 전달됩니다. 근무 확정은 아니며, 매니저가 확인합니다.
+            {replayUiActive ? (
+              <p className="mt-4 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-info-strong">
+                새로 지원하는 것이 아니라, 이전에 보낸 지원서의 접수 결과를 같은 접수번호로 다시 확인합니다.
               </p>
             ) : generalOptIn ? (
-              <p className="mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-info-strong">
+              <p ref={generalJobStatusRef} tabIndex={-1} role="status" aria-live="polite" className="mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-info-strong">
                 <FileText size={17} aria-hidden="true" className="mt-0.5 shrink-0" />
                 <span>지금부터 작성하는 내용은 다른 일자리용 일반 지원서로 접수됩니다.</span>
+              </p>
+            ) : verifiedJob.recruiting ? (
+              <p className="mt-4 rounded-xl border border-success/20 bg-success-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-success-strong">
+                아래 지원서를 제출하면 이 공고에 지원 의사가 전달됩니다. 근무 확정은 아니며, 매니저가 확인합니다.
               </p>
             ) : (
               <div className="mt-4 rounded-xl border border-error/25 bg-error-soft px-3 py-3">
                 <p className="text-[14px] font-bold leading-relaxed text-error-strong">이 공고에는 더 이상 지원할 수 없어요. 원하시면 다른 일자리용 지원서를 남길 수 있어요.</p>
                 <button
+                  ref={applicationModeActionRef}
                   type="button"
-                  onClick={() => setGeneralOptIn(true)}
+                  onClick={continueAsGeneralApplication}
                   className="mt-3 min-h-12 w-full rounded-xl bg-foreground px-4 text-[15px] font-extrabold text-white transition-colors hover:bg-foreground/90 active:bg-foreground/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   다른 일자리 지원서 작성하기
@@ -488,22 +814,100 @@ function ApplyForm() {
           </section>
         )}
 
-        {generalOptIn && !verifiedJob && (
-          <section className="mb-6 flex items-start gap-3 rounded-2xl border border-info/20 bg-info-soft px-5 py-4 text-info-strong">
+        {!replayUiActive && generalOptIn && !verifiedJob && (
+          <section role="status" aria-live="polite" className="mb-6 flex items-start gap-3 rounded-2xl border border-info/20 bg-info-soft px-5 py-4 text-info-strong">
             <FileText size={20} aria-hidden="true" className="mt-0.5 shrink-0" />
             <div>
-              <h2 className="text-[16px] font-extrabold">다른 일자리용 지원서를 작성하고 있어요</h2>
+              <h2 ref={generalApplicationTitleRef} tabIndex={-1} className="text-[16px] font-extrabold">다른 일자리용 지원서를 작성하고 있어요</h2>
               <p className="mt-1 text-[14px] font-medium leading-relaxed">작성하신 조건에 맞는 일자리를 매니저가 확인합니다.</p>
             </div>
           </section>
         )}
 
-        {showApplyForm && <form
+        {showApplyForm && !draftReady && (
+          <section role="status" aria-live="polite" className="mb-6 flex items-center gap-3 rounded-2xl border border-border-strong bg-card px-5 py-5 shadow-sm">
+            <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
+            <div className="text-left">
+              <h2 className="text-[16px] font-extrabold text-foreground">지원서를 준비하고 있어요</h2>
+              <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">이 탭에 작성 중인 내용이 있는지 확인할게요.</p>
+            </div>
+          </section>
+        )}
+
+        {showApplyForm && draftReady && <form
+          aria-busy={submitting}
           onSubmit={(event) => {
             event.preventDefault();
             void handleSubmit();
           }}
         >
+        <fieldset
+          disabled={submitting}
+          className={`m-0 min-w-0 border-0 p-0 ${submitting ? "[&_button]:cursor-wait [&_button]:opacity-60 [&_input]:cursor-wait [&_select]:cursor-wait [&_textarea]:cursor-wait" : ""}`}
+        >
+        {draftRestored && (
+          <section role="status" aria-live="polite" aria-atomic="true" className="mb-5 rounded-2xl border border-info/20 bg-info-soft px-4 py-4 text-info-strong">
+            {resetConfirming ? (
+              <>
+                <h2 className="text-[16px] font-extrabold">
+                  {replayUiActive ? "이전 접수 결과 재확인을 중단할까요?" : "불러온 내용을 모두 지울까요?"}
+                </h2>
+                <p className="mt-1 text-[14px] font-medium leading-relaxed">
+                  {replayUiActive
+                    ? "불러온 내용과 같은 접수번호로 결과를 다시 확인할 수 없게 됩니다."
+                    : "입력한 내용은 복구할 수 없어요."}
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button
+                    ref={keepEditingRef}
+                    type="button"
+                    onClick={cancelResetConfirmation}
+                    className="min-h-12 rounded-xl border border-info/25 bg-card px-4 text-[15px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    계속 작성
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetDraft}
+                    className="min-h-12 rounded-xl bg-error-strong px-4 text-[15px] font-extrabold text-white transition-colors hover:bg-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2"
+                  >
+                    모두 지우기
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-start gap-3">
+                  <FileText size={20} aria-hidden="true" className="mt-0.5 shrink-0" />
+                  <div>
+                    <h2 className="text-[16px] font-extrabold">
+                      {replayUiActive
+                        ? "접수 결과가 확인되지 않은 지원서를 불러왔어요"
+                        : applicationModeChoiceRequired
+                          ? "수정한 내용은 안전하게 저장되어 있어요"
+                          : "작성하던 내용을 불러왔어요"}
+                    </h2>
+                    <p className="mt-1 text-[14px] font-medium leading-relaxed">
+                      {replayUiActive
+                        ? "내용을 그대로 두고 아래 버튼을 누르면 중복 접수 없이 이전 결과를 다시 확인합니다. 내용을 바꾸면 현재 공고 상태에 맞는 새 지원으로 전환됩니다."
+                        : applicationModeChoiceRequired
+                          ? "내용이 바뀌어 새 지원으로 전환됐어요. 위에서 공고를 다시 확인하거나 다른 일자리용 일반 지원을 선택해주세요."
+                          : "확인한 뒤 이어서 작성해주세요."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  ref={resetDraftTriggerRef}
+                  type="button"
+                  onClick={showResetConfirmation}
+                  className="mt-3 min-h-12 w-full rounded-xl border border-info/25 bg-card px-4 text-[15px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  처음부터 작성
+                </button>
+              </>
+            )}
+          </section>
+        )}
         <div className={`sticky top-0 z-20 -mx-2 mb-5 bg-background/95 px-2 py-2 backdrop-blur-sm ${error ? "" : "landscape:static landscape:z-auto landscape:mx-0 landscape:mb-3 landscape:bg-transparent landscape:px-0 landscape:py-0 landscape:backdrop-blur-none"}`}>
           <div className="bg-card border border-border-strong rounded-2xl px-4 py-3 shadow-sm landscape:px-3 landscape:py-2">
             <div className="flex items-center justify-between gap-4 text-[14px]">
@@ -759,12 +1163,28 @@ function ApplyForm() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || waitingForApplicationContext}
           className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full mt-4 min-h-14 bg-brand-yellow hover:bg-yellow-500 disabled:cursor-wait disabled:opacity-60 text-foreground px-4 py-4 rounded-2xl text-[16px] font-extrabold transition-colors flex items-center justify-center gap-2 shadow-brand"
         >
-          {submitting ? <Loader2 size={20} aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : null}
-          {submitting ? "제출 중…" : submissionJobId ? "이 공고에 지원하기" : "지원서 제출하기"}
+          {submitting || waitingForApplicationContext
+            ? <Loader2 size={20} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
+            : null}
+          {waitingForApplicationContext
+            ? "공고 확인 중…"
+            : submitting
+            ? submittingReplay ? "접수 결과 확인 중…" : "제출 중…"
+            : applicationModeChoiceRequired
+              ? "지원 방식 확인하기"
+              : replayUiActive ? "접수 결과 다시 확인" : submissionJobId ? "이 공고에 지원하기" : "지원서 제출하기"}
         </button>
+        {submitting && (
+          <p role="status" aria-live="polite" className="mt-3 text-center text-[14px] font-bold leading-relaxed text-muted-foreground">
+            {submittingReplay
+              ? "이전 접수 결과를 확인하고 있어요. 잠시만 기다려주세요."
+              : "지원서를 제출하고 있어요. 잠시만 기다려주세요."}
+          </p>
+        )}
+        </fieldset>
         </form>}
         <div className="h-10" />
       </div>
@@ -772,10 +1192,33 @@ function ApplyForm() {
   );
 }
 
+function ApplyFormRoute() {
+  const searchParams = useSearchParams();
+  const source = normalizeSource(searchParams.get("source"));
+  const prefillBranch = searchParams.get("branch");
+  const jobParam = searchParams.get("job");
+  const draftScope: ApplicationFormDraftScope = {
+    source,
+    job: jobParam,
+    branch: prefillBranch,
+  };
+  const scopeKey = applicationFormDraftStorageKey(draftScope);
+
+  return (
+    <ApplyForm
+      key={scopeKey}
+      source={source}
+      prefillBranch={prefillBranch}
+      jobParam={jobParam}
+      draftScope={draftScope}
+    />
+  );
+}
+
 export default function ApplyPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-background" />}>
-      <ApplyForm />
+      <ApplyFormRoute />
     </Suspense>
   );
 }

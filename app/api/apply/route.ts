@@ -34,9 +34,13 @@ import {
   isTrustedApplicationInternalRequest,
   trustedApplicationClientIp,
 } from "@/lib/application-rate-limit";
+import {
+  applicationReplayCandidateOutcome,
+  applicationServerReplayPlan,
+} from "@/lib/application-server-replay";
 
 const APPLICATION_REPLAY_APPLICANT_FIELDS = [
-  "id", "source", "status", "note", "birth_date", "own_vehicle", "license_type",
+  "id", "name", "phone", "branch", "work_hours", "source", "status", "note", "birth_date", "own_vehicle", "license_type",
   "vehicle_type", "self_ownership", "filter_pass", "available_slots",
   "available_slots_updated_at", "application_submission_id",
   "application_request_fingerprint", "application_auto_engagement_required",
@@ -44,6 +48,10 @@ const APPLICATION_REPLAY_APPLICANT_FIELDS = [
 
 interface ApplicationReplayApplicant {
   id: number;
+  name: string;
+  phone: string;
+  branch: string | null;
+  work_hours: string | null;
   source: string | null;
   status: string | null;
   note: string | null;
@@ -119,45 +127,7 @@ export async function POST(req: NextRequest) {
     const jobRequested = Number.isInteger(realJobId) && realJobId > 0;
     let publicJobOpen: boolean | null = jobRequested ? null : false;
     let jobVehicleRequired: boolean | null = null;
-
-    // 공고별 필수 조건과 후보 연결 가능 여부를 저장 전에 한 번만 확인한다.
-    if (jobRequested) {
-      const { data: requestedJob, error: requestedJobError } = await supabase
-        .from("jobs")
-        .select("id, title, status, closes_at, exposure, recruit_mode, vehicle_required")
-        .eq("id", realJobId)
-        .maybeSingle();
-      if (requestedJobError) {
-        console.error("[apply] requested job lookup failed", requestedJobError);
-        return NextResponse.json(
-          { error: "공고 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", retryable: true },
-          { status: 503 },
-        );
-      } else if (requestedJob) {
-        const availability = publicJobAvailability({
-          title: typeof requestedJob.title === "string" ? requestedJob.title : null,
-          status: typeof requestedJob.status === "string" ? requestedJob.status : null,
-          exposure: typeof requestedJob.exposure === "string" ? requestedJob.exposure : null,
-          recruitMode: typeof requestedJob.recruit_mode === "string" ? requestedJob.recruit_mode : null,
-          closesAt: typeof requestedJob.closes_at === "string" ? requestedJob.closes_at : null,
-        });
-        if (availability === "hidden") {
-          return NextResponse.json(
-            { error: "공고를 찾을 수 없습니다." },
-            { status: 404 },
-          );
-        }
-        publicJobOpen = availability === "open";
-        jobVehicleRequired = requestedJob.vehicle_required !== false;
-      } else {
-        return NextResponse.json(
-          { error: "선택한 공고를 찾을 수 없습니다. 공고 상태를 다시 확인해주세요." },
-          { status: 409 },
-        );
-      }
-    }
-
-    const vehicleRequired = applicationVehicleRequired({ jobRequested, jobVehicleRequired });
+    let vehicleRequired = true;
     const submittedForm = {
       name: typeof name === "string" ? name : "",
       birthDate: typeof birthDate === "string" ? birthDate : "",
@@ -175,22 +145,174 @@ export async function POST(req: NextRequest) {
       selfOwnership: typeof selfOwnership === "string" ? selfOwnership : "",
       marketingConsent: marketingConsent === true,
     };
-    const validationIssue = validateApplicationSubmission(submittedForm, vehicleRequired);
-    if (validationIssue) {
-      return NextResponse.json(
-        { error: validationIssue.message, field: validationIssue.field },
-        { status: 400 }
-      );
-    }
-
     const submissionFingerprint = await applicationSubmissionPayloadDigest({
       ...submittedForm,
       source: typeof source === "string" ? source : "direct",
       jobId: jobRequested ? realJobId : null,
     });
 
-    // 공개 제출은 applicant 조회·지오코딩·외부 발송보다 먼저 durable admission을 통과한다.
-    // 같은 UUID+payload replay만 제한을 다시 세지 않고 허용하며, 전화/IP 원문은 저장하지 않는다.
+    // 현재 공고를 다시 심사하기 전에 submission key의 영구 매핑부터 해석한다.
+    // 이미 저장된 같은 payload replay는 공고가 이후 변경·삭제되어도 최초 접수를 되돌리지 않는다.
+    const outboxLookup = await supabase
+      .from("application_message_send_requests")
+      .select("request_fingerprint, applicant_id, applicant_phone, body, job_id, sent_by, status, provider_message_id, message_type, template_id, auto_engagement_required, created_at")
+      .eq("idempotency_key", submissionId)
+      .maybeSingle();
+    if (outboxLookup.error) {
+      console.error("[apply] submission outbox mapping lookup failed", outboxLookup.error);
+      return NextResponse.json(
+        { error: "기존 제출 기록을 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
+        { status: 503 },
+      );
+    }
+    const existingInitialMessageRequest = outboxLookup.data
+      ? outboxLookup.data as ExistingApplicationMessageRequest
+      : null;
+    let submissionMappedAt = typeof outboxLookup.data?.created_at === "string"
+      ? outboxLookup.data.created_at
+      : null;
+    let mappingDecision = applicationSubmissionMappingDecision({
+      requestFingerprint: submissionFingerprint,
+      outbox: existingInitialMessageRequest
+        ? {
+            applicantId: existingInitialMessageRequest.applicant_id,
+            requestFingerprint: existingInitialMessageRequest.request_fingerprint,
+          }
+        : null,
+      applicant: null,
+    });
+    if (mappingDecision.kind === "conflict") {
+      return NextResponse.json(
+        { error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다." },
+        { status: 409 },
+      );
+    }
+
+    let mappedAutoEngagementRequired = existingInitialMessageRequest
+      ? existingInitialMessageRequest.auto_engagement_required === true
+      : null;
+    if (mappingDecision.kind === "new") {
+      const submissionMappingLookup = await supabase
+        .from("application_submission_mappings")
+        .select("request_fingerprint, applicant_id, auto_engagement_required, created_at")
+        .eq("submission_id", submissionId)
+        .maybeSingle();
+      if (submissionMappingLookup.error) {
+        console.error("[apply] submission mapping lookup failed", submissionMappingLookup.error);
+        return NextResponse.json(
+          { error: "제출 요청을 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
+          { status: 503 },
+        );
+      }
+      mappingDecision = applicationSubmissionMappingDecision({
+        requestFingerprint: submissionFingerprint,
+        outbox: null,
+        applicant: submissionMappingLookup.data
+          ? {
+              applicantId: Number(submissionMappingLookup.data.applicant_id),
+              requestFingerprint: typeof submissionMappingLookup.data.request_fingerprint === "string"
+                ? submissionMappingLookup.data.request_fingerprint
+                : null,
+            }
+          : null,
+      });
+      if (mappingDecision.kind === "conflict") {
+        return NextResponse.json(
+          { error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다." },
+          { status: 409 },
+        );
+      }
+      if (mappingDecision.kind === "reuse") {
+        mappedAutoEngagementRequired = submissionMappingLookup.data?.auto_engagement_required === true;
+        submissionMappedAt = typeof submissionMappingLookup.data?.created_at === "string"
+          ? submissionMappingLookup.data.created_at
+          : null;
+      }
+    } else if (existingInitialMessageRequest) {
+      // outbox는 candidate 연결보다 늦게 선점될 수 있다. trigger 원장 시각을 우선해야
+      // 같은 submission이 만든 auto-filter candidate를 과거 candidate로 오인하지 않는다.
+      const ledgerTimestampLookup = await supabase
+        .from("application_submission_mappings")
+        .select("request_fingerprint, applicant_id, created_at")
+        .eq("submission_id", submissionId)
+        .maybeSingle();
+      if (ledgerTimestampLookup.error) {
+        console.error("[apply] submission mapping timestamp lookup failed", ledgerTimestampLookup.error);
+      } else if (
+        ledgerTimestampLookup.data?.request_fingerprint === submissionFingerprint
+        && Number(ledgerTimestampLookup.data.applicant_id) === mappingDecision.applicantId
+        && typeof ledgerTimestampLookup.data.created_at === "string"
+      ) {
+        submissionMappedAt = ledgerTimestampLookup.data.created_at;
+      }
+    }
+
+    const acceptedReplay = mappingDecision.kind === "reuse";
+    const replayPreflightPlan = applicationServerReplayPlan({
+      acceptedReplay,
+      storedFilterPass: null,
+      sameAttemptApplicant: false,
+    });
+    if (replayPreflightPlan.requiresJobPreflight) {
+      // 새 제출만 현재 공고의 공개 상태와 차량 조건을 검증한다.
+      if (jobRequested) {
+        const { data: requestedJob, error: requestedJobError } = await supabase
+          .from("jobs")
+          .select("id, title, status, closes_at, exposure, recruit_mode, vehicle_required")
+          .eq("id", realJobId)
+          .maybeSingle();
+        if (requestedJobError) {
+          console.error("[apply] requested job lookup failed", requestedJobError);
+          return NextResponse.json(
+            { error: "공고 정보를 다시 확인하지 못했습니다. 잠시 후 다시 제출해주세요.", retryable: true },
+            { status: 503 },
+          );
+        } else if (requestedJob) {
+          const availability = publicJobAvailability({
+            title: typeof requestedJob.title === "string" ? requestedJob.title : null,
+            status: typeof requestedJob.status === "string" ? requestedJob.status : null,
+            exposure: typeof requestedJob.exposure === "string" ? requestedJob.exposure : null,
+            recruitMode: typeof requestedJob.recruit_mode === "string" ? requestedJob.recruit_mode : null,
+            closesAt: typeof requestedJob.closes_at === "string" ? requestedJob.closes_at : null,
+          });
+          if (availability === "hidden") {
+            return NextResponse.json(
+              { error: "공고를 찾을 수 없습니다.", code: "APPLICATION_CONTEXT_CHANGED" },
+              { status: 404 },
+            );
+          }
+          publicJobOpen = availability === "open";
+          jobVehicleRequired = requestedJob.vehicle_required !== false;
+        } else {
+          return NextResponse.json(
+            {
+              error: "선택한 공고를 찾을 수 없습니다. 공고 상태를 다시 확인해주세요.",
+              code: "APPLICATION_CONTEXT_CHANGED",
+            },
+            { status: 409 },
+          );
+        }
+      }
+
+      vehicleRequired = applicationVehicleRequired({ jobRequested, jobVehicleRequired });
+      const validationIssue = validateApplicationSubmission(submittedForm, vehicleRequired);
+      if (validationIssue) {
+        return NextResponse.json(
+          {
+            error: validationIssue.message,
+            field: validationIssue.field,
+            code: "APPLICATION_CONTEXT_CHANGED",
+          },
+          { status: 400 },
+        );
+      }
+    } else if (jobRequested) {
+      // 후보 연결 복구는 아래 원자 RPC가 현재 공고 상태를 다시 잠가 판단한다.
+      publicJobOpen = true;
+    }
+
+    // 유효한 새 제출과 동일 payload replay만 durable admission을 통과한다.
+    // 이후 applicant 조회·지오코딩·외부 발송보다 앞서며 전화/IP 원문은 저장하지 않는다.
     const rateLimitSecret = process.env.APPLY_RATE_LIMIT_SECRET?.trim()
       || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     if (!rateLimitSecret) {
@@ -261,105 +383,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // submission key의 durable mapping을 전화번호·현재 상태 분기보다 먼저 해석한다.
-    // 같은 key replay가 첫 처리에서 '부적합'이 된 row를 새 applicant로 다시 만들면 안 된다.
-    const outboxLookup = await supabase
-      .from("application_message_send_requests")
-      .select("request_fingerprint, applicant_id, applicant_phone, body, job_id, sent_by, status, provider_message_id, message_type, template_id, auto_engagement_required")
-      .eq("idempotency_key", submissionId)
-      .maybeSingle();
-    if (outboxLookup.error) {
-      console.error("[apply] submission outbox mapping lookup failed", outboxLookup.error);
-      return NextResponse.json(
-        { error: "기존 제출 기록을 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
-        { status: 503 },
-      );
-    }
-    const existingInitialMessageRequest = outboxLookup.data
-      ? outboxLookup.data as ExistingApplicationMessageRequest
-      : null;
-    let mappingDecision = applicationSubmissionMappingDecision({
-      requestFingerprint: submissionFingerprint,
-      outbox: existingInitialMessageRequest
-        ? {
-            applicantId: existingInitialMessageRequest.applicant_id,
-            requestFingerprint: existingInitialMessageRequest.request_fingerprint,
-          }
-        : null,
-      applicant: null,
-    });
-    if (mappingDecision.kind === "conflict") {
-      return NextResponse.json(
-        { error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다." },
-        { status: 409 },
-      );
-    }
-
     let mappedApplicant: ApplicationReplayApplicant | null = null;
-    let mappedAutoEngagementRequired = existingInitialMessageRequest
-      ? existingInitialMessageRequest.auto_engagement_required === true
-      : null;
     if (mappingDecision.kind === "reuse") {
       const mappedLookup = await supabase
         .from("applicants")
         .select(APPLICATION_REPLAY_APPLICANT_FIELDS)
         .eq("id", mappingDecision.applicantId)
         .maybeSingle();
-      if (mappedLookup.error || !mappedLookup.data) {
-        console.error("[apply] outbox applicant mapping missing", mappedLookup.error);
+      if (mappedLookup.error) {
+        console.error("[apply] submission mapping applicant lookup failed", mappedLookup.error);
+        return NextResponse.json(
+          { error: "기존 제출의 지원자 기록을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
+          { status: 503 },
+        );
+      }
+      if (!mappedLookup.data) {
+        console.error("[apply] submission mapping applicant missing");
         return NextResponse.json(
           { error: "기존 제출의 지원자 기록을 확인하지 못했습니다. 매니저에게 문의해주세요." },
           { status: 409 },
         );
       }
       mappedApplicant = mappedLookup.data as unknown as ApplicationReplayApplicant;
-    } else {
-      const submissionMappingLookup = await supabase
-        .from("application_submission_mappings")
-        .select("request_fingerprint, applicant_id, auto_engagement_required")
-        .eq("submission_id", submissionId)
-        .maybeSingle();
-      if (submissionMappingLookup.error) {
-        console.error("[apply] submission mapping lookup failed", submissionMappingLookup.error);
-        return NextResponse.json(
-          { error: "제출 요청을 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true },
-          { status: 503 },
-        );
-      }
-      mappingDecision = applicationSubmissionMappingDecision({
-        requestFingerprint: submissionFingerprint,
-        outbox: null,
-        applicant: submissionMappingLookup.data
-          ? {
-              applicantId: Number(submissionMappingLookup.data.applicant_id),
-              requestFingerprint: typeof submissionMappingLookup.data.request_fingerprint === "string"
-                ? submissionMappingLookup.data.request_fingerprint
-                : null,
-            }
-          : null,
-      });
-      if (mappingDecision.kind === "conflict") {
-        return NextResponse.json(
-          { error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다." },
-          { status: 409 },
-        );
-      }
-      if (mappingDecision.kind === "reuse") {
-        mappedAutoEngagementRequired = submissionMappingLookup.data?.auto_engagement_required === true;
-        const mappedLookup = await supabase
-          .from("applicants")
-          .select(APPLICATION_REPLAY_APPLICANT_FIELDS)
-          .eq("id", mappingDecision.applicantId)
-          .maybeSingle();
-        if (mappedLookup.error || !mappedLookup.data) {
-          console.error("[apply] submission mapping applicant missing", mappedLookup.error);
-          return NextResponse.json(
-            { error: "기존 제출의 지원자 기록을 확인하지 못했습니다. 매니저에게 문의해주세요." },
-            { status: 409 },
-          );
-        }
-        mappedApplicant = mappedLookup.data as unknown as ApplicationReplayApplicant;
-      }
     }
 
     // ── durable mapping이 없을 때만 기존 applicant를 전화번호로 조회 ─────────
@@ -410,13 +455,24 @@ export async function POST(req: NextRequest) {
         ?? (existingRow?.application_auto_engagement_required === true)
       : freshAutoEngagementRequired;
 
-    // 차량이 필요 없는 실공고는 B마트 레거시 차량 조건으로 탈락시키지 않는다.
-    const filterPass = applicationFilterPasses({
-      ownVehicle,
-      licenseType,
-      selfOwnership,
-      vehicleRequired,
+    const sameAttemptApplicant = mappedApplicant?.application_submission_id === submissionId
+      && mappedApplicant.application_request_fingerprint === submissionFingerprint;
+    const replayPlan = applicationServerReplayPlan({
+      acceptedReplay: idempotentReplay,
+      storedFilterPass: typeof mappedApplicant?.filter_pass === "string"
+        ? mappedApplicant.filter_pass
+        : null,
+      sameAttemptApplicant,
     });
+    // 신규만 현재 답변으로 판정한다. 이미 수락된 replay는 저장 당시 판정을 그대로 사용한다.
+    const filterPass = replayPlan.kind === "accepted_replay"
+      ? replayPlan.filterPass === true
+      : applicationFilterPasses({
+          ownVehicle,
+          licenseType,
+          selfOwnership,
+          vehicleRequired,
+        });
 
     // source='danggeun'/'baemin'은 AI가 자동 응대 → 스크리닝 중. 그 외는 매니저 대기 → 스크리닝 전.
     const autoEngages = source === "danggeun" || source === "baemin";
@@ -441,7 +497,9 @@ export async function POST(req: NextRequest) {
     });
 
     // ── 주소 지오코딩 (실패해도 저장 진행) ─────────────────
-    const geo = location?.trim() ? await geocodeAddress(location) : null;
+    const geo = replayPlan.persistsApplicant && location?.trim()
+      ? await geocodeAddress(location)
+      : null;
 
     // ── Supabase에 저장 (UPDATE or INSERT) ─────────────────
     const consent = marketingConsent === true;
@@ -484,30 +542,32 @@ export async function POST(req: NextRequest) {
       application_auto_engagement_required: autoEngagementRequired,
     };
 
-    let inserted: typeof rowPayload & { id: number } | null = null;
+    let inserted: ApplicationReplayApplicant | null = replayPlan.kind === "accepted_replay"
+      ? mappedApplicant
+      : null;
     let error: { message?: string; code?: string } | null = null;
-    if (updateMode) {
+    if (replayPlan.persistsApplicant && updateMode) {
       const { data, error: upErr } = await supabase
         .from("applicants")
         .update(rowPayload)
         .eq("id", existingRow!.id)
         .select()
         .single();
-      inserted = (data as typeof rowPayload & { id: number } | null) ?? null;
+      inserted = (data as unknown as ApplicationReplayApplicant | null) ?? null;
       error = upErr;
-    } else {
+    } else if (replayPlan.persistsApplicant) {
       const { data, error: inErr } = await supabase
         .from("applicants")
         .insert(rowPayload)
         .select()
         .single();
-      inserted = (data as typeof rowPayload & { id: number } | null) ?? null;
+      inserted = (data as unknown as ApplicationReplayApplicant | null) ?? null;
       error = inErr;
     }
 
     // 같은 UUID를 두 요청이 동시에 처음 처리하면 DB 원장/고유 제약 중 하나가 loser를 막는다.
     // winner의 매핑을 다시 읽어 같은 applicant로 수렴시키며, 다른 payload 충돌은 거부한다.
-    if (error?.code === "23505") {
+    if (replayPlan.persistsApplicant && error?.code === "23505") {
       const concurrentMappingLookup = await supabase
         .from("application_submission_mappings")
         .select("request_fingerprint, applicant_id")
@@ -543,7 +603,7 @@ export async function POST(req: NextRequest) {
               { status: 503 },
             );
           }
-          inserted = concurrentApplicantLookup.data as typeof rowPayload & { id: number };
+          inserted = concurrentApplicantLookup.data as unknown as ApplicationReplayApplicant;
           error = null;
           isDuplicate = true;
         }
@@ -561,7 +621,7 @@ export async function POST(req: NextRequest) {
     }
 
     const jobContextId = jobRequested ? realJobId : null;
-    const startAutoEngagement = autoEngagementRequired;
+    const startAutoEngagement = autoEngagementRequired && replayPlan.repairsMissingSideEffects;
     const initialMessagePlan = applicationInitialMessagePlan({
       startAutoEngagement,
       existingRequest: existingInitialMessageRequest,
@@ -584,7 +644,7 @@ export async function POST(req: NextRequest) {
         `${inserted.name}님, 안녕하세요.`,
         "옹고잉 배송원 지원서가 정상 접수되었습니다.",
         "",
-        `▶ 지원지점: ${inserted.branch}`,
+        `▶ 지원지점: ${inserted.branch ?? ""}`,
         `▶ 접수일시: ${receivedAt}`,
         "",
         "서류 검토 후 영업일 기준 1~2일 내",
@@ -662,15 +722,25 @@ export async function POST(req: NextRequest) {
       }
 
       const requestFingerprint = submissionFingerprint;
+      const deliveryRequest = initialMessagePlan === "replay"
+        ? {
+            requestFingerprint: existingInitialMessageRequest!.request_fingerprint,
+            applicantId: existingInitialMessageRequest!.applicant_id,
+            phone: existingInitialMessageRequest!.applicant_phone,
+            body: existingInitialMessageRequest!.body,
+            jobId: existingInitialMessageRequest!.job_id,
+            sentBy: existingInitialMessageRequest!.sent_by,
+          }
+        : {
+            requestFingerprint,
+            applicantId: inserted.id,
+            phone: inserted.phone,
+            body: sendBody,
+            jobId: jobContextId,
+            sentBy: sentByLabel,
+          };
       const delivery = await deliverApplicationMessage({
-        request: {
-          requestFingerprint,
-          applicantId: inserted.id,
-          phone: inserted.phone,
-          body: sendBody,
-          jobId: jobContextId,
-          sentBy: sentByLabel,
-        },
+        request: deliveryRequest,
         claim: async () => {
           if (initialMessagePlan === "replay") {
             return {
@@ -749,7 +819,7 @@ export async function POST(req: NextRequest) {
             "APPLY_RECEIVED",
             {
               "#{이름}": inserted.name,
-              "#{지점}": inserted.branch,
+              "#{지점}": inserted.branch ?? "",
               "#{접수일시}": receivedAt,
             },
             sendBody,
@@ -906,35 +976,78 @@ export async function POST(req: NextRequest) {
       : null;
     if (jobRequested && publicJobOpen === true) {
       try {
-        const now = new Date().toISOString();
-        const { data: linkOutcome, error: candidateLinkError } = await supabase.rpc(
-          "link_public_job_candidate",
-          {
-            p_job_id: realJobId,
-            p_applicant_id: inserted.id,
-            p_agent_stage: filterPass ? "screening" : "abort",
-            p_agent_state: filterPass
-              ? { meta: { screening_entered_at: now, entry: "web_apply" } }
-              : { meta: { auto_filtered_at: now, entry: "web_apply" } },
-            p_closed_at: filterPass ? null : now,
-            p_closed_reason: filterPass ? null : "auto: 자동 필터 부적합",
-          },
-        );
-        if (candidateLinkError) {
-          console.error("[apply] real job candidate link failed", candidateLinkError);
-        } else if (
-          linkOutcome === "linked"
-          || linkOutcome === "already_linked"
-          || linkOutcome === "unchanged_closed"
-          || linkOutcome === "unavailable"
+        let candidateReplayLookupComplete = replayPlan.kind !== "accepted_replay";
+        // 영구 매핑된 replay는 최초 후보 연결을 먼저 보존한다. 공고가 이후 닫혀도
+        // 현재 상태를 이유로 이미 존재하는 연결을 '미지원'으로 바꾸지 않는다.
+        if (replayPlan.kind === "accepted_replay") {
+          const existingCandidate = await supabase
+            .from("job_candidates")
+            .select("agent_stage, closed_at, closed_reason, created_at")
+            .eq("job_id", realJobId)
+            .eq("applicant_id", inserted.id)
+            .maybeSingle();
+          if (existingCandidate.error) {
+            console.error("[apply] replay candidate lookup failed", existingCandidate.error);
+          } else {
+            candidateReplayLookupComplete = true;
+            candidateLinkOutcome = applicationReplayCandidateOutcome({
+              found: Boolean(existingCandidate.data),
+              agentStage: typeof existingCandidate.data?.agent_stage === "string"
+                ? existingCandidate.data.agent_stage
+                : null,
+              closedAt: typeof existingCandidate.data?.closed_at === "string"
+                ? existingCandidate.data.closed_at
+                : null,
+              closedReason: typeof existingCandidate.data?.closed_reason === "string"
+                ? existingCandidate.data.closed_reason
+                : null,
+              candidateCreatedAt: typeof existingCandidate.data?.created_at === "string"
+                ? existingCandidate.data.created_at
+                : null,
+              submissionMappedAt,
+              sameAttemptApplicant,
+            });
+          }
+        }
+
+        // 매핑 직후 중단되어 후보 연결이 없을 때만 원자 RPC로 복구한다.
+        // RPC가 현재 공고 공개 상태까지 잠가 확인하므로 닫힌 공고를 새로 연결하지 않는다.
+        if (
+          candidateLinkOutcome === null
+          && candidateReplayLookupComplete
+          && replayPlan.repairsMissingSideEffects
         ) {
-          candidateLinkOutcome = linkOutcome;
-          if (linkOutcome === "unavailable") publicJobOpen = false;
-        } else {
-          console.error("[apply] unexpected public job link outcome", linkOutcome);
+          const now = new Date().toISOString();
+          const { data: linkOutcome, error: candidateLinkError } = await supabase.rpc(
+            "link_public_job_candidate",
+            {
+              p_job_id: realJobId,
+              p_applicant_id: inserted.id,
+              p_agent_stage: filterPass ? "screening" : "abort",
+              p_agent_state: filterPass
+                ? { meta: { screening_entered_at: now, entry: "web_apply" } }
+                : { meta: { auto_filtered_at: now, entry: "web_apply" } },
+              p_closed_at: filterPass ? null : now,
+              p_closed_reason: filterPass ? null : "auto: 자동 필터 부적합",
+            },
+          );
+          if (candidateLinkError) {
+            console.error("[apply] real job candidate link failed", candidateLinkError);
+          } else if (
+            linkOutcome === "linked"
+            || linkOutcome === "already_linked"
+            || linkOutcome === "unchanged_closed"
+            || linkOutcome === "unavailable"
+          ) {
+            candidateLinkOutcome = linkOutcome;
+            if (linkOutcome === "unavailable") publicJobOpen = false;
+          } else {
+            console.error("[apply] unexpected public job link outcome", linkOutcome);
+          }
         }
         if (shouldSetApplicationCurrentJob(filterPass, candidateLinkOutcome)) {
-          // 진행 중인 다른 공고가 없을 때만 이 공고를 현재 공고로 지정
+          // 진행 중인 다른 공고가 없을 때만 이 공고를 현재 공고로 지정한다.
+          // replay의 existing active candidate도 최초 연결의 durable 증거다.
           await supabase
             .from("applicants")
             .update({ current_job_id: realJobId })

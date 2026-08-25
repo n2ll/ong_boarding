@@ -10,6 +10,14 @@ export type ApplicationInitialMessageDelivery = "sent" | "not_sent" | "unknown";
 export interface ApplicationSubmissionAttempt {
   fingerprint: string;
   id: string;
+  jobId: number | null;
+  vehicleRequired: boolean;
+}
+
+export interface ApplicationSubmissionContext {
+  jobId: number | null;
+  vehicleRequired: boolean;
+  reusesAttempt: boolean;
 }
 
 export interface ApplicationMessageRequest {
@@ -136,30 +144,70 @@ export async function applicationSubmissionPayloadDigest(
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function resolveApplicationSubmissionContext(
+  current: ApplicationSubmissionAttempt | null,
+  request: ApplicantFormData & { source: string; jobId: number | null },
+  vehicleRequired: boolean,
+): ApplicationSubmissionContext {
+  const reusesAttempt = current !== null
+    && current.fingerprint === applicationSubmissionPayloadFingerprint({
+      ...request,
+      jobId: current.jobId,
+    });
+  return reusesAttempt
+    ? {
+        jobId: current.jobId,
+        vehicleRequired: current.vehicleRequired,
+        reusesAttempt: true,
+      }
+    : { jobId: request.jobId, vehicleRequired, reusesAttempt: false };
+}
+
 export function nextApplicationSubmissionAttempt(
   current: ApplicationSubmissionAttempt | null,
   request: ApplicantFormData & { source: string; jobId: number | null },
+  vehicleRequired: boolean,
   createId: () => string,
 ): ApplicationSubmissionAttempt {
-  const fingerprint = applicationSubmissionPayloadFingerprint(request);
-  return current?.fingerprint === fingerprint
-    ? current
-    : { fingerprint, id: createId() };
+  const context = resolveApplicationSubmissionContext(current, request, vehicleRequired);
+  if (context.reusesAttempt) return current!;
+  return {
+    fingerprint: applicationSubmissionPayloadFingerprint(request),
+    id: createId(),
+    jobId: request.jobId,
+    vehicleRequired,
+  };
 }
 
 export function prepareApplicationSubmission(
   current: ApplicationSubmissionAttempt | null,
   request: ApplicantFormData & { source: string; jobId: number | null },
+  vehicleRequired: boolean,
   createId: () => string,
 ): {
   attempt: ApplicationSubmissionAttempt;
+  context: ApplicationSubmissionContext;
   payload: ApplicantFormData & { source: string; jobId: number | null; submissionId: string };
 } {
-  const attempt = nextApplicationSubmissionAttempt(current, request, createId);
+  const attempt = nextApplicationSubmissionAttempt(current, request, vehicleRequired, createId);
   return {
     attempt,
-    payload: { ...request, submissionId: attempt.id },
+    context: {
+      jobId: attempt.jobId,
+      vehicleRequired: attempt.vehicleRequired,
+      reusesAttempt: attempt === current,
+    },
+    payload: { ...request, jobId: attempt.jobId, submissionId: attempt.id },
   };
+}
+
+export function shouldAbandonApplicationSubmissionAttempt(response: unknown): boolean {
+  return Boolean(
+    response
+    && typeof response === "object"
+    && "code" in response
+    && response.code === "APPLICATION_CONTEXT_CHANGED",
+  );
 }
 
 /** 일반 active 재제출은 건너뛰고, triage가 만든 배민 임시 행의 첫 폼 완성만 시작한다. */
