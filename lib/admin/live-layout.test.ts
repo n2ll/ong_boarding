@@ -36,14 +36,21 @@ test("the queue summary distinguishes unknown, actionable, and completed work", 
   assert.deepEqual(liveQueueSummary!("empty", 0), { kind: "clear", count: 0 });
 });
 
-test("a global stop takes precedence over draft mode in the compact status notice", async () => {
+test("the compact AI notice distinguishes unknown, stale, stopped, and draft modes", async () => {
   const layout = await loadLiveLayoutModule();
   const liveModeNotice = layout.liveModeNotice as
-    | ((globalKill: boolean, copilotMode: boolean) => "off" | "draft" | null)
+    | ((view:
+      | { state: "loading" | "error"; mode: null }
+      | { state: "stale" | "ready"; mode: "auto" | "draft" | "off" }
+    ) => "loading" | "error" | "stale" | "off" | "draft" | null)
     | undefined;
 
   assert.equal(typeof liveModeNotice, "function");
-  assert.equal(liveModeNotice!(true, true), "off");
-  assert.equal(liveModeNotice!(false, true), "draft");
-  assert.equal(liveModeNotice!(false, false), null);
+  assert.equal(liveModeNotice!({ state: "loading", mode: null }), "loading");
+  assert.equal(liveModeNotice!({ state: "error", mode: null }), "error");
+  assert.equal(liveModeNotice!({ state: "stale", mode: "auto" }), "stale");
+  assert.equal(liveModeNotice!({ state: "stale", mode: "off" }), "stale");
+  assert.equal(liveModeNotice!({ state: "ready", mode: "off" }), "off");
+  assert.equal(liveModeNotice!({ state: "ready", mode: "draft" }), "draft");
+  assert.equal(liveModeNotice!({ state: "ready", mode: "auto" }), null);
 });

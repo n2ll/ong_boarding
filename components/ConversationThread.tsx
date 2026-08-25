@@ -39,6 +39,12 @@ import {
   manualMessageAttentionPresentation,
   type ManualMessageAttentionCollection,
 } from "@/lib/admin/manual-message-attention";
+import {
+  agentModeAllowsManualSend,
+  agentModePresentation,
+  agentModeResumeTarget,
+  type AdminAgentModeView,
+} from "@/lib/admin/agent-mode-view";
 
 interface PendingDraft {
   id: string;
@@ -178,10 +184,10 @@ interface ConversationThreadProps {
   jobId?: number | null;
   /** jobId가 없을 때 미지정 초안만 조회할지, 전체 공고의 최신 초안을 조회할지 구분 */
   draftScope?: "all" | "unscoped";
-  /** 전역 킬스위치 상태 — true면 AI 배지 문구를 바꾸고 수동 발송 차단을 해제 */
-  globalKill?: boolean;
-  /** 전역 코파일럿(초안만) 모드 — true면 AI가 발송하지 않으므로 수동 발송을 열고 배지 문구를 바꾼다 */
-  copilotMode?: boolean;
+  /** 전역 AI 응답 모드의 원격 신뢰 상태 — 불확실한 값을 auto/off로 추정하지 않는다. */
+  agentMode: AdminAgentModeView;
+  /** AI 모드 조회 실패를 대화 맥락에서 바로 복구할 수 있게 한다. */
+  onAgentModeRetry?: () => void;
   /** 수신거부 시각(sms_opt_out_at) — 있으면 헤더에 빨간 배지 표시 */
   smsOptOutAt?: string | null;
   /** 발송·상태변경 후 부모(목록 등) 갱신용 */
@@ -229,8 +235,8 @@ export function ConversationThread({
   phone,
   jobId = null,
   draftScope = "all",
-  globalKill = false,
-  copilotMode = false,
+  agentMode,
+  onAgentModeRetry,
   smsOptOutAt = null,
   onChanged,
   onQueueItemCompleted,
@@ -470,8 +476,26 @@ export function ConversationThread({
   const isPaused = agentPresentation.kind === "paused";
   const hasActiveFlow = agentPresentation.hasActiveFlow;
   const isAiEnabled = agentPresentation.isAiEnabled;
-  // 전역 킬스위치·코파일럿 중에는 AI가 직접 발송하지 않으므로 수동 발송을 열어 교착을 방지한다.
-  const canSend = scopeReady && (!isAiEnabled || globalKill || copilotMode);
+  const agentModeCopy = agentModePresentation(agentMode);
+  const resumeTarget = agentModeResumeTarget(agentMode);
+  const resumeTargetLabel = resumeTarget === "draft" ? "코파일럿" : "AI 자동 응대";
+  const aiControlLabel = !isAiEnabled
+    ? "AI OFF"
+    : resumeTarget === "auto"
+      ? "AI ON"
+      : resumeTarget === "draft"
+        ? "코파일럿"
+        : "AI 대기";
+  const aiControlTone = !isAiEnabled
+    ? "bg-error-soft border-error/30 text-error-strong"
+    : resumeTarget === "auto"
+      ? "bg-success-soft border-success-soft text-success-strong"
+      : resumeTarget === "draft"
+        ? "bg-copilot-soft border-copilot/30 text-copilot-strong"
+        : "bg-warning-soft border-warning/30 text-warning-strong";
+  // 로컬 AI가 이미 멈췄거나, 최신 전역 상태가 off/draft임이 확인된 경우만 직접 발송한다.
+  // cached+error에서 예전 off/draft를 믿으면 실제 auto와 매니저 답장이 겹칠 수 있다.
+  const canSend = scopeReady && (!isAiEnabled || agentModeAllowsManualSend(agentMode));
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
@@ -603,6 +627,12 @@ export function ConversationThread({
       toast.info("이 지원자는 활성 AI 대화 흐름이 없어요. 매니저가 직접 응대합니다.");
       return;
     }
+    if (checked && resumeTarget === null) {
+      toast.error(agentModeCopy.kind === "off"
+        ? "전역 AI가 중지되어 있어 이 대화를 재개할 수 없어요."
+        : "AI 모드를 다시 확인한 뒤 이 대화를 재개해주세요.");
+      return;
+    }
     if (!checked && !opts?.skipConfirm) {
       if (!(await confirm({
         title: `${applicantName}님 AI를 끌까요?`,
@@ -630,7 +660,7 @@ export function ConversationThread({
       if (mountedRef.current) {
         toast.success(
           checked
-            ? `${applicantName}님 AI 자동 응대를 재개했어요.`
+            ? `${applicantName}님 ${resumeTargetLabel}를 재개했어요.`
             : `${applicantName}님 AI를 끄고 매니저 수동 응대로 전환했어요.`
         );
         onChanged?.();
@@ -642,6 +672,10 @@ export function ConversationThread({
 
   const handleSendMessage = async (advanceAfterSend = false) => {
     if (!manualComposerReady || !inputValue.trim() || sending) return;
+    if (!canSend) {
+      toast.error("AI 모드를 확인하거나 이 대화의 AI를 끈 뒤 발송해주세요.");
+      return;
+    }
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -734,6 +768,12 @@ export function ConversationThread({
   // §6.5 원자 동작: 발송 성공 후 인계 큐의 'AI 재개'와 동일한 재개 API를 순차 호출.
   const handleSendAndResume = async (advanceAfterSend = false) => {
     if (!manualComposerReady || !inputValue.trim() || sending) return;
+    if (resumeTarget === null) {
+      toast.error(agentModeCopy.kind === "off"
+        ? "전역 AI가 중지되어 있어 발송 후 재개할 수 없어요. '발송만'을 사용해주세요."
+        : "AI 모드를 다시 확인한 뒤 발송 후 재개해주세요.");
+      return;
+    }
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -775,7 +815,7 @@ export function ConversationThread({
       if (!resolution.continueAfterSend) {
         if (resolution.kind === "unknown") {
           if (mountedRef.current) {
-            toast.warning(json.error || "발송 결과를 확인할 수 없어 AI를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
+            toast.warning(json.error || "발송 결과를 확인할 수 없어 응대 모드를 재개하지 않았어요. 같은 문자를 다시 보내지 말고 대화 내역을 확인해주세요.");
             await loadMessages({ silent: true });
             onChanged?.();
           }
@@ -799,16 +839,16 @@ export function ConversationThread({
         });
         const resumeJson = await resumeRes.json().catch(() => ({}));
         if (!resumeRes.ok) {
-          if (mountedRef.current) toast.error(resumeJson.error || "발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+          if (mountedRef.current) toast.error(resumeJson.error || `발송은 됐지만 ${resumeTargetLabel} 재개에 실패했어요. 토글로 다시 시도해주세요.`);
         } else {
           resumeSucceeded = true;
           if (isCurrentThreadScope(origin.scopeKey, origin.scopeRevision)) {
             setAgentStage(resumeJson.restored_stage ?? "exploration");
           }
-          if (mountedRef.current) toast.success("문자를 보내고 AI 응대를 재개했어요.");
+          if (mountedRef.current) toast.success(`문자를 보내고 ${resumeTargetLabel}를 재개했어요.`);
         }
       } catch {
-        if (mountedRef.current) toast.error("발송은 됐지만 AI 재개에 실패했어요. AI 토글로 다시 시도해주세요.");
+        if (mountedRef.current) toast.error(`발송은 됐지만 ${resumeTargetLabel} 재개에 실패했어요. 토글로 다시 시도해주세요.`);
       }
       if (mountedRef.current) await loadMessages({ silent: true });
       if (mountedRef.current) onChanged?.();
@@ -830,6 +870,10 @@ export function ConversationThread({
 
   const handleSendDraft = async (advanceAfterSend = false) => {
     if (!scopedPendingDraft || !draftComposerReady || draftBusy) return;
+    if (!canSend) {
+      toast.error("AI 모드를 확인하거나 이 대화의 AI를 끈 뒤 초안을 발송해주세요.");
+      return;
+    }
     if (!phone) {
       toast.error("이 지원자는 전화번호가 없어 발송할 수 없어요");
       return;
@@ -1050,12 +1094,31 @@ export function ConversationThread({
               <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700 bg-muted px-3 py-1.5 rounded-lg border border-gray-300"><MessageSquare size={14} /> 수동 문자 모드</span>
             ) : isPaused ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-100 px-3 py-1.5 rounded-lg border border-yellow-300"><User size={14} /> 수동 개입 중</span>
-            ) : globalKill ? (
+            ) : agentModeCopy.kind === "loading" ? (
+              <span className="flex items-center gap-1.5 rounded-lg border border-border-strong bg-muted px-3 py-1.5 text-xs font-bold text-muted-foreground"><Loader2 size={14} className="animate-spin" /> {agentModeCopy.label}</span>
+            ) : agentModeCopy.kind === "error" || agentModeCopy.kind === "stale" ? (
+              <div className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold ${agentModeCopy.kind === "error" ? "border-error/30 bg-error-soft text-error-strong" : "border-warning/30 bg-warning-soft text-warning-strong"}`}>
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>{agentModeCopy.label}{agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""}</span>
+                {onAgentModeRetry && (
+                  <button type="button" onClick={onAgentModeRetry} className="shrink-0 rounded underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">다시 시도</button>
+                )}
+              </div>
+            ) : agentModeCopy.kind === "off" ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
-            ) : copilotMode ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-copilot-strong bg-copilot-soft px-3 py-1.5 rounded-lg border border-copilot/30"><Wand2 size={14} /> 코파일럿 — AI 초안만, 발송은 매니저 승인</span>
+            ) : agentModeCopy.kind === "draft" ? (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-copilot-strong bg-copilot-soft px-3 py-1.5 rounded-lg border border-copilot/30"><Wand2 size={14} /> {agentModeCopy.label}</span>
             ) : (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-info-strong bg-info-soft px-3 py-1.5 rounded-lg border border-info/25"><Bot size={14} /> 옹봇 자동 응대 중</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-info-strong bg-info-soft px-3 py-1.5 rounded-lg border border-info/25"><Bot size={14} /> {agentModeCopy.label}</span>
+            )}
+            {isPaused && agentModeCopy.kind !== "auto" && (
+              <span className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold ${agentModeCopy.kind === "draft" ? "border-copilot/30 bg-copilot-soft text-copilot-strong" : agentModeCopy.kind === "error" ? "border-error/30 bg-error-soft text-error-strong" : agentModeCopy.kind === "loading" ? "border-border-strong bg-muted text-muted-foreground" : "border-warning/30 bg-warning-soft text-warning-strong"}`}>
+                {agentModeCopy.kind === "loading" ? <Loader2 size={14} className="animate-spin" /> : agentModeCopy.kind === "draft" ? <Wand2 size={14} /> : <AlertTriangle size={14} />}
+                {agentModeCopy.label}{agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""}
+                {agentModeCopy.canRetry && onAgentModeRetry && (
+                  <button type="button" onClick={onAgentModeRetry} className="rounded underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">다시 시도</button>
+                )}
+              </span>
             )}
             {smsOptOutAt ? (
               <>
@@ -1087,14 +1150,14 @@ export function ConversationThread({
               </div>
             ) : agentPresentation.showControls ? (
               <>
-                <div className={`flex items-center gap-2.5 px-3 py-1.5 rounded-2xl border transition-colors ${isAiEnabled ? "bg-success-soft border-success-soft" : "bg-error-soft border-error/30"}`}>
-                  <span className={`text-[12px] font-extrabold ${isAiEnabled ? "text-success-strong" : "text-error-strong"}`}>{isAiEnabled ? "AI ON" : "AI OFF"}</span>
+                <div className={`flex items-center gap-2.5 rounded-2xl border px-3 py-1.5 transition-colors ${aiControlTone}`}>
+                  <span className="text-[12px] font-extrabold">{aiControlLabel}</span>
                   <Switch
                     checked={isAiEnabled}
                     onCheckedChange={handleToggleAi}
-                    disabled={!hasActiveFlow}
-                    aria-label={isAiEnabled ? "AI 자동 응대 끄기" : "AI 자동 응대 켜기"}
-                    className="data-[state=checked]:bg-success data-[state=unchecked]:bg-error"
+                    disabled={!hasActiveFlow || (!isAiEnabled && resumeTarget === null)}
+                    aria-label={isAiEnabled ? "이 대화 AI 끄기" : resumeTarget === "draft" ? "이 대화 코파일럿 재개" : resumeTarget === "auto" ? "이 대화 AI 자동 응대 재개" : `${agentModeCopy.label} — 재개 불가`}
+                    className={`${resumeTarget === "draft" ? "data-[state=checked]:bg-copilot" : resumeTarget === "auto" ? "data-[state=checked]:bg-success" : "data-[state=checked]:bg-warning"} data-[state=unchecked]:bg-error`}
                   />
                 </div>
                 {isAiEnabled && (
@@ -1264,11 +1327,11 @@ export function ConversationThread({
             <div className="flex items-center justify-end gap-2 mt-3">
               <button onClick={handleIgnoreDraft} disabled={draftBusy || !draftComposerReady} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
               {onQueueItemCompleted && (
-                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim()} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
+                <button onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
                   검수 발송만
                 </button>
               )}
-              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim()} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+              <button onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {onQueueItemCompleted ? (hasNextQueueItem ? "검수 발송 후 다음" : "검수 발송하고 완료") : "검수 후 발송"}
                 {onQueueItemCompleted && !draftBusy && <ArrowRight size={15} />}
@@ -1347,34 +1410,53 @@ export function ConversationThread({
             >
               {sending ? <Loader2 size={18} className="text-foreground animate-spin" /> : <><Send size={17} className="text-foreground" />{onQueueItemCompleted ? "발송만" : "발송"}</>}
             </button>
-            {onQueueItemCompleted && !isPaused && (
+            {onQueueItemCompleted && (!isPaused || resumeTarget === null) && (
               <button
                 onClick={() => void handleSendMessage(true)}
                 disabled={sending || !inputValue.trim()}
-                title={hasNextQueueItem ? "발송이 완전히 기록된 뒤 다음 답장 대상으로 이동합니다" : "발송이 완전히 기록되면 답장 큐 처리를 마칩니다"}
+                title={resumeTarget === null && isPaused ? "AI는 재개하지 않고, 발송이 완전히 기록된 뒤 답장 큐만 처리합니다" : hasNextQueueItem ? "발송이 완전히 기록된 뒤 다음 답장 대상으로 이동합니다" : "발송이 완전히 기록되면 답장 큐 처리를 마칩니다"}
                 className="h-[54px] rounded-lg bg-foreground px-4 text-[13px] font-bold text-white shadow-action outline-none transition-colors hover:bg-gray-800 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {hasNextQueueItem ? <>보내고 다음 <ArrowRight size={16} className="ml-1 inline" /></> : "보내고 완료"}
               </button>
             )}
-            {isPaused && (
+            {isPaused && resumeTarget !== null && (
               <button
                 onClick={() => void handleSendAndResume(Boolean(onQueueItemCompleted))}
                 disabled={sending || !inputValue.trim()}
-                title={onQueueItemCompleted ? (hasNextQueueItem ? "발송과 AI 재개가 모두 성공한 뒤 다음 답장 대상으로 이동합니다" : "발송과 AI 재개가 모두 성공하면 답장 큐 처리를 마칩니다") : "발송 성공 후 AI 자동 응대를 즉시 재개합니다"}
+                title={onQueueItemCompleted ? (hasNextQueueItem ? `발송과 ${resumeTargetLabel} 재개가 모두 성공한 뒤 다음 답장 대상으로 이동합니다` : `발송과 ${resumeTargetLabel} 재개가 모두 성공하면 답장 큐 처리를 마칩니다`) : `발송 성공 후 ${resumeTargetLabel}를 즉시 재개합니다`}
                 className={`h-[54px] px-3 rounded-lg text-[12px] font-bold disabled:opacity-50 shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${onQueueItemCompleted ? "bg-foreground text-white hover:bg-gray-800 shadow-action" : "bg-info-soft text-info-strong border border-info/25 hover:bg-info/25"}`}
               >
-                {onQueueItemCompleted ? <>보내고 AI 재개<br />{hasNextQueueItem ? "후 다음" : "후 완료"}</> : <>보내고<br />AI 재개</>}
+                {onQueueItemCompleted ? <>보내고 {resumeTarget === "draft" ? "코파일럿" : "AI"} 재개<br />{hasNextQueueItem ? "후 다음" : "후 완료"}</> : <>보내고<br />{resumeTarget === "draft" ? "코파일럿" : "AI"} 재개</>}
               </button>
             )}
           </div>
           </>
+        ) : agentModeCopy.kind === "loading" || agentModeCopy.kind === "error" || agentModeCopy.kind === "stale" ? (
+          <div className={`flex items-center justify-between gap-4 rounded-2xl border p-4 ${agentModeCopy.kind === "error" ? "border-error/30 bg-error-soft" : agentModeCopy.kind === "stale" ? "border-warning/30 bg-warning-soft" : "border-border-strong bg-background"}`}>
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-card">
+                {agentModeCopy.kind === "loading" ? <Loader2 size={19} className="animate-spin text-muted-foreground" /> : <AlertTriangle size={19} className={agentModeCopy.kind === "error" ? "text-error-strong" : "text-warning-strong"} />}
+              </div>
+              <div className="min-w-0">
+                <div className="text-[14px] font-bold text-foreground">{agentModeCopy.label}</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">
+                  {agentModeCopy.detail ? `${agentModeCopy.detail} · ` : ""}중복 응답을 막기 위해 직접 발송을 잠갔어요. 위에서 AI를 끄거나 다시 확인해주세요.
+                </div>
+              </div>
+            </div>
+            {agentModeCopy.canRetry && onAgentModeRetry && (
+              <button type="button" onClick={onAgentModeRetry} className="min-h-10 shrink-0 rounded-xl border border-border-strong bg-card px-3 text-[12px] font-bold text-foreground outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring">
+                다시 시도
+              </button>
+            )}
+          </div>
         ) : (
           <div className="flex items-center justify-between bg-background border border-border-strong rounded-2xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-info-soft flex items-center justify-center border border-info/25"><Bot size={20} className="text-info" /></div>
               <div>
-                <div className="text-[14px] font-bold text-foreground">AI가 대화형 스크리닝을 진행 중입니다.</div>
+                <div className="text-[14px] font-bold text-foreground">{agentModeCopy.label}</div>
                 <div className="text-[12px] text-muted-foreground mt-0.5">[개입]을 누르면 자동 응대가 중지됩니다.</div>
               </div>
             </div>

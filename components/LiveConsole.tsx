@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Search, X, AlertTriangle, ArrowRight, Phone, CheckCircle2, Clock3, PanelRightOpen } from "lucide-react";
+import { Search, X, AlertTriangle, ArrowRight, Phone, CheckCircle2, Clock3, PanelRightOpen, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
@@ -72,6 +72,11 @@ import {
   liveReplySelectionAfterCompletion,
   nextLiveReplyApplicantId,
 } from "@/lib/admin/live-reply-navigation";
+import {
+  agentModePresentation,
+  agentModeView,
+  type AdminAgentModeResponse,
+} from "@/lib/admin/agent-mode-view";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
 
@@ -489,14 +494,14 @@ export function LiveConsole() {
   // 그런데 폴링이 없어서, 다른 사람이 /brain에서 AI를 꺼도 이 화면을 열어둔 매니저는
   // 페이지를 새로 열 때까지 옛 값을 보고 있었다 — 성능이 아니라 사고 방지 쪽이다.
   // 응답이 몇 바이트짜리라 30초로 잡아도 비용이 없다.
-  const { data: killData } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>(
+  const { data: killData, error: killError, mutate: mutateKillMode } = useSWR<AdminAgentModeResponse>(
     "/api/admin/agent/kill-switch",
     { refreshInterval: 30_000 },
   );
-  const globalKill = killData?.disabled === true || killData?.env_forced === true;
-  const copilotMode = !globalKill && killData?.mode === "draft";
+  const globalAgentMode = agentModeView({ data: killData, error: killError });
+  const agentModeCopy = agentModePresentation(globalAgentMode);
   const queueSummary = liveQueueSummary(appsState, unansweredCount);
-  const modeNotice = liveModeNotice(globalKill, copilotMode);
+  const modeNotice = liveModeNotice(globalAgentMode);
 
   // 확정 모달 오픈 신호 — 큐의 '확정' 버튼이 상세 패널의 확정 모달(지점·슬롯·시작일 수집)을 열게 한다.
   // 대상 지원자 id를 함께 실어야 한다: 패널은 applicantId가 key라 지원자를 바꾸면 리마운트되므로
@@ -1027,12 +1032,20 @@ export function LiveConsole() {
             </div>
             {modeNotice && (
               <div
-                role="status"
-                className={`flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-bold leading-none ${modeNotice === "off" ? "border-priority-critical/30 bg-priority-critical-soft text-priority-critical-ink" : "border-copilot/30 bg-copilot-soft text-copilot-strong"}`}
+                role={modeNotice === "error" || modeNotice === "stale" ? "alert" : "status"}
+                aria-live="polite"
+                className={`flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] font-bold leading-none ${modeNotice === "off" ? "border-priority-critical/30 bg-priority-critical-soft text-priority-critical-ink" : modeNotice === "draft" ? "border-copilot/30 bg-copilot-soft text-copilot-strong" : modeNotice === "error" ? "border-error/30 bg-error-soft text-error-strong" : modeNotice === "stale" ? "border-warning/30 bg-warning-soft text-warning-strong" : "border-border-strong bg-muted text-muted-foreground"}`}
               >
-                <AlertTriangle size={14} className="shrink-0" />
-                <span className="truncate">{modeNotice === "off" ? "AI 자동응답 중지 · 수동 발송만" : "코파일럿 · 승인 후 발송"}</span>
-                <Link href="/brain" className="shrink-0 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">설정</Link>
+                {modeNotice === "loading" ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <AlertTriangle size={14} className="shrink-0" />}
+                <span className="truncate">
+                  {modeNotice === "off" ? "AI 자동응답 중지 · 수동 발송만" : agentModeCopy.label}
+                  {agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""}
+                </span>
+                {agentModeCopy.canRetry ? (
+                  <button type="button" onClick={() => void mutateKillMode()} className="shrink-0 rounded underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">다시 시도</button>
+                ) : modeNotice === "off" || modeNotice === "draft" ? (
+                  <Link href="/brain" className="shrink-0 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">설정</Link>
+                ) : null}
               </div>
             )}
           </div>
@@ -1453,8 +1466,8 @@ export function LiveConsole() {
             phone={activeChat.phone}
             jobId={selectedJobId}
             draftScope={isUnscopedDraftContext ? "unscoped" : "all"}
-            globalKill={globalKill}
-            copilotMode={copilotMode}
+            agentMode={globalAgentMode}
+            onAgentModeRetry={() => { void mutateKillMode(); }}
             smsOptOutAt={activeChat.sms_opt_out_at ?? null}
             onChanged={handleChanged}
             onQueueItemCompleted={replyQueueEligible ? handleReplyQueueItemCompleted : undefined}

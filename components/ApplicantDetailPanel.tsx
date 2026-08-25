@@ -28,6 +28,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ApplicantStatusBadge, StageBadge } from "@/components/ui/stage-badge";
+import {
+  agentModeView,
+  type AdminAgentModeResponse,
+} from "@/lib/admin/agent-mode-view";
 
 // ──────────────────────────────────────────────────────────────────────────
 // 타입
@@ -1736,23 +1740,12 @@ export function ApplicantDetailPanel({
   const [focusJobId, setFocusJobId] = useState<number | null>(jobId);
   useEffect(() => { setFocusJobId(jobId); }, [applicantId, jobId]);
 
-  // 전역 킬스위치 — 드로어 대화 탭에서 'AI 응대 중' 오표시·수동 발송 잠금이 남지 않도록
-  // LiveConsole과 동일 판정을 전달 (env 강제 중단 포함). 코파일럿(draft) 모드도 함께 전달.
-  const [globalKill, setGlobalKill] = useState(false);
-  const [copilotMode, setCopilotMode] = useState(false);
-  useEffect(() => {
-    if (!isOpen) return;
-    fetch("/api/admin/agent/kill-switch")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (j) {
-          const kill = j.disabled === true || j.env_forced === true;
-          setGlobalKill(kill);
-          setCopilotMode(!kill && j.mode === "draft");
-        }
-      })
-      .catch(() => {});
-  }, [isOpen]);
+  // 대화 탭의 AI 상태는 SWR 공용 캐시를 사용하되, loading/error/stale을 자동 모드로 추정하지 않는다.
+  const { data: killData, error: killError, mutate: mutateKillMode } = useSWR<AdminAgentModeResponse>(
+    isOpen ? "/api/admin/agent/kill-switch" : null,
+    { refreshInterval: 30_000 },
+  );
+  const drawerAgentMode = agentModeView({ data: killData, error: killError });
 
   useEffect(() => {
     if (isOpen) setTab(initialTab);
@@ -1891,8 +1884,8 @@ export function ApplicantDetailPanel({
                 phone={a.phone}
                 jobId={focusJobId}
                 smsOptOutAt={a.sms_opt_out_at}
-                globalKill={globalKill}
-                copilotMode={copilotMode}
+                agentMode={drawerAgentMode}
+                onAgentModeRetry={() => { void mutateKillMode(); }}
                 onChanged={() => { reload(); onChanged?.(); }}
                 className="flex-1 min-h-0"
               />

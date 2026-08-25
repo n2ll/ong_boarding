@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, MoreHorizontal, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw } from "lucide-react";
+import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, MoreHorizontal, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
@@ -22,6 +22,12 @@ import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
 import { buildJobListSummary, type JobListSummaryItem } from "@/lib/admin/job-list-layout";
+import {
+  agentModePresentation,
+  agentModeView,
+  fetchFreshAgentMode,
+  type AdminAgentModeResponse,
+} from "@/lib/admin/agent-mode-view";
 
 interface JobRow {
   id: string;
@@ -695,9 +701,6 @@ export function Jobs() {
   const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
-  // 전역 AI 응답 on/off (kill-switch). 공고별 AI 자동 스크리닝 적용 여부 표시에 사용.
-  const [aiGlobalOn, setAiGlobalOn] = useState(true);
-
   // 공고별 지원자 보드
   const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; recruitMode: RecruitMode } | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
@@ -858,7 +861,7 @@ export function Jobs() {
 
   // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
   const dispatchUnsent = async () => {
-    if (!candPanel) return;
+    if (!candPanel || dispatching) return;
     // 실제 SMS 대량 발송 — 확인 없이 원클릭이면 오클릭 사고. 같은 화면의 마감/새공고 안내처럼 확인 거친다.
     const ok = await confirm({
       title: `미발송 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
@@ -868,6 +871,11 @@ export function Jobs() {
     if (!ok) return;
     setDispatching(true);
     try {
+      const latestAgentMode = await fetchFreshAgentMode();
+      if (latestAgentMode.state !== "ready") {
+        toast.error("AI 모드 확인이 끝나지 않아 문자를 보내지 않았어요. 다시 시도해주세요.");
+        return;
+      }
       const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/dispatch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1062,6 +1070,12 @@ export function Jobs() {
 
   // 공고 목록은 SWR 캐시로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 loadJobs(=mutate)로.
   const { data: jobsApi, error: jobsError, isLoading: jobsLoading, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const { data: killData, error: killError, isValidating: killValidating, mutate: mutateKillMode } = useSWR<AdminAgentModeResponse>(
+    "/api/admin/agent/kill-switch",
+    { refreshInterval: 30_000 },
+  );
+  const globalAgentMode = agentModeView({ data: killData, error: killError });
+  const agentModeCopy = agentModePresentation(globalAgentMode);
   const jobs = useMemo(
     () => (jobsApi?.jobs ?? []).filter((j) => !isSystemJobTitle(j.title)).map(toJobRow),
     [jobsApi]
@@ -1894,20 +1908,6 @@ export function Jobs() {
     }
   };
 
-  // AI 자동 스크리닝은 공고 단위 토글이 아니라 전역 AI 스위치(에이전트 두뇌) + 공고 진행 상태로 결정된다.
-  // 진행 중 공고의 후보에게만 AI가 응대하며, 전역 중지 시 모든 공고가 멈춘다.
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/agent/kill-switch");
-        const json = await res.json();
-        setAiGlobalOn(!json.disabled && !json.env_forced);
-      } catch {
-        /* 표시용이므로 실패 시 기본 on 유지 */
-      }
-    })();
-  }, []);
-
   // 채널별 게시 링크 — source 파라미터로 유입을 게시 채널에 귀속시킨다 (외부 게시 = 이중 인입의 ② 트랙).
   const PUBLISH_CHANNELS: { source: string; label: string }[] = [
     { source: "albamon", label: "알바몬" },
@@ -2048,6 +2048,18 @@ export function Jobs() {
           </div>
         </div>
 
+        {agentModeCopy.canRetry && (
+          <div role="alert" className={`flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-[12px] font-semibold ${agentModeCopy.kind === "error" ? "border-error/25 bg-error-soft text-error-strong" : "border-warning/25 bg-warning-soft text-warning-strong"}`}>
+            <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
+            <span className="font-extrabold">{agentModeCopy.label}</span>
+            {agentModeCopy.detail && <span>{agentModeCopy.detail}</span>}
+            <span>현재 자동 응대 여부로 단정하지 않습니다.</span>
+            <button type="button" onClick={() => void mutateKillMode()} disabled={killValidating} className="ml-auto min-h-11 rounded-lg border border-current/20 bg-card px-3 font-bold outline-none hover:bg-background disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-ring">
+              {killValidating ? "확인 중…" : "다시 시도"}
+            </button>
+          </div>
+        )}
+
         {/* Table Header */}
         <div className={`hidden items-center border-b border-border-strong bg-background px-4 py-2.5 text-[12px] font-bold text-muted-foreground lg:grid ${JOB_LIST_GRID}`}>
           <div>공고 정보</div>
@@ -2169,10 +2181,16 @@ export function Jobs() {
                     )}
                     {job.candidates === 0 && <span className="text-[12px] font-semibold text-muted-foreground">연결된 후보 없음</span>}
                   </div>
-                  <div className="text-[12px] font-semibold text-muted-foreground">
-                    {!aiGlobalOn ? (
+                  <div className={`text-[12px] font-semibold ${agentModeCopy.kind === "error" ? "text-error-strong" : agentModeCopy.kind === "stale" ? "text-warning-strong" : "text-muted-foreground"}`}>
+                    {job.effectivelyClosed ? (
+                      "AI 응대 중지 · 마감"
+                    ) : agentModeCopy.kind === "off" ? (
                       <Link href="/brain" className="rounded text-error-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">AI 전역 중지됨</Link>
-                    ) : job.effectivelyClosed ? "AI 응대 중지" : "AI 자동 응대 중"}
+                    ) : (
+                      <span title={agentModeCopy.detail ?? undefined}>
+                        {agentModeCopy.kind === "stale" ? "이전 AI 상태 · 갱신 실패" : agentModeCopy.label}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -3182,13 +3200,22 @@ export function Jobs() {
                 )}
                 {boardPolicy.allowDispatch && candState !== "error" && unsentCount > 0 && (
                   <>
-                    {/* 킬스위치 ON이어도 발송 자체는 막지 않는다 — 다만 답장에 AI가 응대하지 않음을 발송 전에 알린다. */}
-                    {!aiGlobalOn && (
-                      <div className="mt-3 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-200 text-[12px] font-bold text-warning-strong">
-                        전역 AI 중지 중 — 답장은 수동 응대해야 해요
+                    {/* 최신 AI 모드를 확인하지 못한 상태에서는 후속 응대 방식을 보장할 수 없어 신규 발송을 잠근다. */}
+                    {agentModeCopy.kind !== "auto" && (
+                      <div id="job-dispatch-agent-mode-status" role={agentModeCopy.kind === "error" || agentModeCopy.kind === "stale" ? "alert" : "status"} aria-live="polite" className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[12px] font-bold text-warning-strong">
+                        {agentModeCopy.kind === "off"
+                          ? "전역 AI 중지 중 — 답장은 수동 응대해야 해요"
+                          : agentModeCopy.kind === "draft"
+                            ? "코파일럿 모드 — 답장은 초안을 검수한 뒤 발송해야 해요"
+                            : `${agentModeCopy.label} — 확인 전 신규 발송을 잠갔어요`}
+                        {agentModeCopy.canRetry && (
+                          <button type="button" onClick={() => void mutateKillMode()} disabled={killValidating} className="ml-2 min-h-11 rounded px-2 underline underline-offset-2 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-ring">
+                            {killValidating ? "확인 중…" : "다시 시도"}
+                          </button>
+                        )}
                       </div>
                     )}
-                    <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} className="mt-3 w-full">
+                    <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} disabled={globalAgentMode.state !== "ready"} aria-describedby={agentModeCopy.kind !== "auto" ? "job-dispatch-agent-mode-status" : undefined} className="mt-3 w-full">
                         {!dispatching && <Sparkles size={15} />} 미발송 {unsentCount}명에게 스크리닝 문자 발송
                       </Button>
                   </>

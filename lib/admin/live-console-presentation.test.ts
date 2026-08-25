@@ -45,7 +45,9 @@ test("operational signals do not borrow hiring-stage colors", () => {
   assert.match(turnPresentation, /pending_draft[\s\S]*?bg-copilot-soft text-copilot-strong/);
   assert.match(turnPresentation, /AI 응대 중[\s\S]*?bg-info-soft text-info-strong/);
   assert.doesNotMatch(turnPresentation, /bg-stage-(?:exploration|screening|onboarding|active)-soft/);
-  assert.match(compactHeader, /modeNotice === "off"[\s\S]*?: "border-copilot\/30 bg-copilot-soft text-copilot-strong"/);
+  assert.match(compactHeader, /modeNotice === "draft" \? "border-copilot\/30 bg-copilot-soft text-copilot-strong"/);
+  assert.match(compactHeader, /modeNotice === "error" \? "border-error\/30 bg-error-soft text-error-strong"/);
+  assert.match(compactHeader, /modeNotice === "stale" \? "border-warning\/30 bg-warning-soft text-warning-strong"/);
 });
 
 test("queue health uses operational success and info tones", () => {

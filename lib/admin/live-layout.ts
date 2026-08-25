@@ -1,4 +1,5 @@
 import type { RemoteCollectionState } from "./remote-data-state";
+import type { AdminAgentModeView } from "./agent-mode-view";
 
 export type LiveQueueSummary = {
   kind: "loading" | "error" | "attention" | "clear";
@@ -16,10 +17,10 @@ export function liveQueueSummary(
 }
 
 export function liveModeNotice(
-  globalKill: boolean,
-  copilotMode: boolean,
-): "off" | "draft" | null {
-  if (globalKill) return "off";
-  if (copilotMode) return "draft";
+  view: AdminAgentModeView,
+): "loading" | "error" | "stale" | "off" | "draft" | null {
+  if (view.state === "loading" || view.state === "error" || view.state === "stale") return view.state;
+  if (view.mode === "off") return "off";
+  if (view.mode === "draft") return "draft";
   return null;
 }
