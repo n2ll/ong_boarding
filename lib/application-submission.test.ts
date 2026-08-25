@@ -771,6 +771,26 @@ test("a real job without a vehicle requirement skips the legacy vehicle trio", a
   }, vehicleRequired), { completed: 6, total: 7, percent: 86 });
 });
 
+test("submission validation rejects impossible birth dates and excludes them from progress", async () => {
+  const {
+    validateApplicationSubmission,
+    applicationSubmissionProgress,
+  } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.equal(typeof applicationSubmissionProgress, "function");
+  const impossibleBirthDate = { ...completeForm, birthDate: "000230" };
+
+  assert.deepEqual(validateApplicationSubmission!(impossibleBirthDate, true), {
+    field: "birthDate",
+    message: "생년월일을 확인해주세요. 예: 1960년 1월 1일은 600101입니다.",
+  });
+  assert.deepEqual(
+    applicationSubmissionProgress!(impossibleBirthDate, true),
+    { completed: 10, total: 11, percent: 91 },
+  );
+});
+
 test("general and vehicle-required applications retain the legacy vehicle gate", async () => {
   const {
     applicationVehicleRequired,

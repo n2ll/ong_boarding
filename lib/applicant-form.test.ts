@@ -85,6 +85,38 @@ test("progress only counts required answers that are valid", async () => {
   );
 });
 
+test("birth date validation accepts only real YYMMDD calendar dates", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const isValidApplicantBirthDate = applicantFormModule.isValidApplicantBirthDate as
+    | ((value: string) => boolean)
+    | undefined;
+
+  assert.equal(typeof isValidApplicantBirthDate, "function");
+  for (const value of ["600101", "000229"]) {
+    assert.equal(isValidApplicantBirthDate!(value), true, `${value} should be valid`);
+  }
+  for (const value of ["60010", "196001", "991332", "000230", "생년월일"]) {
+    assert.equal(isValidApplicantBirthDate!(value), false, `${value} should be invalid`);
+  }
+});
+
+test("validation explains how to recover from an impossible birth date", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const validateApplicantForm = applicantFormModule.validateApplicantForm as
+    | ((form: ApplicantFormData) => { field: keyof ApplicantFormData; message: string } | null)
+    | undefined;
+
+  assert.equal(typeof validateApplicantForm, "function");
+  assert.deepEqual(validateApplicantForm!({
+    ...EMPTY_FORM,
+    name: "김지원",
+    birthDate: "991332",
+  }), {
+    field: "birthDate",
+    message: "생년월일을 확인해주세요. 예: 1960년 1월 1일은 600101입니다.",
+  });
+});
+
 test("validation points to the first invalid field with a recovery message", async () => {
   const applicantFormModule = await loadApplicantFormModule();
   const validateApplicantForm = applicantFormModule.validateApplicantForm as

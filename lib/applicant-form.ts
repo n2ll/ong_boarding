@@ -34,9 +34,23 @@ export interface ApplicantValidationIssue {
   message: string;
 }
 
+export const APPLICANT_BIRTH_DATE_ERROR_MESSAGE =
+  "생년월일을 확인해주세요. 예: 1960년 1월 1일은 600101입니다.";
+
+export function isValidApplicantBirthDate(value: string): boolean {
+  if (!/^\d{6}$/.test(value)) return false;
+  const year = 2000 + Number(value.slice(0, 2));
+  const month = Number(value.slice(2, 4));
+  const day = Number(value.slice(4, 6));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
 const REQUIREMENTS: Array<ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean }> = [
   { field: "name", message: "이름을 입력해주세요.", isValid: (form) => Boolean(form.name.trim()) },
-  { field: "birthDate", message: "생년월일 6자리(예: 600101)를 입력해주세요.", isValid: (form) => /^\d{6}$/.test(form.birthDate) },
+  { field: "birthDate", message: APPLICANT_BIRTH_DATE_ERROR_MESSAGE, isValid: (form) => isValidApplicantBirthDate(form.birthDate) },
   { field: "phone", message: "연락처를 정확히 입력해주세요.", isValid: (form) => /^\d{10,11}$/.test(form.phone) },
   { field: "location", message: "거주지 주소를 입력해주세요.", isValid: (form) => Boolean(form.location.trim()) },
   { field: "ownVehicle", message: "자차 보유 여부를 선택해주세요.", isValid: (form) => Boolean(form.ownVehicle) },

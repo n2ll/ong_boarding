@@ -1,7 +1,9 @@
-import type {
-  ApplicantFormData,
-  ApplicantValidationIssue,
-} from "./applicant-form";
+import {
+  APPLICANT_BIRTH_DATE_ERROR_MESSAGE,
+  isValidApplicantBirthDate,
+  type ApplicantFormData,
+  type ApplicantValidationIssue,
+} from "./applicant-form.ts";
 
 export type JobApplicationOutcome = "linked" | "unchanged" | "unavailable" | "failed" | "not_requested";
 export type CandidateLinkOutcome = "linked" | "already_linked" | "unchanged_closed" | "unavailable" | null;
@@ -455,7 +457,7 @@ export function applicationFilterPasses(input: {
 
 const BASE_REQUIREMENTS: Array<ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean }> = [
   { field: "name", message: "이름을 입력해주세요.", isValid: (form) => Boolean(form.name.trim()) },
-  { field: "birthDate", message: "생년월일 6자리(예: 600101)를 입력해주세요.", isValid: (form) => /^\d{6}$/.test(form.birthDate) },
+  { field: "birthDate", message: APPLICANT_BIRTH_DATE_ERROR_MESSAGE, isValid: (form) => isValidApplicantBirthDate(form.birthDate) },
   { field: "phone", message: "연락처를 정확히 입력해주세요.", isValid: (form) => /^\d{10,11}$/.test(form.phone) },
   { field: "location", message: "거주지 주소를 입력해주세요.", isValid: (form) => Boolean(form.location.trim()) },
   { field: "branch1", message: "희망 지점을 선택해주세요.", isValid: (form) => Boolean(form.branch1) },

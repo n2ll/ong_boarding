@@ -1,3 +1,5 @@
+import { isValidApplicantBirthDate } from "../applicant-form.ts";
+
 export interface Applicant {
   id: number;
   created_at: string;
@@ -186,10 +188,10 @@ export function getSlotCapacity(branch: Branch | undefined, slot: SlotKey): numb
 // 세기(19xx/20xx) 판정은 고정 컷오프(50) 대신 '근로 가능 나이' 기준으로 한다.
 // 시니어 플랫폼이라 1940년대생(예: 480302=1948)이 핵심 인구인데, 고정 컷오프로는
 // 이들이 2048년생(음수 나이)으로 뒤집혔다. 2000+yy가 미래이거나 15세 미만이면 1900년대로 본다.
-// 월/일이 유효 범위를 벗어나면(테스트·오입력 쓰레기 값) null 반환.
+// 실제 달력에 없는 날짜면(테스트·오입력 쓰레기 값) null 반환.
 const MIN_WORKING_AGE = 15;
 export function calcAge(birth_date: string | null | undefined): number | null {
-  if (!birth_date || !/^\d{6}$/.test(birth_date)) return null;
+  if (!birth_date || !isValidApplicantBirthDate(birth_date)) return null;
   const yy = parseInt(birth_date.slice(0, 2), 10);
   const mm = parseInt(birth_date.slice(2, 4), 10);
   const dd = parseInt(birth_date.slice(4, 6), 10);

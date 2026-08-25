@@ -13,6 +13,8 @@ import {
   type ApplyJobLoadState,
 } from "@/lib/apply-job-flow";
 import {
+  APPLICANT_BIRTH_DATE_ERROR_MESSAGE,
+  isValidApplicantBirthDate,
   type ApplicantFormData,
   type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
@@ -109,7 +111,12 @@ function initialForm(branch: string | null): FormState {
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
 const inputCls =
   "w-full px-4 py-3.5 border border-control-border rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-input-background";
-const requiredMark = <span className="text-error ml-0.5">*</span>;
+const requiredMark = (
+  <>
+    <span aria-hidden="true" className="text-error ml-0.5">*</span>
+    <span className="sr-only"> (필수)</span>
+  </>
+);
 
 function fieldErrorId(field: keyof FormState): string {
   return `${field}-error`;
@@ -124,7 +131,7 @@ function FieldError({
 }) {
   if (issue?.field !== field) return null;
   return (
-    <p id={fieldErrorId(field)} className="mt-2 flex items-start gap-1.5 text-[14px] font-bold leading-relaxed text-error-strong">
+    <p id={fieldErrorId(field)} className="mt-2 flex items-start gap-1.5 text-[15px] font-bold leading-relaxed text-error-strong">
       <AlertCircle size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <span>{issue.message}</span>
     </p>
@@ -372,7 +379,9 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     if (pendingIssue && (jobLoadState === "error" || jobLoadState === "unavailable")) {
       pendingServerValidationRef.current = null;
     }
-    if (jobLoadState === "error") {
+    if (jobLoadState === "loading") {
+      requestAnimationFrame(() => jobLoadingTitleRef.current?.focus({ preventScroll: true }));
+    } else if (jobLoadState === "error") {
       requestAnimationFrame(() => retryJobButtonRef.current?.focus({ preventScroll: true }));
     } else if (jobLoadState === "loaded") {
       requestAnimationFrame(() => jobTitleRef.current?.focus({ preventScroll: true }));
@@ -616,9 +625,12 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const hasUnavailableJobLink = !replayUiActive
     && (jobIntent.kind === "invalid" || jobLoadState === "unavailable");
   const invalidField = validationIssue?.field ?? null;
-  const fieldA11y = (field: keyof FormState) => ({
+  const fieldA11y = (field: keyof FormState, descriptionId?: string) => ({
     "aria-invalid": invalidField === field ? true : undefined,
-    "aria-describedby": invalidField === field ? fieldErrorId(field) : undefined,
+    "aria-describedby": [
+      descriptionId,
+      invalidField === field ? fieldErrorId(field) : null,
+    ].filter(Boolean).join(" ") || undefined,
   });
   const fieldInputClass = (field: keyof FormState, extra = "") =>
     `${inputCls} ${invalidField === field ? "border-error focus-visible:border-error focus-visible:ring-error/25" : ""} ${extra}`;
@@ -654,17 +666,17 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             근무 확정이 아니며, 매니저의 별도 안내가 있어야 다음 절차가 진행됩니다.
           </p>
           {completionKind === "general_job_unchanged" && (
-            <p className="mt-5 rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[14px] font-bold leading-relaxed text-warning-strong">
+            <p className="mt-5 rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-warning-strong">
               이 공고의 검토 목록에는 다시 추가되지 않았어요. 기본 지원 정보만 업데이트됐고, 이 공고의 이전 처리 결과는 그대로 유지됩니다.
             </p>
           )}
           {completionKind === "general_job_unavailable" && (
-            <p className="mt-5 rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[14px] font-bold leading-relaxed text-warning-strong">
+            <p className="mt-5 rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-warning-strong">
               선택한 공고에는 연결되지 않았고, 작성한 내용은 다른 일자리 검토용 지원서로 접수됐어요.
             </p>
           )}
           {completionKind === "general_job_failed" && (
-            <p className="mt-5 rounded-2xl border border-error/25 bg-error-soft px-4 py-3 text-[14px] font-bold leading-relaxed text-error-strong">
+            <p className="mt-5 rounded-2xl border border-error/25 bg-error-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-error-strong">
               선택한 공고와의 연결 여부는 매니저 확인이 필요해요. {initialMessageState === "sent"
                 ? "방금 받은 안내 문자에 답장해 알려주세요."
                 : initialMessageState === "uncertain"
@@ -672,7 +684,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 : "기존에 받은 문자 대화가 있다면 답장하거나 잠시 후 다시 확인해주세요."}
             </p>
           )}
-          <p className="mt-5 border-t border-border pt-4 text-[14px] font-medium leading-relaxed text-muted-foreground">
+          <p className="mt-5 border-t border-border pt-4 text-[15px] font-medium leading-relaxed text-muted-foreground">
             {initialMessageState === "sent"
               ? "안내 문자를 발송했어요. 다음 절차는 문자에서도 확인할 수 있습니다."
               : initialMessageState === "uncertain"
@@ -691,7 +703,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
         <div className="mb-6 text-center landscape:mb-3">
           <div className="inline-flex items-center gap-2.5 mb-3">
             <Image src="/onggoing-logo.png" alt="옹고잉" width={72} height={56} priority className="landscape:h-10 landscape:w-auto" />
-            <h1 className="text-[18px] font-extrabold text-foreground">배송원 지원</h1>
+            <h1 className="text-[22px] font-extrabold text-foreground">배송원 지원</h1>
           </div>
           <p className="text-[16px] text-muted-foreground">
             {replayUiActive ? (
@@ -699,7 +711,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             ) : applicationModeChoiceRequired ? (
               <>수정한 내용은 저장되어 있어요. 위에서 지원 방식을 확인해주세요.</>
             ) : showApplyForm ? (
-              <>아래 항목을 작성해주세요. <span className="text-error-strong">*</span> 표시는 필수입니다.</>
+              <>필수 항목은 <span aria-hidden="true" className="text-error-strong">*</span><span className="sr-only">별표</span>로 표시했어요.</>
             ) : (
               <>문자로 받으신 공고 상태를 먼저 확인할게요.</>
             )}
@@ -711,7 +723,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
             <div className="text-left">
               <h2 ref={jobLoadingTitleRef} tabIndex={-1} className="text-[16px] font-extrabold text-foreground">지원할 공고를 확인하고 있어요</h2>
-              <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">확인되면 지원서를 바로 보여드릴게요.</p>
+              <p className="mt-1 text-[15px] leading-relaxed text-muted-foreground">확인되면 지원서를 바로 보여드릴게요.</p>
             </div>
           </section>
         )}
@@ -722,7 +734,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-strong" />
               <div>
                 <h2 className="text-[17px] font-extrabold text-foreground">공고 상태를 확인하지 못했어요</h2>
-                <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-[15px] leading-relaxed text-muted-foreground">
                   {applyJobLoadErrorDescription(jobLoadTimedOut)}
                 </p>
               </div>
@@ -754,7 +766,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <AlertCircle size={22} aria-hidden="true" className="mt-0.5 shrink-0 text-error-strong" />
               <div>
                 <h2 ref={unavailableJobTitleRef} tabIndex={-1} className="text-[17px] font-extrabold text-foreground">이 공고 링크를 확인할 수 없어요</h2>
-                <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">주소가 잘못됐거나 더 이상 공개되지 않는 공고일 수 있어요.</p>
+                <p className="mt-1 text-[15px] leading-relaxed text-muted-foreground">주소가 잘못됐거나 더 이상 공개되지 않는 공고일 수 있어요.</p>
               </div>
             </div>
             <button
@@ -765,7 +777,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             >
               <FileText size={18} aria-hidden="true" /> 다른 일자리 지원서 작성하기
             </button>
-            <p className="mt-3 text-center text-[13px] leading-relaxed text-muted-foreground">받으신 문자에 답장하시면 매니저가 링크를 확인해드려요.</p>
+            <p className="mt-3 text-center text-[15px] leading-relaxed text-muted-foreground">받으신 문자에 답장하시면 매니저가 링크를 확인해드려요.</p>
           </section>
         )}
 
@@ -786,21 +798,21 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               </div>
             </div>
             {replayUiActive ? (
-              <p className="mt-4 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-info-strong">
+              <p className="mt-4 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[15px] font-bold leading-relaxed text-info-strong">
                 새로 지원하는 것이 아니라, 이전에 보낸 지원서의 접수 결과를 같은 접수번호로 다시 확인합니다.
               </p>
             ) : generalOptIn ? (
-              <p ref={generalJobStatusRef} tabIndex={-1} role="status" aria-live="polite" className="mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-info-strong">
+              <p ref={generalJobStatusRef} tabIndex={-1} role="status" aria-live="polite" className="mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-info-soft px-3 py-2.5 text-[15px] font-bold leading-relaxed text-info-strong">
                 <FileText size={17} aria-hidden="true" className="mt-0.5 shrink-0" />
                 <span>지금부터 작성하는 내용은 다른 일자리용 일반 지원서로 접수됩니다.</span>
               </p>
             ) : verifiedJob.recruiting ? (
-              <p className="mt-4 rounded-xl border border-success/20 bg-success-soft px-3 py-2.5 text-[14px] font-bold leading-relaxed text-success-strong">
+              <p className="mt-4 rounded-xl border border-success/20 bg-success-soft px-3 py-2.5 text-[15px] font-bold leading-relaxed text-success-strong">
                 아래 지원서를 제출하면 이 공고에 지원 의사가 전달됩니다. 근무 확정은 아니며, 매니저가 확인합니다.
               </p>
             ) : (
               <div className="mt-4 rounded-xl border border-error/25 bg-error-soft px-3 py-3">
-                <p className="text-[14px] font-bold leading-relaxed text-error-strong">이 공고에는 더 이상 지원할 수 없어요. 원하시면 다른 일자리용 지원서를 남길 수 있어요.</p>
+                <p className="text-[15px] font-bold leading-relaxed text-error-strong">이 공고에는 더 이상 지원할 수 없어요. 원하시면 다른 일자리용 지원서를 남길 수 있어요.</p>
                 <button
                   ref={applicationModeActionRef}
                   type="button"
@@ -819,7 +831,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <FileText size={20} aria-hidden="true" className="mt-0.5 shrink-0" />
             <div>
               <h2 ref={generalApplicationTitleRef} tabIndex={-1} className="text-[16px] font-extrabold">다른 일자리용 지원서를 작성하고 있어요</h2>
-              <p className="mt-1 text-[14px] font-medium leading-relaxed">작성하신 조건에 맞는 일자리를 매니저가 확인합니다.</p>
+              <p className="mt-1 text-[15px] font-medium leading-relaxed">작성하신 조건에 맞는 일자리를 매니저가 확인합니다.</p>
             </div>
           </section>
         )}
@@ -829,7 +841,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
             <div className="text-left">
               <h2 className="text-[16px] font-extrabold text-foreground">지원서를 준비하고 있어요</h2>
-              <p className="mt-1 text-[14px] leading-relaxed text-muted-foreground">이 탭에 작성 중인 내용이 있는지 확인할게요.</p>
+              <p className="mt-1 text-[15px] leading-relaxed text-muted-foreground">이 탭에 작성 중인 내용이 있는지 확인할게요.</p>
             </div>
           </section>
         )}
@@ -852,7 +864,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 <h2 className="text-[16px] font-extrabold">
                   {replayUiActive ? "이전 접수 결과 재확인을 중단할까요?" : "불러온 내용을 모두 지울까요?"}
                 </h2>
-                <p className="mt-1 text-[14px] font-medium leading-relaxed">
+                <p className="mt-1 text-[15px] font-medium leading-relaxed">
                   {replayUiActive
                     ? "불러온 내용과 같은 접수번호로 결과를 다시 확인할 수 없게 됩니다."
                     : "입력한 내용은 복구할 수 없어요."}
@@ -887,7 +899,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                           ? "수정한 내용은 안전하게 저장되어 있어요"
                           : "작성하던 내용을 불러왔어요"}
                     </h2>
-                    <p className="mt-1 text-[14px] font-medium leading-relaxed">
+                    <p className="mt-1 text-[15px] font-medium leading-relaxed">
                       {replayUiActive
                         ? "내용을 그대로 두고 아래 버튼을 누르면 중복 접수 없이 이전 결과를 다시 확인합니다. 내용을 바꾸면 현재 공고 상태에 맞는 새 지원으로 전환됩니다."
                         : applicationModeChoiceRequired
@@ -896,14 +908,16 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                     </p>
                   </div>
                 </div>
-                <button
-                  ref={resetDraftTriggerRef}
-                  type="button"
-                  onClick={showResetConfirmation}
-                  className="mt-3 min-h-12 w-full rounded-xl border border-info/25 bg-card px-4 text-[15px] font-bold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  처음부터 작성
-                </button>
+                <div className="mt-2 flex justify-end">
+                  <button
+                    ref={resetDraftTriggerRef}
+                    type="button"
+                    onClick={showResetConfirmation}
+                    className="inline-flex min-h-11 items-center rounded-xl px-3 text-[15px] font-bold text-info-strong underline decoration-info/40 underline-offset-4 transition-colors hover:bg-info/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    처음부터 작성
+                  </button>
+                </div>
               </>
             )}
           </section>
@@ -925,7 +939,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <div className="h-full rounded-full bg-brand-yellow transition-[width] motion-reduce:transition-none" style={{ width: `${progress.percent}%` }} />
             </div>
             {error && (
-              <div role="alert" aria-live="assertive" className="mt-3 flex items-start gap-2 border-t border-error/20 pt-3 text-[14px] font-bold text-error-strong">
+              <div role="alert" aria-live="assertive" className="mt-3 flex items-start gap-2 border-t border-error/20 pt-3 text-[15px] font-bold text-error-strong">
                 <AlertCircle size={18} className="mt-0.5 shrink-0" /> {error}
               </div>
             )}
@@ -937,7 +951,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">1</span>
             <div>
               <h2 className="text-[18px] font-extrabold text-foreground">기본 정보</h2>
-              <p className="mt-0.5 text-[14px] text-muted-foreground">연락과 근무지 안내에 필요한 정보예요.</p>
+              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">연락과 근무지 안내에 필요한 정보예요.</p>
             </div>
           </div>
 
@@ -950,8 +964,28 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
           {/* 생년월일 */}
           <div id="field-birthDate">
-            <label htmlFor="birthDate" className={labelCls}>생년월일 (6자리){requiredMark}</label>
-            <input id="birthDate" name="birthDate" aria-required="true" {...fieldA11y("birthDate")} className={fieldInputClass("birthDate")} inputMode="numeric" value={form.birthDate} onChange={(e) => set("birthDate", digits(e.target.value, 6))} placeholder="예: 600101" />
+            <label htmlFor="birthDate" className={labelCls}>생년월일{requiredMark}</label>
+            <input
+              id="birthDate"
+              name="birthDate"
+              aria-required="true"
+              {...fieldA11y("birthDate", "birthDate-help")}
+              className={fieldInputClass("birthDate")}
+              inputMode="numeric"
+              maxLength={6}
+              enterKeyHint="next"
+              value={form.birthDate}
+              onChange={(e) => set("birthDate", digits(e.target.value, 6))}
+              onBlur={() => {
+                if (form.birthDate && !isValidApplicantBirthDate(form.birthDate)) {
+                  setValidationIssue({ field: "birthDate", message: APPLICANT_BIRTH_DATE_ERROR_MESSAGE });
+                }
+              }}
+              placeholder="예: 600101"
+            />
+            <p id="birthDate-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+              1960년 1월 1일은 600101로 입력해주세요. 주민등록번호 뒤 7자리는 입력하지 마세요.
+            </p>
             <FieldError field="birthDate" issue={validationIssue} />
           </div>
 
@@ -968,14 +1002,16 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             <input id="location" name="location" autoComplete="street-address" aria-required="true" {...fieldA11y("location")} className={fieldInputClass("location")} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="예: 서울시 강남구 역삼동" />
             <FieldError field="location" issue={validationIssue} />
           </div>
+        </div>
 
-          <div className="flex items-start gap-3 border-t border-border pt-7">
+        <div className="mt-5 flex flex-col gap-7 rounded-2xl border border-border-strong bg-card p-5 shadow-sm sm:p-8 landscape:p-5">
+          <div className="flex items-start gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">2</span>
             <div>
-              <h2 className="text-[18px] font-extrabold text-foreground">운전·근무 조건</h2>
-              <p className="mt-0.5 text-[14px] text-muted-foreground">
+              <h2 className="text-[18px] font-extrabold text-foreground">차량·면허</h2>
+              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">
                 {vehicleRequired
-                  ? "가능한 조건만 선택하면 맞는 일자리를 안내해드려요."
+                  ? "현재 보유한 차량과 면허 정보를 알려주세요."
                   : "이 공고는 본인 차량이나 운전면허 없이 지원할 수 있어요."}
               </p>
             </div>
@@ -986,7 +1022,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               {/* 자차 보유 */}
               <div id="field-ownVehicle">
                 <div id="ownVehicle-label" className={labelCls}>자차(본인 차량) 보유{requiredMark}</div>
-                <div role="group" aria-labelledby="ownVehicle-label" aria-required="true" {...fieldA11y("ownVehicle")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div role="group" aria-labelledby="ownVehicle-label" {...fieldA11y("ownVehicle")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {["있음", "없음"].map((opt) => (
                     <button
                       key={opt}
@@ -1023,10 +1059,20 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               </div>
             </>
           ) : (
-            <div className="rounded-2xl border border-success/20 bg-success-soft px-4 py-3 text-[14px] font-bold leading-relaxed text-success-strong">
+            <div className="rounded-2xl border border-success/20 bg-success-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-success-strong">
               차량·면허·본인 명의 조건은 이 공고의 필수 항목이 아니므로 입력하지 않아도 됩니다.
             </div>
           )}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-7 rounded-2xl border border-border-strong bg-card p-5 shadow-sm sm:p-8 landscape:p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[14px] font-extrabold text-white">3</span>
+            <div>
+              <h2 className="text-[18px] font-extrabold text-foreground">희망 근무·정산 조건</h2>
+              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">원하는 근무지와 시간, 시작 가능일을 선택해주세요.</p>
+            </div>
+          </div>
 
           {/* 희망 지점 */}
           <div id="field-branch1">
@@ -1073,8 +1119,8 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
           {/* 희망 근무 시간대 */}
           <div id="field-workHours">
-            <div id="workHours-label" className={labelCls}>희망 근무 시간대 (복수 선택){requiredMark}</div>
-            <div role="group" aria-labelledby="workHours-label" aria-required="true" {...fieldA11y("workHours")} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div id="workHours-label" className={labelCls}>희망 근무 시간대 (1개 이상 선택){requiredMark}</div>
+            <div role="group" aria-labelledby="workHours-label" {...fieldA11y("workHours")} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {TIMESLOTS.map((slot) => {
                 const checked = form.workHours.includes(slot.value);
                 return (
@@ -1088,7 +1134,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                   >
                     <div>
                       <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
-                      <div className="text-[13px] text-muted-foreground">{slot.sub}</div>
+                      <div className="text-[15px] text-muted-foreground">{slot.sub}</div>
                     </div>
                     <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-control-border"}`}>
                       {checked && <CheckCircle2 size={16} className="text-foreground" />}
@@ -1110,7 +1156,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           {vehicleRequired && (
             <div id="field-selfOwnership">
               <div id="selfOwnership-label" className={labelCls}>배달앱·정산계좌 본인 명의 가능 여부{requiredMark}</div>
-              <div role="group" aria-labelledby="selfOwnership-label" aria-required="true" {...fieldA11y("selfOwnership")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div role="group" aria-labelledby="selfOwnership-label" {...fieldA11y("selfOwnership")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {["문제 없음", "문제 있음"].map((opt) => (
                   <button
                     key={opt}
@@ -1133,7 +1179,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
             <div className="text-left">
               <h2 className="text-[16px] font-extrabold text-foreground">추가 정보 <span className="font-medium text-muted-foreground">(선택)</span></h2>
-              <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">경력이나 소개를 남기고 싶을 때만 작성해주세요.</p>
+              <p className="mt-0.5 text-[15px] leading-relaxed text-muted-foreground">경력이나 소개를 남기고 싶을 때만 작성해주세요.</p>
             </div>
             <ChevronDown size={20} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
           </summary>
@@ -1156,7 +1202,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <span className="flex h-11 w-11 shrink-0 items-center justify-center">
                 <input id="marketingConsent" name="marketingConsent" type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="h-6 w-6 accent-brand-yellow" />
               </span>
-              <span className="py-2 text-[14px] leading-relaxed text-gray-700">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
+              <span className="py-2 text-[15px] leading-relaxed text-gray-700">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
             </label>
           </div>
         </details>
@@ -1178,7 +1224,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               : replayUiActive ? "접수 결과 다시 확인" : submissionJobId ? "이 공고에 지원하기" : "지원서 제출하기"}
         </button>
         {submitting && (
-          <p role="status" aria-live="polite" className="mt-3 text-center text-[14px] font-bold leading-relaxed text-muted-foreground">
+          <p role="status" aria-live="polite" className="mt-3 text-center text-[15px] font-bold leading-relaxed text-muted-foreground">
             {submittingReplay
               ? "이전 접수 결과를 확인하고 있어요. 잠시만 기다려주세요."
               : "지원서를 제출하고 있어요. 잠시만 기다려주세요."}
@@ -1217,7 +1263,17 @@ function ApplyFormRoute() {
 
 export default function ApplyPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+    <Suspense fallback={(
+      <div className="min-h-dvh bg-background px-4 py-6 sm:px-5 sm:py-10">
+        <div role="status" aria-live="polite" className="mx-auto flex max-w-[560px] items-center gap-3 rounded-2xl border border-border-strong bg-card px-5 py-5 shadow-sm">
+          <Loader2 size={22} aria-hidden="true" className="shrink-0 animate-spin text-warning-strong motion-reduce:animate-none" />
+          <div>
+            <p className="text-[16px] font-extrabold text-foreground">지원서를 준비하고 있어요</p>
+            <p className="mt-1 text-[15px] leading-relaxed text-muted-foreground">잠시만 기다려주세요.</p>
+          </div>
+        </div>
+      </div>
+    )}>
       <ApplyFormRoute />
     </Suspense>
   );
