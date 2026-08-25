@@ -6,8 +6,8 @@
  *  - kind='first_day' : 첫날 근무 규칙 (buildFirstDayRules — 라인 형태별 분기).
  *  - kind='app_guide' : 확정 시 옹고잉 앱 설치·가이드 안내 (system_message 'ongoing_app_guide' 우선).
  *
- * 라인 형태(확장성): 공고 recruit_mode로 판별(isGeneralLineJob). internal 정기배송 라인은 배민 배차
- * 모델 문구를 쓰지 않고 정기배송용 기본 문안으로 분기한다. 특정 라인 하드코딩 없음.
+ * 라인 형태(확장성): 실제 공고의 화주사 유형으로 판별(isGeneralLineJob). 비마트 일반 라인은 배민 배차
+ * 모델 문구를 쓰지 않고 정기배송용 기본 문안으로 분기한다. 모집 채널(recruit_mode)과는 무관하다.
  * 편집(Q1=편집 가능 템플릿): 기본 문안은 system_message(두뇌 탭)로 덮어쓸 수 있고, 클라이언트가
  * 발송 직전 미리보기에서 수정한 본문(text)을 보내면 그 본문 그대로 발송한다.
  *
@@ -20,7 +20,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
 import { buildVenueGuideText, buildFirstDayRules, buildOngoingAppGuide } from "@/lib/agent/transitions";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
-import { isGeneralLineJob } from "@/lib/agent/general-line";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety";
 
 export const dynamic = "force-dynamic";
@@ -73,17 +73,25 @@ export async function POST(req: NextRequest) {
     if (!phone) return NextResponse.json({ error: "지원자 전화번호가 없습니다." }, { status: 400 });
 
     // 공고(라인 형태 판별용) — job_id가 오면 로드. venue는 필수, 나머지는 라인 분기에만 사용.
-    type JobInfo = { id: number; title: string; recruit_mode: string | null; start_date: string | null; pickup_address: string | null; site_manager_id: number | null };
+    type JobInfo = { id: number; title: string; client_type: string | null; start_date: string | null; pickup_address: string | null; site_manager_id: number | null };
     let job: JobInfo | null = null;
     if (job_id) {
-      const { data: j } = await supabase
+      const { data: j, error: jobError } = await supabase
         .from("jobs")
-        .select("id, title, recruit_mode, start_date, pickup_address, site_manager_id")
+        .select("id, title, start_date, pickup_address, site_manager_id, client:clients ( client_type )")
         .eq("id", job_id)
         .maybeSingle();
-      job = (j as JobInfo | null) ?? null;
+      if (jobError) {
+        console.error("[confirm/send] job query error", jobError);
+        return NextResponse.json({ error: "공고 정보를 불러오지 못했습니다." }, { status: 503 });
+      }
+      if (!j) {
+        return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+      }
+      const joined = j as unknown as Omit<JobInfo, "client_type"> & { client?: unknown };
+      job = { ...joined, client_type: joinedClientType(joined.client) };
     }
-    const general = isGeneralLineJob(job ? { title: job.title, recruit_mode: job.recruit_mode } : null);
+    const general = isGeneralLineJob(job);
 
     let text: string;
 
@@ -136,7 +144,7 @@ export async function POST(req: NextRequest) {
           smName = (sm?.name as string) || "";
           smPhone = (sm?.phone as string) || "";
         }
-        // 현장매니저는 비마트 라인에서만 필수. internal 정기배송 라인은 담당자 줄을 생략하고 발송 가능
+        // 현장매니저는 비마트 라인에서만 필수. 일반 배송 라인은 담당자 줄을 생략하고 발송 가능
         // (도시락 등은 현장매니저를 별도로 두지 않는 경우가 많다 — 발송이 막히지 않게).
         if (!smName && !general) {
           return NextResponse.json({ error: "공고에 현장매니저가 지정되지 않았습니다." }, { status: 400 });

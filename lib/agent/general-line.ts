@@ -1,26 +1,35 @@
 /**
- * 일반 배송 라인(도시락 등 recruit_mode='internal' 실공고) 판별 + 전용 지식 헬퍼.
+ * 일반 배송 라인(비마트 외 실제 공고) 판별 + 전용 지식 헬퍼.
  *
  * 배경: 기존 스크리닝 지식은 비마트(배민커넥트) 기준이다
  * (프로모션 5천원 · 08:00/16:00 배차 · 배민 앱 가입 온보딩).
- * internal 실공고(도시락 라인 등)는 프로세스가 다르다:
+ * 비마트 외 실제 공고(도시락 라인 등)는 프로세스가 다르다:
  *   체크: ①차종(공고 요건 대비) ②본인 명의 정산 ③시작 가능일 ④선탑 가능 요일·시간대
  *   통과 시: 배민 앱 가이드 대신 "매니저가 선탑(동승) 일정을 잡아 연락" 마무리 + 매니저 인계(paused).
  *
- * 시스템 공고(__baemin_system__/__danggeun_system__)와 external/both 공고는
- * 기존 비마트 흐름을 100% 유지한다 — 판별은 이 모듈의 isGeneralLineJob 하나로 단일화.
+ * 시스템 공고(__baemin_system__/__danggeun_system__)는 레거시 비마트 흐름을 유지한다.
+ * 실제 공고는 모집 채널(recruit_mode)이 아니라 화주사 유형으로 판별하며,
+ * 명시적 baemin_bmart만 비마트 흐름을 쓴다.
  */
 
-import { isSystemJobTitle } from "../jobs";
+import { isSystemJobTitle } from "../jobs.ts";
 import type { AgentState, JobContext, ScreeningChecklist } from "./types";
 
-/** recruit_mode='internal' 실공고(시스템 더미 공고 제외)만 일반 라인 흐름을 탄다. */
+/** Supabase의 단일 FK 관계가 객체/배열 어느 형태로 와도 client_type을 안전하게 꺼낸다. */
+export function joinedClientType(relation: unknown): string | null {
+  const value = Array.isArray(relation) ? relation[0] : relation;
+  if (!value || typeof value !== "object") return null;
+  const clientType = (value as { client_type?: unknown }).client_type;
+  return typeof clientType === "string" ? clientType : null;
+}
+
+/** 시스템 공고는 레거시, 실제 공고는 명시적 baemin_bmart만 비마트 흐름을 탄다. */
 export function isGeneralLineJob(
-  job: Pick<JobContext, "title" | "recruit_mode"> | null | undefined
+  job: Pick<JobContext, "title" | "client_type"> | null | undefined
 ): boolean {
   if (!job) return false;
   if (isSystemJobTitle(job.title)) return false;
-  return job.recruit_mode === "internal";
+  return job.client_type !== "baemin_bmart";
 }
 
 /**

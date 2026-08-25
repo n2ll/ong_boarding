@@ -3,7 +3,7 @@
  *
  * - prompt_examples.category='conversation' : 일반 대화 톤 (모든 stage) — 백엔드 전용, UI 비노출
  * - prompt_examples.category='facts'        : 공통 운영 정보 (전 지점 공통 — 정산·프로모션·업무시간 등)
- * - prompt_examples.category='knowledge'    : 일반 배송 라인 FAQ — internal 실공고 프롬프트에만 주입
+ * - prompt_examples.category='knowledge'    : 일반 배송 라인 FAQ — 비마트 외 실제 공고 프롬프트에만 주입
  *                                             (비마트 흐름과 정산 주기 등이 달라 facts와 분리)
  * - branches.ai_facts                       : 지점별 AI 참고 정보 (자유 텍스트, 지점관리 탭에서 편집)
  *
@@ -106,7 +106,7 @@ export async function loadFacts(): Promise<string> {
   return fetchCategory("facts");
 }
 
-/** 일반 배송 라인 FAQ(category='knowledge') — internal 실공고 프롬프트에서만 사용. */
+/** 일반 배송 라인 FAQ(category='knowledge') — 비마트 외 실제 공고 프롬프트에서만 사용. */
 export async function loadLineKnowledge(): Promise<string> {
   return fetchCategory("knowledge");
 }
@@ -155,7 +155,7 @@ async function loadBranchAiFacts(branchName: string | null | undefined): Promise
  * @param branchName 지원자의 1지망 지점명 — 그 지점의 ai_facts를 별도 섹션으로 추가.
  *                   비어 있으면 공통 facts만 포함.
  * @param opts.includeCommonFacts false면 공통 운영 정보(facts) 섹션 생략 —
- *                   비마트 기준 정산·프로모션 정보라 일반 라인(internal 공고) 프롬프트를 오염시키기 때문.
+ *                   비마트 기준 정산·프로모션 정보라 일반 배송 공고 프롬프트를 오염시키기 때문.
  */
 export async function buildToneGuide(
   branchName?: string | null,
@@ -163,7 +163,7 @@ export async function buildToneGuide(
 ): Promise<string> {
   const includeCommonFacts = opts?.includeCommonFacts ?? true;
   // 대화 예시(conversation)는 비마트 맥락(배민 자기소개·주말 티오·08:00 배차·프로모션)이라
-  // general(internal) 라인 프롬프트의 '비마트 금지' 규칙과 충돌한다. general이면 예시 텍스트는 빼고
+  // 일반 배송 라인 프롬프트의 '비마트 금지' 규칙과 충돌한다. general이면 예시 텍스트는 빼고
   // 톤 지침(짧고 친근·매니저 어투)만 남긴다.
   const includeConversationExamples = opts?.includeConversationExamples ?? true;
   const [conv, commonFacts, branchFacts, persona] = await Promise.all([

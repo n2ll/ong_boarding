@@ -10,6 +10,7 @@ import { gatherMessagePreviews, livePreviewTargetIds } from "@/lib/message-previ
 import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
 import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
 import { applicationBranchName, applicationUsesLegacyBmartFlow } from "@/lib/application-branch";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ const LIST_COLUMNS = [
  * route.ts가 access_token에 대해 이미 같은 논리를 적어 뒀다("649명분이 통째로 노출된 셈") —
  * 전화번호·주소도 다를 게 없다. **이름·전화 0개가 이 스코프의 설계 목표다.**
  *
- * 조립 필드(agent_stage · job_links · current_recruit_mode · has_access_token)도 안 붙인다.
+ * 조립 필드(agent_stage · job_links · uses_bmart_flow · has_access_token)도 안 붙인다.
  * 네 화면 중 아무도 읽지 않으므로 job_candidates·jobs·gatherLiveJobLinks **조회 3개를 건너뛴다** —
  * 바이트보다 이쪽이 체감에 크다(목록이 1초 걸렸던 원인이 그 3개의 순차 await였다).
  *
@@ -120,7 +121,7 @@ const ROLLUP_COLUMNS = [
  * 같이 고칠 것.
  *
  * 조립 필드는 agent_stage(답장 큐 미착수/응대중 배지 — 빠지면 undefined!=="paused"가
- * 항상 참이라 전원 '미착수'로 뒤집힌다)와 current_recruit_mode(온보딩 게이지의 배민
+ * 항상 참이라 전원 '미착수'로 뒤집힌다)와 uses_bmart_flow(온보딩 게이지의 배민
  * 분모)만 붙인다. job_links는 아무도 안 읽으므로 gatherLiveJobLinks 조회를 건너뛴다.
  * access_token은 select 자체에서 빠진다(has_access_token 변환도 건너뛴다 — 억지로
  * 붙이면 전원 false가 되어 '링크 없음'으로 읽힌다).
@@ -217,7 +218,7 @@ export async function GET(req: NextRequest) {
     const [jcRes, linkRes, jobRes] = await Promise.all([
       supabase
         .from("job_candidates")
-        .select("id, applicant_id, agent_stage, created_at, updated_at")
+        .select("id, applicant_id, agent_stage, created_at, updated_at, jobs:job_id ( title, client:clients ( client_type ) )")
         .in("applicant_id", ids)
         .order("created_at", { ascending: false }),
       // dashboard 스코프는 job_links를 아무도 안 읽는다 — 별도 페이징 조회 1개를 건너뛴다.
@@ -225,8 +226,8 @@ export async function GET(req: NextRequest) {
         ? Promise.resolve({ links: new Map<number, never[]>(), error: null })
         : gatherLiveJobLinks(supabase, ids),
       jobIds.length > 0
-        ? supabase.from("jobs").select("id, recruit_mode").in("id", jobIds)
-        : Promise.resolve({ data: [] as { id: number; recruit_mode: string | null }[], error: null }),
+        ? supabase.from("jobs").select("id, title, client:clients ( client_type )").in("id", jobIds)
+        : Promise.resolve({ data: [] as { id: number; title: string; client: unknown }[], error: null }),
     ]);
 
     let candidateRows = jcRes.data ?? [];
@@ -250,12 +251,17 @@ export async function GET(req: NextRequest) {
       jobRows = queryState.rows.jobs as typeof jobRows;
     }
 
-    const stageByApplicant = new Map<number, { stage: string | null; at: string | null }>();
+    const stageByApplicant = new Map<number, { stage: string | null; at: string | null; usesBmartFlow: boolean }>();
     for (const jc of candidateRows) {
       if (!stageByApplicant.has(jc.applicant_id as number)) {
+        const joinedJob = (jc.jobs ?? null) as unknown as { title?: string | null; client?: unknown } | null;
         stageByApplicant.set(jc.applicant_id as number, {
           stage: jc.agent_stage as string | null,
           at: (jc.updated_at as string | null) ?? null,
+          usesBmartFlow: !!joinedJob?.title && !isGeneralLineJob({
+            title: joinedJob.title,
+            client_type: joinedClientType(joinedJob.client),
+          }),
         });
       }
     }
@@ -290,16 +296,23 @@ export async function GET(req: NextRequest) {
       withStage = withStage.map((a) => ({ ...a, job_links: links.get(a.id) ?? [] }));
     }
 
-    // 현재 공고(current_job_id)의 라인 형태(recruit_mode)를 함께 내려준다 — 대시보드·목록의
-    // 라인형태별 지표/표시(배민 전용 개념 분기)용. current_job_id 없으면 null.
-    if (jobIds.length > 0) {
-      const modeByJob = new Map<number, string | null>();
-      for (const j of jobRows) modeByJob.set(j.id as number, (j.recruit_mode as string | null) ?? null);
-      withStage = withStage.map((a) => ({
-        ...a,
-        current_recruit_mode: typeof a.current_job_id === "number" ? modeByJob.get(a.current_job_id) ?? null : null,
+    // 온보딩의 배민 전용 지표 분기 — 확정 결속 공고가 있으면 그것을 우선하고, 없으면 위에서 고른
+    // 최신 agent 후보의 공고를 쓴다. 모집 채널(recruit_mode)이 아니라 실제 화주사 유형을 따른다.
+    const bmartByJob = new Map<number, boolean>();
+    for (const row of jobRows) {
+      const j = row as unknown as { id: number; title: string; client?: unknown };
+      bmartByJob.set(j.id, !isGeneralLineJob({
+        title: j.title,
+        client_type: joinedClientType(j.client),
       }));
     }
+    withStage = withStage.map((a) => ({
+      ...a,
+      uses_bmart_flow:
+        typeof a.current_job_id === "number"
+          ? bmartByJob.get(a.current_job_id) ?? false
+          : stageByApplicant.get(a.id)?.usesBmartFlow ?? false,
+    }));
   }
 
   // 맞춤 공고 링크 토큰은 '있는지 없는지'만 내려보낸다.

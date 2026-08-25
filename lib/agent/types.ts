@@ -63,7 +63,7 @@ export interface AgentState {
       summary?: string | null;
       suggested_action?: string | null;
     };
-    /** 일반 라인(internal 공고) 스크리닝 수집값 — 차종·시작 가능일·선탑 가능 시간대·법인차 렌트 희망 */
+    /** 일반 배송 라인(비마트 외 실제 공고) 스크리닝 수집값 — 차종·시작 가능일·선탑 가능 시간대·법인차 렌트 희망 */
     general_screening?: {
       차종?: string;
       시작가능일?: string;
@@ -98,8 +98,10 @@ export interface JobContext {
   pay_amount?: number | null;
   /** 공고별 AI 참고 정보 (근무·차량 정책 등 자유 기재) — branches.ai_facts의 공고 레벨 미러. */
   ai_facts?: string | null;
-  /** 모집 방식 (external/internal/both) — internal 실공고는 일반 라인 스크리닝 흐름을 탄다. */
+  /** 모집 방식 (external/internal/both) — 지원자를 받는 채널/노출 방식이며 AI 응대 라인을 정하지 않는다. */
   recruit_mode?: string | null;
+  /** 화주사 유형 — 실제 공고의 AI 응대 라인을 정한다. 명시적 baemin_bmart만 비마트 흐름. */
+  client_type?: string | null;
   /** 공고 상태 — 라우터가 실질 마감(isJobEffectivelyClosed) 판단에 사용. */
   status?: string | null;
   /** 마감시각 — status='active'여도 지났으면 실질 마감. */

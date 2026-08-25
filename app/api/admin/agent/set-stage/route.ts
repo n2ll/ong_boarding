@@ -10,7 +10,7 @@
  * 동작:
  *  - target='screening': 그대로 진입 (checklist 변경 없음)
  *  - target='onboarding': screening 8항목 모두 true → onboarding 진입 (앱설치 안내 자동 발송 등 transitions의 advance 부수효과 그대로)
- *  - target='active': screening 8 + onboarding 4 모두 true → active 진입 (첫출근 룰 자동 발송)
+ *  - target='active': 비마트 공고만 screening 8 + onboarding 4 모두 true → active 진입
  *  - 같은 stage 재지정은 no-op
  */
 
@@ -25,6 +25,7 @@ import type {
   ScreeningChecklist,
   StageName,
 } from "@/lib/agent/types";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 
@@ -43,11 +44,14 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient();
 
     // 활성 job_candidate + 관련 정보 로드
-    const { data: jc } = await supabase
+    const { data: jc, error: jcError } = await supabase
       .from("job_candidates")
       .select(`
         id, job_id, applicant_id, agent_stage, agent_state,
-        jobs:job_id ( id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, recruit_mode ),
+        jobs:job_id (
+          id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, recruit_mode,
+          client:clients ( client_type )
+        ),
         applicants:applicant_id ( id, name, phone, branch1, work_hours, source )
       `)
       .eq("applicant_id", applicant_id)
@@ -56,6 +60,10 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .maybeSingle();
 
+    if (jcError) {
+      console.error("[agent/set-stage] candidate query error", jcError);
+      return NextResponse.json({ error: "후보의 공고 정보를 불러오지 못했습니다." }, { status: 503 });
+    }
     if (!jc) {
       return NextResponse.json({ error: "활성 job_candidate를 찾을 수 없습니다." }, { status: 404 });
     }
@@ -95,7 +103,21 @@ export async function POST(req: NextRequest) {
       id: number; name: string | null; phone: string;
       branch1: string | null; work_hours: string | null; source: string | null;
     };
-    const job = (jc.jobs ?? null) as unknown as JobContext | null;
+    const joinedJob = (jc.jobs ?? null) as unknown as (JobContext & { client?: unknown }) | null;
+    const job: JobContext | null = joinedJob
+      ? { ...joinedJob, client_type: joinedClientType(joinedJob.client) }
+      : null;
+    if (!job) {
+      return NextResponse.json({ error: "후보의 공고 정보를 확인할 수 없습니다." }, { status: 503 });
+    }
+    // 일반 배송은 screening 완료 뒤 paused로 매니저에게 인계하며 onboarding/active를 쓰지 않는다.
+    // active를 성공 처리하면 다음 인입의 router guard가 다시 paused로 뒤집어 매니저 액션과 상태가 모순된다.
+    if (targetStage === "active" && isGeneralLineJob(job)) {
+      return NextResponse.json(
+        { error: "일반 배송 공고는 활동 중(active) 단계를 사용하지 않습니다. 스크리닝 완료 후 수동 응대로 인계해 주세요." },
+        { status: 409 },
+      );
+    }
     const simulate = applicant.source === "danggeun_practice";
 
     // '확정'(active)으로 수동 전환 시엔 자동 발송·부수효과 없이 stage/체크리스트/status만 갱신.

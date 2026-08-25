@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { calcAge, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
+import { isGeneralLineJob } from "@/lib/agent/general-line";
 import { isLiveLinkResolved, type LiveJobLink } from "@/lib/candidate-links";
 import type { ConversationJobContext } from "@/lib/conversation-thread-view";
 import { ConversationThread } from "./ConversationThread";
@@ -61,8 +62,11 @@ interface CandidateLink {
   job_status: string | null;
   job_start_date: string | null;
   job_effectively_closed: boolean;
-  job_recruit_mode: string | null;
-  /** 만남장소 발송 요건 — 서버가 픽업주소를 요구하고, 비internal 라인은 현장매니저까지 필요. */
+  /** AI 응대 분기용 화주사 유형. recruit_mode(모집 채널)와 별개. */
+  job_client_type: string | null;
+  /** 확정 시간대 슬롯을 사용하는 화주사인지. */
+  client_uses_slots: boolean;
+  /** 만남장소 발송 요건 — 서버가 픽업주소를 요구하고, 비마트 라인은 현장매니저까지 필요. */
   job_pickup_address: string | null;
   job_site_manager_id: number | null;
   client_id: number | null;
@@ -441,8 +445,14 @@ export function ApplicantDetailContent({
   const confirm = useConfirm();
   const { reportApplicantDirty } = useAdminUnsavedNavigation();
   // '확정 지점' 드롭다운 소스 — 활성 지점(화주사 결속). 자유텍스트 오타로 충원율 집계가 누락되던 문제(A5) 방지.
-  const { data: branchesApi } = useSWR<{ data?: { id: number; name: string; client_id: number | null; active: boolean }[] }>("/api/admin/branches");
+  const {
+    data: branchesApi,
+    error: branchesError,
+    isLoading: branchesLoading,
+    mutate: mutateBranches,
+  } = useSWR<{ data?: { id: number; name: string; client_id: number | null; active: boolean }[] }>("/api/admin/branches");
   const allBranches = branchesApi?.data ?? [];
+  const branchMetadataUnavailable = Boolean(branchesError) || (branchesLoading && !branchesApi);
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Partial<ApplicantFull>>({});
   const managedFieldsDirty = Object.keys(edit).length > 0;
@@ -590,9 +600,26 @@ export function ApplicantDetailContent({
     isLiveLinkResolved({ agentStage: c.agent_stage, jobTitle: c.job_title, jobEffectivelyClosed: c.job_effectively_closed })
   );
   const isPurePool = cands.length === 0;
-  // 표시 중인 공고가 internal(도시락 등) 라인인가 — 배민 전용 필드(슬롯·지점·배민ID·배민 온보딩)를
-  // 이 상세 패널 전반에서 숨기거나 라인 언어로 치환하는 단일 판정(확정 모달과 동일 규칙).
-  const detailInternal = focusCand?.job_recruit_mode === "internal";
+  // AI 응대 유형·슬롯·지점은 서로 다른 축이다. 모집 방식(recruit_mode)으로 한꺼번에 묶으면
+  // 외부 모집 일반 화주사가 비마트로 보이고, 내부 모집 비마트가 일반 라인으로 보이는 역전이 생긴다.
+  const focusGeneralLine = !!focusCand && isGeneralLineJob({
+    title: focusCand.job_title ?? "",
+    client_type: focusCand.job_client_type,
+  });
+  // 확정 후 운영 필드는 표시 중인 후보가 아니라 current_job_id가 가리키는 공고를 따른다.
+  // 다른 후보 탭을 눌렀다고 배민 ID·슬롯·지점 편집 계약이 바뀌면 확정 공고와 데이터가 어긋난다.
+  const confirmedCand = a.current_job_id == null ? null : cands.find((c) => c.job_id === a.current_job_id) ?? null;
+  const operationsCand = a.current_job_id == null ? focusCand : confirmedCand;
+  // 확정 공고 관계를 못 읽으면 비마트 전용 필드를 보여주지 않는 안전 기본값을 쓴다.
+  const operationsGeneralLine = operationsCand
+    ? isGeneralLineJob({
+        title: operationsCand.job_title ?? "",
+        client_type: operationsCand.job_client_type,
+      })
+    : true;
+  const detailUsesSlots = !!operationsCand && (
+    isSystemJobTitle(operationsCand.job_title ?? "") || operationsCand.client_uses_slots
+  );
 
   const val = <K extends keyof ApplicantFull>(k: K): ApplicantFull[K] =>
     (k in edit ? (edit[k] as ApplicantFull[K]) : a[k]);
@@ -764,17 +791,20 @@ export function ApplicantDetailContent({
   // 선택된 대상 공고의 대화가 중단(abort) 상태인지 — 확정은 허용하되 매니저가 알고 누르게 한다.
   const confirmTargetAborted =
     (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.agent_stage === "abort";
-  // 확정 대상 공고가 internal(도시락 등 정기배송) 라인인지 — 지점·슬롯은 배민/비마트 전용 개념이라
-  // internal 라인 확정 창에선 숨겨 혼동을 막는다(라인 형태별 조건부 UX).
-  const confirmTargetInternal =
-    (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.job_recruit_mode === "internal";
+  const confirmTarget = confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0] ?? null;
+  const confirmTargetUsesSlots = !!confirmTarget && (
+    isSystemJobTitle(confirmTarget.job_title ?? "") || confirmTarget.client_uses_slots
+  );
+  const activeBranchNamesForClient = (clientId: number | null) =>
+    clientId == null
+      ? []
+      : allBranches.filter((b) => b.active && b.client_id === clientId).map((b) => b.name);
   // '확정 지점' 드롭다운 옵션 — 대상 공고 화주사의 활성 지점 이름(정확일치 집계와 맞게 branches.name 사용).
   // client_id=null(화주사 미결속 공고)이면 무소속 지점을 끌어오지 않게 빈 목록.
-  const confirmClientId = (confirmableCands.find((c) => c.job_id === confirmJobId) ?? confirmableCands[0])?.client_id ?? null;
-  const confirmBranchNames = confirmClientId == null ? [] : allBranches.filter((b) => b.active && b.client_id === confirmClientId).map((b) => b.name);
-  // 편집 폼은 이 지원자가 연결된 모든 화주사(병행 투입 포함)의 활성 지점 — 확정 화주사가 focus와 달라도 값이 '미등록'으로 오표기되지 않게.
-  const editClientIds = new Set(cands.map((c) => c.client_id).filter((id): id is number => id != null));
-  const editBranchNames = allBranches.filter((b) => b.active && b.client_id != null && editClientIds.has(b.client_id)).map((b) => b.name);
+  const confirmBranchNames = activeBranchNamesForClient(confirmTarget?.client_id ?? null);
+  // 상시 운영 편집은 current_job_id의 화주사만 권위 소스로 쓴다. 병행 후보 화주사들의 지점을
+  // 합치면 일반 공고 확정자에게 다른 비마트 지점을 저장할 수 있어 공고 결속과 집계가 갈라진다.
+  const confirmedBranchNames = activeBranchNamesForClient(confirmedCand?.client_id ?? null);
   // 후속 안내(만남장소 등) 발송 대상 공고 — 매니저 확정이 결속한 current_job_id(권위 소스, 서버 검증)를 1순위로.
   // screening_passed_at은 에이전트 스크리닝→온보딩 마커라 병행 후보에선 확정 공고와 다를 수 있어 폴백으로만.
   const confirmedJobId = a.current_job_id ?? (cands.find((c) => c.screening_passed_at != null) ?? focusCand)?.job_id ?? null;
@@ -786,9 +816,6 @@ export function ApplicantDetailContent({
       toast.warning("먼저 저장하지 않은 투입·운영 정보 변경을 저장하거나 취소해 주세요.");
       return;
     }
-    setConfirmSlots(
-      String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
-    );
     // 대상 공고 기본값: 외부 시드 → 현재 포커스 후보 → 확정 가능 후보 첫 번째.
     // 대상 시드도 confirmableCands와 같은 기준(비마감·비시스템) — abort를 빼면 시드가 비어 확정이 막힌다.
     const seeded = seedJobId != null ? confirmableCands.find((c) => c.job_id === seedJobId) ?? null : null;
@@ -797,16 +824,29 @@ export function ApplicantDetailContent({
     const target = seeded ?? focusOpen ?? confirmableCands[0] ?? null;
     setConfirmJobId(target?.job_id ?? null);
     setConfirmStartDate(String(a.start_date ?? target?.job_start_date ?? "").slice(0, 10));
-    // 지점 기본값 — '미지정'(지점 미보유 라인 자리값)은 채우지 않는다.
-    const seedBranch = a.confirmed_branch ?? a.branch1 ?? target?.job_branch ?? "";
-    setConfirmBranch(seedBranch === "미지정" ? "" : String(seedBranch));
+    const targetUsesSlots = !!target && target.client_uses_slots;
+    setConfirmSlots(
+      targetUsesSlots
+        ? String(a.confirmed_slot ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+        : []
+    );
+    // 기존 확정 지점은 새 대상 화주사의 활성 지점일 때만 유지한다. 다른 화주사·레거시 값은
+    // 숨은 채 재저장하지 않고, 대상 공고의 등록 지점도 현재 활성 옵션일 때만 시드한다.
+    const targetBranchNames = activeBranchNamesForClient(target?.client_id ?? null);
+    const existingBranch = String(a.confirmed_branch ?? "").trim();
+    const jobBranch = String(target?.job_branch ?? "").trim();
+    setConfirmBranch(
+      targetBranchNames.includes(existingBranch)
+        ? existingBranch
+        : targetBranchNames.includes(jobBranch) ? jobBranch : ""
+    );
     setConfirmSendAppGuide(false);
     setConfirmOpen(true);
   };
   // '확정 대기' 큐 등 외부에서 이 모달을 열 수 있게 최신 함수를 ref에 담아둔다(위 자동 오픈 effect가 호출).
   openConfirmRef.current = openConfirm;
 
-  // 확정 후속 안내 발송 대상 공고 — 만남장소는 서버가 픽업주소(+비internal이면 현장매니저)를 요구한다.
+  // 확정 후속 안내 발송 대상 공고 — 만남장소는 서버가 픽업주소(+비마트이면 현장매니저)를 요구한다.
   // PR1에서 큐의 disabled+툴팁 안내가 사라져 발송 실패를 400으로만 알게 됐던 것을 여기서 복원.
   const followupCand = cands.find((c) => c.job_id === confirmedJobId) ?? null;
   // 서버 confirm/send의 만남장소 '하드' 요건은 job_id 하나다 — 본문을 직접 쓰면(text override)
@@ -821,7 +861,7 @@ export function ApplicantDetailContent({
       ? "이 확정은 특정 공고에 묶이지 않아(슬롯 단위 라인) 집결지 정보가 없어요 — 문안을 직접 작성해 보내세요."
       : !followupCand.job_pickup_address
         ? "공고에 집결지가 없어 기본 문안이 자동으로 채워지지 않아요 — 공고에 집결지를 넣거나 문안을 직접 작성하세요."
-        : followupCand.job_recruit_mode !== "internal" && followupCand.job_site_manager_id == null
+        : !isGeneralLineJob({ title: followupCand.job_title ?? "", client_type: followupCand.job_client_type }) && followupCand.job_site_manager_id == null
           ? "공고에 현장매니저가 없어 기본 문안이 자동으로 채워지지 않아요 — 공고에 현장매니저를 지정하거나 문안을 직접 작성하세요."
           : null;
 
@@ -867,23 +907,35 @@ export function ApplicantDetailContent({
     const c = confirmableCands.find((x) => x.job_id === jid);
     if (c) {
       if (!confirmStartDate && c.job_start_date) setConfirmStartDate(String(c.job_start_date).slice(0, 10));
+      if (!c.client_uses_slots) setConfirmSlots([]);
       // 대상 공고 전환 시 현재 지점값이 새 공고 화주사의 활성 지점에 없으면 그 공고 지점(또는 공백)으로 정정 — 타 화주사 지점 잔류로 오집계되는 것 방지.
-      const nb = c.client_id == null ? [] : allBranches.filter((b) => b.active && b.client_id === c.client_id).map((b) => b.name);
-      if (!nb.includes(confirmBranch)) setConfirmBranch(c.job_branch && c.job_branch !== "미지정" ? c.job_branch : "");
+      const nb = activeBranchNamesForClient(c.client_id);
+      if (!nb.includes(confirmBranch)) {
+        const jobBranch = String(c.job_branch ?? "").trim();
+        setConfirmBranch(nb.includes(jobBranch) ? jobBranch : "");
+      }
     }
   };
 
   // 확정 확정(commit) — status + 대상 공고(current_job_id) + 시작일·지점·슬롯을 한 번에 저장.
   // current_job_id로 확정이 공고에 결속되고, 서버가 잔여 후보 자동 정리·라인 태깅을 그 공고 기준으로 처리한다.
   const commitConfirm = async () => {
-    const body: Record<string, unknown> = { status: "확정인력" };
-    if (confirmJobId != null) body.current_job_id = confirmJobId;
-    if (confirmStartDate.trim()) body.start_date = confirmStartDate.trim();
-    // 지점·슬롯은 지점/슬롯 개념이 있는 라인(비internal)에서만 저장 — internal은 필드 자체가 숨겨짐.
-    if (!confirmTargetInternal) {
-      if (confirmSlots.length > 0) body.confirmed_slot = confirmSlots.join(", ");
-      if (confirmBranch.trim()) body.confirmed_branch = confirmBranch.trim();
+    if (branchMetadataUnavailable) {
+      toast.error("지점 정보를 확인한 뒤 확정할 수 있어요. 다시 불러와 주세요.");
+      return;
     }
+    if (confirmJobId == null) return;
+    // 대상 공고별 값은 비었을 때도 null을 명시한다. 생략하면 이전 비마트 확정의 슬롯·지점·시작일이
+    // 일반 무지점 공고로 바꾼 뒤에도 DB에 남아 Dashboard·SlotBoard가 잘못 집계한다.
+    const body: Record<string, unknown> = {
+      status: "확정인력",
+      current_job_id: confirmJobId,
+      start_date: confirmStartDate.trim() || null,
+      confirmed_slot: confirmTargetUsesSlots
+        ? (confirmSlots.length > 0 ? confirmSlots.join(", ") : null)
+        : null,
+      confirmed_branch: confirmBranch.trim() || null,
+    };
     const ok = await patch(body, `${a.name}님을 확정인력으로 이동했어요.`);
     if (ok) {
       setConfirmOpen(false);
@@ -1377,9 +1429,9 @@ export function ApplicantDetailContent({
             {focusCand && (
               <div className="grid grid-cols-1 gap-3 mt-3">
                 {(() => {
-                  // internal 라인은 비마트 전용 자동통과 항목을 감추고 유효 3개만 라인 언어로 표시.
-                  const keys = detailInternal ? GENERAL_SCREENING_KEYS : SCREENING_KEYS;
-                  const labels = detailInternal ? GENERAL_SCREENING_LABELS : SCREENING_LABELS;
+                  // 일반 배송 라인은 비마트 전용 자동통과 항목을 감추고 유효 항목만 라인 언어로 표시.
+                  const keys = focusGeneralLine ? GENERAL_SCREENING_KEYS : SCREENING_KEYS;
+                  const labels = focusGeneralLine ? GENERAL_SCREENING_LABELS : SCREENING_LABELS;
                   const done = keys.filter((k) => screening[k] === true).length;
                   return (
                     <div className="rounded-2xl border border-border-strong p-3.5 bg-card">
@@ -1392,8 +1444,8 @@ export function ApplicantDetailContent({
                     </div>
                   );
                 })()}
-                {/* 온보딩 체크리스트는 배민 커넥트 온보딩 전용 — internal 라인엔 표시하지 않는다(선탑 이력이 대체). */}
-                {!detailInternal && (focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
+                {/* 온보딩 체크리스트는 배민 커넥트 온보딩 전용 — 일반 배송 라인엔 표시하지 않는다. */}
+                {!focusGeneralLine && (focusCand.agent_stage === "onboarding" || focusCand.agent_stage === "active" || onboardingDone > 0) && (
                   <div className="rounded-2xl border border-border-strong p-3.5 bg-card">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="text-[13px] font-extrabold text-foreground">온보딩 체크리스트</h3>
@@ -1488,8 +1540,8 @@ export function ApplicantDetailContent({
                 )}
               </div>
             )}
-            {/* 확정 슬롯(비마트 전용) + 마지막 메시지 시점. internal 라인은 슬롯 개념이 없어 시각만 표시. */}
-            {detailInternal ? (
+            {/* 확정 슬롯 + 마지막 메시지 시점. 화주사가 슬롯을 쓰지 않으면 시각만 표시. */}
+            {!detailUsesSlots ? (
               <div className="flex items-center justify-end">
                 <span className="flex items-center gap-1 text-[12px] text-muted-foreground" title="이 지원자와 주고받은 마지막 메시지 시점"><Clock size={12} /> 마지막 메시지 {relTime(a.last_message_at)}</span>
               </div>
@@ -1511,23 +1563,26 @@ export function ApplicantDetailContent({
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* 확정 지점 — 등록 지점 드롭다운. 지점 개념 라인·등록 지점 있을 때만(internal·미보유 숨김). */}
-              {!detailInternal && (editBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
+              {/* 확정 지점 — 실제 등록 지점 또는 기존 값이 있을 때만 표시. */}
+              {(confirmedBranchNames.length > 0 || String(val("confirmed_branch") ?? "").trim() !== "") && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-bold text-muted-foreground">확정 지점</span>
-                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} disabled={busy} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                  <select value={String(val("confirmed_branch") ?? "")} onChange={(e) => setField("confirmed_branch", e.target.value)} disabled={busy || branchMetadataUnavailable} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
                     <option value="">미지정</option>
-                    {editBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                    {String(val("confirmed_branch") ?? "").trim() !== "" && !editBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (미등록)</option>}
+                    {confirmedBranchNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    {String(val("confirmed_branch") ?? "").trim() !== "" && !confirmedBranchNames.includes(String(val("confirmed_branch"))) && <option value={String(val("confirmed_branch"))}>{String(val("confirmed_branch"))} (현재 확정 공고 외)</option>}
                   </select>
+                  {!branchMetadataUnavailable && String(val("confirmed_branch") ?? "").trim() !== "" && !confirmedBranchNames.includes(String(val("confirmed_branch"))) && (
+                    <span className="text-[12px] text-warning-strong">현재 확정 공고의 지점이 아니에요. 미지정 또는 올바른 지점으로 정정해 주세요.</span>
+                  )}
                 </label>
               )}
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-bold text-muted-foreground">근무 시작일</span>
                 <input type="date" value={String(val("start_date") ?? "")} onChange={(e) => setField("start_date", e.target.value)} disabled={busy} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
               </label>
-              {/* 배민 커넥트 ID — 배민 온보딩 전용. internal은 숨김. */}
-              {!detailInternal && (
+              {/* 배민 커넥트 ID — 배민 온보딩 전용. */}
+              {!operationsGeneralLine && (
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-bold text-muted-foreground">배민 커넥트 ID</span>
                   <input value={String(val("baemin_id") ?? "")} onChange={(e) => setField("baemin_id", e.target.value)} disabled={busy} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
@@ -1611,10 +1666,10 @@ export function ApplicantDetailContent({
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={!!val("guide_sent")} onChange={(e) => setField("guide_sent", e.target.checked)} disabled={busy} className="accent-brand-yellow w-4 h-4 disabled:opacity-50" />
-                <span className="text-[12px] font-semibold text-gray-700">{detailInternal ? "앱 안내 전달" : "가이드 전달"}</span>
+                <span className="text-[12px] font-semibold text-gray-700">앱 안내 전달</span>
               </label>
-              {/* 카카오 채널 친구는 배민 온보딩 단계 — internal 라인엔 표시하지 않는다. */}
-              {!detailInternal && (
+              {/* 카카오 채널 친구는 배민 온보딩 단계에만 표시한다. */}
+              {!operationsGeneralLine && (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={!!val("kakao_channel_friend")} onChange={(e) => setField("kakao_channel_friend", e.target.checked)} disabled={busy} className="accent-brand-yellow w-4 h-4 disabled:opacity-50" />
                   <span className="text-[12px] font-semibold text-gray-700">카카오 채널 친구</span>
@@ -1709,13 +1764,26 @@ export function ApplicantDetailContent({
             )}
           </div>
 
-          <div className={(!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "")) ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
+          {branchMetadataUnavailable && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-warning-soft bg-yellow-50 px-3 py-2.5">
+              <p className="text-[12px] font-semibold text-warning-strong">
+                {branchesError ? "지점 정보를 불러오지 못했어요. 확인 없이 확정할 수 없어요." : "지점 정보를 확인하는 중이에요…"}
+              </p>
+              {branchesError && (
+                <button type="button" onClick={() => void mutateBranches()} className="shrink-0 rounded-lg border border-warning-soft bg-card px-2.5 py-1 text-[12px] font-bold text-warning-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  다시 불러오기
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className={(confirmBranchNames.length > 0 || confirmBranch.trim() !== "") ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
             <label className="flex flex-col gap-1">
               <span className="text-[12px] font-bold text-muted-foreground">근무 시작일</span>
               <input type="date" value={confirmStartDate} onChange={(e) => setConfirmStartDate(e.target.value)} className="border border-border-strong rounded-2xl px-2.5 py-1.5 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
             </label>
-            {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). 지점 개념 라인·등록 지점 있을 때만. */}
-            {!confirmTargetInternal && (confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
+            {/* 확정 지점 — 등록 지점 드롭다운(자유입력 폐지 → 오타 집계 누락 방지). */}
+            {(confirmBranchNames.length > 0 || confirmBranch.trim() !== "") && (
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-bold text-muted-foreground">확정 지점(선택)</span>
                 <select value={confirmBranch} onChange={(e) => setConfirmBranch(e.target.value)} className="pr-8 border border-border-strong rounded-lg px-2.5 py-1.5 text-[13px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring">
@@ -1727,8 +1795,8 @@ export function ApplicantDetailContent({
             )}
           </div>
 
-          {/* 확정 슬롯 — 시간대 슬롯 개념이 있는 라인(배민/비마트)만. internal 정기배송 라인은 숨김. */}
-          {!confirmTargetInternal && (
+          {/* 확정 슬롯 — 화주사에서 시간대 슬롯을 쓰는 공고에만 표시. */}
+          {confirmTargetUsesSlots && (
             <div>
               <span className="text-[12px] font-bold text-muted-foreground">확정 슬롯 (복수 선택 가능)</span>
               <div className="flex gap-1.5 flex-wrap mt-1.5">
@@ -1766,7 +1834,7 @@ export function ApplicantDetailContent({
 
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-2xl" disabled={busy}>취소</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy || confirmJobId == null} className="rounded-2xl">
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); commitConfirm(); }} disabled={busy || confirmJobId == null || branchMetadataUnavailable} className="rounded-2xl">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} 확정
             </AlertDialogAction>
           </AlertDialogFooter>

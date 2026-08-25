@@ -48,7 +48,7 @@ interface AppRow {
   agent_stage?: string | null;
   guide_sent?: boolean | null;
   baemin_id?: string | null;
-  current_recruit_mode?: string | null;
+  uses_bmart_flow?: boolean;
   onboarding_call_status?: string | null;
   sigungu?: string | null;
   sido?: string | null;
@@ -307,9 +307,8 @@ export function Dashboard() {
       (a) => a.agent_stage === "onboarding" || a.agent_stage === "active" || a.status === "확정인력"
     );
     const t = onboardingTargets.length || 1;
-    // 배민 ID는 배민 커넥트 라인 전용 단계 — internal(도시락 등) 대상은 배민 ID가 없어 분모/분자 모두에서 제외.
-    // (예전엔 internal 대상까지 분모에 들어가 '배민 ID 수신'이 영영 낮게 왜곡됐다)
-    const baeminTargets = onboardingTargets.filter((a) => a.current_recruit_mode !== "internal");
+    // 배민 ID는 배민 커넥트 라인 전용 단계 — 실제 화주사 유형 또는 시스템 공고가 비마트 흐름인 대상만 센다.
+    const baeminTargets = onboardingTargets.filter((a) => a.uses_bmart_flow === true);
     const bt = baeminTargets.length || 1;
     return {
       exploration: stage("exploration"),

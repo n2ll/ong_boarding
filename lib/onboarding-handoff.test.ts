@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const {
@@ -118,4 +119,35 @@ test("a marker write failure is visible instead of claiming completion", async (
     marker: "delivered",
     error: "candidate changed before marker write",
   });
+});
+
+test("the onboarding SMS uses dedicated durable columns before the provider is called", async () => {
+  const [route, migration] = await Promise.all([
+    readFile(new URL("../app/api/admin/cron/onboarding-reminder/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/migrations/2026-08-onboarding-reminder-idempotency.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(route, /!reminderClaimedAt/);
+  assert.match(route, /const reminderClaimId = randomUUID\(\)/);
+  assert.match(
+    route,
+    /onboarding_reminder_claim_id: reminderClaimId[\s\S]*?\.is\("onboarding_reminder_claimed_at", null\)[\s\S]*?\.is\("onboarding_reminder_sent_at", null\)[\s\S]*?send = await sendSms\([\s\S]*?clientRequestId: reminderClaimId/,
+  );
+  assert.match(route, /\.eq\("onboarding_reminder_claim_id", reminderClaimId\)/);
+  assert.doesNotMatch(route, /update\(\{ agent_state: claimedState \}\)/);
+  assert.match(route, /onboarding_reminder_failure_kind/);
+  assert.match(route, /onboarding_reminder_failure_kind:[\s\S]*?agent_stage: "paused"/);
+  assert.match(route, /재발송 없이 수동 확인 필요/);
+  assert.match(route, /const CLAIM_STALE_MS = 15 \* 60 \* 1000/);
+  assert.match(route, /reminderClaimedAt <= claimStaleCutoff[\s\S]*?stale reminder claim — parked to paused/);
+  const reminderPauseWrites = [...route.matchAll(/paused_reason: "온보딩 리마인더[^"]+"/g)];
+  assert.ok(reminderPauseWrites.length >= 4);
+  for (const match of reminderPauseWrites) {
+    const write = route.slice(match.index, match.index + 520);
+    assert.match(write, /\.eq\("agent_stage", "onboarding"\)/);
+  }
+  assert.match(migration, /add column if not exists onboarding_reminder_claimed_at timestamptz/i);
+  assert.match(migration, /add column if not exists onboarding_reminder_claim_id uuid/i);
+  assert.match(migration, /add column if not exists onboarding_reminder_sent_at timestamptz/i);
+  assert.match(migration, /create unique index if not exists job_candidates_onboarding_reminder_claim_id_key/i);
 });

@@ -16,7 +16,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed } from "../jobs";
-import { isGeneralLineJob } from "./general-line";
+import { isGeneralLineJob, joinedClientType } from "./general-line";
 import { ensureExposureIncludeForLinked } from "../exposure";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
 import { getSystemMessage } from "./system-messages";
@@ -129,7 +129,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     .select(`
       id, job_id, applicant_id, agent_stage, agent_state,
       jobs:job_id (
-        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts, recruit_mode, status, closes_at
+        id, title, body, branch, slot, start_date, vehicle_required, pickup_address, site_manager_id, pay_info, policy_notes, pay_type, pay_amount, ai_facts, recruit_mode, status, closes_at,
+        client:clients ( client_type )
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,
@@ -299,9 +300,53 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   // 3) Stage 호출
   // Supabase 조인 응답은 단일 FK여도 객체/배열이 섞여 들어올 수 있어 unknown 경유
-  const job = (jc.jobs ?? null) as unknown as JobContext | null;
+  const joinedJob = (jc.jobs ?? null) as unknown as (JobContext & { client?: unknown }) | null;
+  const job: JobContext | null = joinedJob
+    ? { ...joinedJob, client_type: joinedClientType(joinedJob.client) }
+    : null;
   const applicant = jc.applicants as unknown as ApplicantContext;
   const state = (jc.agent_state ?? {}) as AgentState;
+
+  // 후보 행은 있는데 공고 관계를 못 읽은 상태는 라인 유형을 판별할 근거가 없다.
+  // null을 레거시 비마트로 간주해 Claude/SMS를 실행하지 말고 fail-closed한다.
+  if (!job) {
+    return { ok: false, error: "job context missing — agent not run" };
+  }
+
+  // 일반 라인은 screening 완료 뒤 매니저 인계(paused)가 정상 종료다. 과거 데이터·수동 단계 변경으로
+  // onboarding/active에 들어와 있으면 두 stage 모두 배민 앱/ID를 전제하므로 Claude/SMS 전에 차단한다.
+  if (
+    isGeneralLineJob(job) &&
+    (stageName === "onboarding" || stageName === "active")
+  ) {
+    if (!simulate) {
+      const merged = mergeAgentState(state, {
+        meta: {
+          paused_from_stage: stageName,
+          paused_at: new Date().toISOString(),
+          pause: {
+            category: "routing_guard",
+            summary: "일반 화주사 공고가 비마트 전용 단계에 진입해 자동 응답 차단",
+            suggested_action: "공고와 대화를 확인한 뒤 매니저가 직접 다음 일정을 안내하세요.",
+          },
+        },
+      });
+      const { error: parkError } = await supabase
+        .from("job_candidates")
+        .update({
+          agent_stage: "paused",
+          paused_reason: "일반 화주사 공고의 비마트 전용 단계 진입 — 자동 응답 차단",
+          agent_state: merged,
+        })
+        .eq("id", jc.id)
+        .eq("agent_stage", stageName);
+      if (parkError) {
+        console.error("[agent router] general-line routing guard update failed", parkError);
+        return { ok: false, error: `general line routing guard failed: ${parkError.message}` };
+      }
+    }
+    return { ok: true, skipped: "general line reached B mart-only stage — parked to paused" };
+  }
 
   // 실질 마감 공고 감지 — 일반 라인이면 스크리닝이 '마감 안내 모드'로 전환된다
   // (충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환). 응대를 멈추지 않는다.

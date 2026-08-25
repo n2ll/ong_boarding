@@ -47,7 +47,7 @@ export async function GET(
       .select(
         `id, job_id, agent_stage, agent_state, paused_reason,
        sent_at, responded_at, screening_passed_at, activated_at, closed_at, closed_reason, created_at,
-       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, recruit_mode, pickup_address, site_manager_id )`
+       jobs:job_id ( id, title, branch, client_id, status, start_date, closes_at, pickup_address, site_manager_id )`
       )
       .eq("applicant_id", id)
       .order("created_at", { ascending: false }),
@@ -77,10 +77,14 @@ export async function GET(
   if (!applicant) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  if (candsRes.error) {
+    console.error("[applicant GET] candidates enrich failed", candsRes.error);
+    return NextResponse.json({ error: "지원자의 공고 정보를 불러오지 못했습니다." }, { status: 503 });
+  }
 
   const cands = candsRes.data ?? [];
 
-  // 화주사 이름 매핑 (jobs.client_id → clients.name)
+  // 화주사 메타 매핑 (jobs.client_id → 이름·AI 응대 유형·슬롯 사용 여부)
   const clientIds = Array.from(
     new Set(
       cands
@@ -98,8 +102,8 @@ export async function GET(
   const hasPhone = typeof applicantPhone === "string" && applicantPhone.length > 0;
   const [clientsRes, ongmanaging, blacklisted] = await Promise.all([
     clientIds.length > 0
-      ? supabase.from("clients").select("id, name").in("id", clientIds)
-      : Promise.resolve({ data: [] as { id: number; name: string }[] }),
+      ? supabase.from("clients").select("id, name, client_type, uses_slots").in("id", clientIds)
+      : Promise.resolve({ data: [] as { id: number; name: string; client_type: string | null; uses_slots: boolean | null }[] }),
     hasPhone
       ? fetchWorkerDetailByPhone(applicantPhone as string).catch((e) => {
           console.error("[applicant GET] ongmanaging enrich failed", e);
@@ -113,15 +117,24 @@ export async function GET(
         })
       : Promise.resolve(false),
   ]);
+  const clientsError = "error" in clientsRes ? clientsRes.error : null;
+  if (clientsError) {
+    console.error("[applicant GET] clients enrich failed", clientsError);
+    return NextResponse.json({ error: "지원자의 화주사 정보를 불러오지 못했습니다." }, { status: 503 });
+  }
 
-  const clientNameById = new Map<number, string>();
+  const clientMetaById = new Map<number, { name: string; client_type: string | null; uses_slots: boolean }>();
   for (const cl of clientsRes.data ?? []) {
-    clientNameById.set(cl.id as number, cl.name as string);
+    clientMetaById.set(cl.id as number, {
+      name: cl.name as string,
+      client_type: (cl.client_type as string | null) ?? null,
+      uses_slots: cl.uses_slots === true,
+    });
   }
 
   const candidates = cands.map((c) => {
     const job = c.jobs as unknown as
-      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null; recruit_mode: string | null; pickup_address: string | null; site_manager_id: number | null }
+      | { id: number; title: string; branch: string | null; client_id: number | null; status: string; start_date: string | null; closes_at: string | null; pickup_address: string | null; site_manager_id: number | null }
       | null;
     return {
       id: c.id,
@@ -141,14 +154,17 @@ export async function GET(
       job_status: job?.status ?? null,
       job_start_date: job?.start_date ?? null,
       job_effectively_closed: job ? isJobEffectivelyClosed(job.status, job.closes_at) : true,
-      job_recruit_mode: job?.recruit_mode ?? null,
-      // 만남장소 발송 가능 여부 판정용 — 서버 send 라우트가 픽업주소(+현장매니저, internal은 면제)를
+      job_client_type:
+        job?.client_id != null ? clientMetaById.get(job.client_id)?.client_type ?? null : null,
+      client_uses_slots:
+        job?.client_id != null ? clientMetaById.get(job.client_id)?.uses_slots ?? false : false,
+      // 만남장소 발송 가능 여부 판정용 — 서버 send 라우트가 픽업주소(+현장매니저, 일반 배송은 면제)를
       // 요구하므로, 상세에서 미리 안내해 400을 보고 나서야 알게 되는 것을 막는다.
       job_pickup_address: job?.pickup_address ?? null,
       job_site_manager_id: job?.site_manager_id ?? null,
       client_id: job?.client_id ?? null,
       client_name:
-        job?.client_id != null ? clientNameById.get(job.client_id) ?? null : null,
+        job?.client_id != null ? clientMetaById.get(job.client_id)?.name ?? null : null,
     };
   });
 

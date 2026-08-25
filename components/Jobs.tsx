@@ -14,6 +14,7 @@ import { StageBadge } from "./ui/stage-badge";
 import { Modal } from "./ui/modal";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type ExposureDraft } from "./ExposureEditor";
 import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
 import { PageShell } from "@/components/ui/page-shell";
@@ -39,6 +40,10 @@ interface JobRow {
   role: string;
   status: "active" | "closed";
   recruitMode: RecruitMode;
+  /** AI 응대 계약 — 실제 화주사 유형 기준. 모집 채널(recruitMode)과 별개. */
+  generalLine: boolean;
+  /** 확정 시간대 슬롯을 쓰는 화주사인지. */
+  usesSlots: boolean;
   // 지정 노출(targeted) 여부 — 카드 '지정 노출' 배지.
   targetedExposure: boolean;
   candidates: number;
@@ -68,6 +73,7 @@ interface ApiJob {
   client_id: number | null;
   status: string;
   recruit_mode: string | null;
+  client?: { client_type?: string | null; uses_slots?: boolean | null } | { client_type?: string | null; uses_slots?: boolean | null }[] | null;
   exposure?: string | null;
   exposure_rule?: unknown;
   vehicle_required: boolean;
@@ -85,7 +91,7 @@ interface ApiJob {
   interest_count?: number;
 }
 
-interface ClientOpt { id: number; name: string; uses_slots?: boolean }
+interface ClientOpt { id: number; name: string; client_type?: string | null; uses_slots?: boolean }
 interface BranchOpt { id: number; name: string; client_id: number | null }
 interface SiteManagerOpt { id: number; name: string; active?: boolean }
 
@@ -224,14 +230,14 @@ const JOB_CLOSED_NOTICE = `#{이름}님, '#{공고명}'에 관심 가져주시�
 
 지금 모집 중인 다른 공고는 여기서 보실 수 있어요: #{맞춤링크}`;
 
-// 일반 라인(internal) 마감 안내에만 덧붙는 선탑 제안 — 답장하면 AI '마감 안내 모드'가 받아
+// 일반 배송 라인(비마트 외 실제 공고) 마감 안내에만 덧붙는 선탑 제안 — 답장하면 AI '마감 안내 모드'가 받아
 // 선탑 가능 시간대를 수집하고 매니저에게 인계한다. (선탑≠투입 확정 — '우선순위' 표현까지만)
 const JOB_CLOSED_SUNTOP_LINE = `
 그동안 선탑(동승)으로 현장을 미리 경험해두실 수도 있어요. 비슷한 라인 투입 때 우선순위가 생깁니다. 원하시면 이 번호로 '선탑'이라고 답장 주세요.`;
 
-// 마감 안내 최종 본문 — internal 공고면 선탑 제안 포함. 모달 미리보기와 실제 발송이 같은 본문을 쓴다.
+// 마감 안내 최종 본문 — 일반 배송 라인이면 선탑 제안 포함. 모달 미리보기와 실제 발송이 같은 본문을 쓴다.
 const closeNoticeBody = (job: JobRow) =>
-  (JOB_CLOSED_NOTICE + (job.recruitMode === "internal" ? JOB_CLOSED_SUNTOP_LINE : ""))
+  (JOB_CLOSED_NOTICE + (job.generalLine ? JOB_CLOSED_SUNTOP_LINE : ""))
     .replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
 
 // 마감 안내 발송 대상(미선발 관심자) — interested API(detail=1)가 수신거부·확정인력·기수신자 등을 걸러 내려준다.
@@ -315,15 +321,14 @@ function closedKind(closedReason: string | null | undefined): ClosedKind {
 
 type RecruitMode = "external" | "internal" | "both";
 // 표시 라벨은 확정 용어집(docs/실무자-UX개편-계획-2026-07-25.md)대로 — DB 값(external/internal/both)은 그대로.
-// aiNote — 이 값은 '누구에게 보여줄까'만이 아니라 AI 응대 흐름(lib/agent/general-line.isGeneralLineJob)까지 바꾼다.
-// 예전엔 화면 어디에도 그 사실이 없어 고르는 사람이 알 수 없었다 → 선택 카드에 한 줄로 적는다.
-const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; aiNote: string; badge: string }> = {
-  external: { label: "새로 모집", desc: "지원 폼·광고로 새 지원자를 받아요 (우리 인력의 맞춤 공고 링크에는 안 보여요)", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-info-soft text-info-strong border-info/25" },
-  internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", aiNote: "AI는 일반 배송 라인 흐름(선탑 일정은 매니저가 연락)으로 응대해요", badge: "bg-copilot-soft text-copilot-strong border-copilot-soft" },
-  both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", aiNote: "AI는 배민 앱 가입 안내 흐름으로 응대해요", badge: "bg-success-soft text-success-strong border-success/25" },
+// 모집 방식은 지원자를 받는 채널만 정한다. AI 응대는 별도 화주사 유형(client_type)을 따른다.
+const RECRUIT_MODE_META: Record<RecruitMode, { label: string; desc: string; badge: string }> = {
+  external: { label: "새로 모집", desc: "지원 폼·광고로 새 지원자를 받아요 (우리 인력의 맞춤 공고 링크에는 안 보여요)", badge: "bg-info-soft text-info-strong border-info/25" },
+  internal: { label: "우리 인력에게", desc: "이미 등록된 인력에게만 맞춤 공고 링크로 보여줘요", badge: "bg-copilot-soft text-copilot-strong border-copilot-soft" },
+  both: { label: "둘 다", desc: "새로 모집 + 우리 인력에게 동시에 보여줘요", badge: "bg-success-soft text-success-strong border-success/25" },
 };
-// '둘 다'(both)는 선택지에서 감춘다 — 사용 공고 0건인데 노출만 internal과 같고 AI 응대·확정 후속·지표는
-// external(배민) 기준이라, 골랐을 때만 어긋나는 함정 값이다. DB 값·목록 배지는 그대로 두고(옛 데이터 표시),
+// '둘 다'(both)는 선택지에서 감춘다 — 파일럿에서 사용 공고가 없고 '새로 모집+우리 인력'을 동시에
+// 운영하는 절차도 아직 정리되지 않아 불필요한 선택 부담만 만든다. DB 값·목록 배지는 유지하고,
 // 이미 'both'인 공고를 수정할 때는 그 값이 화면에서 사라지지 않게 선택지에 다시 넣는다.
 const HIDDEN_RECRUIT_MODE: RecruitMode = "both";
 // 기본값 — 파일럿 배포 채널이 맞춤 공고 링크뿐이라 '우리 인력에게'가 아니면 등록해도 지원자에게 안 보인다.
@@ -465,7 +470,7 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
       {!open ? (
         <div className="flex items-center gap-2 px-4 py-3 border border-border-strong rounded-2xl bg-background">
           <span className="text-[13px] font-bold text-foreground shrink-0">{RECRUIT_MODE_META[value].label}</span>
-          <span className="text-[12px] text-muted-foreground truncate" title={`${RECRUIT_MODE_META[value].desc} · ${RECRUIT_MODE_META[value].aiNote}`}>{RECRUIT_MODE_META[value].desc}</span>
+          <span className="text-[12px] text-muted-foreground truncate" title={RECRUIT_MODE_META[value].desc}>{RECRUIT_MODE_META[value].desc}</span>
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -490,7 +495,6 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
               >
                 <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{RECRUIT_MODE_META[m].label}</div>
                 <div className="text-[12px] text-muted-foreground mt-0.5 leading-snug">{RECRUIT_MODE_META[m].desc}</div>
-                <div className="text-[12px] text-warning-strong mt-1 leading-snug">{RECRUIT_MODE_META[m].aiNote}</div>
               </button>
             );
           })}
@@ -503,6 +507,35 @@ function RecruitModeField({ value, onChange }: { value: RecruitMode; onChange: (
 // 단가 형태 옵션 — 등록/수정 모달 급여 그룹 공용(서버 pay_type enum과 일치, app/api/admin/jobs POST/PATCH 검증).
 const PAY_TYPES = ["건당", "일당", "주급", "월급", "혼합", "협의"] as const;
 
+function RoutingMetadataNotice({
+  loading,
+  error,
+  onRetry,
+}: {
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  if (!loading && !error) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-warning-soft bg-yellow-50 px-3 py-2.5">
+      <div className="flex min-w-0 items-start gap-2 text-[12px] font-semibold text-warning-strong">
+        {loading ? <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
+        <span>
+          {loading
+            ? "화주사·지점 정보를 확인하는 중이에요. 확인이 끝나면 저장할 수 있어요."
+            : "화주사 정보를 불러오지 못했어요. AI 응대 유형을 확인할 수 없어 저장을 막았어요."}
+        </span>
+      </div>
+      {error && (
+        <button type="button" onClick={onRetry} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-warning-soft bg-card px-2.5 py-1 text-[12px] font-bold text-warning-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <RefreshCw size={12} /> 다시 불러오기
+        </button>
+      )}
+    </div>
+  );
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -511,15 +544,19 @@ function fmtDate(iso: string | null): string {
 
 function toJobRow(j: ApiJob): JobRow {
   const total = Object.values(j.counts ?? {}).reduce((a, b) => a + b, 0);
+  const clientRelation = Array.isArray(j.client) ? j.client[0] : j.client;
+  const clientType = joinedClientType(j.client);
   return {
     id: String(j.id),
     title: j.title,
-    branch: j.branch ?? "-",
+    branch: j.branch?.trim() ?? "",
     branchId: j.branch_id ?? null,
     clientId: j.client_id ?? null,
     role: j.vehicle_required ? "배송원" : "도보 배달",
     status: j.status === "active" ? "active" : "closed",
     recruitMode: asRecruitMode(j.recruit_mode),
+    generalLine: isGeneralLineJob({ title: j.title, client_type: clientType }),
+    usesSlots: isSystemJobTitle(j.title) || clientRelation?.uses_slots === true,
     // 지정 노출 여부 — 카드 배지용. 미지 값은 안전 방향(전체 노출 취급 아님 — 배지만 안 띄움).
     targetedExposure: j.exposure === "targeted",
     candidates: total,
@@ -703,7 +740,7 @@ export function Jobs() {
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; recruitMode: RecruitMode } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean } | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
   const candidateBoardReturnFocusRef = useRef<HTMLElement | null>(null);
   const candidateBoardWasOpenRef = useRef(false);
@@ -931,7 +968,7 @@ export function Jobs() {
   };
 
   const openCandidates = (job: JobRow) => {
-    setCandPanel({ jobId: Number(job.id), title: job.title, recruitMode: job.recruitMode });
+    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots });
     setCandidates([]);
     setCandLoaded(false);
     setCandError(null);
@@ -1116,13 +1153,30 @@ export function Jobs() {
   );
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
 
-  // 필터용 메타데이터(화주사/지점) — 실패해도 조용히 무시.
-  const { data: clientsApi } = useSWR<{ data?: ClientOpt[] }>("/api/admin/clients");
-  const { data: branchesApi } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  // 화주사 유형은 AI 응대 계약의 권위값이다. 등록·수정 중 이 메타데이터를 못 읽었는데도
+  // 빈 목록을 '일반 배송'으로 간주하면 비마트 공고를 잘못 저장하므로 작성 경로는 fail-closed한다.
+  const {
+    data: clientsApi,
+    error: clientsError,
+    isLoading: clientsLoading,
+    mutate: mutateClients,
+  } = useSWR<{ data?: ClientOpt[] }>("/api/admin/clients");
+  const {
+    data: branchesApi,
+    error: branchesError,
+    isLoading: branchesLoading,
+    mutate: mutateBranches,
+  } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
   const { data: siteManagersApi } = useSWR<{ data?: SiteManagerOpt[] }>("/api/admin/site-managers");
-  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, uses_slots: c.uses_slots })), [clientsApi]);
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, client_type: c.client_type, uses_slots: c.uses_slots })), [clientsApi]);
   const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })), [branchesApi]);
   const siteManagers = useMemo(() => (siteManagersApi?.data ?? []).map((m) => ({ id: m.id, name: m.name, active: m.active ?? true })), [siteManagersApi]);
+  const routingMetadataError = Boolean(clientsError || branchesError);
+  const routingMetadataLoading = (clientsLoading && !clientsApi) || (branchesLoading && !branchesApi);
+  const routingMetadataUnavailable = routingMetadataError || routingMetadataLoading;
+  const retryRoutingMetadata = () => {
+    void Promise.all([mutateClients(), mutateBranches()]);
+  };
   // 편집 모달 지점 셀렉터 노출 — 지점 개념 화주사(슬롯/지점보유)이거나, 이미 지점이 붙은 공고(고아 방지)면 노출.
   const editShowBranch = !!editForm && (
     Boolean(clients.find((c) => c.id === editForm.clientId)?.uses_slots) ||
@@ -1326,6 +1380,10 @@ export function Jobs() {
 
   const handleRegisterJob = async () => {
     if (!channelDrafts || registering) return;
+    if (routingMetadataUnavailable) {
+      toast.error("화주사·지점 정보를 확인한 뒤 공고를 등록할 수 있어요. 다시 불러와 주세요.");
+      return;
+    }
     // 등록 시 알바몬(정형) 본문을 공고 원문으로 저장 — AI 스크리닝이 참조하는 캐논 본문.
     const body = draftBody;
     if (!body) return;
@@ -1558,6 +1616,10 @@ export function Jobs() {
 
   const handleEditSave = async () => {
     if (!editForm) return;
+    if (routingMetadataUnavailable) {
+      toast.error("화주사·지점 정보를 확인한 뒤 공고를 수정할 수 있어요. 다시 불러와 주세요.");
+      return;
+    }
     const title = editForm.title.trim();
     if (!title) return toast.error("공고 제목을 입력해주세요.");
     // 마감시각을 과거로 저장하면 pull에서 즉시 '마감됨' 처리 — 저장 전 경고.
@@ -2040,17 +2102,21 @@ export function Jobs() {
                 <option value="">전체 화주사</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <span aria-hidden="true" className="text-muted-foreground">›</span>
-              <select
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value === "" ? "" : Number(e.target.value))}
-                className="min-w-0 flex-1 cursor-pointer bg-transparent py-2 pr-1 text-[13px] font-semibold text-gray-700 focus:outline-none"
-                aria-label="지점으로 목록 좁히기"
-                title="지점으로 목록 좁히기"
-              >
-                <option value="">전체 지점</option>
-                {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              {branchOptions.length > 0 && (
+                <>
+                  <span aria-hidden="true" className="text-muted-foreground">›</span>
+                  <select
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="min-w-0 flex-1 cursor-pointer bg-transparent py-2 pr-1 text-[13px] font-semibold text-gray-700 focus:outline-none"
+                    aria-label="지점으로 목록 좁히기"
+                    title="지점으로 목록 좁히기"
+                  >
+                    <option value="">전체 지점</option>
+                    {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </>
+              )}
             </div>
             <div className="relative min-w-0">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -2081,7 +2147,7 @@ export function Jobs() {
         {/* Table Header */}
         <div className={`hidden items-center border-b border-border-strong bg-background px-4 py-2.5 text-[12px] font-bold text-muted-foreground lg:grid ${JOB_LIST_GRID}`}>
           <div>공고 정보</div>
-          <div className="hidden xl:block">지점 / 직무</div>
+          <div className="hidden xl:block">근무 정보</div>
           <div>후보 흐름</div>
           <div>상태 · 다음 할 일</div>
           <div className="text-right">관리</div>
@@ -2108,6 +2174,7 @@ export function Jobs() {
           ) : filteredJobs.length > 0 ? (
             filteredJobs.map(job => {
               const operation = jobOperationMeta(toJobOperationInput(job));
+              const hasBranchConcept = job.usesSlots || job.branchId != null || job.branch !== "" || (job.clientId != null && branches.some((b) => b.client_id === job.clientId));
               return (
               <div key={job.id} className={`grid items-center border-b border-muted px-4 py-4 transition-colors hover:bg-background ${JOB_LIST_GRID}`}>
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
@@ -2162,9 +2229,11 @@ export function Jobs() {
                 </div>
 
                 <div className="flex flex-col gap-1.5 lg:hidden xl:flex">
-                  <div className="flex items-center gap-1.5 text-[14px] font-semibold text-gray-700">
-                    <MapPin size={14} className="text-muted-foreground" /> {job.branch}
-                  </div>
+                  {hasBranchConcept && (
+                    <div className="flex items-center gap-1.5 text-[14px] font-semibold text-gray-700">
+                      <MapPin size={14} className="text-muted-foreground" /> {job.branch || "지점 미지정"}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
                     <Briefcase size={14} className="text-muted-foreground" /> {job.role}
                   </div>
@@ -2232,7 +2301,7 @@ export function Jobs() {
                       onClick={() => handleToggleClose(job)}
                       isLoading={statusBusyId === job.id}
                       className="px-3 py-1.5 text-[12px] rounded-lg bg-success hover:bg-success-strong text-white shadow-none focus-visible:ring-success"
-                      title={`매니저 확정 ${job.confirmed}명으로 정원(${job.capacity}명)이 찼어요 — 마감하면 발송·관심 접수가 멈춰요${job.recruitMode === "internal" ? " (AI 응대는 마감 안내 모드로 전환)" : ""}`}
+                      title={`매니저 확정 ${job.confirmed}명으로 정원(${job.capacity}명)이 찼어요 — 마감하면 발송·관심 접수가 멈춰요${job.generalLine ? " (AI 응대는 마감 안내 모드로 전환)" : ""}`}
                     >
                       {statusBusyId !== job.id && <CheckCircle2 size={12} />} 충원 완료 — 마감하기
                     </Button>
@@ -2499,6 +2568,11 @@ export function Jobs() {
                   모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
               <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
                 <div className="text-[13px] font-bold text-foreground">공고 설정</div>
+                <RoutingMetadataNotice
+                  loading={routingMetadataLoading}
+                  error={routingMetadataError}
+                  onRetry={retryRoutingMetadata}
+                />
 
                 {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 대상이 이 값에 따라 달라진다.
                     기본값이면 접힌 한 줄로만 보여준다(B4) — 첫 등록에서 개념 3개를 먼저 고르게 하지 않는다. */}
@@ -2517,6 +2591,7 @@ export function Jobs() {
                     <label className="block text-[13px] font-bold text-gray-700 mb-1.5">화주사</label>
                     <select
                       value={newJobClientId}
+                      disabled={routingMetadataUnavailable}
                       onChange={(e) => {
                         const v = e.target.value === "" ? "" : Number(e.target.value);
                         setNewJobClientId(v);
@@ -2525,11 +2600,18 @@ export function Jobs() {
                           setNewJobBranchId("");
                         }
                       }}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option value="">화주사 선택</option>
                       {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      {routingMetadataUnavailable
+                        ? "AI 응대 유형을 확인하려면 화주사 정보를 다시 불러와 주세요."
+                        : newJobClientId === ""
+                          ? "화주사를 선택하면 적용할 AI 응대 유형을 보여드려요."
+                          : <>AI 응대: {clients.find((c) => c.id === newJobClientId)?.client_type === "baemin_bmart" ? "배민 비마트" : "일반 배송"} · 모집 방식과 별도로 화주사 유형을 따라요</>}
+                    </p>
                   </div>
                   {/* 지점 셀렉터는 지점 개념이 있는 화주사에만(확정슬롯이거나 등록 지점 존재). 대부분 화주사는 지점이 없어 숨겨진다. */}
                   {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
@@ -2753,7 +2835,7 @@ export function Jobs() {
               {!draftBody && (
                 <span className="text-[12px] font-medium text-muted-foreground">본문을 생성하거나 직접 작성하면 등록할 수 있어요</span>
               )}
-              <Button variant="primary" size="lg" onClick={handleRegisterJob} disabled={!draftBody} isLoading={registering}>
+              <Button variant="primary" size="lg" onClick={handleRegisterJob} disabled={!draftBody || routingMetadataUnavailable} isLoading={registering}>
                 {!registering && <CheckCircle2 size={16} />}
                 {registering ? "등록 중..." : "이 내용으로 공고 등록"}
               </Button>
@@ -2821,6 +2903,11 @@ export function Jobs() {
                   onToggle={() => setEditOpenSections((s) => ({ ...s, basic: !s.basic }))}
                 >
                     <>
+                      <RoutingMetadataNotice
+                        loading={routingMetadataLoading}
+                        error={routingMetadataError}
+                        onRetry={retryRoutingMetadata}
+                      />
                       {/* 모집 방식 — 등록 모달과 같은 컨트롤·같은 위치(섹션 최상단). 아래 근무시간 형태·노출 대상이 이 값에 따라 달라진다. */}
                       <RecruitModeField
                         value={editForm.recruitMode}
@@ -2832,6 +2919,7 @@ export function Jobs() {
                         <label className="block text-[13px] font-bold text-gray-700 mb-2">화주사</label>
                         <select
                           value={editForm.clientId}
+                          disabled={routingMetadataUnavailable}
                           onChange={(e) => {
                             const v = e.target.value === "" ? "" : Number(e.target.value);
                             const target = v === "" ? null : v;
@@ -2852,11 +2940,18 @@ export function Jobs() {
                             if (cur && !keepBranch) setEditDroppedBranch({ id: cur.id, name: cur.name });
                             setEditForm({ ...editForm, clientId: v, branchId: keepBranch ? editForm.branchId : "" });
                           }}
-                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                          className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <option value="">미지정</option>
                           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
+                        <p className="mt-1 text-[12px] text-muted-foreground">
+                          {routingMetadataUnavailable
+                            ? "AI 응대 유형을 확인하려면 화주사 정보를 다시 불러와 주세요."
+                            : editForm.clientId === ""
+                              ? "화주사를 선택하면 적용할 AI 응대 유형을 보여드려요."
+                              : <>AI 응대: {clients.find((c) => c.id === editForm.clientId)?.client_type === "baemin_bmart" ? "배민 비마트" : "일반 배송"} · 모집 방식과 별도로 화주사 유형을 따라요</>}
+                        </p>
                       </div>
                       <div className={editShowBranch ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" : ""}>
                         {/* 지점 셀렉터는 지점 개념이 있는 화주사(슬롯/지점보유)이거나 이미 지점이 붙은 공고에만. */}
@@ -3052,7 +3147,7 @@ export function Jobs() {
             )}
             <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-glass bg-white/45">
               <Button variant="ghost" size="lg" disabled={editSaving} onClick={() => { setEditForm(null); setEditDroppedBranch(null); }}>취소</Button>
-              <Button variant="primary" size="lg" onClick={handleEditSave} disabled={editLoading} isLoading={editSaving}>
+              <Button variant="primary" size="lg" onClick={handleEditSave} disabled={editLoading || routingMetadataUnavailable} isLoading={editSaving}>
                   {!editSaving && <Save size={16} />} 저장
                 </Button>
             </div>
@@ -3069,11 +3164,10 @@ export function Jobs() {
               <p className="text-[14px] text-muted-foreground mt-2 leading-relaxed">
                 {`'${closeModal.job.title}' 공고를 마감합니다. 마감 후에도 언제든 재개할 수 있어요.`}
               </p>
-              {/* 마감하면 dispatch·pull 관심표시가 막힌다. 진행 중 후보의 AI 응대는:
-                  internal(일반 라인) = '마감 안내 모드'로 전환(충원완료 안내+결원 우선 약속+선탑 제안, 응대 지속)
-                  external/both = AI가 마감을 인지하지 못한 채 응대할 수 있음 — 직접 안내 권고(E2-2). */}
+              {/* 마감하면 dispatch·pull 관심표시가 막힌다. 일반 배송 라인은 '마감 안내 모드'로
+                  전환하고, 비마트 라인은 현재 마감 전용 응대가 없어 직접 안내를 권고한다. */}
               {closeModal.job.inProgress > 0 && (
-                closeModal.job.recruitMode === "internal" ? (
+                closeModal.job.generalLine ? (
                   <div className="mt-3 px-3 py-2 rounded-lg bg-yellow-50 border border-warning-soft text-[13px] font-bold text-warning-strong">
                     💬 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대는 &lsquo;마감 안내 모드&rsquo;로 전환돼요 — 충원 완료 안내, 결원 시 먼저 안내 약속, 선탑(동승) 제안까지 응대를 이어갑니다.
                   </div>
@@ -3278,8 +3372,8 @@ export function Jobs() {
                         ))}
                       </div>
                     </div>
-                    {/* 확정 슬롯 분포 — 슬롯은 비마트 배차 개념이라 internal 정기배송 라인은 표시하지 않는다. */}
-                    {hasConfirmedSlot && candPanel?.recruitMode !== "internal" && (
+                    {/* 확정 슬롯 분포 — 화주사에서 시간대 슬롯을 쓰는 공고에만 표시한다. */}
+                    {hasConfirmedSlot && candPanel?.usesSlots && (
                       <div>
                         <div className="text-[12px] font-bold text-muted-foreground mb-1.5" title="매니저가 '확정인력'으로 지정한 후보의 시간대 분포 — 충원율 게이지와 같은 기준">확정 슬롯 분포</div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">

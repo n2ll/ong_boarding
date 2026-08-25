@@ -7,7 +7,7 @@
  *             + ensureBaeminSystemJob + job_candidates(stage='screening') + router 호출.
  * - 'job'   : 매니저가 고른 실공고(라인)로 등록. applicants(source='inbound')
  *             + 그 job의 job_candidates(stage='screening') + current_job_id 결속 + router 호출.
- *             라인 형태(도시락 등 internal / 배민 external)는 스크리닝 스테이지가 recruit_mode로 분기.
+ *             라인 형태는 스크리닝 스테이지가 실제 화주사 client_type으로 분기.
  * - 'other' : classification='other'로만 마킹 (대상 메시지만)
  * - 'ongmanaging': 옹매니징(옹고잉 재직자·기존 계약자) 문의 이관.
  *             classification='ongmanaging' 마킹 + raw_payload에 이관 사유·시각 기록.

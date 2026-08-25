@@ -45,7 +45,7 @@ type KbCategory = "facts" | "knowledge" | "system_message" | "conversation";
 
 const KB_CATEGORIES: { key: KbCategory; label: string; hint: string }[] = [
   { key: "facts", label: "운영 정보", hint: "지점·시급·정책 등 AI가 사실로 인용하는 정보. 여기 없는 사실은 추측하지 않고 매니저에게 넘깁니다." },
-  { key: "knowledge", label: "일반 라인 FAQ", hint: "일반 배송 라인(내부 인재풀 공고) 전용 공식 답변 — 정산·유류비·과태료·선탑·보험 등. 비마트 공고 응대에는 주입되지 않습니다." },
+  { key: "knowledge", label: "일반 라인 FAQ", hint: "비마트가 아닌 일반 배송 화주사 공고 전용 공식 답변 — 정산·유류비·과태료·선탑·보험 등. 비마트 공고 응대에는 주입되지 않습니다." },
   { key: "system_message", label: "자동 발송 문구", hint: "시스템이 자동 발송하는 고정 문구. 제목(키)은 바꾸지 말고 본문만 다듬으세요. {{이름}} 등 치환자 사용 가능." },
   { key: "conversation", label: "대화 예시", hint: "옹봇의 말투를 잡아주는 대화 예시. 프롬프트에 함께 주입됩니다." },
 ];

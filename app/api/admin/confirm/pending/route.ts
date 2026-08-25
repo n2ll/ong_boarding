@@ -18,6 +18,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "@/lib/jobs";
 import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ interface JobRow {
   site_manager_id: number | null;
   status: string | null;
   closes_at: string | null;
-  recruit_mode: string | null;
+  client?: unknown;
 }
 
 // 진행 단계(확정 대상 후보로 우선). abort/null은 여기서 제외(단, 폴백에서 null도 허용).
@@ -76,7 +77,7 @@ export async function GET() {
   // 모든 후보 + 공고 (stage 필터 없이) — 라인 형태별 종료 stage가 달라 여기서 좁히지 않는다.
   const candidateResult = await supabase
     .from("job_candidates")
-    .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, start_date, pickup_address, site_manager_id, status, closes_at, recruit_mode )")
+    .select("applicant_id, job_id, agent_stage, created_at, jobs:job_id ( id, title, branch, start_date, pickup_address, site_manager_id, status, closes_at, client:clients ( client_type ) )")
     .in("applicant_id", ids)
     .order("created_at", { ascending: false });
   const candidatesState = requiredRowsQueryState({ jobCandidates: candidateResult });
@@ -151,8 +152,11 @@ export async function GET() {
       const jc = jobByApplicant.get(a.id) ?? null;
       const job = jc?.job ?? null;
       const sm = job?.site_manager_id != null ? smById.get(job.site_manager_id) ?? null : null;
-      // internal 정기배송 라인은 현장매니저 없이도 만남장소 발송 허용(픽업주소만) — send 라우트와 동일 원칙.
-      const isInternal = job?.recruit_mode === "internal";
+      // 일반 배송 라인은 현장매니저 없이도 만남장소 발송 허용(픽업주소만) — send 라우트와 동일 원칙.
+      const generalLine = !!job && isGeneralLineJob({
+        title: job.title ?? "",
+        client_type: joinedClientType(job.client),
+      });
       const jobTitle =
         job && typeof job.title === "string"
           ? job.title.startsWith("__") ? "공고 미지정" : job.title
@@ -169,7 +173,7 @@ export async function GET() {
         pickup_address: job?.pickup_address ?? null,
         site_manager_name: sm?.name ?? null,
         site_manager_phone: sm?.phone ?? null,
-        can_send_venue: !!(job?.pickup_address && (sm?.name || isInternal)),
+        can_send_venue: !!(job?.pickup_address && (sm?.name || generalLine)),
       };
     });
 

@@ -275,7 +275,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           .eq("id", applicant_id)
           .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
 
-        // ─── 일반 라인(internal 공고): 배민 앱 가이드 발송 금지 ───
+        // ─── 일반 배송 라인(비마트 외 실제 공고): 배민 앱 가이드 발송 금지 ───
         // 스크리닝 통과 = AI 역할 종료. 선탑(동승) 인계 마무리 1통 발송 후 onboarding 대신
         // paused로 전환해 매니저에게 인계한다 (Slack에 수집 요약 포함).
         if (isGeneralLineJob(job)) {
@@ -569,7 +569,7 @@ export function buildVenueGuideText(params: {
   name: string | null;
   start_date: string;
   pickup_address: string;
-  /** 현장 담당자 — 지정된 라인만. 없으면(예: internal 정기배송) 담당자 줄을 생략한다. */
+  /** 현장 담당자 — 지정된 라인만. 없으면(예: 일반 정기배송) 담당자 줄을 생략한다. */
   site_manager_name?: string | null;
   site_manager_phone?: string | null;
   /** 집합 시각 (예: "07:50", "09:40"). 공고·라인마다 달라 하드코딩하지 않는다. 비면 시각 줄 생략. */
@@ -634,7 +634,7 @@ function buildFirstDayRulesBaemin(name: string | null): string {
   ].join("\n");
 }
 
-// 도시락 등 internal 정기 배송 라인용 첫날 규칙 — 실시간 배차가 아니라 정해진 시간·경로.
+// 도시락 등 일반 정기 배송 라인용 첫날 규칙 — 실시간 배차가 아니라 정해진 시간·경로.
 // 선탑(동승)에서 배운 동선대로 진행하는 라인이라 배차 문구를 쓰지 않는다.
 function buildFirstDayRulesGeneral(name: string | null): string {
   const n = name ?? "지원자";
@@ -648,7 +648,7 @@ function buildFirstDayRulesGeneral(name: string | null): string {
   ].join("\n");
 }
 
-/** 첫날 규칙 — 라인 형태(general=internal 정기배송)에 맞춰 분기. */
+/** 첫날 규칙 — 라인 형태(general=비마트 외 일반 배송)에 맞춰 분기. */
 export function buildFirstDayRules(name: string | null, opts?: { general?: boolean }): string {
   return opts?.general ? buildFirstDayRulesGeneral(name) : buildFirstDayRulesBaemin(name);
 }

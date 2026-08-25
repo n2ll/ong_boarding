@@ -19,6 +19,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { createServiceClient } from "@/lib/supabase";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { sendSms } from "@/lib/solapi";
@@ -35,11 +36,13 @@ import {
   resolvePreconfirmationGuideText,
 } from "@/lib/agent/outbound-safety";
 import type { AgentState } from "@/lib/agent/types";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 
 const DEADLINE_MS = 24 * 60 * 60 * 1000;       // 가이드 발송 후 리마인더 발송까지 대기
 const HANDOFF_DELAY_MS = 3 * 60 * 60 * 1000;   // 리마인더 발송 후 매니저 인계 슬랙까지 대기
+const CLAIM_STALE_MS = 15 * 60 * 1000;          // 함수 종료·공급자 timeout 뒤 결과 불명 claim을 수동 큐로 올리는 유예
 
 const FALLBACK_BODY = (name: string) =>
   PRECONFIRMATION_ONBOARDING_REMINDER_TEMPLATE.replace("#{이름}", name);
@@ -53,6 +56,7 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const remindCutoff = new Date(now - DEADLINE_MS).toISOString();
   const handoffCutoff = new Date(now - HANDOFF_DELAY_MS).toISOString();
+  const claimStaleCutoff = new Date(now - CLAIM_STALE_MS).toISOString();
 
   // 배민 비마트 임시중단 — 단계 A 리마인더('배민 커넥트 아이디 회신')는 비마트 진행 신호라 배민 유입엔 억제.
   // (source=baemin만 대상 — 당근/일반 라인은 회귀 없이 그대로. 재개 시 플래그를 비우면 자동 복구된다.)
@@ -63,7 +67,10 @@ export async function GET(req: NextRequest) {
     .from("job_candidates")
     .select(`
       id, applicant_id, job_id, agent_state,
+      onboarding_reminder_claimed_at, onboarding_reminder_claim_id,
+      onboarding_reminder_sent_at, onboarding_reminder_failed_at, onboarding_reminder_failure_kind,
       manager_handoff_alerted_at, manager_handoff_slack_suppressed_at,
+      jobs:job_id ( title, client:clients ( client_type ) ),
       applicants:applicant_id (id, name, phone, source, branch1)
     `)
     .eq("agent_stage", "onboarding")
@@ -79,11 +86,56 @@ export async function GET(req: NextRequest) {
   for (const row of rows ?? []) {
     const state = (row.agent_state ?? {}) as AgentState;
     const meta = (state.meta ?? {}) as Record<string, string | undefined>;
+    // 전용 컬럼이 권위 소스. 배포 전 agent_state.meta에 기록된 기존 행만 fallback으로 읽는다.
+    const reminderSentAt = (row.onboarding_reminder_sent_at as string | null)
+      ?? meta.onboarding_reminder_sent_at;
+    const reminderClaimedAt = (row.onboarding_reminder_claimed_at as string | null)
+      ?? meta.onboarding_reminder_claimed_at;
+    const reminderClaimId = row.onboarding_reminder_claim_id as string | null;
     const ob = state.onboarding ?? {};
     const applicant = row.applicants as unknown as {
       id: number; name: string | null; phone: string;
       source: string | null; branch1: string | null;
     };
+    const joinedJob = (row.jobs ?? null) as unknown as { title?: string | null; client?: unknown } | null;
+    if (!joinedJob?.title) {
+      results.push({ candidate_id: row.id as number, stage: "skip", success: false, reason: "job context missing" });
+      continue;
+    }
+    const job = { title: joinedJob.title, client_type: joinedClientType(joinedJob.client) };
+
+    // 이 크론의 리마인더·인계는 배민 ID 온보딩 전용이다. 일반 라인 후보가 수동 변경/과거 데이터로
+    // onboarding에 들어와도 문자·Slack을 보내지 않고 매니저 확인 상태로 격리한다.
+    if (isGeneralLineJob(job)) {
+      const merged = mergeAgentState(state, {
+        meta: {
+          paused_from_stage: "onboarding",
+          paused_at: new Date().toISOString(),
+          pause: {
+            category: "routing_guard",
+            summary: "일반 화주사 공고가 비마트 온보딩 단계에 진입해 리마인더 차단",
+            suggested_action: "공고와 대화를 확인한 뒤 매니저가 직접 다음 일정을 안내하세요.",
+          },
+        },
+      });
+      const { error: pauseError } = await supabase
+        .from("job_candidates")
+        .update({
+          agent_stage: "paused",
+          paused_reason: "일반 화주사 공고의 비마트 온보딩 진입 — 자동 리마인더 차단",
+          agent_state: merged,
+        })
+        .eq("id", row.id)
+        .eq("agent_stage", "onboarding");
+      results.push({
+        candidate_id: row.id as number,
+        stage: "skip",
+        success: !pauseError,
+        reason: pauseError ? "general line pause failed" : "general line — parked to paused",
+        ...(pauseError ? { error: pauseError.message } : {}),
+      });
+      continue;
+    }
 
     // 이미 아이디 수신 — 단계 발동 안 함
     if (ob.배민_아이디_수신 === true) continue;
@@ -96,9 +148,41 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
+    // claim 직후 함수 crash/timeout이면 공급자 호출 여부를 확정할 수 없다. 자동 재발송은 하지 않되,
+    // 15분이 지난 claim을 영구 침묵 상태로 두지 않고 기존 수동 응대 큐(paused)에 올린다.
+    if (reminderClaimedAt && !reminderSentAt) {
+      if (reminderClaimId && reminderClaimedAt <= claimStaleCutoff) {
+        const { data: swept, error: sweepError } = await supabase
+          .from("job_candidates")
+          .update({
+            onboarding_reminder_failed_at: new Date().toISOString(),
+            onboarding_reminder_failure_kind: "unknown",
+            agent_stage: "paused",
+            paused_reason: "온보딩 리마인더 발송 결과 불명 — 재발송 없이 수동 확인 필요",
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .eq("agent_stage", "onboarding")
+          .is("onboarding_reminder_sent_at", null)
+          .select("id")
+          .maybeSingle();
+        results.push({
+          candidate_id: row.id as number,
+          stage: "skip",
+          success: !sweepError,
+          reason: swept ? "stale reminder claim — parked to paused" : "stale reminder claim already handled",
+          ...(sweepError ? { error: sweepError.message } : {}),
+        });
+      } else {
+        results.push({ candidate_id: row.id as number, stage: "skip", success: true, reason: "reminder claim in flight" });
+      }
+      continue;
+    }
+
     // ─── 단계 B: 리마인더 발송 후 3h 경과 → 매니저 전화 인계 Slack (발송/억제 1회) ───
     const handoffMeta = {
       ...meta,
+      onboarding_reminder_sent_at: reminderSentAt,
       manager_handoff_alerted_at: row.manager_handoff_alerted_at
         ?? meta.manager_handoff_alerted_at,
       manager_handoff_slack_suppressed_at: row.manager_handoff_slack_suppressed_at
@@ -152,7 +236,8 @@ export async function GET(req: NextRequest) {
 
     // ─── 단계 A: 가이드 발송 후 24h 경과 + 리마인더 미발송 → 리마인더 SMS ───
     if (
-      !meta.onboarding_reminder_sent_at &&
+      !reminderSentAt &&
+      !reminderClaimedAt &&
       meta.onboarding_entered_at <= remindCutoff
     ) {
       // 배민 비마트 중단 중엔 배민 유입 리마인더 스킵(발송·마킹 X → 재개 시 자연 복구).
@@ -161,10 +246,15 @@ export async function GET(req: NextRequest) {
         continue;
       }
       if (applicant.source === "danggeun_practice") {
+        const practiceSentAt = new Date().toISOString();
         const merged = mergeAgentState(state, {
-          meta: { onboarding_reminder_sent_at: new Date().toISOString() },
+          meta: { onboarding_reminder_sent_at: practiceSentAt },
         });
-        await supabase.from("job_candidates").update({ agent_state: merged }).eq("id", row.id);
+        await supabase
+          .from("job_candidates")
+          .update({ agent_state: merged, onboarding_reminder_sent_at: practiceSentAt })
+          .eq("id", row.id)
+          .is("onboarding_reminder_sent_at", null);
         results.push({ candidate_id: row.id as number, stage: "reminder", success: true, reason: "practice — skipped real SMS" });
         continue;
       }
@@ -183,15 +273,107 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      const send = await sendSms(applicant.phone, body);
+      // 공급자 호출 전에 전용 scalar 컬럼을 조건부 UPDATE로 선점한다. agent_state 안에 claim을 넣으면
+      // 동시에 진행 중인 router/transition의 오래된 JSON 전체 쓰기에 사라질 수 있어 durable하지 않다.
+      // claim은 실패 시에도 자동 해제하지 않는다 — 결과 불명 응답을 재발송해 같은 문자를 두 번 보내는
+      // 것보다 수동 확인이 안전하다.
+      const reminderClaimId = randomUUID();
+      const claimedAt = new Date().toISOString();
+      const { data: claimed, error: claimError } = await supabase
+        .from("job_candidates")
+        .update({
+          onboarding_reminder_claimed_at: claimedAt,
+          onboarding_reminder_claim_id: reminderClaimId,
+        })
+        .eq("id", row.id)
+        .eq("agent_stage", "onboarding")
+        .is("onboarding_reminder_claimed_at", null)
+        .is("onboarding_reminder_sent_at", null)
+        .select("id")
+        .maybeSingle();
+      if (claimError) {
+        console.error("[onboarding-reminder cron] claim fail", row.id, claimError);
+        results.push({ candidate_id: row.id as number, stage: "reminder", success: false, error: `claim failed: ${claimError.message}` });
+        continue;
+      }
+      if (!claimed) {
+        results.push({ candidate_id: row.id as number, stage: "skip", success: true, reason: "reminder already claimed or candidate changed" });
+        continue;
+      }
+
+      let send: Awaited<ReturnType<typeof sendSms>>;
+      try {
+        send = await sendSms(applicant.phone, body, undefined, { clientRequestId: reminderClaimId });
+      } catch (sendError) {
+        const { error: failureMarkError } = await supabase
+          .from("job_candidates")
+          .update({
+            onboarding_reminder_failed_at: new Date().toISOString(),
+            onboarding_reminder_failure_kind: "unknown",
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .is("onboarding_reminder_sent_at", null);
+        const { error: pauseError } = await supabase
+          .from("job_candidates")
+          .update({
+            agent_stage: "paused",
+            paused_reason: "온보딩 리마인더 발송 결과 불명 — 재발송 없이 수동 확인 필요",
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .eq("agent_stage", "onboarding")
+          .is("onboarding_reminder_sent_at", null);
+        const message = sendError instanceof Error ? sendError.message : "SMS provider request failed";
+        console.error("[onboarding-reminder cron] send exception", row.id, message);
+        results.push({
+          candidate_id: row.id as number,
+          stage: "reminder",
+          success: false,
+          error: [message, failureMarkError ? `failure marker: ${failureMarkError.message}` : null, pauseError ? `pause: ${pauseError.message}` : null].filter(Boolean).join(" · "),
+        });
+        continue;
+      }
       if (!send.success) {
+        const { error: failureMarkError } = await supabase
+          .from("job_candidates")
+          .update({
+            onboarding_reminder_failed_at: new Date().toISOString(),
+            onboarding_reminder_failure_kind: send.failureKind,
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .is("onboarding_reminder_sent_at", null);
+        const { error: pauseError } = await supabase
+          .from("job_candidates")
+          .update({
+            agent_stage: "paused",
+            paused_reason: "온보딩 리마인더 발송 실패 — 재발송 없이 수동 확인 필요",
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .eq("agent_stage", "onboarding")
+          .is("onboarding_reminder_sent_at", null);
         console.error("[onboarding-reminder cron] send fail", row.id, send.error);
-        results.push({ candidate_id: row.id as number, stage: "reminder", success: false, error: send.error });
+        results.push({
+          candidate_id: row.id as number,
+          stage: "reminder",
+          success: false,
+          error: [send.error, failureMarkError ? `failure marker: ${failureMarkError.message}` : null, pauseError ? `pause: ${pauseError.message}` : null].filter(Boolean).join(" · "),
+        });
         continue;
       }
 
       const sentAt = new Date().toISOString();
-      await supabase.from("messages").insert({
+      const { data: finalized, error: finalizeError } = await supabase
+        .from("job_candidates")
+        .update({ onboarding_reminder_sent_at: sentAt })
+        .eq("id", row.id)
+        .eq("onboarding_reminder_claim_id", reminderClaimId)
+        .is("onboarding_reminder_sent_at", null)
+        .select("id")
+        .maybeSingle();
+      const { error: messageError } = await supabase.from("messages").insert({
         applicant_id: applicant.id,
         applicant_phone: applicant.phone,
         direction: "outbound",
@@ -202,10 +384,26 @@ export async function GET(req: NextRequest) {
         message_type: "sms",
         job_id: row.job_id as number,
       });
-      const merged = mergeAgentState(state, {
-        meta: { onboarding_reminder_sent_at: sentAt },
-      });
-      await supabase.from("job_candidates").update({ agent_state: merged }).eq("id", row.id);
+      if (finalizeError || !finalized || messageError) {
+        const errorParts = [
+          finalizeError ? `sent marker: ${finalizeError.message}` : !finalized ? "sent marker lost CAS" : null,
+          messageError ? `message log: ${messageError.message}` : null,
+        ].filter(Boolean).join(" · ");
+        // 공급자 성공 뒤 내부 기록이 불완전하면 자동 재발송은 금지한 채 기존 수동 응대 큐에 올린다.
+        // 조용히 onboarding에 남기면 영구 정지가 화면 어디에도 보이지 않는다.
+        await supabase
+          .from("job_candidates")
+          .update({
+            agent_stage: "paused",
+            paused_reason: "온보딩 리마인더 발송 후 기록 불완전 — 수동 확인 필요",
+          })
+          .eq("id", row.id)
+          .eq("onboarding_reminder_claim_id", reminderClaimId)
+          .eq("agent_stage", "onboarding");
+        console.error("[onboarding-reminder cron] post-send persistence incomplete", row.id, errorParts);
+        results.push({ candidate_id: row.id as number, stage: "reminder", success: false, error: `SMS sent; ${errorParts}` });
+        continue;
+      }
       results.push({ candidate_id: row.id as number, stage: "reminder", success: true });
     }
   }
