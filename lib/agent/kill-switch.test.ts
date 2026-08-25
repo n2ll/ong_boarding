@@ -58,3 +58,26 @@ test("a malformed stored kill-switch value fails closed", async () => {
 
   assert.equal(await getAgentMode(client as never), "off");
 });
+
+test("a returned database error fails closed instead of enabling automatic replies", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const client = fakeClient({
+    data: null,
+    error: { message: "database unavailable" },
+  });
+
+  assert.equal(await getAgentMode(client as never), "off");
+});
+
+test("a thrown database exception fails closed instead of enabling automatic replies", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const client = {
+    from() {
+      throw new Error("connection failed");
+    },
+  };
+
+  assert.equal(await getAgentMode(client as never), "off");
+});

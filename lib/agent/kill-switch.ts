@@ -6,6 +6,7 @@
  *  - '1'            → 'off'   : 완전 중지 (기존 kill-switch ON과 100% 동일)
  *  - 'draft'        → 'draft' : 코파일럿 — AI가 초안(message_drafts)만 만들고 발송·전이는 하지 않음
  *  - 그 외 손상값    → 'off'   : 불명확한 상태에서 자동응답을 임의 재개하지 않음
+ *  - DB 조회 실패    → 'off'   : 저장된 중지 의도를 확인할 수 없으면 매니저 수동 응대로 전환
  *
  * 환경변수 AGENT_DISABLED=1 이면 DB 값과 무관하게 항상 'off'.
  *
@@ -50,9 +51,8 @@ export async function getAgentMode(supabase: SupabaseClient): Promise<AgentMode>
       .eq("title", "agent_kill_switch")
       .limit(2);
     if (error) {
-      // 일반 DB 장애는 기존 가용성 정책(fail-open)을 유지한다. 중복 상태만 아래에서 fail-closed한다.
-      console.error("[kill-switch] query failed, treating as mode=auto", error);
-      return "auto";
+      console.error("[kill-switch] query failed, treating as mode=off", error);
+      return "off";
     }
     if ((data?.length ?? 0) > 1) {
       console.error("[kill-switch] duplicate control rows detected, treating as mode=off");
@@ -63,9 +63,8 @@ export async function getAgentMode(supabase: SupabaseClient): Promise<AgentMode>
     cache = { value: v, at: Date.now() };
     return v;
   } catch (e) {
-    // 조회 실패 시 기존 fail-open 유지(auto) — 인입 파이프라인을 죽이지 않는다.
-    console.error("[kill-switch] query failed, treating as mode=auto", e);
-    return "auto";
+    console.error("[kill-switch] query failed, treating as mode=off", e);
+    return "off";
   }
 }
 
