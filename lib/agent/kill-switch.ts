@@ -5,6 +5,7 @@
  *  - ''/'0'/행 없음 → 'auto'  : AI 자동 응대 (기존 동작)
  *  - '1'            → 'off'   : 완전 중지 (기존 kill-switch ON과 100% 동일)
  *  - 'draft'        → 'draft' : 코파일럿 — AI가 초안(message_drafts)만 만들고 발송·전이는 하지 않음
+ *  - 그 외 손상값    → 'off'   : 불명확한 상태에서 자동응답을 임의 재개하지 않음
  *
  * 환경변수 AGENT_DISABLED=1 이면 DB 값과 무관하게 항상 'off'.
  *
@@ -31,9 +32,9 @@ const TTL_MS = 5_000; // 안전상 짧게 — 토글 후 5초 이내 반영
 /** DB body 문자열 → 모드. API 라우트와 판정을 공유한다. */
 export function parseAgentMode(body: string | null | undefined): AgentMode {
   const v = (body ?? "").trim();
-  if (v === "1") return "off";
+  if (v === "" || v === "0") return "auto";
   if (v === "draft") return "draft";
-  return "auto";
+  return "off";
 }
 
 export async function getAgentMode(supabase: SupabaseClient): Promise<AgentMode> {
@@ -42,13 +43,23 @@ export async function getAgentMode(supabase: SupabaseClient): Promise<AgentMode>
   if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
 
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("prompt_examples")
       .select("body")
       .eq("category", "system_message")
       .eq("title", "agent_kill_switch")
-      .maybeSingle();
-    const v = parseAgentMode(data?.body as string | null | undefined);
+      .limit(2);
+    if (error) {
+      // 일반 DB 장애는 기존 가용성 정책(fail-open)을 유지한다. 중복 상태만 아래에서 fail-closed한다.
+      console.error("[kill-switch] query failed, treating as mode=auto", error);
+      return "auto";
+    }
+    if ((data?.length ?? 0) > 1) {
+      console.error("[kill-switch] duplicate control rows detected, treating as mode=off");
+      cache = { value: "off", at: Date.now() };
+      return "off";
+    }
+    const v = parseAgentMode(data?.[0]?.body as string | null | undefined);
     cache = { value: v, at: Date.now() };
     return v;
   } catch (e) {

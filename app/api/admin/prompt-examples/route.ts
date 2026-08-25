@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { invalidateExamplesCache } from "@/lib/agent/examples";
 import { PROMPT_EXAMPLES_SEED } from "@/lib/agent/prompt-examples-seed";
+import { isReservedPromptExampleKey } from "@/lib/admin/prompt-example-reserved";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ data: data ?? [] });
+    const visibleData = (data ?? []).filter((row) => !isReservedPromptExampleKey(row.category, row.title));
+    return NextResponse.json({ data: visibleData });
   } catch (err) {
     console.error("[prompt-examples GET exception]", err);
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });
@@ -59,6 +61,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "title, body는 필수입니다." },
         { status: 400 }
+      );
+    }
+    if (isReservedPromptExampleKey(category, title)) {
+      return NextResponse.json(
+        { error: "전역 AI 응답 모드는 에이전트 설정에서만 변경할 수 있습니다." },
+        { status: 409 }
       );
     }
 
@@ -121,7 +129,8 @@ export async function PUT(req: NextRequest) {
     );
 
     const toInsert = PROMPT_EXAMPLES_SEED.filter(
-      (s) => !existingKeys.has(`${s.category}::${s.title}`)
+      (s) => !isReservedPromptExampleKey(s.category, s.title)
+        && !existingKeys.has(`${s.category}::${s.title}`)
     );
 
     if (toInsert.length === 0) {

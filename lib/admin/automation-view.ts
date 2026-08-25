@@ -1,3 +1,5 @@
+import type { AdminAgentMode, AdminAgentModeView } from "./agent-mode-view";
+
 export type AutomationLoadState = "loading" | "error" | "ready";
 
 export type AutomationMetric = {
@@ -6,16 +8,19 @@ export type AutomationMetric = {
 };
 
 export type AutomationAiMetric = {
-  state: AutomationLoadState;
-  value: "작동 중" | "중단됨" | null;
+  state: AdminAgentModeView["state"];
+  mode: AdminAgentMode | null;
+  value: "확인 중" | "확인 실패" | "갱신 실패" | "자동 응대" | "코파일럿" | "전역 중지";
+  detail: string | null;
   disabled: boolean | null;
+  claimsAutomatic: boolean;
+  canRetry: boolean;
 };
 
 export type AutomationOverviewInput = {
   applicants?: { status: string }[];
   applicantsError?: boolean;
-  killSwitch?: { disabled?: boolean; env_forced?: boolean };
-  killSwitchError?: boolean;
+  agentMode?: AdminAgentModeView;
   inbox?: unknown[];
   inboxError?: boolean;
   activeJobs?: { title: string }[];
@@ -44,15 +49,36 @@ export function automationOverview(input: AutomationOverviewInput): AutomationOv
     (applicants) => applicants.filter((applicant) => applicant.status === status).length,
   );
 
-  let ai: AutomationAiMetric;
-  if (input.killSwitchError) {
-    ai = { state: "error", value: null, disabled: null };
-  } else if (input.killSwitch === undefined) {
-    ai = { state: "loading", value: null, disabled: null };
-  } else {
-    const disabled = Boolean(input.killSwitch.disabled || input.killSwitch.env_forced);
-    ai = { state: "ready", value: disabled ? "중단됨" : "작동 중", disabled };
-  }
+  const modeView = input.agentMode ?? { state: "loading" as const, mode: null };
+  const value: AutomationAiMetric["value"] = modeView.state === "loading"
+    ? "확인 중"
+    : modeView.state === "error"
+      ? "확인 실패"
+      : modeView.state === "stale"
+        ? "갱신 실패"
+        : modeView.mode === "auto"
+          ? "자동 응대"
+          : modeView.mode === "draft"
+            ? "코파일럿"
+            : "전역 중지";
+  const previousModeName = modeView.mode === "auto"
+    ? "자동 응대"
+    : modeView.mode === "draft"
+      ? "코파일럿"
+      : "전역 중지";
+  const ai: AutomationAiMetric = {
+    state: modeView.state,
+    mode: modeView.mode,
+    value,
+    detail: modeView.state === "error"
+      ? "자동 응대 여부를 추정하지 않습니다."
+      : modeView.state === "stale"
+        ? `이전 확인: ${previousModeName}`
+        : null,
+    disabled: modeView.state === "ready" ? modeView.mode === "off" : null,
+    claimsAutomatic: modeView.state === "ready" && modeView.mode === "auto",
+    canRetry: modeView.state === "error" || modeView.state === "stale",
+  };
 
   return {
     ai,

@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Users, Briefcase, Activity, Pl
 import { toast } from "sonner";
 import { automationOverview, type AutomationAiMetric, type AutomationMetric } from "@/lib/admin/automation-view";
 import { saveAutomationConfig } from "@/lib/admin/automation-config-action";
+import { agentModeView, type AdminAgentModeResponse } from "@/lib/admin/agent-mode-view";
 
 interface RuleDef {
   id: string;
@@ -135,7 +136,7 @@ export function Automation() {
     error: killError,
     isValidating: killValidating,
     mutate: mutateKill,
-  } = useSWR<{ disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
+  } = useSWR<AdminAgentModeResponse>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
   const {
     data: inboxRes,
     error: inboxError,
@@ -151,15 +152,15 @@ export function Automation() {
   const stats = useMemo(() => automationOverview({
     applicants: appsRes?.data,
     applicantsError: Boolean(appsError),
-    killSwitch: killRes,
-    killSwitchError: Boolean(killError),
+    agentMode: agentModeView({ data: killRes, error: killError }),
     inbox: inboxRes?.data,
     inboxError: Boolean(inboxError),
     activeJobs: activeJobsRes?.jobs,
     activeJobsError: Boolean(activeJobsError),
   }), [appsRes, appsError, killRes, killError, inboxRes, inboxError, activeJobsRes, activeJobsError]);
 
-  const hasOverviewError = Object.values(stats).some((metric) => metric.state === "error");
+  const hasOverviewError = Object.values(stats).some((metric) => metric.state === "error" || metric.state === "stale");
+  const hasHardOverviewError = Object.values(stats).some((metric) => metric.state === "error");
   const overviewRefreshing = appsValidating || killValidating || inboxValidating || activeJobsValidating;
   const refreshOverview = () => {
     void Promise.all([mutateApps(), mutateKill(), mutateInbox(), mutateActiveJobs()]);
@@ -167,11 +168,21 @@ export function Automation() {
 
   const kpis = [
     {
-      label: "AI 자동응답",
+      label: "AI 응답 모드",
       value: metricValue(stats.ai),
       icon: Power,
-      tone: stats.ai.state === "error" || stats.ai.disabled ? "text-error" : stats.ai.state === "ready" ? "text-success" : "text-muted-foreground",
-      live: stats.ai.state === "ready" && stats.ai.disabled === false,
+      tone: stats.ai.state === "error"
+        ? "text-error"
+        : stats.ai.state === "stale"
+          ? "text-warning-strong"
+          : stats.ai.mode === "off"
+            ? "text-error"
+            : stats.ai.mode === "draft"
+              ? "text-copilot-strong"
+              : stats.ai.claimsAutomatic
+                ? "text-success"
+                : "text-muted-foreground",
+      live: stats.ai.claimsAutomatic,
       href: "/brain",
       action: "에이전트 설정",
     },
@@ -201,23 +212,40 @@ export function Automation() {
             disabled={overviewRefreshing}
             className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-card px-3 text-[12px] font-bold text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           >
-            <RotateCw size={14} className={overviewRefreshing ? "animate-spin" : ""} />
+            <RotateCw size={14} className={overviewRefreshing ? "animate-spin motion-reduce:animate-none" : ""} />
             {overviewRefreshing ? "확인 중" : "새로고침"}
           </button>
         </div>
         {hasOverviewError && (
-          <div role="alert" className="mb-3 flex items-center gap-2 rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[12px] font-bold text-error-strong">
+          <div role="alert" className={`mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-bold ${hasHardOverviewError ? "border-error/30 bg-error-soft text-error-strong" : "border-warning/30 bg-warning-soft text-warning-strong"}`}>
             <AlertTriangle size={15} className="shrink-0" />
-            일부 상태를 확인하지 못했습니다. 실패한 항목은 숫자로 표시하지 않습니다.
+            {hasHardOverviewError
+              ? stats.ai.state === "error"
+                ? "AI 응답 모드를 포함한 일부 상태를 확인하지 못했습니다. 확인되지 않은 값을 정상으로 표시하지 않습니다."
+                : stats.ai.state === "stale"
+                  ? `AI 응답 모드 갱신 실패 · ${stats.ai.detail ?? "이전 상태만 남아 있습니다."} 또한 일부 업무 상태를 확인하지 못했습니다.`
+                  : "일부 상태를 확인하지 못했습니다. 실패한 항목은 숫자로 표시하지 않습니다."
+              : `AI 응답 모드 갱신 실패 · ${stats.ai.detail ?? "이전 상태만 남아 있습니다."} 현재 자동 응대 여부로 단정하지 않습니다.`}
           </div>
         )}
-        {stats.ai.disabled === true && (
-          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
-            <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong">
+        {stats.ai.state === "ready" && stats.ai.mode === "off" && (
+          <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2 text-[12px] font-bold text-error-strong">
               <AlertTriangle size={15} className="shrink-0" />
               AI 자동응답이 중단되어 있습니다. 지원자 응대가 쌓이기 전에 설정을 확인하세요.
             </div>
             <Link href="/brain" className="shrink-0 rounded-lg px-2 py-1.5 text-[12px] font-extrabold text-error-strong outline-none hover:bg-error/10 focus-visible:ring-2 focus-visible:ring-ring">
+              설정 확인
+            </Link>
+          </div>
+        )}
+        {stats.ai.state === "ready" && stats.ai.mode === "draft" && (
+          <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-copilot/30 bg-copilot-soft px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2 text-[12px] font-bold text-copilot-strong">
+              <Power size={15} className="shrink-0" />
+              코파일럿 모드입니다. AI는 초안만 작성하며, 발송은 매니저 승인 후에만 진행됩니다.
+            </div>
+            <Link href="/brain" className="shrink-0 rounded-lg px-2 py-1.5 text-[12px] font-extrabold text-copilot-strong outline-none hover:bg-copilot/10 focus-visible:ring-2 focus-visible:ring-ring">
               설정 확인
             </Link>
           </div>
@@ -235,7 +263,7 @@ export function Automation() {
               </div>
               <div className={`flex items-center gap-1.5 text-[18px] font-extrabold tracking-tight ${k.tone}`}>
                 <span className="truncate">{k.value}</span>
-                {k.live && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
+                {k.live && <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse motion-reduce:animate-none" />}
               </div>
               <div className="mt-1.5 flex items-center gap-1 text-[12px] font-bold text-muted-foreground transition-colors group-hover:text-foreground">
                 {k.action} <ArrowRight size={11} />

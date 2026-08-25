@@ -37,3 +37,15 @@ test("task states, cards, and skeleton follow the same responsive layout contrac
     "the badge must identify that it counts work types rather than individual cases",
   );
 });
+
+test("dashboard AI status never defaults an unknown or stale response to automatic", () => {
+  assert.match(dashboard, /useSWR<AdminAgentModeResponse>/);
+  assert.match(dashboard, /agentModeView\(\{ data: killRes, error: killError \}\)/);
+  assert.match(dashboard, /agentModePresentation\(globalAgentMode\)/);
+  assert.match(dashboard, /agentModeCopy\.detail/);
+  assert.match(dashboard, /agentModeCopy\.canRetry/);
+  assert.match(dashboard, /killValidating/);
+  assert.match(dashboard, /mutateKillMode/);
+  assert.doesNotMatch(dashboard, /killRes\.mode \?\? "auto"/);
+  assert.doesNotMatch(dashboard, /\{aiMode && \(/);
+});

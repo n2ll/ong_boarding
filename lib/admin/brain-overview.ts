@@ -1,5 +1,7 @@
+import type { AdminAgentMode, AdminAgentModeView } from "./agent-mode-view";
+
 export type BrainLoadState = "loading" | "error" | "ready";
-export type BrainMode = "auto" | "draft" | "off";
+export type BrainMode = AdminAgentMode;
 
 export type BrainCountMetric = {
   state: BrainLoadState;
@@ -13,7 +15,7 @@ export type BrainCoverageMetric = {
 };
 
 export type BrainModeMetric = {
-  state: BrainLoadState;
+  state: AdminAgentModeView["state"];
   value: BrainMode | null;
 };
 
@@ -26,8 +28,7 @@ export type BrainOverviewInput = {
   jobsError?: boolean;
   handoffs?: { total?: number };
   handoffsError?: boolean;
-  killSwitch?: { mode?: BrainMode; disabled?: boolean; env_forced?: boolean };
-  killSwitchError?: boolean;
+  agentMode?: AdminAgentModeView;
 };
 
 export type BrainOverview = {
@@ -55,17 +56,8 @@ function coverageMetric<T>(
 }
 
 export function brainOverview(input: BrainOverviewInput): BrainOverview {
-  let mode: BrainModeMetric;
-  if (input.killSwitchError) {
-    mode = { state: "error", value: null };
-  } else if (input.killSwitch === undefined) {
-    mode = { state: "loading", value: null };
-  } else {
-    const value = input.killSwitch.env_forced
-      ? "off"
-      : input.killSwitch.mode ?? (input.killSwitch.disabled ? "off" : "auto");
-    mode = { state: "ready", value };
-  }
+  const modeView = input.agentMode ?? { state: "loading" as const, mode: null };
+  const mode: BrainModeMetric = { state: modeView.state, value: modeView.mode };
 
   const visibleJobs = input.jobs?.filter((job) => !job.title.startsWith("__"));
 

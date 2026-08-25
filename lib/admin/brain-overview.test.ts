@@ -10,8 +10,9 @@ type BrainOverviewInput = {
   jobsError?: boolean;
   handoffs?: { total?: number };
   handoffsError?: boolean;
-  killSwitch?: { mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean };
-  killSwitchError?: boolean;
+  agentMode?:
+    | { state: "loading" | "error"; mode: null }
+    | { state: "stale" | "ready"; mode: "auto" | "draft" | "off" };
 };
 
 async function loadOverviewModule(): Promise<Record<string, unknown>> {
@@ -51,7 +52,7 @@ test("failed brain requests are explicit errors instead of healthy defaults", as
     branchesError: true,
     jobsError: true,
     handoffsError: true,
-    killSwitchError: true,
+    agentMode: { state: "error", mode: null },
   });
 
   assert.equal(result.mode.state, "error");
@@ -73,7 +74,7 @@ test("loaded empty brain data is the only state rendered as zero and automatic m
     branches: [],
     jobs: [],
     handoffs: { total: 0 },
-    killSwitch: { mode: "auto", disabled: false, env_forced: false },
+    agentMode: { state: "ready", mode: "auto" },
   }), {
     mode: { state: "ready", value: "auto" },
     facts: { state: "ready", value: 0 },
@@ -103,7 +104,7 @@ test("brain overview counts usable knowledge and treats environment-forced shutd
       { title: "__system", pay_info: "내부" },
     ],
     handoffs: { total: 4 },
-    killSwitch: { mode: "auto", env_forced: true },
+    agentMode: { state: "ready", mode: "off" },
   }), {
     mode: { state: "ready", value: "off" },
     facts: { state: "ready", value: 1 },
@@ -111,4 +112,16 @@ test("brain overview counts usable knowledge and treats environment-forced shutd
     jobs: { state: "ready", filled: 1, total: 2 },
     handoffs: { state: "ready", value: 4 },
   });
+});
+
+test("brain mode keeps stale data explicit instead of claiming it is current", async () => {
+  const overviewModule = await loadOverviewModule();
+  const brainOverview = overviewModule.brainOverview as
+    | ((input: BrainOverviewInput) => { mode: unknown })
+    | undefined;
+
+  assert.equal(typeof brainOverview, "function");
+  assert.deepEqual(brainOverview!({
+    agentMode: { state: "stale", mode: "draft" },
+  }).mode, { state: "stale", value: "draft" });
 });

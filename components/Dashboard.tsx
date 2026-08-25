@@ -22,6 +22,11 @@ import {
   type DashboardMetricTile,
   type DashboardMetricTone,
 } from "@/lib/admin/dashboard-metrics";
+import {
+  agentModePresentation,
+  agentModeView,
+  type AdminAgentModeResponse,
+} from "@/lib/admin/agent-mode-view";
 
 interface UrgentItem {
   id: string;
@@ -140,7 +145,14 @@ export function Dashboard() {
   const { data: interestRes, error: interestError, mutate: mutateInterest } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
-  const { data: killRes } = useSWR<{ mode?: "auto" | "draft" | "off"; disabled?: boolean; env_forced?: boolean }>("/api/admin/agent/kill-switch");
+  const {
+    data: killRes,
+    error: killError,
+    isValidating: killValidating,
+    mutate: mutateKillMode,
+  } = useSWR<AdminAgentModeResponse>("/api/admin/agent/kill-switch", { refreshInterval: 30_000 });
+  const globalAgentMode = agentModeView({ data: killRes, error: killError });
+  const agentModeCopy = agentModePresentation(globalAgentMode);
   // 답장 큐는 마지막 메시지 방향까지 확인돼야 건수가 확정된다. 로딩/실패를 0건으로
   // 축약하지 않고 '오늘의 할 일' 전체 readiness에 포함한다.
   const [replyCounts, setReplyCounts] = useState<ReplyQueueCounts>({
@@ -421,16 +433,24 @@ export function Dashboard() {
     return { label: `문자폰 ${ago} · 대기 ${pending}건`, bad: min > 10 || pending > 0 };
   }, [hbRes, nowTick]);
 
-  // 운영 모드 한 줄 — 킬스위치 3단(auto/draft/off)을 매니저 언어로. 로딩 전엔 미노출(깜빡임 방지).
-  const aiMode = useMemo(() => {
-    if (!killRes) return null;
-    const mode = killRes.env_forced || killRes.disabled ? "off" : killRes.mode ?? "auto";
-    if (mode === "off")
-      return { label: "AI 자동응대 중지 · 수동 응대", dot: "bg-error" };
-    if (mode === "draft")
-      return { label: "AI 코파일럿 · 승인 후 발송", dot: "bg-copilot" };
-    return { label: "AI 자동 응대 중", dot: "bg-success" };
-  }, [killRes]);
+  const aiModeTone = agentModeCopy.kind === "error" || agentModeCopy.kind === "off"
+    ? "text-error-on-dark"
+    : agentModeCopy.kind === "stale"
+      ? "text-warning-on-dark"
+      : agentModeCopy.kind === "draft"
+        ? "text-copilot-on-dark"
+        : agentModeCopy.kind === "auto"
+          ? "text-success-on-dark"
+          : "text-white/65";
+  const aiModeDot = agentModeCopy.kind === "off"
+    ? "bg-error"
+    : agentModeCopy.kind === "draft"
+      ? "bg-copilot"
+      : agentModeCopy.kind === "auto"
+        ? "bg-success"
+        : agentModeCopy.kind === "stale"
+          ? "bg-warning"
+          : "bg-muted-foreground";
 
   // '지표 · 분석' 접이식 섹션 — 기본 접힘. 첫 화면은 '지금 할 일'이 스크롤 없이 보이는 게 목표.
   const [metricsOpen, setMetricsOpen] = useState(false);
@@ -465,15 +485,34 @@ export function Dashboard() {
                 {queueStatus.label}
               </span>
               <span>지원자 목록 갱신: {syncLabel}</span>
-              {aiMode && (
-                <span
-                  title="AI 응답 모드 — 변경은 지원자 운영 화면 상단 배너 또는 에이전트 두뇌에서"
-                  className="flex items-center gap-1.5 text-white/75"
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${aiMode.dot}`}></span>
-                  {aiMode.label}
+              <div
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                title="AI 응답 모드 — 변경은 지원자 운영 화면 상단 배너 또는 에이전트 두뇌에서"
+                className={`flex min-w-0 items-center gap-1.5 ${aiModeTone}`}
+              >
+                {agentModeCopy.kind === "loading" ? (
+                  <RefreshCw aria-hidden="true" size={12} className="shrink-0 animate-spin motion-reduce:animate-none" />
+                ) : agentModeCopy.kind === "error" || agentModeCopy.kind === "stale" ? (
+                  <AlertTriangle aria-hidden="true" size={12} className="shrink-0" />
+                ) : (
+                  <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${aiModeDot}`} />
+                )}
+                <span className="min-w-0">
+                  {agentModeCopy.label}{agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""}
                 </span>
-              )}
+                {agentModeCopy.canRetry && (
+                  <button
+                    type="button"
+                    onClick={() => void mutateKillMode()}
+                    disabled={killValidating}
+                    className="-my-1 flex min-h-8 shrink-0 items-center rounded px-2 font-bold underline underline-offset-2 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-white/50"
+                  >
+                    {killValidating ? "확인 중" : "다시 시도"}
+                  </button>
+                )}
+              </div>
               {gateway && (
                 <span
                   title="문자를 실제로 보내고 받는 법인폰 상태예요. 신호가 10분 이상 없으면 문자 수·발신이 멈췄을 수 있어요."

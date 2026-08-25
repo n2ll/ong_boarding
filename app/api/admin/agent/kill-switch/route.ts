@@ -3,10 +3,11 @@
  *   → { mode: 'auto'|'draft'|'off', disabled: boolean, updated_at, env_forced }
  * POST /api/admin/agent/kill-switch
  *   body: { mode: 'auto'|'draft'|'off' } — 전역 AI 응답 3단 전환
+ *   → GET과 같은 완전한 상태 snapshot. 클라이언트가 환경 강제 중지를 임의 추정하지 않게 한다.
  *   (하위호환: 구형 { disabled: boolean }도 수용 — true→off, false→auto)
  *
  * 전역 AI 응답 모드를 prompt_examples(category='system_message', title='agent_kill_switch')
- * body 값으로 저장한다. '1'=off(완전 중지, 기존과 동일), 'draft'=코파일럿(초안만), 그 외=auto.
+ * body 값으로 저장한다. '0'=auto, 'draft'=코파일럿(초안만), '1'=off. 알 수 없는 값은 안전상 off.
  * router.runAgentForCandidate가 처리 시작 전 getAgentMode()로 이 값을 확인한다.
  *
  * 주의: 환경변수 AGENT_DISABLED=1이 별도로 걸려 있으면 이 토글과 무관하게 항상 중단된다.
@@ -15,11 +16,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { invalidateKillSwitchCache, parseAgentMode, type AgentMode } from "@/lib/agent/kill-switch";
+import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
 
 export const dynamic = "force-dynamic";
 
-const CATEGORY = "system_message";
-const TITLE = "agent_kill_switch";
+const CATEGORY = AGENT_KILL_SWITCH_CATEGORY;
+const TITLE = AGENT_KILL_SWITCH_TITLE;
 
 const MODE_TO_BODY: Record<AgentMode, string> = { auto: "0", draft: "draft", off: "1" };
 
@@ -31,19 +33,24 @@ export async function GET() {
       .select("body, updated_at")
       .eq("category", CATEGORY)
       .eq("title", TITLE)
-      .maybeSingle();
+      .limit(2);
 
     if (error) {
       console.error("[kill-switch GET]", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+    if ((data?.length ?? 0) > 1) {
+      console.error("[kill-switch GET] duplicate control rows detected");
+      return NextResponse.json({ error: "AI 응답 모드 저장 상태가 중복되어 확인이 필요합니다." }, { status: 409 });
+    }
 
-    const mode = parseAgentMode(data?.body as string | null | undefined);
+    const stored = data?.[0];
+    const mode = parseAgentMode(stored?.body as string | null | undefined);
     return NextResponse.json({
       mode,
       // 하위호환 — 기존 소비자(disabled boolean)는 '완전 중지'일 때만 true.
       disabled: mode === "off",
-      updated_at: (data as { updated_at?: string } | null)?.updated_at ?? null,
+      updated_at: (stored as { updated_at?: string } | undefined)?.updated_at ?? null,
       env_forced: process.env.AGENT_DISABLED === "1",
     });
   } catch (err) {
@@ -77,37 +84,63 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServiceClient();
     const body = MODE_TO_BODY[mode];
+    const updatedAt = new Date().toISOString();
 
-    // 기존 플래그 행이 있으면 업데이트, 없으면 생성.
-    const { data: existing } = await supabase
+    // update-first + 부분 유니크 인덱스로 최초 생성 경쟁에서도 예약 행을 하나만 유지한다.
+    const { data: updatedRows, error: updateError } = await supabase
       .from("prompt_examples")
-      .select("id")
+      .update({ body, updated_at: updatedAt })
       .eq("category", CATEGORY)
       .eq("title", TITLE)
-      .maybeSingle();
+      .select("body, updated_at");
+    if (updateError) {
+      console.error("[kill-switch POST update]", updateError);
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+    if ((updatedRows?.length ?? 0) > 1) {
+      console.error("[kill-switch POST] duplicate control rows detected");
+      return NextResponse.json({ error: "AI 응답 모드 저장 상태가 중복되어 확인이 필요합니다." }, { status: 409 });
+    }
 
-    if (existing) {
-      const { error } = await supabase
+    let stored = updatedRows?.[0] as { body?: string; updated_at?: string } | undefined;
+    if (!stored) {
+      const { data: inserted, error: insertError } = await supabase
         .from("prompt_examples")
-        .update({ body })
-        .eq("id", existing.id);
-      if (error) {
-        console.error("[kill-switch POST update]", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-    } else {
-      const { error } = await supabase
-        .from("prompt_examples")
-        .insert({ category: CATEGORY, title: TITLE, body, sort_order: 0 });
-      if (error) {
-        console.error("[kill-switch POST insert]", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        .insert({ category: CATEGORY, title: TITLE, body, sort_order: 0, updated_at: updatedAt })
+        .select("body, updated_at")
+        .single();
+
+      if (!insertError) {
+        stored = inserted as { body?: string; updated_at?: string };
+      } else if (insertError.code === "23505") {
+        // 다른 요청이 같은 순간 최초 행을 만들었다. 그 행에 이 요청을 마지막 쓰기로 반영한다.
+        const { data: retried, error: retryError } = await supabase
+          .from("prompt_examples")
+          .update({ body, updated_at: updatedAt })
+          .eq("category", CATEGORY)
+          .eq("title", TITLE)
+          .select("body, updated_at")
+          .single();
+        if (retryError) {
+          console.error("[kill-switch POST retry]", retryError);
+          return NextResponse.json({ error: retryError.message }, { status: 500 });
+        }
+        stored = retried as { body?: string; updated_at?: string };
+      } else {
+        console.error("[kill-switch POST insert]", insertError);
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
     }
 
     // 이 인스턴스의 캐시만 즉시 무효화(best-effort). 다른 인스턴스도 TTL 5초 내 반영됨.
     invalidateKillSwitchCache();
-    return NextResponse.json({ mode, disabled: mode === "off" });
+    const storedMode = parseAgentMode(stored?.body);
+    return NextResponse.json({
+      mode: storedMode,
+      disabled: storedMode === "off",
+      env_forced: process.env.AGENT_DISABLED === "1",
+      updated_at: stored?.updated_at ?? updatedAt,
+    });
   } catch (err) {
     console.error("[kill-switch POST exception]", err);
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });

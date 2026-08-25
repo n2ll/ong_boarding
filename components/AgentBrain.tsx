@@ -11,6 +11,14 @@ import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/ui/page-shell";
 import { brainOverview, type BrainCountMetric, type BrainMode } from "@/lib/admin/brain-overview";
 import { brainTabFromParam, brainTabHref, type BrainTab } from "@/lib/admin/brain-navigation";
+import { isReservedPromptExampleKey } from "@/lib/admin/prompt-example-reserved";
+import {
+  agentModePresentation,
+  agentModeSnapshot,
+  agentModeView,
+  isAdminAgentModeResponse,
+  type AdminAgentModeResponse,
+} from "@/lib/admin/agent-mode-view";
 
 interface OverviewBranch {
   id: number;
@@ -296,19 +304,16 @@ export function AgentBrain() {
     setPersona((prev) => ({ ...prev, [key]: value }));
 
   // 전역 AI 응답 모드 (kill-switch 3단): auto=자동 응대 / draft=코파일럿(초안만) / off=완전 중지.
-  // SWR로 로드 후 로컬 상태에 시드(전환은 로컬 갱신). kill-switch 키는 자동화 탭과 공유.
-  const { data: killApi, error: killError, isLoading: killLoading, isValidating: killValidating, mutate: mutateKill } = useSWR<{ mode?: BrainMode; disabled?: boolean; env_forced?: boolean; updated_at?: string | null }>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
-  const [killMode, setKillMode] = useState<BrainMode>("auto");
-  const [killEnvForced, setKillEnvForced] = useState(false);
+  // 설정값과 환경변수로 강제된 실효값을 분리해 표시한다. kill-switch 키는 자동화 탭과 공유.
+  const { data: killApi, error: killError, isValidating: killValidating, mutate: mutateKill } = useSWR<AdminAgentModeResponse>("/api/admin/agent/kill-switch", { refreshInterval: 60_000 });
+  const globalAgentMode = agentModeView({ data: killApi, error: killError });
+  const agentModeCopy = agentModePresentation(globalAgentMode);
+  const killSnapshot = agentModeSnapshot(killApi);
+  const killMode = killSnapshot?.configuredMode ?? null;
+  const killEnvForced = killSnapshot?.override?.kind === "environment";
+  const killOverrideIsCurrent = globalAgentMode.state === "ready" && killEnvForced;
   const [killBusy, setKillBusy] = useState(false);
-  const [killUpdatedAt, setKillUpdatedAt] = useState<string | null>(null);
-  useEffect(() => {
-    if (killApi) {
-      setKillMode(killApi.mode ?? (killApi.disabled ? "off" : "auto"));
-      setKillEnvForced(!!killApi.env_forced);
-      setKillUpdatedAt(killApi.updated_at ?? null);
-    }
-  }, [killApi]);
+  const killUpdatedAt = killSnapshot?.updatedAt ?? null;
   const overview = useMemo(() => brainOverview({
     examples: examplesApi?.data,
     examplesError: Boolean(examplesError),
@@ -318,17 +323,26 @@ export function AgentBrain() {
     jobsError: Boolean(ovJobsError),
     handoffs: ovHandoffsApi,
     handoffsError: Boolean(ovHandoffsError),
-    killSwitch: killApi,
-    killSwitchError: Boolean(killError),
+    agentMode: agentModeView({ data: killApi, error: killError }),
   }), [examplesApi, examplesError, ovBranchesApi, ovBranchesError, ovJobsApi, ovJobsError, ovHandoffsApi, ovHandoffsError, killApi, killError]);
   const overviewRefreshing = examplesValidating || ovBranchesValidating || ovJobsValidating || ovHandoffsValidating || killValidating;
   const loadOverview = useCallback(() => {
     void Promise.all([mutateExamples(), mutateOvBranches(), mutateOvJobs(), mutateOvHandoffs(), mutateKill()]);
   }, [mutateExamples, mutateOvBranches, mutateOvJobs, mutateOvHandoffs, mutateKill]);
-  const killDisabled = killMode === "off";
+  const killDisabled = globalAgentMode.state === "ready" && globalAgentMode.mode === "off";
+  const killDraft = globalAgentMode.state === "ready" && globalAgentMode.mode === "draft";
+  const killCardTone = agentModeCopy.kind === "error"
+    ? "bg-error-soft border-error/30"
+    : agentModeCopy.kind === "stale"
+      ? "bg-warning-soft border-warning/30"
+      : killDisabled
+        ? "bg-error-soft border-error/30"
+        : killDraft
+          ? "bg-copilot-soft border-copilot/30"
+          : "bg-card border-border-strong";
 
   const handleChangeKillMode = async (next: BrainMode) => {
-    if (killBusy || killEnvForced || next === killMode) return;
+    if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || next === killMode) return;
     const ok =
       next === "off"
         ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
@@ -343,19 +357,29 @@ export function AgentBrain() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: next }),
       });
-      const json = await res.json();
+      const json: unknown = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(json.error || "변경에 실패했어요");
+        const errorMessage = json && typeof json === "object" && "error" in json
+          ? String((json as { error?: unknown }).error ?? "")
+          : "";
+        toast.error(errorMessage || "변경에 실패했어요");
         return;
       }
-      setKillMode(next);
-      const updatedAt = new Date().toISOString();
-      setKillUpdatedAt(updatedAt);
-      void mutateKill({ mode: next, disabled: next === "off", env_forced: false, updated_at: updatedAt }, { revalidate: false });
+      if (!isAdminAgentModeResponse(json)) {
+        toast.warning("설정은 저장됐지만 실제 AI 동작 상태를 확인하지 못했어요. 다시 확인해주세요.");
+        void mutateKill();
+        return;
+      }
+      const savedSnapshot = agentModeSnapshot(json);
+      await mutateKill(json, { revalidate: false });
+      if (savedSnapshot?.override) {
+        toast.warning(`저장 모드는 ${MODE_LABEL[savedSnapshot.configuredMode]}로 바뀌었지만, 환경변수로 실제 AI는 계속 중단됩니다.`);
+        return;
+      }
       toast.success(
-        next === "off"
+        json.mode === "off"
           ? "AI 전역 응답을 중단했어요."
-          : next === "draft"
+          : json.mode === "draft"
           ? "코파일럿 모드로 전환했어요. AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다. (5초 이내 반영)"
           : "AI 전역 응답을 재개했어요. (5초 이내 반영)"
       );
@@ -445,17 +469,31 @@ export function AgentBrain() {
     }
   };
 
-  // '__' 접두 제목은 내부 설정용 예약 항목(예: __persona__) — KB 목록에 노출하지 않는다.
-  const kbItems = examples.filter((e) => e.category === kbCategory && !e.title.startsWith("__"));
+  // 내부 설정용 예약 항목은 일반 지식 UI에서 수정·삭제하지 않는다.
+  const kbItems = examples.filter((e) => e.category === kbCategory
+    && !e.title.startsWith("__")
+    && !isReservedPromptExampleKey(e.category, e.title));
 
   // AI 지식 현황 집계
   const payGapJobs = overview.jobs.state === "ready" ? ovJobs.filter((j) => !(j.pay_info ?? "").trim()) : [];
   const modeSummary = overview.mode.state === "ready" && overview.mode.value
-    ? MODE_LABEL[overview.mode.value]
-    : overview.mode.state === "loading" ? "확인 중" : "확인 실패";
+    ? killSnapshot?.override
+      ? "환경 강제 중지"
+      : MODE_LABEL[overview.mode.value]
+    : overview.mode.state === "loading"
+      ? "확인 중"
+      : overview.mode.state === "stale"
+        ? "갱신 실패"
+        : "확인 실패";
   const modeSummaryTone = overview.mode.state === "error" || overview.mode.value === "off"
     ? "text-error-strong"
-    : overview.mode.value === "draft" ? "text-copilot-strong" : overview.mode.state === "ready" ? "text-success-strong" : "text-muted-foreground";
+    : overview.mode.state === "stale"
+      ? "text-warning-strong"
+      : overview.mode.value === "draft"
+        ? "text-copilot-strong"
+        : overview.mode.state === "ready"
+          ? "text-success-strong"
+          : "text-muted-foreground";
   const coverageFailed = overview.branches.state === "error" || overview.jobs.state === "error";
   const coverageLoading = overview.branches.state === "loading" || overview.jobs.state === "loading";
   const knowledgeGapCount = overview.branches.state === "ready" && overview.jobs.state === "ready"
@@ -533,7 +571,7 @@ export function AgentBrain() {
             scroll={false}
             className="group flex min-h-[104px] items-start gap-3 border-b border-border-strong px-5 py-4 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:border-b-0 md:border-r"
           >
-            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${overview.mode.value === "off" || overview.mode.state === "error" ? "bg-error-soft" : overview.mode.state === "loading" ? "bg-muted" : overview.mode.value === "draft" ? "bg-copilot-soft" : "bg-success-soft"}`}>
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${overview.mode.value === "off" || overview.mode.state === "error" ? "bg-error-soft" : overview.mode.state === "stale" ? "bg-warning-soft" : overview.mode.state === "loading" ? "bg-muted" : overview.mode.value === "draft" ? "bg-copilot-soft" : "bg-success-soft"}`}>
               <Power size={17} className={modeSummaryTone} />
             </div>
             <div className="min-w-0">
@@ -997,25 +1035,29 @@ export function AgentBrain() {
           {activeTab === 'mode' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               {/* 전역 AI 응답 모드 (실데이터 연동) — 자동 응대 / 코파일럿(초안만) / 완전 중지 */}
-              <div className={`border rounded-2xl p-7 shadow-sm mb-6 transition-colors ${killError || killDisabled ? 'bg-error-soft border-error/30' : killMode === 'draft' && !killEnvForced ? 'bg-copilot-soft border-copilot/30' : 'bg-card border-border-strong'}`}>
+              <div className={`mb-6 rounded-2xl border p-7 shadow-sm transition-colors ${killCardTone}`}>
                 <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${killError || killDisabled || killEnvForced ? 'bg-error-soft' : killMode === 'draft' ? 'bg-copilot-soft' : 'bg-success-soft'}`}>
-                    {killMode === 'draft' && !killEnvForced ? (
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${agentModeCopy.kind === "loading" ? "bg-muted" : agentModeCopy.kind === "stale" ? "bg-warning-soft" : agentModeCopy.kind === "error" || killDisabled ? "bg-error-soft" : killDraft ? "bg-copilot-soft" : "bg-success-soft"}`}>
+                    {agentModeCopy.kind === "loading" ? (
+                      <Loader2 size={20} className="animate-spin text-muted-foreground motion-reduce:animate-none" />
+                    ) : killDraft ? (
                       <Zap size={20} className="text-copilot-strong" />
                     ) : (
-                      <Power size={20} className={killError || killDisabled || killEnvForced ? 'text-error-strong' : 'text-success'} />
+                      <Power size={20} className={agentModeCopy.kind === "stale" ? "text-warning-strong" : agentModeCopy.kind === "error" || killDisabled ? "text-error-strong" : "text-success"} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h2 className="text-[18px] font-extrabold text-foreground">응답 모드·안전</h2>
-                      {killLoading ? (
+                      {agentModeCopy.kind === "loading" ? (
                         <span className="text-[12px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">확인 중…</span>
-                      ) : killError ? (
+                      ) : agentModeCopy.kind === "error" ? (
                         <span className="text-[12px] font-bold text-error-strong bg-error-soft px-2 py-0.5 rounded-full">확인 실패</span>
+                      ) : agentModeCopy.kind === "stale" ? (
+                        <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[12px] font-bold text-warning-strong">갱신 실패</span>
                       ) : (
-                        <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full ${killDisabled || killEnvForced ? 'text-error-strong bg-error-soft' : killMode === 'draft' ? 'text-copilot-strong bg-copilot-soft' : 'text-success-strong bg-success/25'}`}>
-                          {killEnvForced ? '중단됨 (환경변수)' : killDisabled ? '중단됨' : killMode === 'draft' ? '코파일럿' : '작동 중'}
+                        <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ${killDisabled ? "bg-error-soft text-error-strong" : killDraft ? "bg-copilot-soft text-copilot-strong" : "bg-success/25 text-success-strong"}`}>
+                          {killOverrideIsCurrent ? "중단됨 (환경변수)" : killDisabled ? "중단됨" : killDraft ? "코파일럿" : "자동 응대"}
                         </span>
                       )}
                     </div>
@@ -1030,7 +1072,7 @@ export function AgentBrain() {
                         { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-copilot bg-copilot-soft ring-1 ring-copilot', dotCls: 'text-copilot-strong' },
                         { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-error bg-error-soft ring-1 ring-error', dotCls: 'text-error-strong' },
                       ]).map((opt) => {
-                        const active = !killLoading && !killError && killMode === opt.id && !killEnvForced;
+                        const active = killSnapshot !== null && killMode === opt.id;
                         return (
                           <button
                             key={opt.id}
@@ -1038,8 +1080,14 @@ export function AgentBrain() {
                             role="radio"
                             aria-checked={active}
                             onClick={() => handleChangeKillMode(opt.id)}
-                            disabled={killLoading || Boolean(killError) || killBusy || killEnvForced}
-                            title={killEnvForced ? "환경변수로 강제 중단된 상태입니다" : opt.desc}
+                            disabled={globalAgentMode.state !== "ready" || killBusy || killEnvForced}
+                            title={killOverrideIsCurrent
+                              ? `저장된 선택은 ${MODE_LABEL[killMode ?? opt.id]}이지만 환경변수로 실제 AI는 중단되어 있습니다`
+                              : globalAgentMode.state === "stale"
+                                ? killEnvForced
+                                  ? `이전 확인에서는 ${MODE_LABEL[killMode ?? opt.id]} 설정에 환경 강제 중지가 적용돼 있었습니다. 다시 확인하기 전에는 변경할 수 없습니다`
+                                  : "이전 설정만 남아 있어 다시 확인하기 전에는 변경할 수 없습니다"
+                                : opt.desc}
                             className={`text-left rounded-2xl border p-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${active ? opt.activeCls : 'border-border-strong bg-card hover:border-foreground/30'}`}
                           >
                             <div className={`flex items-center gap-1.5 text-[13px] font-extrabold ${active ? opt.dotCls : 'text-gray-700'}`}>
@@ -1052,25 +1100,29 @@ export function AgentBrain() {
                       })}
                     </div>
 
-                    {!killLoading && killUpdatedAt && (
+                    {killUpdatedAt && globalAgentMode.state !== "loading" && globalAgentMode.state !== "error" && (
                       <p className="text-[12px] text-muted-foreground mt-3">
-                        마지막 변경: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
+                        {globalAgentMode.state === "stale" ? "이전 설정 변경" : "마지막 변경"}: {new Date(killUpdatedAt).toLocaleString("ko-KR")}
                       </p>
                     )}
                     {killEnvForced && (
                       <p className="text-[12px] font-bold text-warning-strong mt-2 flex items-center gap-1.5">
-                        <AlertTriangle size={13} /> 환경변수 AGENT_DISABLED=1 이 설정돼 있어, 이 설정과 무관하게 항상 중단됩니다.
+                        <AlertTriangle size={13} /> {killOverrideIsCurrent
+                          ? "환경변수 AGENT_DISABLED=1이 설정돼 있어, 저장 모드와 무관하게 현재 중단됩니다."
+                          : "이전 확인에서는 환경변수 AGENT_DISABLED=1로 중단돼 있었습니다. 현재 상태를 다시 확인해주세요."}
                       </p>
                     )}
-                    {killError && (
-                      <div role="alert" className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-error/30 bg-card px-3 py-2">
-                        <div className="flex items-center gap-2 text-[12px] font-bold text-error-strong"><AlertTriangle size={13} /> 현재 모드를 확인하지 못해 변경을 막았습니다.</div>
-                        <Button variant="secondary" size="toolbar" onClick={() => void mutateKill()}>다시 시도</Button>
+                    {agentModeCopy.canRetry && (
+                      <div role="alert" className={`mt-3 flex items-center justify-between gap-3 rounded-xl border bg-card px-3 py-2 ${agentModeCopy.kind === "error" ? "border-error/30" : "border-warning/30"}`}>
+                        <div className={`flex items-center gap-2 text-[12px] font-bold ${agentModeCopy.kind === "error" ? "text-error-strong" : "text-warning-strong"}`}>
+                          <AlertTriangle size={13} /> {agentModeCopy.label}{agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""} · 변경을 막았습니다.
+                        </div>
+                        <Button variant="secondary" size="toolbar" onClick={() => void mutateKill()} isLoading={killValidating}>다시 시도</Button>
                       </div>
                     )}
                     {killBusy && (
                       <p className="text-[12px] font-bold text-muted-foreground mt-2 flex items-center gap-1.5">
-                        <Loader2 size={12} className="animate-spin" /> 변경 중…
+                        <Loader2 size={12} className="animate-spin motion-reduce:animate-none" /> 변경 중…
                       </p>
                     )}
                   </div>

@@ -111,5 +111,6 @@ test("stage accents describe hiring stages, not operational signals", () => {
 
   assert.match(live, /pending_draft[\s\S]*?bg-copilot-soft/);
   assert.match(live, /AI 응대 중[\s\S]*?bg-info-soft/);
-  assert.match(live, /modeNotice === "off"[\s\S]*?: "border-copilot\/30 bg-copilot-soft/);
+  assert.match(live, /modeNotice === "off" \? "border-priority-critical\/30 bg-priority-critical-soft/);
+  assert.match(live, /modeNotice === "draft" \? "border-copilot\/30 bg-copilot-soft/);
 });

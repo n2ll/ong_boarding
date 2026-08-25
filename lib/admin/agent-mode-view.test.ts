@@ -8,6 +8,17 @@ type AgentModeView =
   | { state: "stale" | "ready"; mode: AgentMode };
 
 type AgentModeViewModule = {
+  isAdminAgentModeResponse?: (value: unknown) => boolean;
+  agentModeSnapshot?: (data: unknown) => {
+    configuredMode: AgentMode;
+    effectiveMode: AgentMode;
+    override: null | {
+      kind: "environment";
+      variable: "AGENT_DISABLED";
+      forcedMode: "off";
+    };
+    updatedAt: string | null;
+  } | null;
   agentModeView?: (input: { data?: unknown; error?: unknown }) => AgentModeView;
   fetchFreshAgentMode?: (fetcher: (input: string, init?: RequestInit) => Promise<{
     ok: boolean;
@@ -60,6 +71,41 @@ test("a current response exposes its effective auto, draft, or off mode", async 
     state: "ready",
     mode: "off",
   });
+});
+
+test("a settings snapshot preserves configured mode and an environment override", async () => {
+  const { agentModeSnapshot, isAdminAgentModeResponse } = await loadModule();
+  const forcedDraft = {
+    mode: "draft",
+    disabled: false,
+    env_forced: true,
+    updated_at: "2026-08-25T00:00:00.000Z",
+  };
+
+  assert.equal(typeof agentModeSnapshot, "function");
+  assert.equal(typeof isAdminAgentModeResponse, "function");
+  assert.equal(isAdminAgentModeResponse!(forcedDraft), true);
+  assert.deepEqual(agentModeSnapshot!(forcedDraft), {
+    configuredMode: "draft",
+    effectiveMode: "off",
+    override: {
+      kind: "environment",
+      variable: "AGENT_DISABLED",
+      forcedMode: "off",
+    },
+    updatedAt: "2026-08-25T00:00:00.000Z",
+  });
+  assert.deepEqual(agentModeSnapshot!({
+    mode: "off",
+    disabled: true,
+    env_forced: false,
+  }), {
+    configuredMode: "off",
+    effectiveMode: "off",
+    override: null,
+    updatedAt: null,
+  });
+  assert.equal(agentModeSnapshot!({}), null);
 });
 
 test("a refresh failure marks a valid cached AI mode as stale", async () => {

@@ -7,6 +7,17 @@ export type AdminAgentModeResponse = {
   updated_at?: string | null;
 };
 
+export type AdminAgentModeSnapshot = {
+  configuredMode: AdminAgentMode;
+  effectiveMode: AdminAgentMode;
+  override: null | {
+    kind: "environment";
+    variable: "AGENT_DISABLED";
+    forcedMode: "off";
+  };
+  updatedAt: string | null;
+};
+
 export type AdminAgentModeView =
   | { state: "loading" | "error"; mode: null }
   | { state: "stale" | "ready"; mode: AdminAgentMode };
@@ -19,7 +30,7 @@ export type AdminAgentModePresentation = {
   claimsAutomatic: boolean;
 };
 
-function validResponse(value: unknown): value is AdminAgentModeResponse {
+export function isAdminAgentModeResponse(value: unknown): value is AdminAgentModeResponse {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const response = value as Partial<AdminAgentModeResponse>;
   const validMode = response.mode === "auto" || response.mode === "draft" || response.mode === "off";
@@ -33,20 +44,38 @@ function validResponse(value: unknown): value is AdminAgentModeResponse {
     && validUpdatedAt;
 }
 
+export function agentModeSnapshot(data: unknown): AdminAgentModeSnapshot | null {
+  if (!isAdminAgentModeResponse(data)) return null;
+  const override = data.env_forced
+    ? {
+        kind: "environment" as const,
+        variable: "AGENT_DISABLED" as const,
+        forcedMode: "off" as const,
+      }
+    : null;
+  return {
+    configuredMode: data.mode,
+    effectiveMode: override ? "off" : data.mode,
+    override,
+    updatedAt: data.updated_at ?? null,
+  };
+}
+
 export function agentModeView(input: {
   data?: unknown;
   error?: unknown;
 }): AdminAgentModeView {
-  if (!validResponse(input.data)) {
+  const snapshot = agentModeSnapshot(input.data);
+  if (!snapshot) {
     return input.data === undefined && !input.error
       ? { state: "loading", mode: null }
       : { state: "error", mode: null };
   }
 
-  const mode = input.data.disabled === true || input.data.env_forced === true
-    ? "off"
-    : input.data.mode;
-  return { state: input.error ? "stale" : "ready", mode };
+  return {
+    state: input.error ? "stale" : "ready",
+    mode: snapshot.effectiveMode,
+  };
 }
 
 type AgentModeFetchResponse = {
