@@ -22,7 +22,10 @@ import {
   type ApplicantFormData,
   type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
-import { embedApplicantPostcode } from "@/lib/applicant-postcode";
+import {
+  applicantPostcodePresentation,
+  embedApplicantPostcode,
+} from "@/lib/applicant-postcode";
 import { applicationSourceRequiresBranchChoice } from "@/lib/application-branch";
 import {
   applicationFormDraftContentKey,
@@ -344,6 +347,10 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     && !currentApplyFormAvailable;
   const waitingForApplicationContext = (applicationModeChoiceRequired
     && jobLoadState === "loading") || branchContextLoading || branchChoicesUnavailable;
+  const addressPresentation = applicantPostcodePresentation(
+    form.location,
+    addressManualEntry,
+  );
 
   useEffect(() => {
     void loadKakaoPostcodeScript().catch(() => {
@@ -719,6 +726,8 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
   const enableManualAddressEntry = () => {
     if (submitInFlightRef.current) return;
+    setAddressSearchOpen(false);
+    addressSearchContainerRef.current?.replaceChildren();
     setAddressManualEntry(true);
     setAddressLookupState("idle");
     requestAnimationFrame(() => locationInputRef.current?.focus({ preventScroll: true }));
@@ -1345,51 +1354,86 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
           {/* 거주지 */}
           <div id="field-location">
-            <label htmlFor="location" className={labelCls}>거주지 도로명 주소{requiredMark}</label>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-              <div className="relative min-w-0">
-                <MapPin aria-hidden="true" size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  ref={locationInputRef}
-                  id="location"
-                  name="location"
-                  autoComplete="address-line1"
-                  aria-required="true"
-                  readOnly={!addressManualEntry}
-                  {...fieldA11y("location", "location-help")}
-                  className={fieldInputClass("location", addressManualEntry ? "pl-11" : "cursor-default pl-11")}
-                  value={form.location}
-                  onChange={(event) => set("location", event.target.value)}
-                  onBlur={() => {
-                    if (form.location && !isValidApplicantRoadAddress(form.location)) {
-                      setValidationIssue({
-                        field: "location",
-                        message: APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
-                      });
-                    }
-                  }}
-                  placeholder={addressManualEntry
-                    ? "예: 서울 강남구 테헤란로 123"
-                    : "주소 찾기로 선택해주세요"}
-                />
-              </div>
-              <button
-                ref={addressLookupButtonRef}
-                type="button"
-                aria-controls="road-address-search"
-                aria-expanded={addressSearchOpen}
-                disabled={addressLookupState === "loading" || submitting}
-                onClick={openRoadAddressLookup}
-                className="inline-flex min-h-12 items-center justify-center gap-1.5 rounded-2xl border border-foreground bg-foreground px-4 text-[15px] font-extrabold text-white transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
-              >
-                {addressLookupState === "loading"
-                  ? <Loader2 aria-hidden="true" size={18} className="animate-spin motion-reduce:animate-none" />
-                  : <Search aria-hidden="true" size={18} />}
-                {form.location ? "다시 찾기" : "주소 찾기"}
-              </button>
+            <label
+              id="location-label"
+              htmlFor={addressPresentation.mode === "manual" ? "location" : undefined}
+              className={labelCls}
+            >
+              거주지 도로명 주소{requiredMark}
+            </label>
+            <div role="group" aria-labelledby="location-label">
+              {addressPresentation.mode === "manual" ? (
+                <div className="relative min-w-0">
+                  <MapPin aria-hidden="true" size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    ref={locationInputRef}
+                    id="location"
+                    name="location"
+                    autoComplete="address-line1"
+                    aria-required="true"
+                    {...fieldA11y("location", "location-help")}
+                    className={fieldInputClass("location", "pl-11")}
+                    value={form.location}
+                    onChange={(event) => {
+                      setAddressManualEntry(true);
+                      set("location", event.target.value);
+                    }}
+                    onBlur={() => {
+                      if (form.location && !isValidApplicantRoadAddress(form.location)) {
+                        setValidationIssue({
+                          field: "location",
+                          message: APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
+                        });
+                      }
+                    }}
+                    placeholder="예: 서울 강남구 테헤란로 123"
+                  />
+                </div>
+              ) : addressPresentation.mode === "selected" ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  aria-label={addressPresentation.statusMessage ?? undefined}
+                  className="rounded-2xl border border-success/25 bg-success-soft px-4 py-4 text-success-strong"
+                >
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 aria-hidden="true" size={20} className="mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[14px] font-extrabold">선택한 주소</p>
+                      <p className="mt-1 break-words text-[16px] font-bold leading-relaxed text-foreground">
+                        {form.location}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {addressLookupState !== "error" && (
+                <button
+                  ref={addressLookupButtonRef}
+                  type="button"
+                  aria-controls="road-address-search"
+                  aria-expanded={addressSearchOpen}
+                  disabled={addressLookupState === "loading" || addressSearchOpen || submitting}
+                  onClick={openRoadAddressLookup}
+                  className={`inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-4 text-[16px] font-extrabold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${
+                    addressPresentation.mode === "search"
+                      ? "border border-foreground bg-foreground text-white hover:bg-foreground/90"
+                      : "mt-2 border border-border-strong bg-card text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {addressLookupState === "loading"
+                    ? <Loader2 aria-hidden="true" size={19} className="animate-spin motion-reduce:animate-none" />
+                    : <Search aria-hidden="true" size={19} />}
+                  {addressLookupState === "loading"
+                    ? "주소 검색 불러오는 중"
+                    : addressPresentation.actionLabel}
+                </button>
+              )}
             </div>
             <p id="location-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
-              {addressManualEntry
+              {addressPresentation.mode === "manual"
                 ? "도로명과 건물번호까지만 입력해주세요. 아파트 동·호수나 층은 받지 않아요."
                 : "검색 결과의 도로명과 건물번호만 저장합니다. 아파트 동·호수나 층은 받지 않아요."}
             </p>
@@ -1399,15 +1443,27 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                   <AlertCircle aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
                   주소 검색을 열지 못했어요. 다시 시도하거나 도로명 주소를 직접 입력해주세요.
                 </p>
-                {!addressManualEntry && (
+                <div className="mt-3 grid gap-2">
                   <button
+                    ref={addressLookupButtonRef}
                     type="button"
-                    onClick={enableManualAddressEntry}
-                    className="mt-2 inline-flex min-h-11 items-center rounded-xl border border-error/30 bg-card px-3 text-[15px] font-extrabold text-error-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={openRoadAddressLookup}
+                    disabled={submitting}
+                    className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-[15px] font-extrabold text-white transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
                   >
-                    도로명 주소 직접 입력
+                    <RefreshCw aria-hidden="true" size={18} />
+                    주소 검색 다시 시도
                   </button>
-                )}
+                  {!addressManualEntry && (
+                    <button
+                      type="button"
+                      onClick={enableManualAddressEntry}
+                      className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-error/30 bg-card px-4 text-[15px] font-extrabold text-error-strong transition-colors hover:bg-error/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      도로명 주소 직접 입력
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             <FieldError field="location" issue={validationIssue} />
@@ -1435,6 +1491,15 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
                 style={{ height: `${addressSearchHeight}px` }}
                 className="w-full bg-white"
               />
+              <div className="border-t border-border bg-card px-3 py-2">
+                <button
+                  type="button"
+                  onClick={enableManualAddressEntry}
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-xl px-3 text-[15px] font-bold text-muted-foreground underline decoration-border-strong underline-offset-4 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  주소 검색이 어렵다면 도로명 주소 직접 입력
+                </button>
+              </div>
             </div>
           </div>
         </div>

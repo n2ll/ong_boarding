@@ -254,8 +254,11 @@ test("the applicant UI renders branches only from an explicit server-backed cont
   assert.match(page, /secondBranchDetailsRef\.current\?\.setAttribute\("open", ""\)/);
   assert.match(page, /kakao-postcode-script/);
   assert.match(page, /embedApplicantPostcode\(\{/);
-  assert.match(page, /readOnly=\{!addressManualEntry\}/);
+  assert.match(page, /addressPresentation\.mode === "manual" \? \(/);
+  assert.match(page, /addressPresentation\.mode === "selected" \? \(/);
+  assert.match(page, /aria-label=\{addressPresentation\.statusMessage \?\? undefined\}/);
   assert.match(page, /도로명 주소 직접 입력/);
+  assert.match(page, /주소 검색이 어렵다면 도로명 주소 직접 입력/);
   assert.match(page, /min-h-12 min-w-12/);
   assert.match(page, /예: 모닝 \/ 아반떼 \/ 스타렉스 \/ 포터/);
   assert.match(page, /배송에 사용할 차량 모델명을 입력해주세요/);

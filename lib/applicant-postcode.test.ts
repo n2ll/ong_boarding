@@ -7,6 +7,14 @@ type ApplicantPostcodeModule = {
     create: () => { embed: (container: unknown) => void };
     onError: () => void;
   }) => boolean;
+  applicantPostcodePresentation?: (
+    address: string,
+    manualEntry: boolean,
+  ) => {
+    mode: "search" | "selected" | "manual";
+    actionLabel: string;
+    statusMessage: string | null;
+  };
 };
 
 async function loadModule(): Promise<ApplicantPostcodeModule> {
@@ -67,4 +75,51 @@ test("a successful postcode embed does not invoke recovery", async () => {
   assert.equal(result, true);
   assert.equal(embeddedContainer, container);
   assert.equal(recoveryCount, 0);
+});
+
+test("postcode presentation keeps search primary until an address is selected", async () => {
+  const { applicantPostcodePresentation } = await loadModule();
+  assert.equal(typeof applicantPostcodePresentation, "function");
+
+  assert.deepEqual(applicantPostcodePresentation!("", false), {
+    mode: "search",
+    actionLabel: "주소 검색해서 선택하기",
+    statusMessage: null,
+  });
+});
+
+test("postcode presentation announces a selected address and offers a change action", async () => {
+  const { applicantPostcodePresentation } = await loadModule();
+  assert.equal(typeof applicantPostcodePresentation, "function");
+
+  assert.deepEqual(
+    applicantPostcodePresentation!("서울 강남구 테헤란로 123", false),
+    {
+      mode: "selected",
+      actionLabel: "주소 변경",
+      statusMessage: "주소 선택 완료: 서울 강남구 테헤란로 123",
+    },
+  );
+});
+
+test("postcode presentation gives manual fallback its own editable mode", async () => {
+  const { applicantPostcodePresentation } = await loadModule();
+  assert.equal(typeof applicantPostcodePresentation, "function");
+
+  assert.deepEqual(applicantPostcodePresentation!("", true), {
+    mode: "manual",
+    actionLabel: "주소 검색 사용하기",
+    statusMessage: null,
+  });
+});
+
+test("postcode presentation keeps an invalid restored address editable instead of marking success", async () => {
+  const { applicantPostcodePresentation } = await loadModule();
+  assert.equal(typeof applicantPostcodePresentation, "function");
+
+  assert.deepEqual(applicantPostcodePresentation!("서울 강남구 역삼동", false), {
+    mode: "manual",
+    actionLabel: "주소 검색 사용하기",
+    statusMessage: null,
+  });
 });
