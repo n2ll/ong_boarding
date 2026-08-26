@@ -99,7 +99,7 @@ test("the latest new-job entry owns the form and query prefills start from empty
   const request = duplicateSource.indexOf("await fetch(");
   const parsed = duplicateSource.indexOf("await res.json()");
   const staleGuard = duplicateSource.indexOf("if (requestId !== duplicateRequestIdRef.current) return");
-  const applyCopy = duplicateSource.indexOf("const j = json.job");
+  const applyCopy = duplicateSource.indexOf("applyJobDuplicateSource(jobDuplicateSource(json.job))");
 
   assert.ok(claimRequest >= 0 && claimRequest < request, "duplicate should claim ownership before fetching");
   assert.ok(parsed < staleGuard && staleGuard < applyCopy, "a stale duplicate must return before touching form state");

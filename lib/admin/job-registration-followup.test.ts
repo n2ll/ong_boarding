@@ -9,28 +9,37 @@ import {
 } from "./job-registration-followup.ts";
 
 type Announcement = { targets: number };
+type DuplicateSource = { title: string; body: string };
+
+const duplicateSource: DuplicateSource = {
+  title: "강남 배송원 모집",
+  body: "공고 본문",
+};
 
 test("a successful registration exposes a durable follow-up while announcement targets load", () => {
   assert.deepEqual(
-    beginJobRegistrationFollowup<Announcement>({
+    beginJobRegistrationFollowup<Announcement, DuplicateSource>({
       jobId: 42,
       title: "강남 배송원 모집",
       note: "상차지 좌표를 확인해 주세요.",
+      duplicateSource,
     }),
     {
       jobId: 42,
       title: "강남 배송원 모집",
       note: "상차지 좌표를 확인해 주세요.",
+      duplicateSource,
       announcement: { status: "checking" },
     },
   );
 });
 
 test("a late announcement lookup cannot revive a dismissed or newer registration follow-up", () => {
-  const current = beginJobRegistrationFollowup<Announcement>({
+  const current = beginJobRegistrationFollowup<Announcement, DuplicateSource>({
     jobId: 43,
     title: "서초 배송원 모집",
     note: null,
+    duplicateSource,
   });
   const ready = { status: "ready", payload: { targets: 3 } } as const;
 
@@ -39,10 +48,11 @@ test("a late announcement lookup cannot revive a dismissed or newer registration
 });
 
 test("only the matching registration receives its announcement result", () => {
-  const current: JobRegistrationFollowup<Announcement> = beginJobRegistrationFollowup({
+  const current: JobRegistrationFollowup<Announcement, DuplicateSource> = beginJobRegistrationFollowup({
     jobId: 44,
     title: "송파 배송원 모집",
     note: null,
+    duplicateSource,
   });
 
   assert.deepEqual(
@@ -70,32 +80,24 @@ test("announcement lookup cannot keep the core registration request pending", ()
   assert.doesNotMatch(registrationSource, /await fetchAnnounceTargets\(newJobId\)/);
 });
 
-test("same-conditions action keeps the completion modal recoverable while the source job loads", () => {
+test("same-conditions completion action reuses the successful POST snapshot without another GET", () => {
   const jobsSource = readFileSync(
     new URL("../../components/Jobs.tsx", import.meta.url),
     "utf8",
   );
-  const duplicateStart = jobsSource.indexOf("const duplicateJob = async (jobId: string) => {");
-  const duplicateEnd = jobsSource.indexOf("const handleRegisterJob = async () => {", duplicateStart);
-  const duplicateSource = jobsSource.slice(duplicateStart, duplicateEnd);
+  const directStart = jobsSource.indexOf("const duplicateRegisteredJob = (source: JobDuplicateSource) => {");
+  const directEnd = jobsSource.indexOf("const duplicateJob = async (jobId: string) => {", directStart);
+  const directSource = jobsSource.slice(directStart, directEnd);
   const modalStart = jobsSource.indexOf("{/* 등록 완료 후속 단계");
   const modalEnd = jobsSource.indexOf("{/* 새 공고 안내 확인 모달", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
-  assert.match(duplicateSource, /setRegistrationFollowup\(null\);\s*setAiModalOpen\(true\)/);
-  assert.match(duplicateSource, /const controller = new AbortController\(\)/);
-  assert.match(duplicateSource, /signal: controller\.signal/);
-  assert.match(duplicateSource, /clearTimeout\(timeoutId\)/);
-  assert.doesNotMatch(
-    modalSource,
-    /const jobId = registrationFollowup\.jobId;\s*setRegistrationFollowup\(null\);\s*void duplicateJob/,
+  assert.ok(directStart >= 0 && directEnd > directStart, "direct duplicate handler should exist");
+  assert.ok(
+    directSource.indexOf("duplicateRequestIdRef.current += 1") < directSource.indexOf("applyJobDuplicateSource(source)"),
+    "the direct path must invalidate older duplicate requests before applying the POST snapshot",
   );
-  assert.match(
-    modalSource,
-    /busy=\{duplicatingId === String\(registrationFollowup\.jobId\)\}/,
-  );
-  assert.match(
-    modalSource,
-    /isLoading=\{duplicatingId === String\(registrationFollowup\.jobId\)\}/,
-  );
+  assert.match(modalSource, /duplicateRegisteredJob\(registrationFollowup\.duplicateSource\)/);
+  assert.doesNotMatch(modalSource, /duplicateJob\(String\(jobId\)\)/);
+  assert.doesNotMatch(modalSource, /isLoading=\{duplicatingId === String\(registrationFollowup\.jobId\)\}/);
 });

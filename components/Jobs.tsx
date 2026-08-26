@@ -58,6 +58,17 @@ import {
   nextJobCreateAttempt,
   type JobCreateAttempt,
 } from "@/lib/admin/job-create-idempotency";
+import {
+  jobDuplicateSource,
+  type JobDuplicateSource,
+} from "@/lib/admin/job-duplicate-source";
+import {
+  filtersToRevealJob,
+  jobListVisibility,
+  type JobListFilters,
+  type JobListHiddenBy,
+  type JobListTab,
+} from "@/lib/admin/job-list-visibility";
 import { currentJobClosedSmsBody } from "@/lib/sms-consent-policy";
 
 interface JobRow {
@@ -628,6 +639,13 @@ const JOB_LIST_SUMMARY_TONE: Record<JobListSummaryItem["tone"], string> = {
   neutral: "bg-muted text-gray-700",
 };
 
+const JOB_LIST_HIDDEN_LABEL: Record<JobListHiddenBy, string> = {
+  status: "상태 탭",
+  client: "화주사",
+  branch: "지점",
+  query: "검색어",
+};
+
 const JOB_LIST_GRID = "grid-cols-1 lg:grid-cols-[minmax(210px,1.4fr)_minmax(175px,1fr)_minmax(155px,0.9fr)_minmax(168px,auto)] xl:grid-cols-[minmax(225px,1.3fr)_minmax(125px,0.72fr)_minmax(190px,1fr)_minmax(170px,0.9fr)_minmax(220px,auto)]";
 
 // 모집 기간(work_period) 배지 — 하루/단기=노랑, 정기=초록
@@ -686,7 +704,7 @@ export function Jobs() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState<JobListTab>("active");
   const [aiModalOpen, setAiModalOpen] = useState(false);
   // 등록 완료 토스트의 복제 액션은 이전 렌더를 보관하므로, 콜백 안에서는 최신 모달 상태를 ref로 읽는다.
   const aiModalOpenRef = useRef(aiModalOpen);
@@ -717,6 +735,9 @@ export function Jobs() {
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState<number | "">("");
   const [branchFilter, setBranchFilter] = useState<number | "">("");
+  // 성공한 최신 공고는 다음 등록이 생길 때까지 추적한다. 목록 재조회 전에도 필터 가림을 설명하고,
+  // 재조회 뒤에는 행을 약하게 강조해 "등록했는데 사라졌다"는 오인을 막는다.
+  const [recentlyCreatedJob, setRecentlyCreatedJob] = useState<JobRow | null>(null);
   const [newJobClientId, setNewJobClientId] = useState<number | "">("");
   const [newJobBranchId, setNewJobBranchId] = useState<number | "">("");
   // 현장매니저(site_manager) — external 만남장소·첫날 안내 발송 담당. 서버 POST/PATCH가 site_manager_id 수용.
@@ -783,7 +804,7 @@ export function Jobs() {
   const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   // 등록 성공과 후속 안내 조회를 분리한다. 비만료 완료 창이 연속 등록·안내 검토를 한곳에서 조정하며,
   // 늦은 대상 조회가 이미 시작한 다음 공고 위에 별도 모달을 띄우지 못하게 소유권을 가진다.
-  const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<AnnounceTargetsRes> | null>(null);
+  const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<AnnounceTargetsRes, JobDuplicateSource> | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
@@ -1485,8 +1506,79 @@ export function Jobs() {
     resetNewJobForm();
   };
 
-  // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
-  // 정기 라인 재모집 시 반복 입력을 없앤다. 등록은 기존 POST를 그대로 재사용.
+  // 공고 복제 프리필 공통 적용 — 등록 직후 POST 스냅샷과 기존 행 상세 GET이 같은 규칙을 쓴다.
+  const applyJobDuplicateSource = (j: JobDuplicateSource) => {
+    resetNewJobForm();
+    const body = j.body.trim();
+    const cb = j.channelBodies;
+    // 당근·문자 탭에 저장본을 쓰면 그 뒤 수정 모달로 고친 본문이 반영되지 않는다 → 그 사실을 화면에 밝힌다.
+    setChannelDraftsFromCopy(Boolean(cb?.danggeun || cb?.sms));
+    setDuplicatedFrom(j.title.slice(0, 24) || "원본 공고");
+    setChannelDrafts({
+      danggeun: cb?.danggeun || body,
+      // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
+      albamon: body,
+      sms: cb?.sms || body,
+    });
+    setActiveChannel("albamon");
+    setPromptOpen(false);
+    setPostingTitle(j.title.slice(0, 80));
+    setNewJobClientId(j.clientId ?? "");
+    setNewJobBranchId(j.branchId ?? "");
+    setNewJobSiteManagerId(j.siteManagerId ?? "");
+    const dupExternal = j.recruitMode === "external";
+    setNewJobMode(j.recruitMode);
+    // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
+    // 단 external은 pull 미노출 → 지정 노출이 고아로 복제되지 않게 전체 노출로 리셋(D10 일관성).
+    const dupRule = ruleToDraft(j.exposureRule);
+    // 반경은 복제하지 않는다 — 등록 모달엔 반경을 보거나 끌 UI가 없어(공고 저장 후에만 설정 가능),
+    // 보이지 않는 규칙이 등록 가드(집결지 좌표 필요)에 걸리면 원인을 알 수 없는 등록 실패가 된다.
+    const dupHadRadius = dupRule.radiusKm !== "";
+    dupRule.radiusKm = "";
+    dupRule.radiusIncludeUnknown = false;
+    setNewJobExposure(
+      dupExternal ? EMPTY_EXPOSURE : { exposure: j.exposure, rule: dupRule }
+    );
+    if (!dupExternal && dupHadRadius) {
+      toast.info("원본의 거리 반경 조건은 복제되지 않아요 — 등록 후 공고 수정에서 다시 설정하세요(집결지 좌표가 잡힌 뒤에 가능).");
+    }
+    // 수동 명단 전용(규칙 없는) 지정 노출 공고를 복제하면 노출 0명 공고가 될 수 있어 경고.
+    if (!dupExternal && j.exposure === "targeted" && !draftToRule(dupRule)) {
+      toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
+    }
+    setNewJobCapacity(j.capacity !== null && j.capacity > 0 ? j.capacity : "");
+    setNewJobPayType(j.payType);
+    setNewJobPayAmount(j.payAmount ?? "");
+    setNewJobPeriod(j.workPeriod);
+    setNewJobSlot(j.slot);
+    setNewJobSlotKeys(j.slotKeys);
+    // 시작일은 복제하지 않는다 — 원본의 지난 날짜가 그대로 실려 지원자 화면과 만남장소 문자('일시')에 나간다.
+    // 마감시각을 복제하지 않는 것과 같은 이유(라인별로 다시 정해야 하는 값).
+    setNewJobStartDate("");
+    setNewJobPickupAddress(j.pickupAddress);
+    setNewJobDropoffAddress(j.dropoffAddress);
+    setNewJobVehicleRequired(j.vehicleRequired);
+    setNewJobPayInfo(j.payInfo);
+    setNewJobPolicyNotes(j.policyNotes);
+    setNewJobAiFacts(j.aiFacts);
+    // 접이식(근무상세·정책)은 그 안 필드가 있거나 원본 시작일을 새로 정해야 할 때만 연다.
+    if (j.policyNotes || j.aiFacts || j.slot || j.startDate) setNewJobExtraOpen(true);
+    setRegistrationFollowup(null);
+    setAiModalOpen(true);
+  };
+
+  // 등록 직후에는 성공 응답을 바로 재사용한다. 이전 행 복제 요청의 늦은 응답이 새 폼을 덮지 못하게 먼저 무효화한다.
+  const duplicateRegisteredJob = (source: JobDuplicateSource) => {
+    if (aiModalOpenRef.current) {
+      toast.info("작성 중인 공고를 먼저 등록하거나 닫아 주세요.");
+      return;
+    }
+    duplicateRequestIdRef.current += 1;
+    setDuplicatingId(null);
+    applyJobDuplicateSource(source);
+  };
+
+  // 기존 행 복제 — 최신 수정값이 필요하므로 상세를 읽고, 이후 프리필 규칙은 등록 직후 복제와 공유한다.
   const duplicateJob = async (jobId: string) => {
     if (aiModalOpenRef.current) {
       toast.info("작성 중인 공고를 먼저 등록하거나 닫아 주세요.");
@@ -1504,65 +1596,7 @@ export function Jobs() {
         toast.error(json.error || "공고를 불러오지 못했어요");
         return;
       }
-      const j = json.job;
-      resetNewJobForm();
-      const body = (j.body ?? "").trim();
-      // 채널별 본문이 저장돼 있으면 채널 특화를 보존해 복제(D1). 없으면(레거시) 캐논 본문으로 3채널 채움.
-      const cb = (j.channel_bodies ?? null) as { danggeun?: string; albamon?: string; sms?: string } | null;
-      // 당근·문자 탭에 저장본을 쓰면 그 뒤 수정 모달로 고친 본문이 반영되지 않는다 → 그 사실을 화면에 밝힌다.
-      setChannelDraftsFromCopy(Boolean(cb?.danggeun || cb?.sms));
-      setDuplicatedFrom((j.title ?? "").slice(0, 24) || "원본 공고");
-      setChannelDrafts({
-        danggeun: cb?.danggeun || body,
-        // 알바몬=캐논 채널이라 항상 현재 body(편집 모달 수정 반영)를 사용 — 편집 후 복제 시 stale channel_bodies로 수정분이 유실되지 않게.
-        albamon: body,
-        sms: cb?.sms || body,
-      });
-      setActiveChannel("albamon");
-      setPromptOpen(false);
-      setPostingTitle((j.title ?? "").slice(0, 80));
-      setNewJobClientId(typeof j.client_id === "number" ? j.client_id : "");
-      setNewJobBranchId(typeof j.branch_id === "number" ? j.branch_id : "");
-      setNewJobSiteManagerId(typeof j.site_manager_id === "number" ? j.site_manager_id : "");
-      const dupExternal = asRecruitMode(j.recruit_mode) === "external";
-      setNewJobMode(asRecruitMode(j.recruit_mode));
-      // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
-      // 단 external은 pull 미노출 → 지정 노출이 고아로 복제되지 않게 전체 노출로 리셋(D10 일관성).
-      const dupRule = ruleToDraft(j.exposure_rule);
-      // 반경은 복제하지 않는다 — 등록 모달엔 반경을 보거나 끌 UI가 없어(공고 저장 후에만 설정 가능),
-      // 보이지 않는 규칙이 등록 가드(집결지 좌표 필요)에 걸리면 원인을 알 수 없는 등록 실패가 된다.
-      const dupHadRadius = dupRule.radiusKm !== "";
-      dupRule.radiusKm = "";
-      dupRule.radiusIncludeUnknown = false;
-      setNewJobExposure(
-        dupExternal ? EMPTY_EXPOSURE : { exposure: j.exposure === "targeted" ? "targeted" : "all", rule: dupRule }
-      );
-      if (!dupExternal && dupHadRadius) {
-        toast.info("원본의 거리 반경 조건은 복제되지 않아요 — 등록 후 공고 수정에서 다시 설정하세요(집결지 좌표가 잡힌 뒤에 가능).");
-      }
-      // 수동 명단 전용(규칙 없는) 지정 노출 공고를 복제하면 노출 0명 공고가 될 수 있어 경고.
-      if (!dupExternal && j.exposure === "targeted" && !draftToRule(dupRule)) {
-        toast.info("지정 노출 공고예요 — 수동 지정 명단은 복제되지 않아요. 등록 후 파이프라인에서 노출 대상을 다시 지정하세요.");
-      }
-      setNewJobCapacity(typeof j.capacity === "number" && j.capacity > 0 ? j.capacity : "");
-      setNewJobPayType(j.pay_type ?? "");
-      setNewJobPayAmount(typeof j.pay_amount === "number" ? j.pay_amount : "");
-      setNewJobPeriod(j.work_period ?? "");
-      setNewJobSlot(j.slot ?? "");
-      setNewJobSlotKeys(Array.isArray(j.slot_keys) ? j.slot_keys.filter((k: unknown): k is string => typeof k === "string") : []);
-      // 시작일은 복제하지 않는다 — 원본의 지난 날짜가 그대로 실려 지원자 화면과 만남장소 문자('일시')에 나간다.
-      // 마감시각을 복제하지 않는 것과 같은 이유(라인별로 다시 정해야 하는 값).
-      setNewJobStartDate("");
-      setNewJobPickupAddress(j.pickup_address ?? "");
-      setNewJobDropoffAddress(j.dropoff_address ?? "");
-      setNewJobVehicleRequired(j.vehicle_required !== false);
-      setNewJobPayInfo(j.pay_info ?? "");
-      setNewJobPolicyNotes(j.policy_notes ?? "");
-      setNewJobAiFacts(j.ai_facts ?? "");
-      // 접이식(근무상세·정책)은 그 안 필드가 있을 때만 연다. 위치·급여는 항상 보이므로 트리거에서 제외.
-      if (j.policy_notes || j.ai_facts || j.slot || j.start_date) setNewJobExtraOpen(true);
-      setRegistrationFollowup(null);
-      setAiModalOpen(true);
+      applyJobDuplicateSource(jobDuplicateSource(json.job));
     } catch (error) {
       if (requestId === duplicateRequestIdRef.current) {
         toast.error(
@@ -1718,6 +1752,9 @@ export function Jobs() {
       // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
       const geoNote = geocodeResultNote(json.job, newJobPickupAddress, newJobDropoffAddress);
       const newJobId = typeof json.job?.id === "number" ? json.job.id : null;
+      const newJobRow = newJobId !== null ? toJobRow(json.job as ApiJob) : null;
+      const duplicateSource = jobDuplicateSource(json.job);
+      if (newJobRow) setRecentlyCreatedJob(newJobRow);
       // 긴급 건에서 파생된 공고면 '이 조건으로 대상 선별' CTA를 붙여 탭 이동 단절을 없앤다(SOS→공고→선별 브릿지).
       if (sosSnapshot.id) {
         const params = sosToPipelineParams(sosSnapshot.region, sosSnapshot.vehicle);
@@ -1740,6 +1777,7 @@ export function Jobs() {
             jobId: newJobId,
             title,
             note: geoNote ?? null,
+            duplicateSource,
           }));
         }
       }
@@ -1786,16 +1824,35 @@ export function Jobs() {
     }
   };
 
-  const q = query.trim();
-  const filteredJobs = jobs.filter(job => {
-    // 탭은 실질 마감(effectivelyClosed) 기준 — 마감시각이 지난 공고는 status='active'여도 '마감됨' 탭으로(행 상태 pill과 일치).
-    if (activeTab === 'active' && job.effectivelyClosed) return false;
-    if (activeTab === 'closed' && !job.effectivelyClosed) return false;
-    if (clientFilter !== "" && job.clientId !== clientFilter) return false;
-    if (branchFilter !== "" && job.branchId !== branchFilter) return false;
-    if (q && !(job.title.includes(q) || job.branch.includes(q))) return false;
-    return true;
-  });
+  const jobListFilters: JobListFilters = {
+    tab: activeTab,
+    clientId: clientFilter,
+    branchId: branchFilter,
+    query,
+  };
+  const filteredJobs = jobs.filter((job) => jobListVisibility(job, jobListFilters).visible);
+  const recentlyCreatedInList = recentlyCreatedJob
+    ? jobs.some((job) => job.id === recentlyCreatedJob.id)
+    : false;
+  const recentlyCreatedVisibility = recentlyCreatedJob
+    ? jobListVisibility(recentlyCreatedJob, jobListFilters)
+    : null;
+  const registeredJobHidden = Boolean(
+    registrationFollowup
+    && recentlyCreatedJob?.id === String(registrationFollowup.jobId)
+    && recentlyCreatedVisibility
+    && !recentlyCreatedVisibility.visible,
+  );
+
+  const revealRecentlyCreatedJob = () => {
+    if (!recentlyCreatedJob) return;
+    const next = filtersToRevealJob(recentlyCreatedJob, jobListFilters);
+    setActiveTab(next.tab);
+    setClientFilter(next.clientId);
+    setBranchFilter(next.branchId);
+    setQuery(next.query);
+    setRegistrationFollowup(null);
+  };
 
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
@@ -2377,6 +2434,26 @@ export function Jobs() {
           </div>
         </div>
 
+        {recentlyCreatedJob && !recentlyCreatedInList && !jobsError ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 border-b border-border-strong bg-muted px-4 py-3 text-[13px] font-semibold text-muted-foreground">
+            <Loader2 aria-hidden="true" size={15} className="shrink-0 animate-spin motion-reduce:animate-none" />
+            <span><b className="text-foreground">‘{recentlyCreatedJob.title}’</b> 공고를 목록에 반영하고 있어요.</span>
+          </div>
+        ) : recentlyCreatedJob && recentlyCreatedVisibility && !recentlyCreatedVisibility.visible ? (
+          <div role="status" className="flex flex-wrap items-center gap-3 border-b border-brand-yellow/40 bg-brand-muted/45 px-4 py-3 text-[13px] font-semibold text-foreground">
+            <Filter aria-hidden="true" size={16} className="shrink-0 text-warning-strong" />
+            <span className="min-w-0 flex-1">
+              <b>방금 등록한 공고 ‘{recentlyCreatedJob.title}’가 현재 목록에 가려져 있어요.</b>{" "}
+              <span className="text-muted-foreground">
+                {recentlyCreatedVisibility.hiddenBy.map((reason) => JOB_LIST_HIDDEN_LABEL[reason]).join(" · ")} 조건만 풀면 바로 볼 수 있어요.
+              </span>
+            </span>
+            <Button type="button" variant="secondary" size="sm" onClick={revealRecentlyCreatedJob}>
+              필터 풀고 보기
+            </Button>
+          </div>
+        ) : null}
+
         {agentModeCopy.canRetry && (
           <div role="alert" className={`flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-[12px] font-semibold ${agentModeCopy.kind === "error" ? "border-error/25 bg-error-soft text-error-strong" : "border-warning/25 bg-warning-soft text-warning-strong"}`}>
             <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
@@ -2420,8 +2497,12 @@ export function Jobs() {
             filteredJobs.map(job => {
               const operation = jobOperationMeta(toJobOperationInput(job));
               const hasBranchConcept = job.usesSlots || job.branchId != null || job.branch !== "" || (job.clientId != null && branches.some((b) => b.client_id === job.clientId));
+              const isRecentlyCreated = recentlyCreatedJob?.id === job.id;
               return (
-              <div key={job.id} className={`grid items-center border-b border-muted px-4 py-4 transition-colors hover:bg-background ${JOB_LIST_GRID}`}>
+              <div
+                key={job.id}
+                className={`grid items-center border-b border-muted px-4 py-4 transition-colors motion-reduce:transition-none ${isRecentlyCreated ? "bg-brand-muted/45 ring-2 ring-inset ring-brand-yellow/50 hover:bg-brand-muted/60" : "hover:bg-background"} ${JOB_LIST_GRID}`}
+              >
                 <div className="flex flex-col gap-1.5 min-w-0 pr-4">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {/* 제목 클릭 = 지원자 보드 열기. 예전엔 div+onClick이라 키보드로는 들어갈 수 없었다. */}
@@ -2433,6 +2514,11 @@ export function Jobs() {
                     >
                       {job.title}
                     </button>
+                    {isRecentlyCreated && (
+                      <Badge variant="brand" aria-label="방금 등록한 공고">
+                        <CheckCircle2 aria-hidden="true" /> 방금 등록
+                      </Badge>
+                    )}
                     {job.workPeriod && PERIOD_BADGE[job.workPeriod] && (
                       <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[12px] font-bold border ${PERIOD_BADGE[job.workPeriod]}`}>{job.workPeriod}</span>
                     )}
@@ -3596,7 +3682,6 @@ export function Jobs() {
         <Modal
           open={Boolean(registrationFollowup)}
           onClose={() => setRegistrationFollowup(null)}
-          busy={duplicatingId === String(registrationFollowup.jobId)}
           size="md"
           title="공고 등록 완료"
           description={`‘${registrationFollowup.title}’ 공고가 등록되었어요. 다음 작업을 선택하세요.`}
@@ -3605,15 +3690,16 @@ export function Jobs() {
               <Button
                 variant="ghost"
                 size="lg"
-                disabled={duplicatingId !== null}
-                onClick={() => setRegistrationFollowup(null)}
+                onClick={() => {
+                  if (registeredJobHidden) revealRecentlyCreatedJob();
+                  else setRegistrationFollowup(null);
+                }}
               >
-                목록으로
+                {registeredJobHidden ? "필터 풀고 목록에서 보기" : "목록으로"}
               </Button>
               <Button
                 variant="secondary"
                 size="lg"
-                disabled={duplicatingId !== null}
                 onClick={() => {
                   setRegistrationFollowup(null);
                   openBlankNewJobForm();
@@ -3624,14 +3710,9 @@ export function Jobs() {
               <Button
                 variant="brand"
                 size="lg"
-                disabled={duplicatingId !== null}
-                isLoading={duplicatingId === String(registrationFollowup.jobId)}
-                onClick={() => {
-                  const jobId = registrationFollowup.jobId;
-                  void duplicateJob(String(jobId));
-                }}
+                onClick={() => duplicateRegisteredJob(registrationFollowup.duplicateSource)}
               >
-                {duplicatingId !== String(registrationFollowup.jobId) && <CopyPlus size={16} />}
+                <CopyPlus size={16} />
                 같은 조건으로 하나 더
               </Button>
             </>
@@ -3645,6 +3726,16 @@ export function Jobs() {
                 <p className="mt-1 text-[13px] font-medium leading-relaxed">권역이나 시간만 다른 공고라면 같은 조건으로 복제한 뒤 바뀐 값만 수정하세요.</p>
               </div>
             </div>
+
+            {registeredJobHidden && (
+              <div role="status" className="flex items-start gap-3 rounded-2xl border border-brand-yellow/40 bg-brand-muted/45 p-4 text-foreground">
+                <Filter aria-hidden="true" size={18} className="mt-0.5 shrink-0 text-warning-strong" />
+                <div>
+                  <div className="text-[13px] font-extrabold">현재 목록 필터에서는 방금 만든 공고가 보이지 않아요</div>
+                  <p className="mt-1 text-[13px] font-medium leading-relaxed text-muted-foreground">‘필터 풀고 목록에서 보기’를 누르면 이 공고를 가리는 조건만 해제합니다.</p>
+                </div>
+              </div>
+            )}
 
             {registrationFollowup.note && (
               <div role="status" className="rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[13px] font-semibold leading-relaxed text-warning-strong">

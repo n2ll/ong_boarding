@@ -137,7 +137,7 @@ test("the jobs header and every desktop row share one responsive grid contract",
 
   assert.equal(/Table Header[\s\S]*?lg:grid \$\{JOB_LIST_GRID\}/.test(jobs), true, "header must use JOB_LIST_GRID");
   assert.equal(
-    /<div key=\{job\.id\} className=\{`[^`]*\$\{JOB_LIST_GRID\}[^`]*`\}>/.test(jobs),
+    /key=\{job\.id\}[\s\S]{0,500}?className=\{`[^`]*\$\{JOB_LIST_GRID\}[^`]*`\}/.test(jobs),
     true,
     "desktop rows must use the same JOB_LIST_GRID contract",
   );
