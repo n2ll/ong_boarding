@@ -30,6 +30,12 @@ interface ExistingOutboxRequest {
 }
 
 type ManualMessageModule = {
+  parseManualMessageJobId?: (
+    value: unknown,
+  ) => { ok: true; jobId: number | null } | { ok: false };
+  parseManualMessageDraftId?: (
+    value: unknown,
+  ) => { ok: true; draftId: string | null } | { ok: false };
   manualMessageRecipientEligibility?: (
     request: { applicantId: number | null; phone: string },
     lookup: { phone: string | null; failed: boolean },
@@ -50,6 +56,24 @@ type ManualMessageModule = {
     request: RequestFingerprint,
     createKey: () => string
   ) => Attempt;
+  prepareManualMessageSend?: (
+    current: Attempt | null,
+    request: RequestFingerprint,
+    createKey: () => string,
+  ) => {
+    attempt: Attempt;
+    payload: {
+      applicant_id: number | null;
+      phone: string;
+      body: string;
+      sent_by: string;
+      job_id?: number;
+      draft_id?: string;
+      draft_was_edited?: boolean;
+      purpose: "current_application";
+      idempotency_key: string;
+    };
+  };
   manualMessageReplayDecision?: (
     existing: ExistingOutboxRequest,
     request: RequestFingerprint
@@ -156,6 +180,36 @@ test("every manual SMS is bound to the selected applicant's canonical phone numb
     ),
     { ok: false, reason: "applicant_required" },
   );
+});
+
+test("a malformed job id cannot silently downgrade a selected-job send to a general message", async () => {
+  const { parseManualMessageJobId } = await loadModule();
+  assert.equal(typeof parseManualMessageJobId, "function");
+
+  assert.deepEqual(parseManualMessageJobId!(undefined), { ok: true, jobId: null });
+  assert.deepEqual(parseManualMessageJobId!(null), { ok: true, jobId: null });
+  assert.deepEqual(parseManualMessageJobId!(31), { ok: true, jobId: 31 });
+  assert.deepEqual(parseManualMessageJobId!("31"), { ok: false });
+  assert.deepEqual(parseManualMessageJobId!(31.5), { ok: false });
+  assert.deepEqual(parseManualMessageJobId!(0), { ok: false });
+  assert.deepEqual(parseManualMessageJobId!(-31), { ok: false });
+});
+
+test("a present malformed draft id cannot silently downgrade a draft send to a manual send", async () => {
+  const { parseManualMessageDraftId } = await loadModule();
+  assert.equal(typeof parseManualMessageDraftId, "function");
+
+  assert.deepEqual(parseManualMessageDraftId!(undefined), { ok: true, draftId: null });
+  assert.deepEqual(parseManualMessageDraftId!(null), { ok: true, draftId: null });
+  assert.deepEqual(
+    parseManualMessageDraftId!(" 41f82761-a37a-4f6f-8ad5-8b6b93acb8c1 "),
+    { ok: true, draftId: "41f82761-a37a-4f6f-8ad5-8b6b93acb8c1" },
+  );
+  assert.deepEqual(parseManualMessageDraftId!(""), { ok: false });
+  assert.deepEqual(parseManualMessageDraftId!("   "), { ok: false });
+  assert.deepEqual(parseManualMessageDraftId!("draft-1"), { ok: false });
+  assert.deepEqual(parseManualMessageDraftId!(31), { ok: false });
+  assert.deepEqual(parseManualMessageDraftId!({}), { ok: false });
 });
 
 const request: RequestFingerprint = {
@@ -306,6 +360,72 @@ test("editing the message creates a new attempt key", async () => {
 
   assert.equal(first.key, "key-1");
   assert.equal(edited.key, "key-2");
+});
+
+test("manual send preparation derives the API payload and attempt from one request", async () => {
+  const { prepareManualMessageSend } = await loadModule();
+  assert.equal(typeof prepareManualMessageSend, "function");
+
+  let sequence = 0;
+  const prepared = prepareManualMessageSend!(
+    null,
+    request,
+    () => `key-${++sequence}`,
+  );
+  const retry = prepareManualMessageSend!(
+    prepared.attempt,
+    { ...request },
+    () => `key-${++sequence}`,
+  );
+
+  assert.equal(prepared.attempt.key, "key-1");
+  assert.deepEqual(prepared.payload, {
+    applicant_id: 17,
+    phone: "01012345678",
+    body: "안녕하세요. 확인 후 안내드릴게요.",
+    sent_by: "관리자",
+    job_id: 31,
+    purpose: "current_application",
+    idempotency_key: "key-1",
+  });
+  assert.deepEqual(retry, prepared);
+  assert.equal(sequence, 1);
+});
+
+test("draft send preparation keeps its effective job id aligned with the idempotency attempt", async () => {
+  const { prepareManualMessageSend } = await loadModule();
+  assert.equal(typeof prepareManualMessageSend, "function");
+
+  let sequence = 0;
+  const first = prepareManualMessageSend!(
+    null,
+    request,
+    () => `key-${++sequence}`,
+  );
+  const draftRequest: RequestFingerprint = {
+    ...request,
+    jobId: 47,
+    draftId: "41f82761-a37a-4f6f-8ad5-8b6b93acb8c1",
+    draftWasEdited: true,
+  };
+  const draft = prepareManualMessageSend!(
+    first.attempt,
+    draftRequest,
+    () => `key-${++sequence}`,
+  );
+
+  assert.equal(draft.attempt.key, "key-2");
+  assert.deepEqual(draft.payload, {
+    applicant_id: 17,
+    phone: "01012345678",
+    body: "안녕하세요. 확인 후 안내드릴게요.",
+    sent_by: "관리자",
+    job_id: 47,
+    draft_id: "41f82761-a37a-4f6f-8ad5-8b6b93acb8c1",
+    draft_was_edited: true,
+    purpose: "current_application",
+    idempotency_key: "key-2",
+  });
 });
 
 test("changing a post-send input creates a new attempt key", async () => {

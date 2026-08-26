@@ -26,12 +26,19 @@ import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockMan
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
 import { buildJobListSummary, type JobListSummaryItem } from "@/lib/admin/job-list-layout";
 import {
-  validateJobCreateCapacity,
-  validateJobCreateCompensation,
   validateJobCreateWorkLocation,
+  validateJobRequiredFields,
   type JobCreateValidationIssue,
 } from "@/lib/admin/job-create-validation";
 import { hasJobCreateDraft, jobCreateDraftBody } from "@/lib/admin/job-create-draft";
+import {
+  loadJobCreateDraft,
+  removeJobCreateDraft,
+  saveJobCreateDraft,
+  type JobCreateStoredDraft,
+} from "@/lib/admin/job-create-draft-storage";
+import { hasJobEditDraftChanges } from "@/lib/admin/job-edit-draft";
+import { editJobRoutingOptions, newJobRoutingOptions } from "@/lib/admin/job-routing-options";
 import {
   changedJobGenerationContextFields,
   createJobGenerationContext,
@@ -131,8 +138,8 @@ interface ApiJob {
   interest_count?: number;
 }
 
-interface ClientOpt { id: number; name: string; client_type?: string | null; uses_slots?: boolean }
-interface BranchOpt { id: number; name: string; client_id: number | null }
+interface ClientOpt { id: number; name: string; client_type?: string | null; uses_slots?: boolean; active?: boolean }
+interface BranchOpt { id: number; name: string; client_id: number | null; active?: boolean }
 interface SiteManagerOpt { id: number; name: string; active?: boolean }
 
 const JOB_GENERATION_CONTEXT_LABELS: Record<JobGenerationContextField, string> = {
@@ -401,6 +408,11 @@ interface EditJobForm {
    * (전환이 취소되고, 되돌릴 수 없다며 지운 규칙이 부활한다). 안 만졌으면 아예 전송하지 않는다.
    */
   exposureBaseline: ExposureDraft;
+}
+
+function editableJobDraft(form: EditJobForm): Omit<EditJobForm, "exposureBaseline"> {
+  const { exposureBaseline: _baseline, ...draft } = form;
+  return draft;
 }
 
 // ── 수정 모달 접이식 섹션 요약 ──
@@ -727,6 +739,7 @@ export function Jobs() {
   const jobCreateAttemptRef = useRef<JobCreateAttempt | null>(null);
   const closeRegisterConfirmPendingRef = useRef(false);
   const aiPromptRef = useRef<HTMLTextAreaElement>(null);
+  const newJobClientRef = useRef<HTMLSelectElement>(null);
   const staleGenerationNoticeRef = useRef<HTMLDivElement>(null);
   // AI가 비어 있던 등록 필드에 자동 입력한 마지막 값. 재생성 때 자동값만 교체하고 매니저 수정값은 보존한다.
   const aiPrefilledPayInfoRef = useRef<string | null>(null);
@@ -788,10 +801,22 @@ export function Jobs() {
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
+  const [draftStorageReady, setDraftStorageReady] = useState(false);
+  const [recoverableNewJobDraft, setRecoverableNewJobDraft] = useState<JobCreateStoredDraft | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditJobForm | null>(null);
+  const [editBaseline, setEditBaseline] = useState<EditJobForm | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const editSavePendingRef = useRef(false);
+  const [editValidationIssue, setEditValidationIssue] = useState<JobCreateValidationIssue | null>(null);
+  const editCloseConfirmPendingRef = useRef(false);
+  const editRequestIdRef = useRef(0);
+  const editTitleRef = useRef<HTMLInputElement>(null);
+  const editCapacityRef = useRef<HTMLInputElement>(null);
+  const editPickupAddressRef = useRef<HTMLInputElement>(null);
+  const editDropoffAddressRef = useRef<HTMLInputElement>(null);
+  const editPayInfoRef = useRef<HTMLTextAreaElement>(null);
   // E17 · 수정 모달 접이식 섹션 열림 상태. 자주 고치는 제목·기간·마감은 접이식 밖 상단 상시 표시,
   // 나머지는 섹션으로 접어 ~2,100px 평면 스크롤을 없앤다. 기본 정보만 열고 시작.
   const [editOpenSections, setEditOpenSections] = useState({ basic: true, exposure: false, work: false, content: false });
@@ -1240,16 +1265,30 @@ export function Jobs() {
     isLoading: branchesLoading,
     mutate: mutateBranches,
   } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
-  const { data: siteManagersApi } = useSWR<{ data?: SiteManagerOpt[] }>("/api/admin/site-managers");
-  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, client_type: c.client_type, uses_slots: c.uses_slots })), [clientsApi]);
-  const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id })), [branchesApi]);
+  const {
+    data: siteManagersApi,
+    isLoading: siteManagersLoading,
+  } = useSWR<{ data?: SiteManagerOpt[] }>("/api/admin/site-managers");
+  const clients = useMemo(() => (clientsApi?.data ?? []).map((c) => ({ id: c.id, name: c.name, client_type: c.client_type, uses_slots: c.uses_slots, active: c.active })), [clientsApi]);
+  const branches = useMemo(() => (branchesApi?.data ?? []).map((b) => ({ id: b.id, name: b.name, client_id: b.client_id, active: b.active })), [branchesApi]);
   const siteManagers = useMemo(() => (siteManagersApi?.data ?? []).map((m) => ({ id: m.id, name: m.name, active: m.active ?? true })), [siteManagersApi]);
+  const newJobClients = useMemo(() => newJobRoutingOptions(clients), [clients]);
+  const newJobBranches = useMemo(() => newJobRoutingOptions(branches), [branches]);
+  const editJobClients = useMemo(
+    () => editJobRoutingOptions(clients, editForm?.clientId ?? ""),
+    [clients, editForm?.clientId],
+  );
+  const editJobBranches = useMemo(
+    () => editJobRoutingOptions(branches, editForm?.branchId ?? ""),
+    [branches, editForm?.branchId],
+  );
   const routingMetadataError = Boolean(clientsError || branchesError);
   const routingMetadataLoading = (clientsLoading && !clientsApi) || (branchesLoading && !branchesApi);
   const routingMetadataUnavailable = routingMetadataError || routingMetadataLoading;
+  const draftRestoreMetadataUnavailable = routingMetadataUnavailable || (siteManagersLoading && !siteManagersApi);
   // 생성 요청·생성 기준·등록 payload가 모두 같은 지점 값을 쓰게 한다. 화주사를 바꾼 뒤 남은 타 화주사 지점은 무시한다.
   const effectiveNewJobBranchId =
-    newJobBranchId !== "" && branches.some((branch) => branch.id === newJobBranchId && branch.client_id === newJobClientId)
+    newJobBranchId !== "" && newJobBranches.some((branch) => branch.id === newJobBranchId && branch.client_id === newJobClientId)
       ? newJobBranchId
       : "";
   const currentGenerationContext = createJobGenerationContext({
@@ -1268,7 +1307,7 @@ export function Jobs() {
   // 편집 모달 지점 셀렉터 노출 — 지점 개념 화주사(슬롯/지점보유)이거나, 이미 지점이 붙은 공고(고아 방지)면 노출.
   const editShowBranch = !!editForm && (
     Boolean(clients.find((c) => c.id === editForm.clientId)?.uses_slots) ||
-    branches.some((b) => b.client_id === editForm.clientId) ||
+    editJobBranches.some((b) => b.client_id === editForm.clientId) ||
     editForm.branchId !== ""
   );
 
@@ -1476,18 +1515,187 @@ export function Jobs() {
     sosId: newJobSosId,
   });
 
+  const storedNewJobDraft = useMemo<JobCreateStoredDraft>(() => ({
+    prompt: aiPrompt,
+    postingTitle,
+    channelDrafts,
+    activeChannel,
+    aiSource,
+    generatedContext,
+    clientId: newJobClientId,
+    branchId: newJobBranchId,
+    siteManagerId: newJobSiteManagerId,
+    recruitMode: newJobMode,
+    capacity: newJobCapacity,
+    payType: newJobPayType,
+    payAmount: newJobPayAmount,
+    period: newJobPeriod,
+    closesAt: newJobClosesAt,
+    slot: newJobSlot,
+    slotKeys: newJobSlotKeys,
+    startDate: newJobStartDate,
+    pickupAddress: newJobPickupAddress,
+    dropoffAddress: newJobDropoffAddress,
+    vehicleRequired: newJobVehicleRequired,
+    payInfo: newJobPayInfo,
+    policyNotes: newJobPolicyNotes,
+    aiFacts: newJobAiFacts,
+    extraOpen: newJobExtraOpen,
+    exposure: {
+      exposure: newJobExposure.exposure,
+      rule: draftToRule(newJobExposure.rule),
+    },
+    duplicatedFrom,
+    channelDraftsFromCopy,
+    sosId: newJobSosId,
+    sosRegion: newJobSosRegion,
+    sosVehicle: newJobSosVehicle,
+    createAttempt: jobCreateAttemptRef.current,
+  }), [
+    activeChannel,
+    aiPrompt,
+    aiSource,
+    channelDrafts,
+    channelDraftsFromCopy,
+    duplicatedFrom,
+    generatedContext,
+    newJobAiFacts,
+    newJobBranchId,
+    newJobCapacity,
+    newJobClientId,
+    newJobClosesAt,
+    newJobDropoffAddress,
+    newJobExposure,
+    newJobExtraOpen,
+    newJobMode,
+    newJobPayAmount,
+    newJobPayInfo,
+    newJobPayType,
+    newJobPeriod,
+    newJobPickupAddress,
+    newJobPolicyNotes,
+    newJobSiteManagerId,
+    newJobSosId,
+    newJobSosRegion,
+    newJobSosVehicle,
+    newJobSlot,
+    newJobSlotKeys,
+    newJobStartDate,
+    newJobVehicleRequired,
+    postingTitle,
+  ]);
+
+  useEffect(() => {
+    setRecoverableNewJobDraft(loadJobCreateDraft(window.localStorage));
+    setDraftStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!draftStorageReady || !aiModalOpen || !hasUnsavedNewJobDraft) return;
+    // 저장된 이전 초안이 있으면 새 입력·복제·SOS 프리필이 같은 단일 슬롯을 조용히 덮지 않는다.
+    // 매니저가 '삭제' 또는 '이어쓰기'를 명시적으로 고른 뒤에만 현재 폼이 저장 슬롯을 소유한다.
+    if (recoverableNewJobDraft) return;
+    const timer = window.setTimeout(() => {
+      if (saveJobCreateDraft(window.localStorage, storedNewJobDraft)) {
+        setRecoverableNewJobDraft(null);
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [aiModalOpen, draftStorageReady, hasUnsavedNewJobDraft, recoverableNewJobDraft, storedNewJobDraft]);
+
+  const clearStoredNewJobDraft = () => {
+    removeJobCreateDraft(window.localStorage);
+    setRecoverableNewJobDraft(null);
+  };
+
+  const restoreNewJobDraft = () => {
+    if (!recoverableNewJobDraft || draftRestoreMetadataUnavailable) return;
+    const draft = recoverableNewJobDraft;
+    const restoredClientId = draft.clientId !== "" && newJobClients.some((client) => client.id === draft.clientId)
+      ? draft.clientId
+      : "";
+    const restoredBranchId = draft.branchId !== "" && newJobBranches.some(
+      (branch) => branch.id === draft.branchId && branch.client_id === restoredClientId,
+    )
+      ? draft.branchId
+      : "";
+    const restoredSiteManagerId = draft.siteManagerId !== "" && siteManagers.some(
+      (manager) => manager.id === draft.siteManagerId && manager.active,
+    )
+      ? draft.siteManagerId
+      : "";
+
+    jobCreateAttemptRef.current = draft.createAttempt;
+    setAiPrompt(draft.prompt);
+    setPostingTitle(draft.postingTitle);
+    setChannelDrafts(draft.channelDrafts);
+    setActiveChannel(draft.activeChannel);
+    setAiSource(draft.aiSource);
+    setGeneratedContext(draft.generatedContext);
+    aiPrefilledPayInfoRef.current = null;
+    aiPrefilledFactsRef.current = null;
+    setPromptOpen(!draft.channelDrafts);
+    setNewJobClientId(restoredClientId);
+    setNewJobBranchId(restoredBranchId);
+    setNewJobSiteManagerId(restoredSiteManagerId);
+    setNewJobMode(draft.recruitMode);
+    setNewJobCapacity(draft.capacity);
+    setNewJobPayType(draft.payType);
+    setNewJobPayAmount(draft.payAmount);
+    setNewJobPeriod(draft.period);
+    setNewJobClosesAt(draft.closesAt);
+    setNewJobSlot(draft.slot);
+    setNewJobSlotKeys(draft.slotKeys);
+    setNewJobStartDate(draft.startDate);
+    setNewJobPickupAddress(draft.pickupAddress);
+    setNewJobDropoffAddress(draft.dropoffAddress);
+    setNewJobVehicleRequired(draft.vehicleRequired);
+    setNewJobPayInfo(draft.payInfo);
+    newJobPayInfoValueRef.current = draft.payInfo;
+    setNewJobPolicyNotes(draft.policyNotes);
+    setNewJobAiFacts(draft.aiFacts);
+    newJobAiFactsValueRef.current = draft.aiFacts;
+    setNewJobExtraOpen(draft.extraOpen);
+    setNewJobExposure({
+      exposure: draft.exposure.exposure,
+      rule: ruleToDraft(draft.exposure.rule),
+    });
+    setDuplicatedFrom(draft.duplicatedFrom);
+    setChannelDraftsFromCopy(draft.channelDraftsFromCopy);
+    setNewJobSosId(draft.sosId);
+    setNewJobSosRegion(draft.sosRegion);
+    setNewJobSosVehicle(draft.sosVehicle);
+    setNewJobValidationIssue(null);
+    setRecoverableNewJobDraft(null);
+    if (
+      restoredClientId !== draft.clientId
+      || restoredBranchId !== draft.branchId
+      || restoredSiteManagerId !== draft.siteManagerId
+    ) {
+      toast.info("비활성화된 화주사·지점·담당자 선택은 초안에서 제외했어요.");
+    } else {
+      toast.success("작성하던 공고 초안을 복구했어요.");
+    }
+  };
+
+  const discardRecoverableNewJobDraft = () => {
+    clearStoredNewJobDraft();
+    toast.success("저장된 공고 초안을 삭제했어요.");
+  };
+
   // 등록 모달 닫기 — 실제 저장될 값이 하나라도 있으면 확인 후 파기한다. UI 섹션·빈 직접 작성 칸만
   // 연 경우는 묻지 않는다. 등록 중 닫기와 중복 확인은 늦은 POST/단일 confirm resolver 경합을 막기 위해 잠근다.
   const closeRegisterModal = async () => {
     if (registering || closeRegisterConfirmPendingRef.current) return;
 
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    let discardCurrentDraft = false;
     if (hasUnsavedNewJobDraft) {
       closeRegisterConfirmPendingRef.current = true;
       try {
         const ok = await confirm({
           title: "작성 중인 공고를 버릴까요?",
-          description: "입력한 공고 정보와 작성한 초안이 저장되지 않았어요. 닫으면 모두 사라지고 복구할 수 없어요.",
+          description: "공고 초안은 이 브라우저에 24시간 보관돼요. 지금 '버리고 닫기'를 누르면 저장된 초안까지 삭제됩니다.",
           confirmText: "버리고 닫기",
           cancelText: "계속 작성",
           destructive: true,
@@ -1498,10 +1706,12 @@ export function Jobs() {
           });
           return;
         }
+        discardCurrentDraft = true;
       } finally {
         closeRegisterConfirmPendingRef.current = false;
       }
     }
+    if (discardCurrentDraft) clearStoredNewJobDraft();
     setAiModalOpen(false);
     resetNewJobForm();
   };
@@ -1523,9 +1733,29 @@ export function Jobs() {
     setActiveChannel("albamon");
     setPromptOpen(false);
     setPostingTitle(j.title.slice(0, 80));
-    setNewJobClientId(j.clientId ?? "");
-    setNewJobBranchId(j.branchId ?? "");
-    setNewJobSiteManagerId(j.siteManagerId ?? "");
+    const duplicateClientId = j.clientId !== null && newJobClients.some((client) => client.id === j.clientId)
+      ? j.clientId
+      : "";
+    const duplicateBranchId = j.branchId !== null && newJobBranches.some(
+      (branch) => branch.id === j.branchId && branch.client_id === duplicateClientId,
+    )
+      ? j.branchId
+      : "";
+    const duplicateSiteManagerId = j.siteManagerId !== null && siteManagers.some(
+      (manager) => manager.id === j.siteManagerId && manager.active,
+    )
+      ? j.siteManagerId
+      : "";
+    setNewJobClientId(duplicateClientId);
+    setNewJobBranchId(duplicateBranchId);
+    setNewJobSiteManagerId(duplicateSiteManagerId);
+    if (
+      duplicateClientId !== (j.clientId ?? "")
+      || duplicateBranchId !== (j.branchId ?? "")
+      || duplicateSiteManagerId !== (j.siteManagerId ?? "")
+    ) {
+      toast.info("원본에서 비활성화된 화주사·지점·담당자 선택은 복제하지 않았어요.");
+    }
     const dupExternal = j.recruitMode === "external";
     setNewJobMode(j.recruitMode);
     // 노출 설정도 복제 — 정기 라인 재모집 시 같은 타깃 규칙 재사용(수동 명단은 공고별이라 복제 안 됨).
@@ -1643,48 +1873,32 @@ export function Jobs() {
     }
     // 발사 체크리스트가 사람에게 요구하던 13개 중 코드가 막는 건 2개뿐이었다(마감시각·시작일).
     // 사고로 직결되는 3개를 여기서 막는다 — 화면 라벨과 문서가 서로 반대말을 하던 자리다.
-    const capacityIssue = validateJobCreateCapacity(newJobCapacity);
-    if (capacityIssue) {
-      setNewJobValidationIssue(capacityIssue);
-      toast.error("모집 인원을 입력해주세요. 이 숫자가 차면 나머지 관심자에게 '자리가 찼어요'가 나갑니다.");
-      requestAnimationFrame(() => {
-        const capacityField = newJobCapacityRef.current;
-        if (!capacityField) return;
-        capacityField.focus({ preventScroll: true });
-        capacityField.scrollIntoView({ block: "center" });
-      });
-      return;
-    }
-    const workLocationIssue = validateJobCreateWorkLocation({
+    const requiredIssue = validateJobRequiredFields({
+      capacity: newJobCapacity,
       pickupAddress: newJobPickupAddress,
       dropoffAddress: newJobDropoffAddress,
-    });
-    if (workLocationIssue) {
-      setNewJobValidationIssue(workLocationIssue);
-      toast.error(workLocationIssue.message);
-      requestAnimationFrame(() => {
-        const locationField = workLocationIssue.field === "pickupAddress"
-          ? newJobPickupAddressRef.current
-          : newJobDropoffAddressRef.current;
-        if (!locationField) return;
-        locationField.focus({ preventScroll: true });
-        locationField.scrollIntoView({ block: "center" });
-      });
-      return;
-    }
-    const compensationIssue = validateJobCreateCompensation({
       payType: newJobPayType,
       payAmount: newJobPayAmount,
       payInfo: newJobPayInfo,
     });
-    if (compensationIssue) {
-      setNewJobValidationIssue(compensationIssue);
-      toast.error(compensationIssue.message);
+    if (requiredIssue) {
+      setNewJobValidationIssue(requiredIssue);
+      toast.error(
+        requiredIssue.field === "capacity"
+          ? "모집 인원을 입력해주세요. 이 숫자가 차면 나머지 관심자에게 '자리가 찼어요'가 나갑니다."
+          : requiredIssue.message,
+      );
       requestAnimationFrame(() => {
-        const payInfoField = newJobPayInfoRef.current;
-        if (!payInfoField) return;
-        payInfoField.focus({ preventScroll: true });
-        payInfoField.scrollIntoView({ block: "center" });
+        const field = requiredIssue.field === "capacity"
+          ? newJobCapacityRef.current
+          : requiredIssue.field === "pickupAddress"
+          ? newJobPickupAddressRef.current
+          : requiredIssue.field === "dropoffAddress"
+            ? newJobDropoffAddressRef.current
+            : newJobPayInfoRef.current;
+        if (!field) return;
+        field.focus({ preventScroll: true });
+        field.scrollIntoView({ block: "center" });
       });
       return;
     }
@@ -1731,6 +1945,12 @@ export function Jobs() {
       () => crypto.randomUUID(),
     );
     jobCreateAttemptRef.current = createAttempt;
+    // POST 성공 뒤 응답이 유실되고 새로고침돼도 같은 UUID로 재조회·재생해야 중복 공고가 생기지 않는다.
+    // ref 갱신은 렌더를 일으키지 않으므로 네트워크 호출 직전에 시도 정보가 든 스냅샷을 명시 저장한다.
+    saveJobCreateDraft(window.localStorage, {
+      ...storedNewJobDraft,
+      createAttempt,
+    });
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
@@ -1783,6 +2003,7 @@ export function Jobs() {
       }
 
       // 핵심 저장은 끝났다. 목록 재검증·안내 대상 조회가 느려도 다음 공고 작성은 잠그지 않는다.
+      clearStoredNewJobDraft();
       setAiModalOpen(false);
       resetNewJobForm();
       loadJobs();
@@ -1856,21 +2077,62 @@ export function Jobs() {
 
   const branchOptions = clientFilter === "" ? branches : branches.filter(b => b.client_id === clientFilter);
 
-  const openEdit = useCallback(async (id: string) => {
+  const hasUnsavedEditJobDraft = Boolean(
+    editForm
+    && editBaseline
+    && hasJobEditDraftChanges(editableJobDraft(editBaseline), editableJobDraft(editForm)),
+  );
+
+  const closeEditModal = async () => {
+    if (editSaving || editSavePendingRef.current || editCloseConfirmPendingRef.current) return;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (hasUnsavedEditJobDraft) {
+      editCloseConfirmPendingRef.current = true;
+      try {
+        const ok = await confirm({
+          title: "수정 중인 내용을 버릴까요?",
+          description: "저장하지 않은 공고 수정 내용이 있어요. 닫으면 복구할 수 없습니다.",
+          confirmText: "수정 내용 버리기",
+          cancelText: "계속 수정",
+          destructive: true,
+        });
+        if (!ok) {
+          requestAnimationFrame(() => {
+            if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+          });
+          return;
+        }
+      } finally {
+        editCloseConfirmPendingRef.current = false;
+      }
+    }
+    editRequestIdRef.current += 1;
+    setEditLoading(false);
+    setEditForm(null);
+    setEditBaseline(null);
+    setEditValidationIssue(null);
     setEditDroppedBranch(null);
+  };
+
+  const openEdit = useCallback(async (id: string) => {
+    const requestId = ++editRequestIdRef.current;
+    setEditDroppedBranch(null);
+    setEditBaseline(null);
+    setEditValidationIssue(null);
     setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", slotKeys: [], startDate: "", pickupAddress: "", dropoffAddress: "", distanceBasis: DEFAULT_DISTANCE_BASIS, exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
     setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
       const json = await res.json();
+      if (requestId !== editRequestIdRef.current) return;
       if (!res.ok) {
         toast.error(json.error || "공고를 불러오지 못했어요");
         setEditForm(null);
         return;
       }
       const j = json.job;
-      setEditForm({
+      const loadedForm: EditJobForm = {
         id,
         title: j.title ?? "",
         body: j.body ?? "",
@@ -1902,12 +2164,18 @@ export function Jobs() {
           exposure: j.exposure === "targeted" ? "targeted" : "all",
           rule: ruleToDraft(j.exposure_rule),
         },
-      });
+      };
+      setEditForm(loadedForm);
+      setEditBaseline(loadedForm);
     } catch {
+      if (requestId !== editRequestIdRef.current) return;
       toast.error("공고를 불러오지 못했어요");
       setEditForm(null);
     } finally {
-      setEditLoading(false);
+      if (requestId === editRequestIdRef.current) {
+        setEditLoading(false);
+        requestAnimationFrame(() => editTitleRef.current?.focus({ preventScroll: true }));
+      }
     }
   }, []);
 
@@ -1921,17 +2189,56 @@ export function Jobs() {
   }, [searchParams, router, openEdit]);
 
   const handleEditSave = async () => {
-    if (!editForm) return;
+    if (!editForm || editSavePendingRef.current) return;
+    // 첫 confirm/GET보다 먼저 잠근다. 저장 전 검증을 기다리는 동안 X·ESC로 폼을 버린 뒤
+    // 캡처된 값이 뒤늦게 PATCH되는 경합과 더블클릭 중복 저장을 함께 막는다.
+    editSavePendingRef.current = true;
+    setEditSaving(true);
+    try {
     if (routingMetadataUnavailable) {
       toast.error("화주사·지점 정보를 확인한 뒤 공고를 수정할 수 있어요. 다시 불러와 주세요.");
       return;
     }
     const title = editForm.title.trim();
-    if (!title) return toast.error("공고 제목을 입력해주세요.");
+    if (!title) {
+      toast.error("공고 제목을 입력해주세요.");
+      requestAnimationFrame(() => {
+        editTitleRef.current?.focus({ preventScroll: true });
+        editTitleRef.current?.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
     // 마감시각을 과거로 저장하면 pull에서 즉시 '마감됨' 처리 — 저장 전 경고.
     if (editForm.closesAt && new Date(editForm.closesAt).getTime() <= Date.now()) {
       return toast.error("마감시각이 과거입니다. 현재 이후 시각으로 설정해주세요.");
     }
+    const requiredIssue = validateJobRequiredFields({
+      capacity: editForm.capacity,
+      pickupAddress: editForm.pickupAddress,
+      dropoffAddress: editForm.dropoffAddress,
+      payType: editForm.payType,
+      payAmount: editForm.payAmount,
+      payInfo: editForm.payInfo,
+    });
+    if (requiredIssue) {
+      setEditValidationIssue(requiredIssue);
+      setEditOpenSections((sections) => ({ ...sections, basic: true, work: true }));
+      toast.error(requiredIssue.message);
+      requestAnimationFrame(() => {
+        const field = requiredIssue.field === "capacity"
+          ? editCapacityRef.current
+          : requiredIssue.field === "pickupAddress"
+            ? editPickupAddressRef.current
+            : requiredIssue.field === "dropoffAddress"
+              ? editDropoffAddressRef.current
+              : editPayInfoRef.current;
+        if (!field) return;
+        field.focus({ preventScroll: true });
+        field.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
+    setEditValidationIssue(null);
     // 화주사를 바꿔 지점이 떨어져 나간 상태 — 지점 연결과 지점명이 함께 지워지므로 확인을 받는다.
     // 대체 지점을 골랐으면 지워지는 게 없으므로 확인을 묻지 않는다(거짓 경고 방지).
     if (editDroppedBranch && editForm.branchId === "") {
@@ -2000,8 +2307,6 @@ export function Jobs() {
         if (!ok) return;
       }
     }
-    setEditSaving(true);
-    try {
       const res = await fetch(`/api/admin/jobs/${editForm.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2053,11 +2358,15 @@ export function Jobs() {
           : "";
       const desc = [geoNote, autoNote].filter(Boolean).join(" ");
       toast.success("공고를 수정했어요.", desc ? { description: desc } : undefined);
+      setEditBaseline(null);
+      setEditValidationIssue(null);
+      setEditDroppedBranch(null);
       setEditForm(null);
       await loadJobs();
     } catch {
       toast.error("수정에 실패했어요");
     } finally {
+      editSavePendingRef.current = false;
       setEditSaving(false);
     }
   };
@@ -2754,6 +3063,7 @@ export function Jobs() {
         <Modal bare open={aiModalOpen} onClose={closeRegisterModal} busy={registering} size="full"
                title="새 공고 등록"
                description="화주사 맥락을 고른 뒤 AI 초안을 만들거나 공고 본문을 직접 작성하세요."
+               initialFocusRef={newJobClientRef}
                closeOnOutside={false}
                className="xl:max-w-6xl max-w-[800px] sm:max-w-[800px]">
             <div className="flex items-center justify-between gap-3 border-b border-border-strong px-5 py-4 sm:px-7 sm:py-5">
@@ -2771,12 +3081,36 @@ export function Jobs() {
                 <X size={24} />
               </Button>
             </div>
+            <fieldset disabled={registering} className="contents">
 
             {/* [&>*]:shrink-0 — flex 세로 스택 + 자식 overflow-hidden 조합에서 flex가 자식 높이를
                 뺏어 누르면 내용이 그냥 사라진다. 실제로 AI 초안 카드가 높이 44px로 눌려
                 "생성 성공 토스트는 떴는데 본문이 안 보이는" 상태가 재현됐다(2026-08-14 감사).
                 대시보드 히어로 352px 잘림과 같은 원인 — Dashboard.tsx:281 주석 참고. */}
             <div className={`min-w-0 flex-1 overflow-y-auto bg-background p-5 sm:p-7 flex flex-col gap-4 sm:gap-6 [&>*]:min-w-0 [&>*]:shrink-0 ${(isGenerating || channelDrafts) ? "xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start" : ""}`}>
+              {recoverableNewJobDraft && (
+                <div role="status" className="flex flex-col gap-3 rounded-2xl border border-info/25 bg-info-soft px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between xl:col-span-2">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span aria-hidden className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white/70 text-info-strong">
+                      <RefreshCw size={16} />
+                    </span>
+                    <div>
+                      <p className="text-[13px] font-extrabold text-foreground">24시간 안에 작성하던 공고 초안이 있어요</p>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                        {hasUnsavedNewJobDraft
+                          ? "현재 내용과 별도로 보관 중이에요. 이어쓰기를 누르면 현재 폼을 저장된 초안으로 교체합니다."
+                          : "이 브라우저에만 저장된 초안입니다. 이어 쓰거나 삭제할 수 있어요."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 pl-11 sm:pl-0">
+                    <Button variant="ghost" size="sm" onClick={discardRecoverableNewJobDraft}>삭제</Button>
+                    <Button variant="primary" size="sm" onClick={restoreNewJobDraft} disabled={draftRestoreMetadataUnavailable}>
+                      {hasUnsavedNewJobDraft ? "이전 초안으로 교체" : "이어쓰기"}
+                    </Button>
+                  </div>
+                </div>
+              )}
               {/* AI가 실제로 참조하는 화주사·지점과 이번 공고의 위치를 먼저 정한다. 생성 후 2열에서도 이 카드는 전체 폭을 써서
                   DOM 순서와 시각 순서가 모두 공고 맥락 → AI 조건 → 초안으로 유지된다. */}
               <section aria-labelledby="new-job-context-title" className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm xl:col-span-2">
@@ -2803,6 +3137,7 @@ export function Jobs() {
                   <div>
                     <label htmlFor="new-job-client" className="mb-1.5 block text-[13px] font-bold text-gray-700">화주사 <span className="font-semibold text-muted-foreground">(선택)</span></label>
                     <select
+                      ref={newJobClientRef}
                       id="new-job-client"
                       value={newJobClientId}
                       disabled={routingMetadataUnavailable || isGenerating}
@@ -2810,14 +3145,14 @@ export function Jobs() {
                         const v = e.target.value === "" ? "" : Number(e.target.value);
                         setNewJobClientId(v);
                         // 화주사 변경 시 하위와 맞지 않는 지점 선택은 해제
-                        if (newJobBranchId !== "" && branches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
+                        if (newJobBranchId !== "" && newJobBranches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
                           setNewJobBranchId("");
                         }
                       }}
                       className="min-h-11 w-full rounded-2xl border border-border-strong bg-input-background px-3.5 py-2.5 pr-8 text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option value="">화주사 선택</option>
-                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {newJobClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                     <p className="mt-1 text-[12px] text-muted-foreground">
                       {routingMetadataUnavailable
@@ -2828,7 +3163,7 @@ export function Jobs() {
                     </p>
                   </div>
 
-                  {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
+                  {(clients.find((c) => c.id === newJobClientId)?.uses_slots || newJobBranches.some((b) => b.client_id === newJobClientId)) && (
                     <div>
                       <label htmlFor="new-job-branch" className="mb-1.5 block text-[13px] font-bold text-gray-700">지점 <span className="font-semibold text-muted-foreground">(선택)</span></label>
                       <select
@@ -2840,14 +3175,14 @@ export function Jobs() {
                           setNewJobBranchId(v);
                           // 지점 선택 시 소속 화주사를 상위 셀렉트에 동기화
                           if (v !== "") {
-                            const cid = branches.find((b) => b.id === v)?.client_id;
+                            const cid = newJobBranches.find((b) => b.id === v)?.client_id;
                             if (typeof cid === "number") setNewJobClientId(cid);
                           }
                         }}
                         className="min-h-11 w-full rounded-2xl border border-border-strong bg-input-background px-3.5 py-2.5 pr-8 text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">지점 선택</option>
-                        {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        {newJobBranches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                       <p className="mt-1 text-[12px] text-muted-foreground">집결지·근무 정보가 있는 지점이라면 초안 작성에 함께 참고해요.</p>
                     </div>
@@ -3296,20 +3631,23 @@ export function Jobs() {
                 </Button>
               </div>
             </div>
+            </fieldset>
         </Modal>
       )}
 
       {/* 공고 수정 모달 — backdrop 클릭으로 닫지 않는다(긴 편집 중 오클릭 한 번에 수정분이 소리 없이
           날아가던 문제). 닫기는 명시적으로 X·취소 버튼으로만. */}
       {editForm && (
-        <Modal bare open={Boolean(editForm)} onClose={() => { setEditForm(null); setEditDroppedBranch(null); }} size="lg"
+        <Modal bare open={Boolean(editForm)} onClose={closeEditModal} busy={editSaving} size="lg"
                title="공고 수정"
+               initialFocusRef={editTitleRef}
                closeOnOutside={false}
                className="max-w-[640px] sm:max-w-[640px]">
             <div className="flex items-center justify-between px-7 py-5 border-b border-border-strong">
               <h2 className="text-[18px] font-extrabold text-foreground">공고 수정</h2>
-              <Button variant="ghost" size="icon" aria-label="공고 수정 창 닫기" onClick={() => { setEditForm(null); setEditDroppedBranch(null); }}><X size={22} /></Button>
+              <Button variant="ghost" size="icon" aria-label="공고 수정 창 닫기" onClick={closeEditModal} disabled={editSaving}><X size={22} /></Button>
             </div>
+            <fieldset disabled={editSaving} className="contents">
             {editLoading ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 size={20} className="animate-spin mr-2" /> 불러오는 중…</div>
             ) : (
@@ -3321,7 +3659,7 @@ export function Jobs() {
                     {/* 등록 모달에만 있던 안내 — 제목이 어디에 그대로 노출되는지 알려준다. */}
                     <span className="block text-[12px] font-semibold text-muted-foreground mt-0.5">맞춤 공고 링크 화면·안내 문자에 그대로 표시돼요</span>
                   </label>
-                  <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input ref={editTitleRef} value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="예: 성수동 새벽 배송 기사 모집" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -3399,7 +3737,7 @@ export function Jobs() {
                           className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <option value="">미지정</option>
-                          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          {editJobClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                         <p className="mt-1 text-[12px] text-muted-foreground">
                           {routingMetadataUnavailable
@@ -3430,13 +3768,14 @@ export function Jobs() {
                             className="pr-8 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <option value="">미지정</option>
-                            {branches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            {editJobBranches.filter((b) => b.client_id === editForm.clientId || b.id === editForm.branchId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                           </select>
                         </div>
                         )}
                         <div>
-                          <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 인원</label>
-                          <input type="number" min={1} value={editForm.capacity} onChange={(e) => setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) })} className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                          <label className="block text-[13px] font-bold text-gray-700 mb-2">모집 인원 <span className="text-error">*</span></label>
+                          <input ref={editCapacityRef} aria-invalid={editValidationIssue?.field === "capacity"} type="number" min={1} value={editForm.capacity} onChange={(e) => { setEditForm({ ...editForm, capacity: Math.max(1, Number(e.target.value) || 1) }); if (editValidationIssue?.field === "capacity") setEditValidationIssue(null); }} className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                          {editValidationIssue?.field === "capacity" && <p role="alert" className="mt-1 text-[12px] font-semibold text-error-strong">{editValidationIssue.message}</p>}
                         </div>
                       </div>
                       {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록은 설정 › 팀·권한. */}
@@ -3453,10 +3792,10 @@ export function Jobs() {
                           <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
                         </button>
                       </div>
-                      {/* E18 · 급여 (선택) — 등록 모달과 같은 그룹·같은 섹션 위치로 올렸다.
+                      {/* E18 · 급여·정산 — 등록 모달과 같은 그룹·같은 섹션 위치로 올렸다.
                           예전엔 '공고 본문·급여·AI 근거' 접이식 안 2단 깊이라, 등록 때는 0클릭이던 급여가 수정 때는 펼쳐야 보였다. */}
                       <div className="p-4 bg-background border border-border-strong rounded-2xl flex flex-col gap-4">
-                        <div className="text-[12px] font-bold text-gray-700">급여 (선택) — 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
+                        <div className="text-[12px] font-bold text-gray-700">급여·정산 안내 — 지원자가 조건을 판단하고 AI가 문의에 답하는 필수 정보입니다</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[13px] font-bold text-gray-700 mb-2">대표 단가 형태</label>
@@ -3473,8 +3812,9 @@ export function Jobs() {
                           )}
                         </div>
                         <div>
-                          <label className="block text-[13px] font-bold text-gray-700 mb-2">급여·정산 정보</label>
-                          <textarea value={editForm.payInfo} onChange={(e) => setEditForm({ ...editForm, payInfo: e.target.value })} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          <label className="block text-[13px] font-bold text-gray-700 mb-2">급여·정산 정보 <span className="text-error">*</span></label>
+                          <textarea ref={editPayInfoRef} aria-invalid={editValidationIssue?.field === "payInfo"} value={editForm.payInfo} onChange={(e) => { setEditForm({ ...editForm, payInfo: e.target.value }); if (editValidationIssue?.field === "payInfo") setEditValidationIssue(null); }} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                          {editValidationIssue?.field === "payInfo" && <p role="alert" className="mt-1 text-[12px] font-semibold text-error-strong">{editValidationIssue.message}</p>}
                         </div>
                       </div>
                     </>
@@ -3534,12 +3874,14 @@ export function Jobs() {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-[13px] font-bold text-gray-700 mb-2">집결지</label>
-                        <input type="text" value={editForm.pickupAddress} onChange={(e) => setEditForm({ ...editForm, pickupAddress: e.target.value })} placeholder="예: 성수동 물류센터 3번 게이트" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        <label className="block text-[13px] font-bold text-gray-700 mb-2">상차지·집결지 <span className="text-error">*</span></label>
+                        <input ref={editPickupAddressRef} aria-invalid={editValidationIssue?.field === "pickupAddress"} type="text" value={editForm.pickupAddress} onChange={(e) => { setEditForm({ ...editForm, pickupAddress: e.target.value }); if (editValidationIssue?.field === "pickupAddress") setEditValidationIssue(null); }} placeholder="예: 성수동 물류센터 3번 게이트" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        {editValidationIssue?.field === "pickupAddress" && <p role="alert" className="mt-1 text-[12px] font-semibold text-error-strong">{editValidationIssue.message}</p>}
                       </div>
                       <div>
-                        <label className="block text-[13px] font-bold text-gray-700 mb-2">마지막 경유지(배송 종료 지점)</label>
-                        <input type="text" value={editForm.dropoffAddress} onChange={(e) => setEditForm({ ...editForm, dropoffAddress: e.target.value })} placeholder="예: 하남 미사강변도시 일대" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        <label className="block text-[13px] font-bold text-gray-700 mb-2">배송 권역·마지막 경유지 <span className="text-error">*</span></label>
+                        <input ref={editDropoffAddressRef} aria-invalid={editValidationIssue?.field === "dropoffAddress"} type="text" value={editForm.dropoffAddress} onChange={(e) => { setEditForm({ ...editForm, dropoffAddress: e.target.value }); if (editValidationIssue?.field === "dropoffAddress") setEditValidationIssue(null); }} placeholder="예: 하남 미사강변도시 일대" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-4 py-3 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring" />
+                        {editValidationIssue?.field === "dropoffAddress" && <p role="alert" className="mt-1 text-[12px] font-semibold text-error-strong">{editValidationIssue.message}</p>}
                       </div>
                       {/* 거리 기준 — 노출 반경 규칙·거리 정렬·'대기자에게 안내' 조건 매칭이 **모두 이 값**을 쓴다.
                           집결지=경유지인 라인은 차이가 없지만, 멀리 떨어진 라인은 대상 수가 크게 갈린다
@@ -3602,11 +3944,12 @@ export function Jobs() {
               </div>
             )}
             <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-glass bg-white/45">
-              <Button variant="ghost" size="lg" disabled={editSaving} onClick={() => { setEditForm(null); setEditDroppedBranch(null); }}>취소</Button>
+              <Button variant="ghost" size="lg" disabled={editSaving} onClick={closeEditModal}>취소</Button>
               <Button variant="primary" size="lg" onClick={handleEditSave} disabled={editLoading || routingMetadataUnavailable} isLoading={editSaving}>
                   {!editSaving && <Save size={16} />} 저장
                 </Button>
             </div>
+            </fieldset>
         </Modal>
       )}
 

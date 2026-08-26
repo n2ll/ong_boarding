@@ -63,6 +63,8 @@ type ModalProps = {
   className?: string;
   /** 본문 패딩을 직접 잡고 싶을 때(표·리스트 모달 등). */
   bodyClassName?: string;
+  /** 열릴 때 닫기 버튼 대신 해당 작업의 첫 입력으로 포커스를 보낸다. */
+  initialFocusRef?: React.RefObject<HTMLElement>;
   /**
    * 머리말/본문/바닥 틀 없이 유리 면과 동작(ESC·포커스 트랩·스크롤 잠금·모바일 시트)만 준다.
    * 이미 제 머리말과 바닥을 갖춘 큰 폼(공고 등록·수정 등)을 옮길 때 쓴다 —
@@ -85,6 +87,7 @@ function Modal({
   headerAside,
   className,
   bodyClassName,
+  initialFocusRef,
   bare = false,
   children,
 }: ModalProps) {
@@ -147,6 +150,12 @@ function Modal({
           className="fixed inset-0 z-50 bg-scrim backdrop-blur-[3px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
         />
         <DialogPrimitive.Content
+          onOpenAutoFocus={(e) => {
+            const target = initialFocusRef?.current;
+            if (!target || target.hasAttribute("disabled")) return;
+            e.preventDefault();
+            target.focus({ preventScroll: true });
+          }}
           onEscapeKeyDown={guardEsc}
           onPointerDownOutside={guardOutside}
           onInteractOutside={guardOutside}

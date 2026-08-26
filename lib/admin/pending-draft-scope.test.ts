@@ -156,6 +156,41 @@ test("the message endpoint limits an explicit unscoped draft request to job_id N
   assert.match(route, /shouldLoadCandidateAgentState\(jobIdFilter,\s*draftScope/);
 });
 
+test("the all-jobs message response includes a pending draft job in its label map", async () => {
+  const route = await readFile(
+    new URL("../../app/api/admin/messages/[applicantId]/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(route, /latestDraft\?\.job_id/);
+  assert.match(route, /jobIdsInThread/);
+});
+
+test("the message endpoint fails closed when the pending-draft query errors", async () => {
+  const route = await readFile(
+    new URL("../../app/api/admin/messages/[applicantId]/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    route,
+    /if\s*\(draftsError\)\s*\{[\s\S]*?return\s+NextResponse\.json\([\s\S]*?\{\s*status:\s*500\s*\}[\s\S]*?\);[\s\S]*?\}[\s\S]*?const\s+latestDraft\s*=/,
+  );
+});
+
+test("AI draft controls use a separate effective job context from the manual composer", async () => {
+  const thread = await readFile(
+    new URL("../../components/ConversationThread.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(thread, /bindConversationDraftJobContext/);
+  assert.match(thread, /const\s+canSendDraft\s*=/);
+  assert.match(thread, /id="draft-sms-job-context"/);
+  assert.match(thread, /aria-describedby="draft-sms-job-context"/);
+  assert.match(thread, /disabled=\{[^}]*!canSendDraft/);
+});
+
 test("the unscoped live tab passes an explicit draft scope into the conversation", async () => {
   const [live, thread] = await Promise.all([
     readFile(new URL("../../components/LiveConsole.tsx", import.meta.url), "utf8"),
@@ -180,6 +215,8 @@ test("the unscoped draft context hides unrelated job state and direct-send contr
     thread,
     /agentPresentation\.kind\s*===\s*"unscoped"\s*\?\s*\([\s\S]*?초안 카드[\s\S]*?\)\s*:\s*canSend\s*\?/,
   );
+  assert.match(thread, /const\s+showManualJobContext\s*=\s*agentPresentation\.kind\s*!==\s*"unscoped"\s*\|\|\s*!scopedPendingDraft/);
+  assert.match(thread, /\{showManualJobContext\s*&&\s*\([\s\S]*?id="sms-job-context"/);
 });
 
 test("a late unscoped ignore response cannot clear or leave a newer thread scope", async () => {

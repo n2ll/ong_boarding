@@ -9,6 +9,12 @@ import { createServiceClient } from "@/lib/supabase";
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule, writeExposureProtectRows } from "@/lib/exposure";
 import { DISTANCE_BASIS_VALUES, EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
+import {
+  validateJobUpdateRequiredFields,
+  validateJobUpdateRouting,
+  type JobCreateBranchRoutingRow,
+  type JobCreateClientRoutingRow,
+} from "@/lib/admin/job-create-server-validation";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -182,15 +188,116 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const supabase = createServiceClient();
 
+  const requiredFields = ["capacity", "pickup_address", "dropoff_address", "pay_info"] as const;
+  const touchesRequiredFields = requiredFields.some((field) => field in update);
+  let currentRequiredFields: Record<string, unknown> = {};
+  if (touchesRequiredFields && requiredFields.some((field) => !(field in update))) {
+    const { data: current, error: currentError } = await supabase
+      .from("jobs")
+      .select("capacity, pickup_address, dropoff_address, pay_info")
+      .eq("id", id)
+      .maybeSingle();
+    if (currentError) {
+      console.error("[jobs PATCH] required-field lookup", currentError);
+      return NextResponse.json({ error: "현재 공고 정보를 확인하지 못했어요." }, { status: 500 });
+    }
+    if (!current) {
+      return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+    }
+    currentRequiredFields = current;
+  }
+  const requiredIssue = validateJobUpdateRequiredFields(update, currentRequiredFields);
+  if (requiredIssue) {
+    return NextResponse.json({ error: requiredIssue.error, field: requiredIssue.field }, { status: 400 });
+  }
+
+  // 기존에 연결된 비활성 화주사·지점은 옛 공고를 수정할 수 있도록 보존하되,
+  // 다른 마스터로 연결을 바꾸는 순간에는 활성 상태를 다시 확인한다.
+  let validatedRoutingBranch: JobCreateBranchRoutingRow | null = null;
+  if ("client_id" in update || "branch_id" in update) {
+    const { data: currentRouting, error: currentRoutingError } = await supabase
+      .from("jobs")
+      .select("client_id, branch_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (currentRoutingError) {
+      console.error("[jobs PATCH] routing current lookup", currentRoutingError);
+      return NextResponse.json({ error: "현재 공고의 화주사·지점 정보를 확인하지 못했어요." }, { status: 500 });
+    }
+    if (!currentRouting) {
+      return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+    }
+
+    const currentClientId =
+      typeof currentRouting.client_id === "number" ? currentRouting.client_id : null;
+    const currentBranchId =
+      typeof currentRouting.branch_id === "number" ? currentRouting.branch_id : null;
+    const branchChanged =
+      "branch_id" in update && update.branch_id !== currentBranchId;
+
+    if (
+      branchChanged &&
+      typeof update.branch_id === "number" &&
+      Number.isSafeInteger(update.branch_id) &&
+      update.branch_id > 0
+    ) {
+      const { data: branchData, error: branchError } = await supabase
+        .from("branches")
+        .select("id, name, client_id, active")
+        .eq("id", update.branch_id)
+        .maybeSingle();
+      if (branchError) {
+        console.error("[jobs PATCH] routing branch lookup", branchError);
+        return NextResponse.json({ error: "지점 정보를 확인하지 못했습니다." }, { status: 500 });
+      }
+      validatedRoutingBranch = branchData as JobCreateBranchRoutingRow | null;
+    }
+
+    const targetClientId =
+      branchChanged && typeof validatedRoutingBranch?.client_id === "number"
+        ? validatedRoutingBranch.client_id
+        : "client_id" in update && typeof update.client_id === "number" && update.client_id !== currentClientId
+          ? update.client_id
+          : null;
+    let targetClient: JobCreateClientRoutingRow | null = null;
+    if (targetClientId !== null) {
+      const { data: clientData, error: clientError } = await supabase
+        .from("clients")
+        .select("id, active")
+        .eq("id", targetClientId)
+        .maybeSingle();
+      if (clientError) {
+        console.error("[jobs PATCH] routing client lookup", clientError);
+        return NextResponse.json({ error: "화주사 정보를 확인하지 못했습니다." }, { status: 500 });
+      }
+      targetClient = clientData as JobCreateClientRoutingRow | null;
+    }
+
+    const routingIssue = validateJobUpdateRouting({
+      currentClientId,
+      currentBranchId,
+      requestedClientId: "client_id" in update ? update.client_id : undefined,
+      requestedBranchId: "branch_id" in update ? update.branch_id : undefined,
+      branch: validatedRoutingBranch,
+      client: targetClient,
+    });
+    if (routingIssue) {
+      return NextResponse.json({ error: routingIssue.error }, { status: 400 });
+    }
+  }
+
   // 지점(branch_id) 변경 시 지점 이름·소속 화주사를 함께 맞춰 계층 정합성 유지.
   // 수정 모달에 화주사 셀렉트가 생겼고(잘못 귀속 바로잡기) 클라이언트가 화주사에 안 맞는 지점 선택을 미리 해제하므로,
   // 서버까지 온 불일치는 데이터 상태로 보고 '지점 기준'으로 정합화한다(저장을 막지 않는다).
   if (typeof update.branch_id === "number") {
-    const { data: b, error: bErr } = await supabase
-      .from("branches")
-      .select("name, client_id")
-      .eq("id", update.branch_id)
-      .maybeSingle();
+    const branchLookup = validatedRoutingBranch
+      ? { data: validatedRoutingBranch, error: null }
+      : await supabase
+          .from("branches")
+          .select("name, client_id")
+          .eq("id", update.branch_id)
+          .maybeSingle();
+    const { data: b, error: bErr } = branchLookup;
     // 조회 실패·없는 지점이면 계층 채움만 건너뛴다 — 저장 자체를 막지 않는다.
     // (지점이 지워진 옛 공고의 제목 수정까지 막히면 손댈 방법이 없어진다.)
     if (!bErr && b) {

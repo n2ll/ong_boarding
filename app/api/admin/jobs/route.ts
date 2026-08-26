@@ -24,8 +24,25 @@ import {
   jobCreateReplayDecision,
   validateJobCreateRequestId,
 } from "@/lib/admin/job-create-idempotency";
+import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+
+export const dynamic = "force-dynamic";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
+
+type JobAggregateCandidateRow = {
+  job_id: number;
+  agent_stage: string | null;
+  applicants:
+    | { status?: string | null; current_job_id?: number | null }
+    | { status?: string | null; current_job_id?: number | null }[]
+    | null;
+};
+
+type JobInterestRow = {
+  applicant_id: number | null;
+  job_id: number | null;
+};
 
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
@@ -56,7 +73,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
   }
 
-  // 공고별 후보 카운트(stage 별) 조회 — 한 번의 쿼리로.
+  // 공고별 후보 카운트(stage 별) — PostgREST 상한을 넘겨도 페이지 단위로 전량 조회한다.
   // 충원율은 매니저 명시 확정(applicants.status='확정인력')만 센다 — agent_stage='active'는 자동 전이라
   // '확정'이 아니다(확정은 매니저 판단, transitions.ts 참조). confirmed_count로 별도 집계해 게이지와
   // 보드의 '확정 슬롯 분포'가 같은 소스를 쓰게 한다.
@@ -70,18 +87,50 @@ export async function GET(req: NextRequest) {
   const stageCounts: Record<number, Record<string, number>> = {};
   const confirmedCounts: Record<number, number> = {};
   const reviewReadyCounts: Record<number, number> = {};
+  const interestCounts: Record<number, number> = {};
   if (jobIds.length > 0) {
-    const { data: cands } = await supabase
-      .from("job_candidates")
-      .select("job_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
-      .in("job_id", jobIds);
-    for (const c of cands ?? []) {
+    let candidateRows: JobAggregateCandidateRow[];
+    let interestRows: JobInterestRow[];
+    try {
+      [candidateRows, interestRows] = await Promise.all([
+        fetchAllPostgrestRows(async (from, to) => {
+          const result = await supabase
+            .from("job_candidates")
+            .select("id, job_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
+            .in("job_id", jobIds)
+            .order("id", { ascending: true })
+            .range(from, to);
+          return {
+            data: result.data as unknown as JobAggregateCandidateRow[] | null,
+            error: result.error,
+          };
+        }, "공고 후보 집계"),
+        fetchAllPostgrestRows(async (from, to) => {
+          const result = await supabase
+            .from("pool_events")
+            .select("id, applicant_id, job_id")
+            .eq("event_type", "interest_click")
+            .in("job_id", jobIds)
+            .order("id", { ascending: true })
+            .range(from, to);
+          return {
+            data: result.data as unknown as JobInterestRow[] | null,
+            error: result.error,
+          };
+        }, "공고 관심 집계"),
+      ]);
+    } catch (aggregateError) {
+      console.error("[jobs GET] aggregate load failed", aggregateError);
+      return NextResponse.json({ error: "공고 후보·관심 집계 조회 실패" }, { status: 500 });
+    }
+
+    for (const c of candidateRows) {
       const jid = c.job_id as number;
       const stage = (c.agent_stage as string | null) ?? "sent";
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
-      const rel = (c as { applicants?: { status?: string | null; current_job_id?: number | null } | { status?: string | null; current_job_id?: number | null }[] | null }).applicants;
+      const rel = c.applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
       // 스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보 — 공고 목록의 '후보 검토' 큐.
       // agent_stage='active'도 자동 전이일 수 있으므로 확정으로 간주하지 않는다.
@@ -101,20 +150,8 @@ export async function GET(req: NextRequest) {
         confirmedCounts[jid] = (confirmedCounts[jid] ?? 0) + 1;
       }
     }
-  }
-
-  // 공고별 관심 표시(interest_click) 인원수 — pull 채널 반응 현황. 같은 지원자의 중복 클릭은 1명으로 센다.
-  const interestCounts: Record<number, number> = {};
-  if (jobIds.length > 0) {
-    const { data: clicks } = await supabase
-      .from("pool_events")
-      .select("applicant_id, job_id")
-      .eq("event_type", "interest_click")
-      .in("job_id", jobIds)
-      // supabase 기본 1000행 절단 방지(pool-events/summary와 동일 상한).
-      .limit(5000);
     const seen = new Set<string>();
-    for (const ev of clicks ?? []) {
+    for (const ev of interestRows) {
       const jid = ev.job_id as number | null;
       const aid = ev.applicant_id as number | null;
       if (typeof jid !== "number" || typeof aid !== "number") continue;

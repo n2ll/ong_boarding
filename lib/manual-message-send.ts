@@ -13,6 +13,18 @@ export interface ManualMessageFingerprint {
   draftWasEdited: boolean;
 }
 
+export interface ManualMessageSendPayload {
+  applicant_id: number | null;
+  phone: string;
+  body: string;
+  sent_by: string;
+  job_id?: number;
+  draft_id?: string;
+  draft_was_edited?: boolean;
+  purpose: "current_application";
+  idempotency_key: string;
+}
+
 export type ManualMessageFailureCode =
   | "job_scope_mismatch"
   | "job_scope_unavailable"
@@ -20,6 +32,17 @@ export type ManualMessageFailureCode =
   | "recipient_unavailable"
   | "applicant_required"
   | "marketing_consent_required";
+
+/** 값이 있었는데 형식이 틀린 job_id를 공고 미지정 발송으로 낮추지 않는다. */
+export function parseManualMessageJobId(
+  value: unknown,
+): { ok: true; jobId: number | null } | { ok: false } {
+  if (value == null) return { ok: true, jobId: null };
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    return { ok: false };
+  }
+  return { ok: true, jobId: value };
+}
 
 export function manualMessageRecipientEligibility(
   request: { applicantId: number | null; phone: string },
@@ -132,6 +155,18 @@ export type ManualMessagePauseOutcome =
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** 명시된 draft_id가 잘못됐을 때 일반 문자 발송으로 낮추지 않는다. */
+export function parseManualMessageDraftId(
+  value: unknown,
+): { ok: true; draftId: string | null } | { ok: false } {
+  if (value == null) return { ok: true, draftId: null };
+  if (typeof value !== "string") return { ok: false };
+  const draftId = value.trim();
+  return UUID_PATTERN.test(draftId)
+    ? { ok: true, draftId }
+    : { ok: false };
+}
+
 /** 외부 SMS 호출 직전에 초안이 현재 지원자·공고의 미처리 건인지 다시 확인한다. */
 export function manualDraftSendEligibility(
   draft: ManualMessageDraftRecord | null,
@@ -185,6 +220,33 @@ export function nextManualMessageAttempt(
   const nextFingerprint = fingerprint(request);
   if (current?.fingerprint === nextFingerprint) return current;
   return { fingerprint: nextFingerprint, key: createKey() };
+}
+
+/** 동일한 발송 의도에서 중복 방지 키와 API payload를 함께 만들어 공고 결속의 어긋남을 막는다. */
+export function prepareManualMessageSend(
+  current: ManualMessageAttempt | null,
+  request: ManualMessageFingerprint,
+  createKey: () => string,
+): { attempt: ManualMessageAttempt; payload: ManualMessageSendPayload } {
+  const attempt = nextManualMessageAttempt(current, request, createKey);
+  return {
+    attempt,
+    payload: {
+      applicant_id: request.applicantId,
+      phone: request.phone,
+      body: request.body,
+      sent_by: request.sentBy,
+      ...(request.jobId !== null ? { job_id: request.jobId } : {}),
+      ...(request.draftId !== null
+        ? {
+            draft_id: request.draftId,
+            draft_was_edited: request.draftWasEdited,
+          }
+        : {}),
+      purpose: "current_application",
+      idempotency_key: attempt.key,
+    },
+  };
 }
 
 /**

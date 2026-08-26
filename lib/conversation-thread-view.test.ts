@@ -34,6 +34,50 @@ type ConversationThreadViewModule = {
     detail: string;
     sendReady: boolean;
   };
+  bindConversationJobContext?: (input: {
+    jobId: number | null;
+    draftScope: "all" | "unscoped";
+    context:
+      | { state: "loading" }
+      | { state: "error" }
+      | {
+          state: "ready";
+          scope: "job";
+          job: { id: number; title: string; branch: string | null };
+        }
+      | { state: "ready"; scope: "general" | "unscoped-draft"; job: null };
+  }) =>
+    | { state: "loading" }
+    | { state: "error" }
+    | {
+        state: "ready";
+        scope: "job";
+        job: { id: number; title: string; branch: string | null };
+      }
+    | { state: "ready"; scope: "general" | "unscoped-draft"; job: null };
+  bindConversationDraftJobContext?: (input: {
+    jobId: number | null;
+    draftJobId: number | null;
+    draftScope: "all" | "unscoped";
+    context:
+      | { state: "loading" }
+      | { state: "error" }
+      | {
+          state: "ready";
+          scope: "job";
+          job: { id: number; title: string; branch: string | null };
+        }
+      | { state: "ready"; scope: "general" | "unscoped-draft"; job: null };
+    draftJob: { id: number; title: string; branch: string | null } | null;
+  }) =>
+    | { state: "loading" }
+    | { state: "error" }
+    | {
+        state: "ready";
+        scope: "job";
+        job: { id: number; title: string; branch: string | null };
+      }
+    | { state: "ready"; scope: "general" | "unscoped-draft"; job: null };
 };
 
 async function loadModule(): Promise<ConversationThreadViewModule> {
@@ -159,5 +203,86 @@ test("intentional jobless contexts remain explicit instead of looking like a sel
       detail: "공고를 추정하지 않고 이 초안만 검수해 발송합니다.",
       sendReady: true,
     },
+  );
+});
+
+test("a displayed job context unlocks sending only for the exact payload job id", async () => {
+  const { bindConversationJobContext } = await loadModule();
+  assert.equal(typeof bindConversationJobContext, "function");
+
+  const displayedJob = {
+    state: "ready" as const,
+    scope: "job" as const,
+    job: { id: 31, title: "강남 새벽 배송", branch: "강남" },
+  };
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: 31, draftScope: "all", context: displayedJob }),
+    displayedJob,
+  );
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: 32, draftScope: "all", context: displayedJob }),
+    { state: "error" },
+  );
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: null, draftScope: "all", context: displayedJob }),
+    { state: "error" },
+  );
+});
+
+test("jobless and unscoped-draft composers cannot borrow each other's send-ready context", async () => {
+  const { bindConversationJobContext } = await loadModule();
+  assert.equal(typeof bindConversationJobContext, "function");
+
+  const general = { state: "ready" as const, scope: "general" as const, job: null };
+  const unscopedDraft = { state: "ready" as const, scope: "unscoped-draft" as const, job: null };
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: null, draftScope: "all", context: general }),
+    general,
+  );
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: null, draftScope: "unscoped", context: unscopedDraft }),
+    unscopedDraft,
+  );
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: null, draftScope: "all", context: unscopedDraft }),
+    { state: "error" },
+  );
+  assert.deepEqual(
+    bindConversationJobContext!({ jobId: null, draftScope: "unscoped", context: general }),
+    { state: "error" },
+  );
+});
+
+test("a job-bound AI draft in the all-jobs view names its actual outgoing job", async () => {
+  const { bindConversationDraftJobContext } = await loadModule();
+  assert.equal(typeof bindConversationDraftJobContext, "function");
+
+  const general = { state: "ready" as const, scope: "general" as const, job: null };
+  const draftJob = { id: 31, title: "강남 새벽 배송", branch: "강남" };
+  assert.deepEqual(
+    bindConversationDraftJobContext!({
+      jobId: null,
+      draftJobId: 31,
+      draftScope: "all",
+      context: general,
+      draftJob,
+    }),
+    { state: "ready", scope: "job", job: draftJob },
+  );
+});
+
+test("a job-bound AI draft stays locked when its display label cannot be verified", async () => {
+  const { bindConversationDraftJobContext } = await loadModule();
+  assert.equal(typeof bindConversationDraftJobContext, "function");
+
+  assert.deepEqual(
+    bindConversationDraftJobContext!({
+      jobId: null,
+      draftJobId: 31,
+      draftScope: "all",
+      context: { state: "ready", scope: "general", job: null },
+      draftJob: null,
+    }),
+    { state: "error" },
   );
 });

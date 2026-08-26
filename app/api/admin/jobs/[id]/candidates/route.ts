@@ -9,6 +9,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { ensureExposureIncludeForLinked } from "@/lib/exposure";
+import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+
+export const dynamic = "force-dynamic";
+
+type CandidateBoardRow = Record<string, unknown> & {
+  applicants?:
+    | { lat?: number | null; lng?: number | null }
+    | { lat?: number | null; lng?: number | null }[]
+    | null;
+};
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params;
@@ -18,46 +28,69 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const supabase = createServiceClient();
-  const { data: rows, error } = await supabase
-    .from("job_candidates")
-    .select(`
-      id, job_id, applicant_id, agent_stage, agent_state, paused_reason,
-      sent_at, responded_at, screening_passed_at, activated_at, closed_at, closed_reason,
-      created_at, updated_at,
-      applicants:applicant_id (
-        id, name, phone, branch1, branch2, work_hours, location,
-        own_vehicle, license_type, vehicle_type, available_date, status,
-        source, confirmed_slot, confirmed_branch, availability,
-        lat, lng, applied_at,
-        last_message_at
-      )
-    `)
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false });
+  let rows: CandidateBoardRow[];
+  let job: GeoJob | null;
+  const [candidateResult, jobResult] = await Promise.allSettled([
+    fetchAllPostgrestRows(async (from, to) => {
+      const result = await supabase
+        .from("job_candidates")
+        .select(`
+          id, job_id, applicant_id, agent_stage, agent_state, paused_reason,
+          sent_at, responded_at, screening_passed_at, activated_at, closed_at, closed_reason,
+          created_at, updated_at,
+          applicants:applicant_id (
+            id, name, phone, branch1, branch2, work_hours, location,
+            own_vehicle, license_type, vehicle_type, available_date, status,
+            source, confirmed_slot, confirmed_branch, availability,
+            lat, lng, applied_at,
+            last_message_at
+          )
+        `)
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
+      return {
+        data: result.data as unknown as CandidateBoardRow[] | null,
+        error: result.error,
+      };
+    }, "공고 후보"),
+    supabase
+      .from("jobs")
+      .select(EXPOSURE_JOB_GEO_COLUMNS)
+      .eq("id", jobId)
+      .maybeSingle(),
+  ]);
 
-  if (error) {
-    console.error("[candidates GET]", error);
+  if (candidateResult.status === "rejected") {
+    console.error("[candidates GET]", candidateResult.reason);
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
+  }
+  rows = candidateResult.value;
+
+  if (jobResult.status === "rejected") {
+    console.error("[candidates GET] optional job geo", jobResult.reason);
+    job = null;
+  } else if (jobResult.value.error) {
+    console.error("[candidates GET] optional job geo", jobResult.value.error);
+    job = null;
+  } else {
+    job = (jobResult.value.data as unknown as GeoJob | null) ?? null;
   }
 
   // 후보↔공고 거리(km) — 상차지·마지막 경유지 중 가까운 쪽 기준(파이프라인 거리 정렬과 동일 원칙).
   // 보드 '추천순' 정렬과 카드 메타 줄의 근거로 distance_km을 함께 내려준다.
-  const { data: job } = await supabase
-    .from("jobs")
-    .select(EXPOSURE_JOB_GEO_COLUMNS)
-    .eq("id", jobId)
-    .maybeSingle();
 
-  const candidates = (rows ?? []).map((r) => {
+  const candidates = rows.map((r) => {
     // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어(jobs GET과 동일 패턴).
-    const rel = (r as { applicants?: { lat?: number | null; lng?: number | null } | { lat?: number | null; lng?: number | null }[] | null }).applicants;
+    const rel = r.applicants;
     const a = Array.isArray(rel) ? rel[0] : rel;
     const alat = a?.lat;
     const alng = a?.lng;
     // 거리는 lib/geo 단일 공식 — 기준점은 공고가 정한다(distance_basis). 화면마다 다른 숫자를 만들지 않는다.
     const distance_km = distanceToJobKm(
       { lat: typeof alat === "number" ? alat : null, lng: typeof alng === "number" ? alng : null },
-      (job ?? null) as unknown as GeoJob | null
+      job
     );
     return { ...r, distance_km };
   });

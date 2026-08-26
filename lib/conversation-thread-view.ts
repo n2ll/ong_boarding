@@ -18,6 +18,64 @@ export type ConversationJobContext =
     }
   | { state: "ready"; scope: "general" | "unscoped-draft"; job: null };
 
+/**
+ * 화면에 표시할 공고 맥락과 실제 조회·발송에 쓰는 scope를 한 번 더 결속한다.
+ * 두 prop이 잠깐이라도 어긋나면 어느 쪽도 추정하지 않고 발송을 잠근다.
+ */
+export function bindConversationJobContext(input: {
+  jobId: number | null;
+  draftScope: "all" | "unscoped";
+  context: ConversationJobContext;
+}): ConversationJobContext {
+  if (input.context.state !== "ready") return input.context;
+  if (input.jobId !== null) {
+    return input.context.scope === "job" && input.context.job.id === input.jobId
+      ? input.context
+      : { state: "error" };
+  }
+  if (input.draftScope === "unscoped") {
+    return input.context.scope === "unscoped-draft"
+      ? input.context
+      : { state: "error" };
+  }
+  return input.context.scope === "general"
+    ? input.context
+    : { state: "error" };
+}
+
+/**
+ * 전체 대화에서도 공고 귀속 AI 초안은 보일 수 있다. 일반 작성창의 null job_id 맥락을
+ * 빌려 쓰지 않고, 초안이 실제 전송할 job_id의 검증된 라벨에 별도로 결속한다.
+ */
+export function bindConversationDraftJobContext(input: {
+  jobId: number | null;
+  draftJobId: number | null;
+  draftScope: "all" | "unscoped";
+  context: ConversationJobContext;
+  draftJob: { id: number; title: string; branch: string | null } | null;
+}): ConversationJobContext {
+  const base = bindConversationJobContext({
+    jobId: input.jobId,
+    draftScope: input.draftScope,
+    context: input.context,
+  });
+  if (base.state !== "ready") return base;
+
+  const effectiveJobId = input.jobId ?? input.draftJobId;
+  if (effectiveJobId === null) return base;
+  if (input.jobId !== null) return base;
+
+  if (
+    base.scope !== "general"
+    || !input.draftJob
+    || input.draftJob.id !== effectiveJobId
+  ) {
+    return { state: "error" };
+  }
+
+  return { state: "ready", scope: "job", job: input.draftJob };
+}
+
 export function conversationJobContextPresentation(
   input: ConversationJobContext,
 ): {

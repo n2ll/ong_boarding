@@ -106,10 +106,11 @@ export async function GET(
     if (jobIdFilter !== null) pendingDraftQuery = pendingDraftQuery.eq("job_id", jobIdFilter);
     else if (draftScopeParam === "unscoped") pendingDraftQuery = pendingDraftQuery.is("job_id", null);
     const { data: pendingDrafts, error: draftsError } = await pendingDraftQuery.limit(1);
-    if (draftsError) console.error("[messages draft fetch error]", draftsError);
-    const latestDraft = draftsError
-      ? null
-      : selectPendingDraftForJob(pendingDrafts ?? [], jobIdFilter);
+    if (draftsError) {
+      console.error("[messages draft fetch error]", draftsError);
+      return NextResponse.json({ error: "초안 조회 실패" }, { status: 500 });
+    }
+    const latestDraft = selectPendingDraftForJob(pendingDrafts ?? [], jobIdFilter);
 
     // 메시지별 reasoning 매핑 — message_drafts.used_message_id 기준
     // (router.ts가 자동 발송 시 status='auto_sent'로 함께 insert함)
@@ -155,7 +156,11 @@ export async function GET(
     // 시스템 더미 공고(__ 접두)는 제외 → 칩 미표시.
     const jobIdsInThread = Array.from(
       new Set(
-        [...messagesList.map((m) => m.job_id), ...eventsList.map((e) => e.job_id)].filter(
+        [
+          ...messagesList.map((m) => m.job_id),
+          ...eventsList.map((e) => e.job_id),
+          latestDraft?.job_id,
+        ].filter(
           (x): x is number => typeof x === "number"
         )
       )

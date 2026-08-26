@@ -14,6 +14,12 @@ export interface JobCreateWorkLocationInput {
   dropoffAddress: string;
 }
 
+export interface JobRequiredFieldsInput
+  extends JobCreateCompensationInput,
+    JobCreateWorkLocationInput {
+  capacity: number | "";
+}
+
 export function validateJobCreateCapacity(
   capacity: number | "",
 ): JobCreateValidationIssue | null {
@@ -59,4 +65,15 @@ export function validateJobCreateWorkLocation({
   }
 
   return null;
+}
+
+/** 등록과 수정 화면이 같은 순서·문구로 운영 필수값을 검증한다. */
+export function validateJobRequiredFields(
+  input: JobRequiredFieldsInput,
+): JobCreateValidationIssue | null {
+  return (
+    validateJobCreateCapacity(input.capacity)
+    ?? validateJobCreateWorkLocation(input)
+    ?? validateJobCreateCompensation(input)
+  );
 }

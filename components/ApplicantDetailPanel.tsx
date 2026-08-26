@@ -422,7 +422,6 @@ export function ApplicantDetailContent({
   useEffect(() => { setFocusOverrideLocal(null); }, [applicantId, jobId]);
   // 부모가 표시 기준 공고를 들고 있으면 그 값을 쓴다(드로어: 상세 탭·대화 탭이 같은 공고를 봐야 한다).
   const controlled = onFocusJobChange != null;
-  const focusOverride = controlled ? (focusJobIdProp ?? null) : focusOverrideLocal;
   const setFocusOverride = (v: number | null, job?: LiveJobLink) => (
     controlled ? onFocusJobChange!(v, job) : setFocusOverrideLocal(v)
   );
@@ -588,8 +587,14 @@ export function ApplicantDetailContent({
 
   // 표시 대상 후보 — 패널에서 고른 공고 > 부르는 화면이 준 공고 > 최신.
   // (기본값을 '최신'에서 바꾸지 않는다 — 확정 모달·후속 발송의 대상이 조용히 달라지면 안 된다.)
-  const focusJobId = focusOverride ?? jobId;
-  const focusCand = (focusJobId != null ? cands.find((c) => c.job_id === focusJobId) : cands[0]) ?? null;
+  const focusJobId = controlled
+    ? (focusJobIdProp ?? null)
+    : focusOverrideLocal ?? jobId;
+  const focusCand = focusJobId != null
+    ? cands.find((c) => c.job_id === focusJobId) ?? null
+    : controlled
+      ? null
+      : cands[0] ?? null;
   const requestFocusJobChange = (nextJobId: number | null, job?: LiveJobLink) => {
     if (nextJobId === focusJobId) return;
     if (dirty) {

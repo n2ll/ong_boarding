@@ -94,6 +94,21 @@ test("the live detail panel and central conversation share one selected job", ()
     /<ApplicantDetailContent[\s\S]*?focusJobId=\{currentSelectedJobId\}[\s\S]*?onFocusJobChange=/,
   );
   assert.match(applicantDetail, /onFocusJobChange\?:/);
+  assert.match(
+    live,
+    /const handleDetailJobFocus[\s\S]*?selectLiveJob\(jobId\)[\s\S]*?<ConversationThread[\s\S]*?jobId=\{currentSelectedJobId\}/,
+  );
+});
+
+test("the controlled live detail preserves an explicitly unscoped draft", () => {
+  assert.match(
+    applicantDetail,
+    /const focusJobId\s*=\s*controlled\s*\?[\s\S]*?focusJobIdProp[\s\S]*?:[\s\S]*?focusOverrideLocal\s*\?\?\s*jobId/,
+  );
+  assert.match(
+    applicantDetail,
+    /const focusCand\s*=\s*focusJobId\s*!=\s*null[\s\S]*?cands\.find[\s\S]*?:\s*controlled\s*\?\s*null\s*:\s*cands\[0\]/,
+  );
 });
 
 test("applicant detail never exposes a response owned by the previously selected person", () => {

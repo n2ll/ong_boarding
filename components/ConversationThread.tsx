@@ -14,7 +14,7 @@ import {
 import {
   manualMessageClientResolution,
   manualMessagePauseOutcome,
-  nextManualMessageAttempt,
+  prepareManualMessageSend,
 } from "@/lib/manual-message-send";
 import {
   clearDraftMessageComposerSnapshot,
@@ -30,6 +30,8 @@ import {
   type ManualMessageComposerSnapshot,
 } from "@/lib/manual-message-composer-storage";
 import {
+  bindConversationDraftJobContext,
+  bindConversationJobContext,
   conversationAgentPresentation,
   conversationJobContextPresentation,
   conversationMessagesView,
@@ -453,12 +455,33 @@ export function ConversationThread({
           : oldest;
       }, null)
     : null;
-  const jobContextCopy = conversationJobContextPresentation(jobContext);
+  const boundJobContext = bindConversationJobContext({ jobId, draftScope, context: jobContext });
+  const jobContextCopy = conversationJobContextPresentation(boundJobContext);
+  const scopedDraftJobLabel = scopedPendingDraft?.job_id != null
+    ? currentJobsMap[scopedPendingDraft.job_id]
+    : null;
+  const boundDraftJobContext = bindConversationDraftJobContext({
+    jobId,
+    draftJobId: scopedPendingDraft?.job_id ?? null,
+    draftScope,
+    context: jobContext,
+    draftJob: scopedPendingDraft?.job_id != null && scopedDraftJobLabel
+      ? {
+          id: scopedPendingDraft.job_id,
+          title: scopedDraftJobLabel.title,
+          branch: scopedDraftJobLabel.branch,
+        }
+      : null,
+  });
+  const draftJobContextCopy = conversationJobContextPresentation(boundDraftJobContext);
   const agentPresentation = conversationAgentPresentation({
     scopeReady: scopeReady && jobContextCopy.sendReady,
     draftScope,
     agentStage,
   });
+  // 미지정 초안 카드가 이미 같은 발송 맥락을 명확히 보여주는 동안에는 하단 수동 작성창의
+  // 동일 배너를 반복하지 않는다. 수동 작성은 잠긴 상태이므로 아래 안내만 남긴다.
+  const showManualJobContext = agentPresentation.kind !== "unscoped" || !scopedPendingDraft;
 
   // 스크롤: 최초 로드는 '마지막 지원자(inbound) 메시지' 위치로 — 무엇에 답해야 하는지 바로 보이게.
   // inbound가 없으면 기존처럼 맨 아래. 이후 새 메시지 도착 시에는 맨 아래로.
@@ -505,6 +528,7 @@ export function ConversationThread({
   // 로컬 AI가 이미 멈췄거나, 최신 전역 상태가 off/draft임이 확인된 경우만 직접 발송한다.
   // cached+error에서 예전 off/draft를 믿으면 실제 auto와 매니저 답장이 겹칠 수 있다.
   const canSend = scopeReady && jobContextCopy.sendReady && (!isAiEnabled || agentModeAllowsManualSend(agentMode));
+  const canSendDraft = scopeReady && draftJobContextCopy.sendReady && (!isAiEnabled || agentModeAllowsManualSend(agentMode));
 
   // 멀티-잡: 이 스레드가 2개 이상 공고에 걸쳐 있으면 말풍선마다 공고 라벨 칩 표시(섞임 방지).
   // 특정 공고로 필터된 스레드(jobId 지정)나 단일 공고면 칩을 숨겨 노이즈를 줄인다.
@@ -542,8 +566,8 @@ export function ConversationThread({
   // 빠른 템플릿 변수 치환 — #{이름}/#{공고명}/#{지점}/#{맞춤링크}(bulk-send 문법 통일).
   // 값이 없는 변수는 토큰을 그대로 남기고 목록으로 돌려줘 경고 토스트의 근거로 쓴다.
   const fillTemplateVars = (text: string): { filled: string; unresolved: string[] } => {
-    const contextJob = jobContext.state === "ready" && jobContext.scope === "job"
-      ? jobContext.job
+    const contextJob = boundJobContext.state === "ready" && boundJobContext.scope === "job"
+      ? boundJobContext.job
       : undefined;
     const job = contextJob ?? (jobId != null ? currentJobsMap[jobId] : undefined);
     const values: Record<string, string | null> = {
@@ -697,7 +721,7 @@ export function ConversationThread({
       return;
     }
     const body = inputValue.trim();
-    const attempt = nextManualMessageAttempt(
+    const { attempt, payload } = prepareManualMessageSend(
       manualComposer.attempt,
       { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
       () => crypto.randomUUID()
@@ -721,7 +745,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, purpose: "current_application", idempotency_key: attempt.key }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({}));
       const resolution = manualMessageClientResolution(json, res.ok);
@@ -780,6 +804,10 @@ export function ConversationThread({
   // §6.5 원자 동작: 발송 성공 후 인계 큐의 'AI 재개'와 동일한 재개 API를 순차 호출.
   const handleSendAndResume = async (advanceAfterSend = false) => {
     if (!manualComposerReady || !inputValue.trim() || sending) return;
+    if (!canSend) {
+      toast.error("AI 모드를 확인하거나 발송 대상 공고를 다시 확인해주세요.");
+      return;
+    }
     if (resumeTarget === null) {
       toast.error(agentModeCopy.kind === "off"
         ? "전역 AI가 중지되어 있어 발송 후 재개할 수 없어요. '발송만'을 사용해주세요."
@@ -795,7 +823,7 @@ export function ConversationThread({
       return;
     }
     const body = inputValue.trim();
-    const attempt = nextManualMessageAttempt(
+    const { attempt, payload } = prepareManualMessageSend(
       manualComposer.attempt,
       { applicantId, phone, body, jobId, sentBy: "관리자", draftId: null, draftWasEdited: false },
       () => crypto.randomUUID()
@@ -819,7 +847,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, purpose: "current_application", idempotency_key: attempt.key }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       const resolution = manualMessageClientResolution(json, res.ok);
@@ -882,8 +910,8 @@ export function ConversationThread({
 
   const handleSendDraft = async (advanceAfterSend = false) => {
     if (!scopedPendingDraft || !draftComposerReady || draftBusy) return;
-    if (!canSend) {
-      toast.error("AI 모드를 확인하거나 이 대화의 AI를 끈 뒤 초안을 발송해주세요.");
+    if (!canSendDraft) {
+      toast.error("AI 모드 또는 초안이 실제로 연결된 공고를 다시 확인해주세요.");
       return;
     }
     if (!phone) {
@@ -900,14 +928,14 @@ export function ConversationThread({
       return;
     }
     const draftWasEdited = body !== (scopedPendingDraft.draft_text ?? "");
-    const draftJobId = jobId ?? scopedPendingDraft.job_id;
-    const attempt = nextManualMessageAttempt(
+    const effectiveDraftJobId = scopedPendingDraft.job_id;
+    const { attempt, payload } = prepareManualMessageSend(
       draftComposer.attempt,
       {
         applicantId,
         phone,
         body,
-        jobId: draftJobId,
+        jobId: effectiveDraftJobId,
         sentBy: "관리자",
         draftId: scopedPendingDraft.id,
         draftWasEdited,
@@ -931,17 +959,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicant_id: applicantId,
-          phone,
-          body,
-          sent_by: "관리자",
-          job_id: draftJobId ?? undefined,
-          draft_id: scopedPendingDraft.id,
-          draft_was_edited: draftWasEdited,
-          purpose: "current_application",
-          idempotency_key: attempt.key,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({}));
       const resolution = manualMessageClientResolution(json, res.ok);
@@ -1323,13 +1341,35 @@ export function ConversationThread({
               </div>
               <span className="text-[12px] font-bold text-copilot-strong">검수 후 발송됩니다</span>
             </div>
+            <div
+              id="draft-sms-job-context"
+              role={draftJobContextCopy.kind === "error" ? "alert" : "status"}
+              aria-live={draftJobContextCopy.kind === "error" ? "assertive" : "polite"}
+              className={`mb-2.5 flex items-start gap-2 rounded-xl border bg-card/80 px-3 py-2 ${
+                draftJobContextCopy.sendReady
+                  ? "border-copilot/30 text-copilot-strong"
+                  : "border-error/30 text-error-strong"
+              }`}
+            >
+              {draftJobContextCopy.sendReady
+                ? <BriefcaseBusiness aria-hidden="true" size={15} className="mt-0.5 shrink-0" />
+                : <LockKeyhole aria-hidden="true" size={15} className="mt-0.5 shrink-0" />}
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-extrabold" title={draftJobContextCopy.title}>
+                  {draftJobContextCopy.label} · {draftJobContextCopy.title}
+                </div>
+                <div className="truncate text-[12px] font-medium text-muted-foreground" title={draftJobContextCopy.detail}>
+                  {draftJobContextCopy.detail}
+                </div>
+              </div>
+            </div>
             {scopedPendingDraft.status === "need_info" && scopedPendingDraft.missing_info && (
               <div className="mb-2.5 text-[12px] text-warning-strong bg-card border border-warning/35 rounded-lg px-3 py-2 leading-relaxed">
                 <b>부족한 정보:</b> {scopedPendingDraft.missing_info}
               </div>
             )}
             <textarea
-              aria-describedby="sms-job-context"
+              aria-describedby="draft-sms-job-context"
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
               disabled={draftBusy || !draftComposerReady}
@@ -1345,11 +1385,11 @@ export function ConversationThread({
             <div className="flex items-center justify-end gap-2 mt-3">
               <button onClick={handleIgnoreDraft} disabled={draftBusy || !draftComposerReady} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-4 py-2 rounded-2xl text-[13px] font-bold text-muted-foreground hover:bg-card border border-border-strong disabled:opacity-50 flex items-center gap-1.5"><X size={15} /> 무시</button>
               {onQueueItemCompleted && (
-                <button aria-describedby="sms-job-context" onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
+                <button aria-describedby="draft-sms-job-context" onClick={() => void handleSendDraft(false)} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSendDraft} className="min-h-10 rounded-xl border border-border-strong bg-card px-3.5 text-[13px] font-bold text-gray-700 outline-none hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring">
                   검수 발송만
                 </button>
               )}
-              <button aria-describedby="sms-job-context" onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSend} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
+              <button aria-describedby="draft-sms-job-context" onClick={() => void handleSendDraft(Boolean(onQueueItemCompleted))} disabled={draftBusy || !draftComposerReady || !draftText.trim() || !canSendDraft} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-10 px-4 rounded-xl text-[13px] font-bold text-white bg-copilot-strong hover:bg-copilot-strong disabled:opacity-50 flex items-center gap-1.5">
                 {draftBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {onQueueItemCompleted ? (hasNextQueueItem ? "검수 발송 후 다음" : "검수 발송하고 완료") : "검수 후 발송"}
                 {onQueueItemCompleted && !draftBusy && <ArrowRight size={15} />}
@@ -1361,6 +1401,7 @@ export function ConversationThread({
 
       {/* 입력 영역 */}
       <div className="p-5 bg-card border-t border-border-strong shrink-0">
+        {showManualJobContext && (
         <div
           id="sms-job-context"
           role={jobContextCopy.kind === "error" ? "alert" : "status"}
@@ -1422,6 +1463,7 @@ export function ConversationThread({
             </button>
           )}
         </div>
+        )}
 
         {!jobContextCopy.sendReady ? (
           <div className="flex min-h-[54px] items-center justify-center gap-2 text-[13px] font-semibold text-muted-foreground">

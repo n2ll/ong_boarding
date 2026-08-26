@@ -9,6 +9,8 @@ import {
   manualMessageJobBindingEligibility,
   manualMessageRecipientEligibility,
   manualMessagePostprocessResult,
+  parseManualMessageDraftId,
+  parseManualMessageJobId,
   type ExistingManualMessageRequest,
   type ManualMessageFingerprint,
   validateManualMessageIdempotencyKey,
@@ -35,7 +37,30 @@ export async function POST(req: NextRequest) {
       idempotency_key,
     } = await req.json();
     // 매니저 답장의 공고 컨텍스트 — 스레드 job_id 필터·인계 큐 매칭이 어긋나지 않게 함께 저장.
-    const jobId: number | null = typeof job_id === "number" && Number.isFinite(job_id) ? job_id : null;
+    const parsedJobId = parseManualMessageJobId(job_id);
+    if (!parsedJobId.ok) {
+      return NextResponse.json(
+        {
+          error: "유효하지 않은 공고 ID입니다. 대화를 새로고침한 뒤 다시 시도해주세요.",
+          delivery: "not_attempted",
+          retryable: true,
+        },
+        { status: 400 },
+      );
+    }
+    const jobId = parsedJobId.jobId;
+    const parsedDraftId = parseManualMessageDraftId(draft_id);
+    if (!parsedDraftId.ok) {
+      return NextResponse.json(
+        {
+          error: "유효하지 않은 문자 초안 ID입니다. 대화를 새로고침한 뒤 다시 시도해주세요.",
+          delivery: "not_attempted",
+          retryable: true,
+        },
+        { status: 400 },
+      );
+    }
+    const draftId = parsedDraftId.draftId;
     const applicantId: number | null = typeof applicant_id === "number" && Number.isFinite(applicant_id)
       ? applicant_id
       : null;
@@ -78,7 +103,6 @@ export async function POST(req: NextRequest) {
     }
     const idempotencyKey = validatedKey.key;
     const supabase = createServiceClient();
-    const draftId = typeof draft_id === "string" && draft_id.trim() ? draft_id.trim() : null;
     const draftWasEdited = draft_was_edited === true;
     const requestFingerprint: ManualMessageFingerprint = {
       applicantId,

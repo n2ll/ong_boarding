@@ -61,3 +61,26 @@ test("job creation requires the current posting's pickup and delivery details", 
     null,
   );
 });
+
+test("new and edited jobs share one ordered required-field contract", async () => {
+  const validationModule = await import("./job-create-validation.ts");
+  const validate = validationModule.validateJobRequiredFields;
+
+  assert.equal(typeof validate, "function", "shared job form validation should exist");
+  if (typeof validate !== "function") return;
+
+  const valid = {
+    capacity: 3,
+    pickupAddress: "성수동 물류센터",
+    dropoffAddress: "하남 미사 일대",
+    payType: "건당",
+    payAmount: 3500,
+    payInfo: "건당 3,500원 · 매주 금요일 정산",
+  };
+
+  assert.equal(validate({ ...valid, capacity: 0 })?.field, "capacity");
+  assert.equal(validate({ ...valid, pickupAddress: " " })?.field, "pickupAddress");
+  assert.equal(validate({ ...valid, dropoffAddress: " " })?.field, "dropoffAddress");
+  assert.equal(validate({ ...valid, payInfo: " " })?.field, "payInfo");
+  assert.equal(validate(valid), null);
+});
