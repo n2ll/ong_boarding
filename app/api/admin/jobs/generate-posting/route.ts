@@ -7,13 +7,17 @@
  *   2) 실패(키 없음/타임아웃/파싱 실패)하면 메모를 휴리스틱 파싱해 목업 템플릿으로 폴백
  * → 시연 중 네트워크/모델 이슈가 있어도 항상 그럴듯한 결과를 반환한다.
  *
- * body: { prompt: string }
+ * body: { prompt: string, client_id?, branch_id?, pickup_address?, dropoff_address? }
  * res:  { ok, source: "ai"|"mock", posting: MultiPlatformPosting }
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { generateMultiPlatformPosting, type MultiPlatformPosting } from "@/lib/claude";
+import {
+  buildCurrentJobPostingLocationContext,
+  formatCurrentJobPostingLocation,
+} from "@/lib/admin/job-posting-context";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -22,11 +26,15 @@ export async function POST(req: NextRequest) {
   let prompt = "";
   let clientId: number | null = null;
   let branchId: number | null = null;
+  let pickupAddress = "";
+  let dropoffAddress = "";
   try {
     const body = await req.json();
     prompt = String(body?.prompt ?? "").trim();
     if (typeof body?.client_id === "number") clientId = body.client_id;
     if (typeof body?.branch_id === "number") branchId = body.branch_id;
+    if (typeof body?.pickup_address === "string") pickupAddress = body.pickup_address.trim();
+    if (typeof body?.dropoff_address === "string") dropoffAddress = body.dropoff_address.trim();
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
@@ -37,10 +45,14 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient();
   // 선택된 화주사·지점 마스터에서 검증된 사실(화주사명·지점 집결지/시급 등 ai_facts)을 모아 초안 생성에 주입(D2).
   const masterContext = await buildMasterContext(supabase, clientId, branchId);
+  // 상차지·배송지는 라인 마스터가 아니라 이번 공고의 값이 권위값이다. 마스터와 충돌하면 이 값을 우선하라고 명시한다.
+  const currentLocation = { pickupAddress, dropoffAddress };
+  const currentLocationContext = buildCurrentJobPostingLocationContext(currentLocation);
+  const generationContext = [masterContext, currentLocationContext].filter(Boolean).join("\n") || undefined;
 
   // 1) Claude 우선
   try {
-    const ai = await generateMultiPlatformPosting(prompt, supabase, masterContext);
+    const ai = await generateMultiPlatformPosting(prompt, supabase, generationContext);
     if (ai && ai.danggeun?.body && ai.albamon?.body && ai.sms?.body) {
       return NextResponse.json({ ok: true, source: "ai", posting: ai });
     }
@@ -49,7 +61,11 @@ export async function POST(req: NextRequest) {
   }
 
   // 2) 목업 폴백
-  return NextResponse.json({ ok: true, source: "mock", posting: buildMockPosting(prompt) });
+  return NextResponse.json({
+    ok: true,
+    source: "mock",
+    posting: buildMockPosting(prompt, formatCurrentJobPostingLocation(currentLocation)),
+  });
 }
 
 // 화주사(clients.name) + 지점(branches.name·ai_facts)에서 '검증된 사실'을 조립. 없으면 undefined.
@@ -80,11 +96,11 @@ async function buildMasterContext(
 // 목업 폴백 — 메모에서 핵심 정보를 휴리스틱으로 뽑아 채널별 템플릿에 채운다.
 // ──────────────────────────────────────────────────────────────────────────
 
-function buildMockPosting(prompt: string): MultiPlatformPosting {
+function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPosting {
   const f = parseRough(prompt);
 
   const company = f.company || "옹고잉";
-  const location = f.location || "";
+  const location = currentLocation || f.location || "";
   const pay = f.pay || "협의";
   const schedule = f.schedule || "협의";
   const role = f.role || "배송";

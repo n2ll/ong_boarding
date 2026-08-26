@@ -167,9 +167,8 @@ generate_multi_posting 도구로만 응답해라. 줄바꿈은 실제 개행(\\n
 export async function generateMultiPlatformPosting(
   rough: string,
   supabase?: SupabaseClient,
-  // 화주사/지점 마스터에서 서버가 조회한 '검증된 사실'(집결지·시급 등). 있으면 초안에 반영한다
-  // — '지어내지 마라' 규칙과 충돌 없이(제공된 사실이므로) 채널 초안 정확도를 높인다(주제 D2).
-  masterContext?: string
+  // 화주사/지점 마스터와 이번 공고의 입력 위치를 합친 공고 맥락. 현재 공고 값이 마스터보다 우선한다.
+  postingContext?: string
 ): Promise<MultiPlatformPosting | null> {
   const apiKey = process.env.CLAUDE_API;
   if (!apiKey) {
@@ -241,8 +240,8 @@ export async function generateMultiPlatformPosting(
     messages: [
       {
         role: "user",
-        content: masterContext
-          ? `${rough}\n\n[검증된 마스터 사실 — 시스템이 화주사·지점 마스터에서 확인한 정보다. 초안에 반영해도 되고, 여기 없는 건 지어내지 마라]\n${masterContext}`
+        content: postingContext
+          ? `${rough}\n\n[확인된 공고 맥락 — 초안에 반드시 반영하되, 여기 없는 정보는 지어내지 마라. '이번 공고 입력 위치'는 화주사·지점 마스터보다 우선한다]\n${postingContext}`
           : rough,
       },
     ],

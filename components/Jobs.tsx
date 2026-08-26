@@ -10,6 +10,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { SelectField, TextareaField, TextField } from "./ui/field";
 import { StageBadge } from "./ui/stage-badge";
 import { Modal } from "./ui/modal";
 import { sourceLabel } from "@/lib/applicant-source";
@@ -25,6 +26,20 @@ import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockMan
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
 import { buildJobListSummary, type JobListSummaryItem } from "@/lib/admin/job-list-layout";
 import {
+  validateJobCreateCapacity,
+  validateJobCreateCompensation,
+  validateJobCreateWorkLocation,
+  type JobCreateValidationIssue,
+} from "@/lib/admin/job-create-validation";
+import { hasJobCreateDraft, jobCreateDraftBody } from "@/lib/admin/job-create-draft";
+import {
+  changedJobGenerationContextFields,
+  createJobGenerationContext,
+  resolveJobGenerationAutofill,
+  type JobGenerationContext,
+  type JobGenerationContextField,
+} from "@/lib/admin/job-generation-context";
+import {
   agentModePresentation,
   agentModeView,
   fetchFreshAgentMode,
@@ -34,6 +49,15 @@ import {
   announceZeroTargetDescription,
   isIntentionalCampaignGuardError,
 } from "@/lib/admin/types";
+import {
+  beginJobRegistrationFollowup,
+  settleJobRegistrationFollowup,
+  type JobRegistrationFollowup,
+} from "@/lib/admin/job-registration-followup";
+import {
+  nextJobCreateAttempt,
+  type JobCreateAttempt,
+} from "@/lib/admin/job-create-idempotency";
 import { currentJobClosedSmsBody } from "@/lib/sms-consent-policy";
 
 interface JobRow {
@@ -99,6 +123,14 @@ interface ApiJob {
 interface ClientOpt { id: number; name: string; client_type?: string | null; uses_slots?: boolean }
 interface BranchOpt { id: number; name: string; client_id: number | null }
 interface SiteManagerOpt { id: number; name: string; active?: boolean }
+
+const JOB_GENERATION_CONTEXT_LABELS: Record<JobGenerationContextField, string> = {
+  prompt: "채용 조건",
+  client: "화주사",
+  branch: "지점",
+  pickupAddress: "상차지·집결지",
+  dropoffAddress: "배송 권역·마지막 경유지",
+};
 
 interface JobCand {
   id: number;
@@ -656,6 +688,9 @@ export function Jobs() {
   }, []);
   const [activeTab, setActiveTab] = useState('active');
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  // 등록 완료 토스트의 복제 액션은 이전 렌더를 보관하므로, 콜백 안에서는 최신 모달 상태를 ref로 읽는다.
+  const aiModalOpenRef = useRef(aiModalOpen);
+  aiModalOpenRef.current = aiModalOpen;
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   // 초안이 나온 뒤에는 프롬프트 카드를 한 줄로 접는다 — 이 카드(입력 100px + 버튼 + 힌트 ≈ 250px)가
@@ -666,6 +701,18 @@ export function Jobs() {
   const [channelDrafts, setChannelDrafts] = useState<{ danggeun: string; albamon: string; sms: string } | null>(null);
   const [activeChannel, setActiveChannel] = useState<"danggeun" | "albamon" | "sms">("danggeun");
   const [aiSource, setAiSource] = useState<"ai" | "mock" | null>(null);
+  // 성공한 AI/오프라인 템플릿 생성 요청의 입력값. 현재 입력과 달라지면 이전 기준의 초안을 등록하지 못하게 한다.
+  // 복제·직접 작성은 이 값이 null이라 새 경고 대상이 아니다.
+  const [generatedContext, setGeneratedContext] = useState<JobGenerationContext | null>(null);
+  const generationRequestIdRef = useRef(0);
+  const duplicateRequestIdRef = useRef(0);
+  const jobCreateAttemptRef = useRef<JobCreateAttempt | null>(null);
+  const closeRegisterConfirmPendingRef = useRef(false);
+  const aiPromptRef = useRef<HTMLTextAreaElement>(null);
+  const staleGenerationNoticeRef = useRef<HTMLDivElement>(null);
+  // AI가 비어 있던 등록 필드에 자동 입력한 마지막 값. 재생성 때 자동값만 교체하고 매니저 수정값은 보존한다.
+  const aiPrefilledPayInfoRef = useRef<string | null>(null);
+  const aiPrefilledFactsRef = useRef<string | null>(null);
   const [registering, setRegistering] = useState(false);
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState<number | "">("");
@@ -687,6 +734,7 @@ export function Jobs() {
   // 모집 인원은 빈 칸에서 시작한다 — 예전 프리필 1은 발사 체크리스트가 "가장 위험"이라 적은 값이다.
   // 1인 채 등록되면 첫 확정 순간 나머지 관심자 전원에게 "자리가 모두 찼어요"가 나간다(07-14 실제 발생).
   const [newJobCapacity, setNewJobCapacity] = useState<number | "">("");
+  const newJobCapacityRef = useRef<HTMLInputElement>(null);
   const [newJobPayType, setNewJobPayType] = useState("");
   const [newJobPayAmount, setNewJobPayAmount] = useState<number | "">("");
   const [newJobPeriod, setNewJobPeriod] = useState("");
@@ -702,8 +750,16 @@ export function Jobs() {
   const [newJobVehicleRequired, setNewJobVehicleRequired] = useState(true);
   // AI 응대 근거(급여·정책) — 등록 단계에서 접이식으로 함께 입력해 편집 모달 2단계 강제를 없앤다.
   const [newJobPayInfo, setNewJobPayInfo] = useState("");
+  const newJobPayInfoValueRef = useRef(newJobPayInfo);
+  newJobPayInfoValueRef.current = newJobPayInfo;
+  const [newJobValidationIssue, setNewJobValidationIssue] = useState<JobCreateValidationIssue | null>(null);
+  const newJobPickupAddressRef = useRef<HTMLInputElement>(null);
+  const newJobDropoffAddressRef = useRef<HTMLInputElement>(null);
+  const newJobPayInfoRef = useRef<HTMLTextAreaElement>(null);
   const [newJobPolicyNotes, setNewJobPolicyNotes] = useState("");
   const [newJobAiFacts, setNewJobAiFacts] = useState("");
+  const newJobAiFactsValueRef = useRef(newJobAiFacts);
+  newJobAiFactsValueRef.current = newJobAiFacts;
   const [newJobExtraOpen, setNewJobExtraOpen] = useState(false);
   // J 타겟 노출 — 노출 대상(전체/지정) + 자동 규칙 draft. 등록 POST에 exposure·exposure_rule로 실림.
   const [newJobExposure, setNewJobExposure] = useState<ExposureDraft>(EMPTY_EXPOSURE);
@@ -711,6 +767,7 @@ export function Jobs() {
   const [newJobSosId, setNewJobSosId] = useState<string | null>(null);
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditJobForm | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -721,9 +778,12 @@ export function Jobs() {
   // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
   const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
   const [closing, setClosing] = useState(false);
-  // 새 공고 안내 모달 — 등록 직후(대상 ≥1이면 자동)와 행 '대기자에게 안내'(수동)가 같은 모달을 쓴다.
+  // 새 공고 안내 모달 — 등록 완료 단계의 '안내 검토'와 행 '대기자에게 안내'가 같은 모달을 쓴다.
   // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
   const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
+  // 등록 성공과 후속 안내 조회를 분리한다. 비만료 완료 창이 연속 등록·안내 검토를 한곳에서 조정하며,
+  // 늦은 대상 조회가 이미 시작한 다음 공고 위에 별도 모달을 띄우지 못하게 소유권을 가진다.
+  const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<AnnounceTargetsRes> | null>(null);
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
@@ -1081,6 +1141,11 @@ export function Jobs() {
     const newParam = searchParams.get("new");
     const qParam = searchParams.get("q");
     if (newParam === "1") {
+      // 새 진입이 폼 소유권을 갖는다. 늦게 끝난 복제 응답은 이 폼을 덮을 수 없고,
+      // SOS/일반 딥링크 모두 빈 기본값에서 시작해 이전 작성값과 섞이지 않는다.
+      duplicateRequestIdRef.current += 1;
+      setDuplicatingId(null);
+      resetNewJobForm();
       const line = searchParams.get("line")?.trim() ?? "";
       const region = searchParams.get("region")?.trim() ?? "";
       const vehicle = searchParams.get("vehicle")?.trim() ?? "";
@@ -1161,6 +1226,21 @@ export function Jobs() {
   const routingMetadataError = Boolean(clientsError || branchesError);
   const routingMetadataLoading = (clientsLoading && !clientsApi) || (branchesLoading && !branchesApi);
   const routingMetadataUnavailable = routingMetadataError || routingMetadataLoading;
+  // 생성 요청·생성 기준·등록 payload가 모두 같은 지점 값을 쓰게 한다. 화주사를 바꾼 뒤 남은 타 화주사 지점은 무시한다.
+  const effectiveNewJobBranchId =
+    newJobBranchId !== "" && branches.some((branch) => branch.id === newJobBranchId && branch.client_id === newJobClientId)
+      ? newJobBranchId
+      : "";
+  const currentGenerationContext = createJobGenerationContext({
+    prompt: aiPrompt,
+    clientId: newJobClientId,
+    branchId: effectiveNewJobBranchId,
+    pickupAddress: newJobPickupAddress,
+    dropoffAddress: newJobDropoffAddress,
+  });
+  const changedGenerationFields = changedJobGenerationContextFields(generatedContext, currentGenerationContext);
+  const generationContextStale = changedGenerationFields.length > 0;
+  const changedGenerationLabels = changedGenerationFields.map((field) => JOB_GENERATION_CONTEXT_LABELS[field]);
   const retryRoutingMetadata = () => {
     void Promise.all([mutateClients(), mutateBranches()]);
   };
@@ -1172,24 +1252,62 @@ export function Jobs() {
   );
 
   const handleGenerateJD = async () => {
-    if (!aiPrompt.trim()) return toast.error("채용 조건을 입력해주세요.");
+    if (isGenerating) return;
+    if (!aiPrompt.trim()) {
+      setPromptOpen(true);
+      toast.error("채용 조건을 입력해주세요.");
+      requestAnimationFrame(() => {
+        aiPromptRef.current?.focus({ preventScroll: true });
+        aiPromptRef.current?.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
+    const workLocationIssue = validateJobCreateWorkLocation({
+      pickupAddress: newJobPickupAddress,
+      dropoffAddress: newJobDropoffAddress,
+    });
+    if (workLocationIssue) {
+      setNewJobValidationIssue(workLocationIssue);
+      toast.error(workLocationIssue.message);
+      requestAnimationFrame(() => {
+        const locationField = workLocationIssue.field === "pickupAddress"
+          ? newJobPickupAddressRef.current
+          : newJobDropoffAddressRef.current;
+        if (!locationField) return;
+        locationField.focus({ preventScroll: true });
+        locationField.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
+    const requestedContext = createJobGenerationContext({
+      prompt: aiPrompt,
+      clientId: newJobClientId,
+      branchId: effectiveNewJobBranchId,
+      pickupAddress: newJobPickupAddress,
+      dropoffAddress: newJobDropoffAddress,
+    });
+    const requestId = ++generationRequestIdRef.current;
+    const failureMessage = channelDrafts
+      ? "초안을 다시 생성하지 못했어요. 기존 초안은 유지했습니다."
+      : "공고 생성에 실패했어요";
     setIsGenerating(true);
-    setChannelDrafts(null);
-    setAiSource(null);
     try {
       const res = await fetch("/api/admin/jobs/generate-posting", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 선택된 화주사·지점을 함께 보내 서버가 마스터(화주사명·지점 집결지/시급)를 초안에 반영(D2).
         body: JSON.stringify({
-          prompt: aiPrompt.trim(),
-          ...(newJobClientId !== "" ? { client_id: newJobClientId } : {}),
-          ...(newJobBranchId !== "" ? { branch_id: newJobBranchId } : {}),
+          prompt: requestedContext.prompt,
+          ...(requestedContext.clientId !== null ? { client_id: requestedContext.clientId } : {}),
+          ...(requestedContext.branchId !== null ? { branch_id: requestedContext.branchId } : {}),
+          pickup_address: requestedContext.pickupAddress,
+          dropoff_address: requestedContext.dropoffAddress,
         }),
       });
       const json = await res.json();
+      if (requestId !== generationRequestIdRef.current) return;
       if (!res.ok || !json.posting) {
-        toast.error(json.error || "공고 생성에 실패했어요");
+        toast.error(channelDrafts ? failureMessage : json.error || failureMessage);
         return;
       }
       const p = json.posting as {
@@ -1205,23 +1323,47 @@ export function Jobs() {
         albamon: p.albamon?.body ?? "",
         sms: p.sms?.body ?? "",
       });
-      // AI 초안이 뽑아낸 급여·근무 정보로 참고정보 필드를 프리필해 재입력을 줄인다(사용자가 비운 필드만).
-      const payText = p.fields?.pay?.trim();
-      const schedText = p.fields?.schedule?.trim();
-      // pay_info는 항상 보이는 '급여' 그룹이라 채우기만 하면 됨. ai_facts는 접이식 안이라 값이 있을 때만 펼친다.
-      if (payText) setNewJobPayInfo((prev) => prev || payText);
-      if (schedText) {
-        setNewJobAiFacts((prev) => prev || `근무: ${schedText}`);
+      // 재생성은 이전 AI 자동값만 새 응답으로 바꾼다. 매니저가 직접 고친 급여·참고정보는 덮어쓰지 않는다.
+      const payText = p.fields?.pay?.trim() ?? "";
+      const schedText = p.fields?.schedule?.trim() ?? "";
+      const scheduleFact = schedText ? `근무: ${schedText}` : "";
+      const currentPayInfo = newJobPayInfoValueRef.current;
+      const payAutofill = resolveJobGenerationAutofill({
+        currentValue: currentPayInfo,
+        previousGeneratedValue: aiPrefilledPayInfoRef.current,
+        nextGeneratedValue: payText,
+      });
+      if (payAutofill.value !== currentPayInfo) setNewJobPayInfo(payAutofill.value);
+      newJobPayInfoValueRef.current = payAutofill.value;
+      aiPrefilledPayInfoRef.current = payAutofill.generatedValue;
+
+      const currentAiFacts = newJobAiFactsValueRef.current;
+      const factsAutofill = resolveJobGenerationAutofill({
+        currentValue: currentAiFacts,
+        previousGeneratedValue: aiPrefilledFactsRef.current,
+        nextGeneratedValue: scheduleFact,
+      });
+      if (factsAutofill.value !== currentAiFacts) setNewJobAiFacts(factsAutofill.value);
+      newJobAiFactsValueRef.current = factsAutofill.value;
+      aiPrefilledFactsRef.current = factsAutofill.generatedValue;
+      if (payText) {
+        setNewJobValidationIssue(null);
+      }
+      if (scheduleFact) {
         setNewJobExtraOpen(true);
       }
       setActiveChannel("danggeun");
       setPromptOpen(false); // 초안이 화면 위쪽에 오게 — 조건 입력은 '조건 수정'으로 다시 펼친다
       setAiSource(json.source === "mock" ? "mock" : "ai");
+      setGeneratedContext(requestedContext);
+      // 복제본을 새 기준으로 다시 생성했다면 더는 원본 저장본이 아니다.
+      setDuplicatedFrom(null);
+      setChannelDraftsFromCopy(false);
       toast.success(json.source === "mock" ? "초안을 생성했어요 (오프라인 템플릿)." : "AI가 채널별 공고 초안을 완성했어요.");
     } catch {
-      toast.error("공고 생성에 실패했어요");
+      if (requestId === generationRequestIdRef.current) toast.error(failureMessage);
     } finally {
-      setIsGenerating(false);
+      if (requestId === generationRequestIdRef.current) setIsGenerating(false);
     }
   };
 
@@ -1236,10 +1378,17 @@ export function Jobs() {
 
   // 등록 모달 입력 초기화 — 등록 성공·모달 닫기에서 공통 사용.
   const resetNewJobForm = () => {
+    jobCreateAttemptRef.current = null;
+    // 닫힌 모달의 늦은 생성 응답이 다음 등록 폼을 다시 채우지 못하게 무효화한다.
+    generationRequestIdRef.current += 1;
+    setIsGenerating(false);
     setAiPrompt("");
     setPromptOpen(true);
     setChannelDrafts(null);
     setAiSource(null);
+    setGeneratedContext(null);
+    aiPrefilledPayInfoRef.current = null;
+    aiPrefilledFactsRef.current = null;
     setPostingTitle("");
     setNewJobClientId("");
     setNewJobBranchId("");
@@ -1259,8 +1408,11 @@ export function Jobs() {
     setNewJobDropoffAddress("");
     setNewJobVehicleRequired(true);
     setNewJobPayInfo("");
+    newJobPayInfoValueRef.current = "";
+    setNewJobValidationIssue(null);
     setNewJobPolicyNotes("");
     setNewJobAiFacts("");
+    newJobAiFactsValueRef.current = "";
     setNewJobExposure(EMPTY_EXPOSURE);
     setNewJobExtraOpen(false);
     setNewJobSosId(null);
@@ -1268,21 +1420,66 @@ export function Jobs() {
     setNewJobSosVehicle(null);
   };
 
+  const openBlankNewJobForm = () => {
+    duplicateRequestIdRef.current += 1;
+    setDuplicatingId(null);
+    resetNewJobForm();
+    setAiModalOpen(true);
+  };
+
   // 등록에 쓸 본문이 실제로 있나 — '직접 작성'으로 빈 편집칸만 열어둔 상태와 구분한다.
   // (AI 초안 없이도 등록할 수 있게 하면서, 빈 공고가 등록되는 것은 계속 막는다.)
-  const draftBody = channelDrafts ? (channelDrafts.albamon || channelDrafts.danggeun || channelDrafts.sms).trim() : "";
+  const draftBody = jobCreateDraftBody(channelDrafts);
+  const hasUnsavedNewJobDraft = hasJobCreateDraft({
+    prompt: aiPrompt,
+    postingTitle,
+    channelDrafts,
+    clientId: newJobClientId,
+    branchId: newJobBranchId,
+    siteManagerId: newJobSiteManagerId,
+    recruitModeChanged: newJobMode !== DEFAULT_RECRUIT_MODE,
+    capacity: newJobCapacity,
+    payType: newJobPayType,
+    payInfo: newJobPayInfo,
+    period: newJobPeriod,
+    closesAt: newJobClosesAt,
+    slot: newJobSlot,
+    slotKeys: newJobSlotKeys,
+    startDate: newJobStartDate,
+    pickupAddress: newJobPickupAddress,
+    dropoffAddress: newJobDropoffAddress,
+    vehicleRequirementChanged: !newJobVehicleRequired,
+    policyNotes: newJobPolicyNotes,
+    aiFacts: newJobAiFacts,
+    hasCustomExposure: newJobExposure.exposure !== "all" || draftToRule(newJobExposure.rule) !== null,
+    sosId: newJobSosId,
+  });
 
-  // 등록 모달 닫기 — 작성 중이면 확인 후 파기. 무확인 즉시 초기화로 10분 작업이
-  // 통째 사라지던 문제 방지. 본문 유무를 '작업 있음' 프록시로 사용(빈 편집칸은 확인 없이 닫는다).
+  // 등록 모달 닫기 — 실제 저장될 값이 하나라도 있으면 확인 후 파기한다. UI 섹션·빈 직접 작성 칸만
+  // 연 경우는 묻지 않는다. 등록 중 닫기와 중복 확인은 늦은 POST/단일 confirm resolver 경합을 막기 위해 잠근다.
   const closeRegisterModal = async () => {
-    if (draftBody) {
-      const ok = await confirm({
-        title: "작성 중인 내용을 버릴까요?",
-        description: "생성한 AI 초안과 입력한 내용이 모두 사라져요. 등록하지 않고 닫으면 복구할 수 없어요.",
-        confirmText: "버리고 닫기",
-        destructive: true,
-      });
-      if (!ok) return;
+    if (registering || closeRegisterConfirmPendingRef.current) return;
+
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (hasUnsavedNewJobDraft) {
+      closeRegisterConfirmPendingRef.current = true;
+      try {
+        const ok = await confirm({
+          title: "작성 중인 공고를 버릴까요?",
+          description: "입력한 공고 정보와 작성한 초안이 저장되지 않았어요. 닫으면 모두 사라지고 복구할 수 없어요.",
+          confirmText: "버리고 닫기",
+          cancelText: "계속 작성",
+          destructive: true,
+        });
+        if (!ok) {
+          requestAnimationFrame(() => {
+            if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+          });
+          return;
+        }
+      } finally {
+        closeRegisterConfirmPendingRef.current = false;
+      }
     }
     setAiModalOpen(false);
     resetNewJobForm();
@@ -1290,12 +1487,19 @@ export function Jobs() {
 
   // 공고 복제 — 기존 공고를 프리필한 등록 모달을 연다(후보·마감시각·id는 비움).
   // 정기 라인 재모집 시 반복 입력을 없앤다. 등록은 기존 POST를 그대로 재사용.
-  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const duplicateJob = async (jobId: string) => {
+    if (aiModalOpenRef.current) {
+      toast.info("작성 중인 공고를 먼저 등록하거나 닫아 주세요.");
+      return;
+    }
+    const requestId = ++duplicateRequestIdRef.current;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
     setDuplicatingId(jobId);
     try {
-      const res = await fetch(`/api/admin/jobs/${jobId}`);
+      const res = await fetch(`/api/admin/jobs/${jobId}`, { signal: controller.signal });
       const json = await res.json();
+      if (requestId !== duplicateRequestIdRef.current) return;
       if (!res.ok) {
         toast.error(json.error || "공고를 불러오지 못했어요");
         return;
@@ -1355,18 +1559,34 @@ export function Jobs() {
       setNewJobPayInfo(j.pay_info ?? "");
       setNewJobPolicyNotes(j.policy_notes ?? "");
       setNewJobAiFacts(j.ai_facts ?? "");
-      // 접이식(근무상세·정책)은 그 안 필드가 있을 때만 연다. pay_info는 항상 보이는 급여 그룹이라 트리거에서 제외.
-      if (j.policy_notes || j.ai_facts || j.slot || j.start_date || j.pickup_address || j.dropoff_address) setNewJobExtraOpen(true);
+      // 접이식(근무상세·정책)은 그 안 필드가 있을 때만 연다. 위치·급여는 항상 보이므로 트리거에서 제외.
+      if (j.policy_notes || j.ai_facts || j.slot || j.start_date) setNewJobExtraOpen(true);
+      setRegistrationFollowup(null);
       setAiModalOpen(true);
-    } catch {
-      toast.error("공고를 불러오지 못했어요");
+    } catch (error) {
+      if (requestId === duplicateRequestIdRef.current) {
+        toast.error(
+          error instanceof DOMException && error.name === "AbortError"
+            ? "공고를 불러오는 시간이 길어 중단했어요. 다시 시도해 주세요."
+            : "공고를 불러오지 못했어요",
+        );
+      }
     } finally {
-      setDuplicatingId(null);
+      window.clearTimeout(timeoutId);
+      if (requestId === duplicateRequestIdRef.current) setDuplicatingId(null);
     }
   };
 
   const handleRegisterJob = async () => {
-    if (!channelDrafts || registering) return;
+    if (!channelDrafts || registering || isGenerating) return;
+    if (generationContextStale) {
+      toast.error("생성 기준이 변경됐어요. 새 기준으로 다시 생성한 뒤 등록해 주세요.");
+      requestAnimationFrame(() => {
+        staleGenerationNoticeRef.current?.focus({ preventScroll: true });
+        staleGenerationNoticeRef.current?.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
     if (routingMetadataUnavailable) {
       toast.error("화주사·지점 정보를 확인한 뒤 공고를 등록할 수 있어요. 다시 불러와 주세요.");
       return;
@@ -1389,72 +1609,115 @@ export function Jobs() {
     }
     // 발사 체크리스트가 사람에게 요구하던 13개 중 코드가 막는 건 2개뿐이었다(마감시각·시작일).
     // 사고로 직결되는 3개를 여기서 막는다 — 화면 라벨과 문서가 서로 반대말을 하던 자리다.
-    if (newJobCapacity === "" || Number(newJobCapacity) < 1) {
+    const capacityIssue = validateJobCreateCapacity(newJobCapacity);
+    if (capacityIssue) {
+      setNewJobValidationIssue(capacityIssue);
       toast.error("모집 인원을 입력해주세요. 이 숫자가 차면 나머지 관심자에게 '자리가 찼어요'가 나갑니다.");
+      requestAnimationFrame(() => {
+        const capacityField = newJobCapacityRef.current;
+        if (!capacityField) return;
+        capacityField.focus({ preventScroll: true });
+        capacityField.scrollIntoView({ block: "center" });
+      });
       return;
     }
-    if (!newJobPayType && !newJobPayInfo.trim()) {
-      toast.error("급여를 입력해주세요 — 단가 형태를 고르거나 급여·정산 정보를 적어주세요.");
+    const workLocationIssue = validateJobCreateWorkLocation({
+      pickupAddress: newJobPickupAddress,
+      dropoffAddress: newJobDropoffAddress,
+    });
+    if (workLocationIssue) {
+      setNewJobValidationIssue(workLocationIssue);
+      toast.error(workLocationIssue.message);
+      requestAnimationFrame(() => {
+        const locationField = workLocationIssue.field === "pickupAddress"
+          ? newJobPickupAddressRef.current
+          : newJobDropoffAddressRef.current;
+        if (!locationField) return;
+        locationField.focus({ preventScroll: true });
+        locationField.scrollIntoView({ block: "center" });
+      });
       return;
     }
-    if (!newJobPickupAddress.trim()) {
-      toast.error("집결지를 입력해주세요 — 만남장소 안내 문자와 거리 정렬에 쓰입니다.");
-      setNewJobExtraOpen(true); // 접이식 안에 있는 칸이라, 접힌 채 에러만 나면 어디를 채우라는 건지 알 수 없다
+    const compensationIssue = validateJobCreateCompensation({
+      payType: newJobPayType,
+      payAmount: newJobPayAmount,
+      payInfo: newJobPayInfo,
+    });
+    if (compensationIssue) {
+      setNewJobValidationIssue(compensationIssue);
+      toast.error(compensationIssue.message);
+      requestAnimationFrame(() => {
+        const payInfoField = newJobPayInfoRef.current;
+        if (!payInfoField) return;
+        payInfoField.focus({ preventScroll: true });
+        payInfoField.scrollIntoView({ block: "center" });
+      });
       return;
     }
     // resetNewJobForm()이 SOS 상태를 지우기 전에, 등록 후 CTA용으로 스냅샷을 잡아둔다.
     const sosSnapshot = { id: newJobSosId, region: newJobSosRegion, vehicle: newJobSosVehicle };
-    // 선택 화주사에 실제 속한 지점만 유효 지점으로 취급(숨겨졌거나 타 화주사에 속한 stale 지점은 무시).
-    const effNewJobBranchId =
-      newJobBranchId !== "" && branches.some((b) => b.id === newJobBranchId && b.client_id === newJobClientId)
-        ? newJobBranchId
-        : "";
+    const jobPayload: Record<string, unknown> = {
+      title,
+      body,
+      // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
+      ...(channelDrafts ? { channel_bodies: channelDrafts } : {}),
+      // 긴급 건에서 파생된 공고면 sos_request_id로 연결 저장(자동 해결 연동은 범위 밖).
+      ...(newJobSosId && /^\d+$/.test(newJobSosId) ? { sos_request_id: Number(newJobSosId) } : {}),
+      // 선택 화주사에 실제 속한 지점만 유효로 취급 — 복제 등으로 남은 타 화주사 stale 지점이 숨겨진 채 재전송돼 조용히 다른 화주사로 귀속되는 것을 막는다.
+      // 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 막는다(지점 선택 시 서버가 소속 화주사로 역채움).
+      branch_id: effectiveNewJobBranchId === "" ? null : effectiveNewJobBranchId,
+      ...(effectiveNewJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
+      ...(newJobSiteManagerId !== "" ? { site_manager_id: newJobSiteManagerId } : {}),
+      recruit_mode: newJobMode,
+      exposure: newJobExposure.exposure,
+      exposure_rule: draftToRule(newJobExposure.rule),
+      capacity: Number(newJobCapacity),
+      vehicle_required: newJobVehicleRequired,
+      pay_type: newJobPayType || null,
+      // 금액은 단가형태가 있고 '협의'가 아닐 때만 저장. '협의'/미지정이면 화면에 숨긴 stale 금액이 실려
+      // AI 응대에 '협의 3,500원' 같은 모순 단가가 주입되지 않게 null 정규화(등록·수정 공통 규칙).
+      pay_amount: newJobPayType && newJobPayType !== "협의" && newJobPayAmount !== "" ? Number(newJobPayAmount) : null,
+      pay_info: newJobPayInfo.trim() || null,
+      policy_notes: newJobPolicyNotes.trim() || null,
+      ai_facts: newJobAiFacts.trim() || null,
+      slot: newJobSlot || null,
+      slot_keys: newJobSlotKeys,
+      start_date: newJobStartDate || null,
+      pickup_address: newJobPickupAddress.trim() || null,
+      dropoff_address: newJobDropoffAddress.trim() || null,
+      // datetime-local 값은 로컬(KST) 기준 → ISO(UTC)로 변환해 전송. 빈 값이면 미전송.
+      ...(newJobPeriod ? { work_period: newJobPeriod } : {}),
+      ...(newJobClosesAt ? { closes_at: new Date(newJobClosesAt).toISOString() } : {}),
+    };
+    // 한 번 열린 폼은 성공하거나 명시적으로 버릴 때까지 같은 UUID를 쓴다. 응답 유실 뒤 내용이
+    // 바뀌면 서버가 409로 막아, 기존 공고와 수정본이 둘 다 생기는 사고를 방지한다.
+    const createAttempt = nextJobCreateAttempt(
+      jobCreateAttemptRef.current,
+      jobPayload,
+      () => crypto.randomUUID(),
+    );
+    jobCreateAttemptRef.current = createAttempt;
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          body,
-          // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
-          ...(channelDrafts ? { channel_bodies: channelDrafts } : {}),
-          // 긴급 건에서 파생된 공고면 sos_request_id로 연결 저장(자동 해결 연동은 범위 밖).
-          ...(newJobSosId && /^\d+$/.test(newJobSosId) ? { sos_request_id: Number(newJobSosId) } : {}),
-          // 선택 화주사에 실제 속한 지점만 유효로 취급 — 복제 등으로 남은 타 화주사 stale 지점이 숨겨진 채 재전송돼 조용히 다른 화주사로 귀속되는 것을 막는다.
-          // 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 막는다(지점 선택 시 서버가 소속 화주사로 역채움).
-          branch_id: effNewJobBranchId === "" ? null : effNewJobBranchId,
-          ...(effNewJobBranchId === "" && newJobClientId !== "" ? { client_id: newJobClientId } : {}),
-          ...(newJobSiteManagerId !== "" ? { site_manager_id: newJobSiteManagerId } : {}),
-          recruit_mode: newJobMode,
-          exposure: newJobExposure.exposure,
-          exposure_rule: draftToRule(newJobExposure.rule),
-          capacity: Number(newJobCapacity),
-          vehicle_required: newJobVehicleRequired,
-          pay_type: newJobPayType || null,
-          // 금액은 단가형태가 있고 '협의'가 아닐 때만 저장. '협의'/미지정이면 화면에 숨긴 stale 금액이 실려
-          // AI 응대에 '협의 3,500원' 같은 모순 단가가 주입되지 않게 null 정규화(등록·수정 공통 규칙).
-          pay_amount: newJobPayType && newJobPayType !== "협의" && newJobPayAmount !== "" ? Number(newJobPayAmount) : null,
-          pay_info: newJobPayInfo.trim() || null,
-          policy_notes: newJobPolicyNotes.trim() || null,
-          ai_facts: newJobAiFacts.trim() || null,
-          slot: newJobSlot || null,
-          slot_keys: newJobSlotKeys,
-          start_date: newJobStartDate || null,
-          pickup_address: newJobPickupAddress.trim() || null,
-          dropoff_address: newJobDropoffAddress.trim() || null,
-          // datetime-local 값은 로컬(KST) 기준 → ISO(UTC)로 변환해 전송. 빈 값이면 미전송.
-          ...(newJobPeriod ? { work_period: newJobPeriod } : {}),
-          ...(newJobClosesAt ? { closes_at: new Date(newJobClosesAt).toISOString() } : {}),
+          ...jobPayload,
+          client_request_id: createAttempt.requestId,
         }),
       });
       const json = await res.json();
       if (!res.ok) {
+        if (res.status === 409) {
+          loadJobs();
+        }
         toast.error(json.error || "공고 등록에 실패했어요");
         return;
       }
       // 지오코딩 결과 병기 — 주소를 넣었는데 좌표가 안 잡히면 거리 정렬이 안 되므로 저장 시점에 알린다.
       const geoNote = geocodeResultNote(json.job, newJobPickupAddress, newJobDropoffAddress);
+      const newJobId = typeof json.job?.id === "number" ? json.job.id : null;
       // 긴급 건에서 파생된 공고면 '이 조건으로 대상 선별' CTA를 붙여 탭 이동 단절을 없앤다(SOS→공고→선별 브릿지).
       if (sosSnapshot.id) {
         const params = sosToPipelineParams(sosSnapshot.region, sosSnapshot.vehicle);
@@ -1468,65 +1731,53 @@ export function Jobs() {
           duration: 8000,
         });
       } else {
-        // 배치 등록 동선 — 목록에서 카드를 찾아 복제하러 가는 왕복을 없앤다(권역만 다른 라인 6~7개가 기본).
-        const registeredId = typeof json.job?.id === "number" ? String(json.job.id) : null;
         toast.success("새 공고가 등록되었어요.", {
           ...(geoNote ? { description: geoNote } : {}),
-          ...(registeredId
-            ? {
-                action: {
-                  label: "복제해서 하나 더 →",
-                  onClick: () => void duplicateJob(registeredId),
-                },
-                duration: 10000,
-              }
-            : {}),
         });
+        // 토스트처럼 사라지지 않는 후속 단계. 대상 조회와 무관하게 즉시 열어 연속 등록을 계속할 수 있다.
+        if (newJobId !== null) {
+          setRegistrationFollowup(beginJobRegistrationFollowup({
+            jobId: newJobId,
+            title,
+            note: geoNote ?? null,
+          }));
+        }
       }
+
+      // 핵심 저장은 끝났다. 목록 재검증·안내 대상 조회가 느려도 다음 공고 작성은 잠그지 않는다.
       setAiModalOpen(false);
       resetNewJobForm();
-      await loadJobs();
-      // 새 공고 안내 후보(충원 안내 이력·알림 신청·조건 맞는 최근 관심) 원클릭 안내 — 대상 ≥1일 때만 모달.
-      // 조회 실패는 등록 흐름에 영향 없음(행 '대기자에게 안내'로 나중에 가능).
-      const newJobId = typeof json.job?.id === "number" ? json.job.id : null;
-      if (newJobId !== null) {
-        try {
-          const at = await fetchAnnounceTargets(newJobId);
-          if (at.targets.length > 0) {
-            setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
-          } else if ((at.dropped_by_consent?.total ?? 0) > 0) {
-            const description = announceZeroTargetDescription({
-              consent: at.dropped_by_consent!,
-              fatigue: at.dropped_by_fatigue ?? { total: 0, promised: 0 },
-              exposure: at.dropped_by_exposure ?? { total: 0, promised: 0 },
-              fatigueDays: at.fatigue_days ?? 7,
-            });
-            toast.info("따로 안내 문자를 보낼 대상은 없어요", {
-              description: description ?? undefined,
-              duration: 9000,
-            });
-          } else if ((at.dropped_by_fatigue?.total ?? 0) > 0) {
-            // **두 번째 공고부터의 침묵을 없앤다** — 대상 0명의 이유가 '이력 없음'이 아니라
-            // '최근 N일 안에 다른 공고 안내를 이미 받음'이다. 그분들 맞춤 링크에는 이 공고도 함께 보인다.
-            const f = at.dropped_by_fatigue!;
-            toast.info("따로 안내 문자를 보낼 대상은 없어요", {
-              description:
-                `최근 ${at.fatigue_days ?? 7}일 안에 다른 공고 안내를 이미 받은 ${f.total}명이 있어 이번엔 빠졌어요` +
-                `${f.promised > 0 ? `(그중 ${f.promised}명은 충원 안내 이력 보유자·선탑 완료자)` : ""}. ` +
-                `문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`,
-              duration: 9000,
-            });
-          } else if ((at.dropped_by_exposure?.total ?? 0) > 0) {
-            // 대상 0명이 '이력이 없어서'가 아니라 '노출 명단이 좁아서'인 경우 — 등록 경로에서도 침묵하지 않는다.
-            toast.info("안내할 대기자가 없어요", {
-              description: `이 공고는 지정 노출이라 명단 밖 ${at.dropped_by_exposure?.total}명이 대상에서 빠졌어요${
-                (at.dropped_by_exposure?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_exposure?.promised}명은 충원 안내 이력 보유자·선탑 완료자)` : ""
-              }. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`,
-            });
-          }
-        } catch {
-          /* noop */
-        }
+      loadJobs();
+
+      // 선택적 후속 조회는 완료 창의 상태만 갱신한다. 사용자가 완료 창을 닫거나 다음 공고를 시작했다면
+      // settleJobRegistrationFollowup이 null/다른 jobId를 보존해 늦은 응답으로 창을 되살리지 않는다.
+      if (newJobId !== null && !sosSnapshot.id) {
+        void fetchAnnounceTargets(newJobId)
+          .then((at) => {
+            if (at.targets.length > 0) {
+              setRegistrationFollowup((current) =>
+                settleJobRegistrationFollowup(current, newJobId, { status: "ready", payload: at }),
+              );
+            } else {
+              const description = announceZeroTargetDescription({
+                consent: at.dropped_by_consent ?? { total: 0, promised: 0 },
+                fatigue: at.dropped_by_fatigue ?? { total: 0, promised: 0 },
+                exposure: at.dropped_by_exposure ?? { total: 0, promised: 0 },
+                fatigueDays: at.fatigue_days ?? 7,
+              });
+              setRegistrationFollowup((current) =>
+                settleJobRegistrationFollowup(current, newJobId, {
+                  status: "empty",
+                  description: description ?? "현재 조건에서 별도로 안내할 대상은 없어요.",
+                }),
+              );
+            }
+          })
+          .catch(() => {
+            setRegistrationFollowup((current) =>
+              settleJobRegistrationFollowup(current, newJobId, { status: "error" }),
+            );
+          });
       }
     } catch {
       toast.error("공고 등록에 실패했어요");
@@ -2073,7 +2324,7 @@ export function Jobs() {
               >
                 {!previewLoading && <Eye size={16} />} <span className="hidden sm:inline">지원자 화면</span> 미리보기
               </Button>
-              <Button variant="brand" onClick={() => setAiModalOpen(true)}>
+              <Button variant="brand" onClick={openBlankNewJobForm}>
                 <Wand2 size={16} /> 새 공고
               </Button>
             </div>
@@ -2404,7 +2655,7 @@ export function Jobs() {
               </div>
               <h3 className="text-[16px] font-bold text-foreground mb-2">이 상태의 공고가 없어요</h3>
               <p className="text-[14px] text-muted-foreground mb-6">위 상태 필터를 바꿔 보거나, 아래 버튼으로 새 공고를 만들면 AI가 채널별 초안까지 만들어 드려요.</p>
-              <Button variant="brand" size="lg" onClick={() => setAiModalOpen(true)}>
+              <Button variant="brand" size="lg" onClick={openBlankNewJobForm}>
                 새 공고 등록하기
               </Button>
             </div>
@@ -2414,21 +2665,23 @@ export function Jobs() {
 
       {/* AI JD Generator Modal */}
       {aiModalOpen && (
-        <Modal bare open={aiModalOpen} onClose={closeRegisterModal} size="full"
-               title="AI 맞춤형 공고 작성"
+        <Modal bare open={aiModalOpen} onClose={closeRegisterModal} busy={registering} size="full"
+               title="새 공고 등록"
+               description="화주사 맥락을 고른 뒤 AI 초안을 만들거나 공고 본문을 직접 작성하세요."
                closeOnOutside={false}
                className="xl:max-w-6xl max-w-[800px] sm:max-w-[800px]">
-            <div className="flex items-center justify-between px-7 py-5 border-b border-border-strong">
+            <div className="flex items-center justify-between gap-3 border-b border-border-strong px-5 py-4 sm:px-7 sm:py-5">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center text-warning-strong">
                   <Wand2 size={18} />
                 </div>
                 <div>
-                  <h2 className="text-[18px] font-extrabold text-foreground tracking-tight">AI 맞춤형 공고 작성</h2>
-                  <p className="text-[13px] text-muted-foreground mt-0.5">간단한 조건만 입력하면 당근·알바몬·문자 채널별 공고 초안을 만들어 드려요.</p>
+                  {/* Modal이 스크린리더용 DialogTitle을 이미 제공한다. 같은 제목을 두 번 읽지 않도록 시각 제목은 숨김 처리. */}
+                  <div aria-hidden="true" className="text-[18px] font-extrabold text-foreground tracking-tight">새 공고 등록</div>
+                  <p className="text-[13px] text-muted-foreground mt-0.5">화주사 맥락을 고른 뒤 AI 초안을 만들거나 공고 본문을 직접 작성하세요.</p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" aria-label="공고 등록 창 닫기" onClick={closeRegisterModal}>
+              <Button variant="ghost" size="icon" aria-label="공고 등록 창 닫기" onClick={closeRegisterModal} disabled={registering}>
                 <X size={24} />
               </Button>
             </div>
@@ -2437,43 +2690,172 @@ export function Jobs() {
                 뺏어 누르면 내용이 그냥 사라진다. 실제로 AI 초안 카드가 높이 44px로 눌려
                 "생성 성공 토스트는 떴는데 본문이 안 보이는" 상태가 재현됐다(2026-08-14 감사).
                 대시보드 히어로 352px 잘림과 같은 원인 — Dashboard.tsx:281 주석 참고. */}
-            <div className={`flex-1 overflow-y-auto p-7 flex flex-col gap-6 bg-background [&>*]:shrink-0 ${(isGenerating || channelDrafts) ? "xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start" : ""}`}>
+            <div className={`min-w-0 flex-1 overflow-y-auto bg-background p-5 sm:p-7 flex flex-col gap-4 sm:gap-6 [&>*]:min-w-0 [&>*]:shrink-0 ${(isGenerating || channelDrafts) ? "xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start" : ""}`}>
+              {/* AI가 실제로 참조하는 화주사·지점과 이번 공고의 위치를 먼저 정한다. 생성 후 2열에서도 이 카드는 전체 폭을 써서
+                  DOM 순서와 시각 순서가 모두 공고 맥락 → AI 조건 → 초안으로 유지된다. */}
+              <section aria-labelledby="new-job-context-title" className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm xl:col-span-2">
+                <div className="flex items-start gap-3">
+                  <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">1</span>
+                  <div>
+                    <h3 id="new-job-context-title" className="text-[14px] font-extrabold text-foreground">공고 맥락</h3>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">화주사·지점은 참고값이고, 이번 공고의 상차지와 배송 위치를 우선해 초안을 만들어요.</p>
+                  </div>
+                </div>
+
+                {(routingMetadataLoading || routingMetadataError) && (
+                  <div className="mt-4">
+                    <RoutingMetadataNotice
+                      loading={routingMetadataLoading}
+                      error={routingMetadataError}
+                      onRetry={retryRoutingMetadata}
+                    />
+                  </div>
+                )}
+
+                {/* 지점은 해당 개념이 있는 화주사(확정슬롯 또는 등록 지점 보유)에만 노출한다. */}
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="new-job-client" className="mb-1.5 block text-[13px] font-bold text-gray-700">화주사 <span className="font-semibold text-muted-foreground">(선택)</span></label>
+                    <select
+                      id="new-job-client"
+                      value={newJobClientId}
+                      disabled={routingMetadataUnavailable || isGenerating}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? "" : Number(e.target.value);
+                        setNewJobClientId(v);
+                        // 화주사 변경 시 하위와 맞지 않는 지점 선택은 해제
+                        if (newJobBranchId !== "" && branches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
+                          setNewJobBranchId("");
+                        }
+                      }}
+                      className="min-h-11 w-full rounded-2xl border border-border-strong bg-input-background px-3.5 py-2.5 pr-8 text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">화주사 선택</option>
+                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      {routingMetadataUnavailable
+                        ? "AI 응대 유형을 확인하려면 화주사 정보를 다시 불러와 주세요."
+                        : newJobClientId === ""
+                          ? "선택하면 해당 화주사의 AI 응대 유형을 함께 적용해요."
+                          : <>AI 응대: {clients.find((c) => c.id === newJobClientId)?.client_type === "baemin_bmart" ? "배민 비마트" : "일반 배송"} · 모집 방식과 별도로 화주사 유형을 따라요</>}
+                    </p>
+                  </div>
+
+                  {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
+                    <div>
+                      <label htmlFor="new-job-branch" className="mb-1.5 block text-[13px] font-bold text-gray-700">지점 <span className="font-semibold text-muted-foreground">(선택)</span></label>
+                      <select
+                        id="new-job-branch"
+                        value={newJobBranchId}
+                        disabled={isGenerating}
+                        onChange={(e) => {
+                          const v = e.target.value === "" ? "" : Number(e.target.value);
+                          setNewJobBranchId(v);
+                          // 지점 선택 시 소속 화주사를 상위 셀렉트에 동기화
+                          if (v !== "") {
+                            const cid = branches.find((b) => b.id === v)?.client_id;
+                            if (typeof cid === "number") setNewJobClientId(cid);
+                          }
+                        }}
+                        className="min-h-11 w-full rounded-2xl border border-border-strong bg-input-background px-3.5 py-2.5 pr-8 text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <option value="">지점 선택</option>
+                        {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                      <p className="mt-1 text-[12px] text-muted-foreground">집결지·근무 정보가 있는 지점이라면 초안 작성에 함께 참고해요.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 공고마다 달라지는 권위 정보 — 화주사·라인 마스터보다 이번 모집 광고의 값을 우선한다. */}
+                <section aria-labelledby="new-job-location-title" className="mt-5 border-t border-border pt-4">
+                  <div>
+                    <h4 id="new-job-location-title" className="text-[13px] font-bold text-foreground">이번 공고의 근무 위치</h4>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                      AI가 당근 등 구인광고 본문에 반영하고, 등록 후 지원자 안내에도 그대로 사용해요.
+                    </p>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <TextField
+                      ref={newJobPickupAddressRef}
+                      label="상차지·집결지"
+                      required
+                      value={newJobPickupAddress}
+                      disabled={isGenerating}
+                      onChange={(e) => {
+                        setNewJobPickupAddress(e.target.value);
+                        if (newJobValidationIssue?.field === "pickupAddress") setNewJobValidationIssue(null);
+                      }}
+                      placeholder="예: 성수동 물류센터 3번 게이트"
+                      hint="지원자가 처음 찾아갈 실제 상차·집결 장소를 적어주세요."
+                      error={newJobValidationIssue?.field === "pickupAddress" ? newJobValidationIssue.message : undefined}
+                    />
+                    <TextField
+                      ref={newJobDropoffAddressRef}
+                      label="배송 권역·마지막 경유지"
+                      required
+                      value={newJobDropoffAddress}
+                      disabled={isGenerating}
+                      onChange={(e) => {
+                        setNewJobDropoffAddress(e.target.value);
+                        if (newJobValidationIssue?.field === "dropoffAddress") setNewJobValidationIssue(null);
+                      }}
+                      placeholder="예: 하남 미사강변도시 일대 · 종료 미사역"
+                      hint="배송지 범위와 종료 지점을 함께 적으면 지원자의 추가 질문을 줄일 수 있어요."
+                      error={newJobValidationIssue?.field === "dropoffAddress" ? newJobValidationIssue.message : undefined}
+                    />
+                  </div>
+                </section>
+              </section>
+
               {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
               {promptOpen ? (
                 <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-                  <label className="block text-[13px] font-bold text-gray-700 mb-2">어떤 포지션을 찾고 계신가요?</label>
+                  <div className="mb-4 flex items-start gap-3">
+                    <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
+                    <div>
+                      <h3 className="text-[14px] font-extrabold text-foreground">AI에 전달할 채용 조건</h3>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">시간·권역·급여·필요 차량처럼 이번 공고에서 달라지는 조건을 적어 주세요.</p>
+                    </div>
+                  </div>
+                  <label htmlFor="new-job-ai-brief" className="block text-[13px] font-bold text-gray-700 mb-2">어떤 포지션을 찾고 계신가요?</label>
                   <textarea
+                    ref={aiPromptRef}
+                    id="new-job-ai-brief"
                     value={aiPrompt}
+                    disabled={isGenerating}
                     onChange={(e) => setAiPrompt(e.target.value)}
                     placeholder="예: 강북권 새벽 냉장배송, 주 5일 새벽 3~9시, 건당 3,500원, 1톤 냉장차 지참"
-                    className="w-full bg-background border border-border-strong rounded-2xl px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none"
+                    className="w-full bg-background border border-border-strong rounded-2xl px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none disabled:cursor-not-allowed disabled:opacity-55"
                   />
-                  <div className="flex justify-end mt-3">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
                     {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
                         다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
                     {!channelDrafts && !isGenerating && (
                       <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
-                      setChannelDraftsFromCopy(false);
-                      setActiveChannel("albamon");
-                      setPromptOpen(false);
-                    }}
-                    title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
-                  >직접 작성</Button>
+                        variant="secondary"
+                        onClick={() => {
+                          setChannelDrafts({ danggeun: "", albamon: "", sms: "" });
+                          setChannelDraftsFromCopy(false);
+                          setGeneratedContext(null);
+                          setActiveChannel("albamon");
+                          setPromptOpen(false);
+                        }}
+                        title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                      >직접 작성</Button>
                     )}
-                    <Button variant="primary" onClick={handleGenerateJD} disabled={!aiPrompt} isLoading={isGenerating}>
-                    {!isGenerating && <Sparkles size={16} className="text-brand-yellow" />}
-                    {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
-                  </Button>
+                    <Button variant="primary" onClick={handleGenerateJD} disabled={!aiPrompt.trim()} isLoading={isGenerating}>
+                      {!isGenerating && <Sparkles size={16} className="text-brand-yellow" />}
+                      {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
+                    </Button>
                   </div>
-                  <p className="text-[12px] text-muted-foreground mt-2 leading-relaxed">💡 아래 <b className="text-muted-foreground">공고 설정</b>에서 화주사·지점을 먼저 고르면 집결지·시급 등 등록 정보가 초안에 자동 반영돼요.</p>
+                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">위 공고 맥락을 바꿨다면 새 기준으로 다시 생성해 주세요.</p>
                 </div>
 
               ) : (
                 /* 접힌 상태 — 초안 편집칸을 첫 화면에 올리려고 접는다. 조건은 언제든 다시 펼칠 수 있다. */
-                <div className="bg-card border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex items-center gap-3">
+                <div className="bg-card border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex flex-wrap items-center gap-3">
                   <Wand2 size={15} className="text-warning-strong shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[12px] font-bold text-gray-700">
@@ -2483,7 +2865,7 @@ export function Jobs() {
                       {aiPrompt.trim() || "조건을 입력하면 AI가 채널별 초안을 다시 써줍니다"}
                     </div>
                   </div>
-                  <Button variant="secondary" size="sm" className="shrink-0" onClick={() => setPromptOpen(true)}>조건 수정 · 다시 생성</Button>
+                  <Button variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto" disabled={isGenerating} onClick={() => setPromptOpen(true)}>조건 수정 · 다시 생성</Button>
                 </div>
               )}
 
@@ -2493,21 +2875,52 @@ export function Jobs() {
                   복제로 열었을 때도 같은 이유로 원본 제목·본문이 안 보였다(지역명을 안 고치고 등록하는 사고). */}
               {/* Generated Result — 채널별 초안 (당근/알바몬/SMS) */}
               {(isGenerating || channelDrafts) && (
-                <div className="bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden xl:sticky xl:top-0 xl:col-start-2 xl:row-start-1 xl:row-span-6 xl:self-start xl:max-h-[calc(88dvh-170px)] xl:overflow-y-auto">
+                <div className={`bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden xl:sticky xl:top-0 xl:col-start-2 xl:row-start-2 xl:row-span-6 xl:self-start xl:max-h-[calc(88dvh-170px)] xl:overflow-y-auto ${isGenerating && !channelDrafts ? "min-h-[180px]" : ""}`}>
                   {isGenerating && (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center backdrop-blur-md">
-                      <Wand2 size={28} className="text-warning-strong animate-bounce mb-3" />
+                      <Loader2 size={28} className="text-warning-strong animate-spin mb-3" />
                       <div className="text-[14px] font-bold text-foreground">AI 옹봇이 채널별 공고를 작성하고 있습니다...</div>
                       <div className="text-[12px] text-muted-foreground mt-1">당근 · 알바몬 · 문자 형식으로 각각 최적화하는 중</div>
                     </div>
                   )}
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="mb-3 flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
                     <label className="text-[13px] font-bold text-warning-strong flex items-center gap-1.5">
                       <Sparkles size={14} /> {draftBody ? "채널별 공고 초안" : "채널별 공고 본문 — 직접 작성"}
                       {aiSource === "mock" && <span className="text-[12px] font-bold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">오프라인 템플릿</span>}
                     </label>
                     <span className="text-[12px] text-muted-foreground">탭별로 수정·복사할 수 있어요</span>
                   </div>
+                  {generationContextStale && (
+                    <div
+                      ref={staleGenerationNoticeRef}
+                      id="stale-job-generation-notice"
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                      tabIndex={-1}
+                      className="mb-3 rounded-2xl border border-warning/30 bg-warning-soft p-3.5 text-warning-strong outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <AlertTriangle aria-hidden="true" size={18} className="mt-0.5 shrink-0 sm:self-start" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] font-extrabold">생성 기준이 변경됐어요</div>
+                          <p className="mt-0.5 text-[12px] font-semibold leading-relaxed">
+                            변경된 항목: {changedGenerationLabels.join(" · ")}. 현재 초안에는 이전 기준의 안내가 남아 있을 수 있어요.
+                          </p>
+                        </div>
+                        <Button
+                          variant="brand"
+                          size="sm"
+                          onClick={() => void handleGenerateJD()}
+                          isLoading={isGenerating}
+                          className="w-full sm:w-auto"
+                        >
+                          {!isGenerating && <RefreshCw aria-hidden="true" size={14} />}
+                          새 기준으로 다시 생성
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {duplicatedFrom && (
                     <div className="mb-3 px-3 py-2 rounded-lg bg-error-soft border border-error/30 text-[12px] font-bold text-error-strong leading-relaxed">
                       복제한 공고예요 — <b>제목·본문에 원본({duplicatedFrom})의 권역·단가가 그대로 남아 있어요.</b> 바꿀 곳을 고치고 등록하세요.
@@ -2522,16 +2935,16 @@ export function Jobs() {
                   {channelDrafts && (
                     <>
                       {/* 채널 탭 */}
-                      <div className="flex gap-1.5 mb-3">
+                      <div className="mb-3 grid grid-cols-3 gap-1.5 sm:flex">
                         {([
                           { id: "danggeun", label: "당근알바" },
                           { id: "albamon", label: "알바몬" },
                           { id: "sms", label: "문자(SMS)" },
                         ] as const).map((ch) => (
-                          <button aria-pressed={activeChannel === ch.id} key={ch.id} onClick={() => setActiveChannel(ch.id)} className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3.5 py-1.5 rounded-lg text-[13px] font-bold transition-colors ${activeChannel === ch.id ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}>{ch.label}</button>
+                          <button aria-pressed={activeChannel === ch.id} key={ch.id} onClick={() => setActiveChannel(ch.id)} className={`min-h-11 rounded-xl px-2 text-[12px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:px-3.5 sm:text-[13px] ${activeChannel === ch.id ? "bg-foreground text-white" : "bg-muted text-muted-foreground hover:bg-gray-200"}`}>{ch.label}</button>
                         ))}
-                        <div className="flex-1" />
-                        <Button size="chip" variant="brand" className="px-3 py-1.5 text-[13px] rounded-lg bg-yellow-50 border border-brand-yellow text-warning-strong hover:bg-yellow-100 shadow-none" onClick={() => copyChannel(channelDrafts[activeChannel], activeChannel === "danggeun" ? "당근알바" : activeChannel === "albamon" ? "알바몬" : "문자")}><Copy size={14} /> 복사</Button>
+                        <div className="hidden flex-1 sm:block" />
+                        <Button size="sm" variant="brand" className="col-span-3 w-full rounded-xl border border-brand-yellow bg-yellow-50 text-[13px] text-warning-strong shadow-none hover:bg-yellow-100 sm:w-auto" onClick={() => copyChannel(channelDrafts[activeChannel], activeChannel === "danggeun" ? "당근알바" : activeChannel === "albamon" ? "알바몬" : "문자")}><Copy size={14} /> 복사</Button>
                       </div>
                       <textarea
                         value={channelDrafts[activeChannel]}
@@ -2559,14 +2972,9 @@ export function Jobs() {
               )}
 
               {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
-                  모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 초안 생성(D2)에 쓰이므로 항상 표시. */}
+                  모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 AI 입력 앞 공고 맥락에서 먼저 고른다. */}
               <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
                 <div className="text-[13px] font-bold text-foreground">공고 설정</div>
-                <RoutingMetadataNotice
-                  loading={routingMetadataLoading}
-                  error={routingMetadataError}
-                  onRetry={retryRoutingMetadata}
-                />
 
                 {/* 모집 방식 — 먼저 고른다: 아래 근무시간 형태·노출 대상이 이 값에 따라 달라진다.
                     기본값이면 접힌 한 줄로만 보여준다(B4) — 첫 등록에서 개념 3개를 먼저 고르게 하지 않는다. */}
@@ -2579,60 +2987,12 @@ export function Jobs() {
                   }}
                 />
 
-                {/* 화주사 → 지점 2단 선택 — 지점 미선택이어도 화주사만 고르면 client_id를 실어 필터 유실을 방어. 화주사·지점은 초안 생성에 반영(D2). */}
+                {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-1.5">화주사</label>
+                    <label htmlFor="new-job-site-manager" className="block text-[13px] font-bold text-gray-700 mb-1.5">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
                     <select
-                      value={newJobClientId}
-                      disabled={routingMetadataUnavailable}
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? "" : Number(e.target.value);
-                        setNewJobClientId(v);
-                        // 화주사 변경 시 하위와 맞지 않는 지점 선택은 해제
-                        if (newJobBranchId !== "" && branches.find((b) => b.id === newJobBranchId)?.client_id !== (v === "" ? undefined : v)) {
-                          setNewJobBranchId("");
-                        }
-                      }}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <option value="">화주사 선택</option>
-                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      {routingMetadataUnavailable
-                        ? "AI 응대 유형을 확인하려면 화주사 정보를 다시 불러와 주세요."
-                        : newJobClientId === ""
-                          ? "화주사를 선택하면 적용할 AI 응대 유형을 보여드려요."
-                          : <>AI 응대: {clients.find((c) => c.id === newJobClientId)?.client_type === "baemin_bmart" ? "배민 비마트" : "일반 배송"} · 모집 방식과 별도로 화주사 유형을 따라요</>}
-                    </p>
-                  </div>
-                  {/* 지점 셀렉터는 지점 개념이 있는 화주사에만(확정슬롯이거나 등록 지점 존재). 대부분 화주사는 지점이 없어 숨겨진다. */}
-                  {(clients.find((c) => c.id === newJobClientId)?.uses_slots || branches.some((b) => b.client_id === newJobClientId)) && (
-                    <div>
-                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">지점 <span className="text-muted-foreground font-semibold">(선택)</span></label>
-                      <select
-                        value={newJobBranchId}
-                        onChange={(e) => {
-                          const v = e.target.value === "" ? "" : Number(e.target.value);
-                          setNewJobBranchId(v);
-                          // 지점 선택 시 소속 화주사를 상위 셀렉트에 동기화
-                          if (v !== "") {
-                            const cid = branches.find((b) => b.id === v)?.client_id;
-                            if (typeof cid === "number") setNewJobClientId(cid);
-                          }
-                        }}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option value="">지점 선택</option>
-                        {branches.filter((b) => b.client_id === newJobClientId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-1.5">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
-                    <select
+                      id="new-job-site-manager"
                       value={newJobSiteManagerId}
                       onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
                       className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
@@ -2645,17 +3005,21 @@ export function Jobs() {
 
                 {/* 정원 · 기간 · 마감시각 */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-1.5">모집 인원 <span className="text-error-strong" aria-hidden>*</span></label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={newJobCapacity}
-                      placeholder="예: 3"
-                      onChange={(e) => setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1))}
-                      className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </div>
+                  <TextField
+                    ref={newJobCapacityRef}
+                    label="모집 인원"
+                    required
+                    type="number"
+                    min={1}
+                    value={newJobCapacity}
+                    placeholder="예: 3"
+                    onChange={(e) => {
+                      setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1));
+                      if (newJobValidationIssue?.field === "capacity") setNewJobValidationIssue(null);
+                    }}
+                    hint="이 인원이 확정되면 나머지 관심자에게 충원 완료 안내를 보낼 수 있어요."
+                    error={newJobValidationIssue?.field === "capacity" ? newJobValidationIssue.message : undefined}
+                  />
                   <div>
                     <label className="block text-[13px] font-bold text-gray-700 mb-1.5">모집 기간</label>
                     <select
@@ -2702,62 +3066,80 @@ export function Jobs() {
                   </button>
                 </div>
 
-                {/* E18 · 급여 (선택) — 예전엔 단가형태·금액(푸터)과 정산정보(접이식)로 분산. 한 그룹으로 일원화. 채우면 AI가 단가·정산 문의에 직접 답한다. */}
-                <div className="p-4 bg-background border border-border-strong rounded-2xl flex flex-col gap-4">
-                  <div className="text-[12px] font-bold text-gray-700">급여 <span className="text-error-strong" aria-hidden>*</span> — 단가 형태 또는 급여·정산 정보 중 하나는 필수 · 채우면 단가·정산 문의를 AI가 직접 안내합니다</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[13px] font-bold text-gray-700 mb-1.5">대표 단가 형태</label>
-                      <select
+                {/* 지원자가 금액·정산 주기를 다시 묻지 않도록, 사람이 읽는 안내 문장을 유일한 필수 정보원으로 둔다.
+                    단가 형태·대표 금액은 목록 요약용 선택값이며 안내 문장을 대신하지 않는다. */}
+                <section aria-labelledby="new-job-pay-title" className="flex flex-col gap-4 rounded-2xl border border-border-strong bg-background p-4">
+                  <div>
+                    <h3 id="new-job-pay-title" className="text-[13px] font-bold text-foreground">급여 정보</h3>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">AI와 지원자가 그대로 참고할 안내 문구는 필수예요. 금액과 정산 시점을 한 번에 적어 주세요.</p>
+                  </div>
+
+                  <TextareaField
+                    ref={newJobPayInfoRef}
+                    label="급여·정산 안내"
+                    required
+                    value={newJobPayInfo}
+                    onChange={(e) => {
+                      setNewJobPayInfo(e.target.value);
+                      if (newJobValidationIssue?.field === "payInfo") setNewJobValidationIssue(null);
+                    }}
+                    rows={2}
+                    placeholder="예: 건당 3,500원 · 매주 금요일 정산 · 부가세 포함"
+                    hint="지원자 안내와 AI의 급여·정산 답변에 그대로 사용해요."
+                    error={newJobValidationIssue?.field === "payInfo" ? newJobValidationIssue.message : undefined}
+                    inputClassName="min-h-[84px] resize-none"
+                  />
+
+                  <div className="border-t border-border pt-4">
+                    <div className="mb-3 text-[12px] font-bold text-muted-foreground">목록 요약용 정보 <span className="font-semibold">(선택)</span></div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <SelectField
+                        label="대표 단가 형태"
+                        aside="선택"
                         value={newJobPayType}
                         onChange={(e) => setNewJobPayType(e.target.value)}
-                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <option value="">미지정</option>
                         {PAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </div>
-                    {newJobPayType && newJobPayType !== "협의" && (
-                      <div>
-                        <label className="block text-[13px] font-bold text-gray-700 mb-1.5">대표 금액(원)</label>
-                        <input
+                      </SelectField>
+                      {newJobPayType && newJobPayType !== "협의" && (
+                        <TextField
+                          label="대표 금액(원)"
+                          aside="선택"
                           type="number"
                           min={0}
                           value={newJobPayAmount}
                           onChange={(e) => setNewJobPayAmount(e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0))}
                           placeholder="예: 3500"
-                          className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                         />
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-700 mb-1.5">급여·정산 정보</label>
-                    <textarea value={newJobPayInfo} onChange={(e) => setNewJobPayInfo(e.target.value)} rows={2} placeholder="예: 건당/일당 금액 · 정산 주기(주급/익월5일 등) · 특이사항" className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] leading-relaxed focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none" />
-                  </div>
-                </div>
+                </section>
 
                 {/* 긴급 건(SOS)에서 파생된 공고 추적용 — 화면 비표시(향후 공고↔긴급건 연결) */}
                 {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
 
-              {/* 근무 상세 + AI 응대 근거 — 접이식. pull 카드 표시 필드(근무시간·시작일·집결지)와
-                  단가·정책 참고정보를 등록 단계에서 함께 채워 편집 모달 2단계 강제를 없앤다. */}
+              {/* 선택 근무 상세 + AI 응대 근거 — 공고별 필수 위치와 급여는 위에서 상시 노출하고,
+                  근무시간·시작일·정책 참고정보만 필요할 때 펼친다. */}
               {channelDrafts && (
                 <div className="bg-card border border-border-strong rounded-2xl shadow-sm overflow-hidden">
                   <button
                     type="button"
+                    aria-expanded={newJobExtraOpen}
+                    aria-controls="new-job-extra-details"
                     onClick={() => setNewJobExtraOpen((v) => !v)}
                     className="w-full flex items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <div>
-                      <div className="text-[13px] font-bold text-foreground">근무 상세 · AI 응대 근거 <span className="text-error-strong" aria-hidden>*</span></div>
-                      <div className="text-[12px] text-muted-foreground mt-0.5"><b>집결지는 필수</b> — 만남장소 문자·거리 정렬의 근거예요. 근무시간·정책·참고정보를 채우면 맞춤 공고 링크에 표시되고 AI가 문의에 직접 답합니다.</div>
+                      <div className="text-[13px] font-bold text-foreground">추가 근무 상세 · AI 응대 근거 <span className="text-muted-foreground font-semibold">(선택)</span></div>
+                      <div className="text-[12px] text-muted-foreground mt-0.5">근무시간·시작일·정책·참고정보를 채우면 맞춤 공고 링크에 표시되고 AI가 문의에 직접 답합니다.</div>
                     </div>
                     <ChevronRight size={18} className={`text-muted-foreground transition-transform ${newJobExtraOpen ? "rotate-90" : ""}`} />
                   </button>
                   {newJobExtraOpen && (
-                    <div className="px-5 pb-5 flex flex-col gap-4 border-t border-muted pt-4">
+                    <div id="new-job-extra-details" className="px-5 pb-5 flex flex-col gap-4 border-t border-muted pt-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <SlotKeysField
                           keys={newJobSlotKeys}
@@ -2777,26 +3159,6 @@ export function Jobs() {
                             className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                           />
                         </div>
-                      </div>
-                      <div>
-                        <label className="block text-[13px] font-bold text-gray-700 mb-1.5">집결지 <span className="text-error-strong" aria-hidden>*</span> <span className="text-muted-foreground font-semibold">— 만남장소 안내 문자·거리 정렬에 그대로 쓰여요</span></label>
-                        <input
-                          type="text"
-                          value={newJobPickupAddress}
-                          onChange={(e) => setNewJobPickupAddress(e.target.value)}
-                          placeholder="예: 성수동 물류센터 3번 게이트"
-                          className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[13px] font-bold text-gray-700 mb-1.5">마지막 경유지(배송 종료 지점)</label>
-                        <input
-                          type="text"
-                          value={newJobDropoffAddress}
-                          onChange={(e) => setNewJobDropoffAddress(e.target.value)}
-                          placeholder="예: 하남 미사강변도시 일대"
-                          className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full px-3.5 py-2.5 border border-border-strong rounded-2xl text-[14px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-                        />
                       </div>
                       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-2xl flex flex-col gap-4">
                         <div className="text-[12px] font-bold text-warning-strong">AI 응대 근거 — 채우면 정책·근무 문의를 AI가 직접 안내해 매니저가 직접 답해야 하는 일이 줄어듭니다 (급여는 ‘공고 설정’의 ‘급여’ 그룹에서)</div>
@@ -2824,15 +3186,29 @@ export function Jobs() {
             </div>
 
             {/* E16 · 푸터 — 라벨 없는 컨트롤 벽은 본문 '공고 설정'으로 승격. 여기는 닫기/등록만. */}
-            <div className="flex items-center justify-end gap-3 px-7 py-5 border-t border-border-glass bg-white/45">
-              <Button variant="ghost" size="lg" onClick={closeRegisterModal}>닫기</Button>
-              {!draftBody && (
-                <span className="text-[12px] font-medium text-muted-foreground">본문을 생성하거나 직접 작성하면 등록할 수 있어요</span>
-              )}
-              <Button variant="primary" size="lg" onClick={handleRegisterJob} disabled={!draftBody || routingMetadataUnavailable} isLoading={registering}>
-                {!registering && <CheckCircle2 size={16} />}
-                {registering ? "등록 중..." : "이 내용으로 공고 등록"}
-              </Button>
+            <div className="flex flex-col gap-3 border-t border-border-glass bg-white/45 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-7 sm:py-5">
+              {generationContextStale ? (
+                <span id="stale-job-registration-reason" className="text-[12px] font-semibold leading-relaxed text-warning-strong sm:mr-auto">
+                  생성 기준이 바뀌어 다시 생성한 뒤 등록할 수 있어요
+                </span>
+              ) : !draftBody ? (
+                <span className="text-[12px] font-medium leading-relaxed text-muted-foreground sm:mr-auto">본문을 생성하거나 직접 작성하면 등록할 수 있어요</span>
+              ) : null}
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
+                <Button variant="ghost" size="lg" className="w-full sm:w-auto" onClick={closeRegisterModal} disabled={registering}>닫기</Button>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full sm:w-auto"
+                  onClick={handleRegisterJob}
+                  disabled={!draftBody || routingMetadataUnavailable || generationContextStale || isGenerating}
+                  aria-describedby={generationContextStale ? "stale-job-registration-reason" : undefined}
+                  isLoading={registering}
+                >
+                  {!registering && <CheckCircle2 size={16} />}
+                  {registering ? "등록 중..." : "이 내용으로 공고 등록"}
+                </Button>
+              </div>
             </div>
         </Modal>
       )}
@@ -3215,7 +3591,117 @@ export function Jobs() {
         </Modal>
       )}
 
-      {/* 새 공고 안내 확인 모달 — 등록 직후(대상 ≥1) 자동 + 행 '대기자에게 안내' 재사용.
+      {/* 등록 완료 후속 단계 — 사라지는 토스트와 자동 안내 모달이 경쟁하지 않게 연속 등록·안내 검토를 한곳에 둔다. */}
+      {registrationFollowup && (
+        <Modal
+          open={Boolean(registrationFollowup)}
+          onClose={() => setRegistrationFollowup(null)}
+          busy={duplicatingId === String(registrationFollowup.jobId)}
+          size="md"
+          title="공고 등록 완료"
+          description={`‘${registrationFollowup.title}’ 공고가 등록되었어요. 다음 작업을 선택하세요.`}
+          footer={(
+            <>
+              <Button
+                variant="ghost"
+                size="lg"
+                disabled={duplicatingId !== null}
+                onClick={() => setRegistrationFollowup(null)}
+              >
+                목록으로
+              </Button>
+              <Button
+                variant="secondary"
+                size="lg"
+                disabled={duplicatingId !== null}
+                onClick={() => {
+                  setRegistrationFollowup(null);
+                  openBlankNewJobForm();
+                }}
+              >
+                새 조건으로 만들기
+              </Button>
+              <Button
+                variant="brand"
+                size="lg"
+                disabled={duplicatingId !== null}
+                isLoading={duplicatingId === String(registrationFollowup.jobId)}
+                onClick={() => {
+                  const jobId = registrationFollowup.jobId;
+                  void duplicateJob(String(jobId));
+                }}
+              >
+                {duplicatingId !== String(registrationFollowup.jobId) && <CopyPlus size={16} />}
+                같은 조건으로 하나 더
+              </Button>
+            </>
+          )}
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-2xl border border-success/25 bg-success-soft p-4 text-success-strong">
+              <CheckCircle2 aria-hidden="true" size={20} className="mt-0.5 shrink-0" />
+              <div>
+                <div className="text-[14px] font-extrabold">저장이 끝나 다음 공고를 바로 만들 수 있어요</div>
+                <p className="mt-1 text-[13px] font-medium leading-relaxed">권역이나 시간만 다른 공고라면 같은 조건으로 복제한 뒤 바뀐 값만 수정하세요.</p>
+              </div>
+            </div>
+
+            {registrationFollowup.note && (
+              <div role="status" className="rounded-2xl border border-warning/30 bg-warning-soft px-4 py-3 text-[13px] font-semibold leading-relaxed text-warning-strong">
+                {registrationFollowup.note}
+              </div>
+            )}
+
+            <section aria-labelledby="registration-followup-announce-title" className="rounded-2xl border border-border-strong bg-background p-4">
+              <h3 id="registration-followup-announce-title" className="text-[13px] font-bold text-foreground">새 공고 안내 문자</h3>
+              {registrationFollowup.announcement.status === "checking" && (
+                <div role="status" className="mt-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+                  <Loader2 aria-hidden="true" size={15} className="animate-spin" /> 안내할 대상을 확인하고 있어요. 기다리지 않고 다음 공고를 만들어도 됩니다.
+                </div>
+              )}
+              {registrationFollowup.announcement.status === "ready" && (
+                <div className="mt-2 flex flex-col items-start gap-3">
+                  <p className="text-[13px] font-medium leading-relaxed text-foreground">
+                    동의와 발송 간격을 확인한 안내 대상 <b>{registrationFollowup.announcement.payload.targets.length}명</b>이 있어요.
+                    {registrationFollowup.announcement.payload.night && " 야간에는 검토만 가능하고 발송은 아침 9시 이후에 할 수 있어요."}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={duplicatingId !== null}
+                    onClick={() => {
+                      const at = registrationFollowup.announcement.status === "ready"
+                        ? registrationFollowup.announcement.payload
+                        : null;
+                      if (!at) return;
+                      const jobId = registrationFollowup.jobId;
+                      setRegistrationFollowup(null);
+                      setAnnounceModal({
+                        jobId,
+                        smsTitle: at.sms_title,
+                        targets: at.targets,
+                        groups: at.groups,
+                        night: at.night,
+                        dropped: at.dropped_by_exposure,
+                      });
+                    }}
+                  >
+                    <Megaphone size={15} /> {registrationFollowup.announcement.payload.targets.length}명 안내 검토
+                  </Button>
+                </div>
+              )}
+              {registrationFollowup.announcement.status === "empty" && (
+                <p className="mt-2 text-[13px] font-medium leading-relaxed text-muted-foreground">{registrationFollowup.announcement.description}</p>
+              )}
+              {registrationFollowup.announcement.status === "error" && (
+                <p className="mt-2 text-[13px] font-medium leading-relaxed text-muted-foreground">대상을 지금 확인하지 못했어요. 공고 행의 ‘대기자에게 안내’에서 나중에 다시 확인할 수 있어요.</p>
+              )}
+            </section>
+          </div>
+        </Modal>
+      )}
+
+      {/* 새 공고 안내 확인 모달 — 등록 완료 단계와 행 '대기자에게 안내'가 같은 검토 모달을 연다.
           충원 안내 이력(waitlist_notice)·알림 신청(notify_request) 기반 후보를 게시 순간 원클릭으로. */}
       {announceModal && (
         <Modal bare open={Boolean(announceModal)} onClose={() => setAnnounceModal(null)} size="md"

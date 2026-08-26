@@ -13,6 +13,17 @@ import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
 import { isReviewReadyCandidate } from "@/lib/admin/job-operations";
+import {
+  resolveJobCreateRouting,
+  validateJobCreateRequiredFields,
+  type JobCreateBranchRoutingRow,
+  type JobCreateClientRoutingRow,
+} from "@/lib/admin/job-create-server-validation";
+import {
+  jobCreatePayloadDigest,
+  jobCreateReplayDecision,
+  validateJobCreateRequestId,
+} from "@/lib/admin/job-create-idempotency";
 
 const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 
@@ -197,11 +208,56 @@ export async function POST(req: NextRequest) {
     channel_bodies?: { danggeun?: string; albamon?: string; sms?: string } | null;
   };
 
+  const validatedCreateRequestId = validateJobCreateRequestId(body.client_request_id);
+  if (!validatedCreateRequestId.ok) {
+    return NextResponse.json(
+      { error: "공고 생성 요청 ID가 없거나 올바르지 않습니다. 새 공고 창을 다시 열어주세요." },
+      { status: 400 },
+    );
+  }
+  const createRequestId = validatedCreateRequestId.requestId;
+  const createRequestFingerprint = await jobCreatePayloadDigest(body);
+
+  const supabase = createServiceClient();
+
+  // 먼저 처리된 요청은 현재 비즈니스 검증 규칙과 무관하게 기존 결과를 재생한다. 배포 사이에
+  // 검증이 강화돼도 같은 UUID·같은 payload가 400으로 바뀌지 않아야 완전한 replay가 된다.
+  const { data: existingCreate, error: existingCreateError } = await supabase
+    .from("jobs")
+    .select("*")
+    .eq("client_request_id", createRequestId)
+    .maybeSingle();
+  if (existingCreateError) {
+    console.error("[jobs POST idempotency lookup]", existingCreateError);
+    return NextResponse.json({ error: "공고 중복 등록 여부를 확인하지 못했습니다." }, { status: 500 });
+  }
+  if (existingCreate) {
+    if (jobCreateReplayDecision(existingCreate.creation_request_fingerprint, createRequestFingerprint) === "replay") {
+      return NextResponse.json({ job: existingCreate, deduplicated: true });
+    }
+    return NextResponse.json(
+      {
+        error: "이미 처리된 공고 등록 요청과 내용이 다릅니다. 공고 목록을 확인한 뒤 새 창에서 다시 등록해주세요.",
+        job: existingCreate,
+      },
+      { status: 409 },
+    );
+  }
+
   if (!title?.trim() || !jobBody?.trim()) {
     return NextResponse.json(
       { error: "title과 body는 필수입니다." },
       { status: 400 }
     );
+  }
+  const requiredFieldIssue = validateJobCreateRequiredFields({
+    capacity,
+    pickupAddress: pickup_address,
+    dropoffAddress: dropoff_address,
+    payInfo: pay_info,
+  });
+  if (requiredFieldIssue) {
+    return NextResponse.json({ error: requiredFieldIssue.error }, { status: 400 });
   }
   // `__` 프리픽스는 시스템 더미 공고 예약어 — 사용자 공고가 이걸로 시작하면 목록·pull에서 숨겨져 사라진 것처럼 보인다.
   if (isSystemJobTitle(title.trim())) {
@@ -233,29 +289,62 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "work_period 값이 잘못되었습니다." }, { status: 400 });
   }
 
-  const supabase = createServiceClient();
-
-  // branch_id가 오면 지점 이름·소속 화주사를 함께 채워 계층을 일관되게 유지한다.
-  // 지점 없이 화주사(client_id)만 온 경우엔 그 값을 그대로 저장해 화주사 필터에서 유실되지 않게 한다.
-  let resolvedBranchName: string | null = branch ?? null;
-  let resolvedClientId: number | null = typeof client_id === "number" ? client_id : null;
-  if (typeof branch_id === "number") {
-    const { data: b } = await supabase
+  // 화주사 자체는 일반 라인 호환을 위해 선택값으로 두되, 전달된 라우팅은 활성 마스터에만 연결한다.
+  // 지점은 활성 상태·소속 화주사까지 확인하고, 요청 화주사와 다르면 조용히 덮어쓰지 않고 막는다.
+  let branchRow: JobCreateBranchRoutingRow | null = null;
+  if (typeof branch_id === "number" && Number.isSafeInteger(branch_id) && branch_id > 0) {
+    const { data: branchData, error: branchError } = await supabase
       .from("branches")
-      .select("name, client_id")
+      .select("id, name, client_id, active")
       .eq("id", branch_id)
       .maybeSingle();
-    if (b) {
-      resolvedBranchName = (b.name as string) ?? resolvedBranchName;
-      resolvedClientId = (b.client_id as number | null) ?? null;
+    if (branchError) {
+      console.error("[jobs POST routing branch]", branchError);
+      return NextResponse.json({ error: "지점 정보를 확인하지 못했습니다." }, { status: 500 });
     }
+    branchRow = branchData as JobCreateBranchRoutingRow | null;
   }
+
+  const routingClientId =
+    typeof branchRow?.client_id === "number"
+      ? branchRow.client_id
+      : typeof client_id === "number" && Number.isSafeInteger(client_id) && client_id > 0
+        ? client_id
+        : null;
+  let clientRow: JobCreateClientRoutingRow | null = null;
+  if (routingClientId !== null) {
+    const { data: clientData, error: clientError } = await supabase
+      .from("clients")
+      .select("id, active")
+      .eq("id", routingClientId)
+      .maybeSingle();
+    if (clientError) {
+      console.error("[jobs POST routing client]", clientError);
+      return NextResponse.json({ error: "화주사 정보를 확인하지 못했습니다." }, { status: 500 });
+    }
+    clientRow = clientData as JobCreateClientRoutingRow | null;
+  }
+
+  const routing = resolveJobCreateRouting({
+    requestedClientId: client_id,
+    requestedBranchId: branch_id,
+    requestedBranchName: branch,
+    branch: branchRow,
+    client: clientRow,
+  });
+  if (!routing.ok) {
+    return NextResponse.json({ error: routing.error }, { status: 400 });
+  }
+
+  const normalizedPickupAddress = pickup_address!.trim();
+  const normalizedDropoffAddress = dropoff_address!.trim();
+  const normalizedPayInfo = pay_info!.trim();
 
   // 상차지 주소가 있고 좌표가 안 넘어왔으면 지오코딩 — 파이프라인 거리 정렬의 근거.
   let resolvedPickupLat = typeof pickup_lat === "number" ? pickup_lat : null;
   let resolvedPickupLng = typeof pickup_lng === "number" ? pickup_lng : null;
-  if (pickup_address && resolvedPickupLat === null && resolvedPickupLng === null) {
-    const { geo } = await geocodeAddressWithFallback(String(pickup_address));
+  if (resolvedPickupLat === null && resolvedPickupLng === null) {
+    const { geo } = await geocodeAddressWithFallback(normalizedPickupAddress);
     if (geo) {
       resolvedPickupLat = geo.lat;
       resolvedPickupLng = geo.lng;
@@ -265,8 +354,8 @@ export async function POST(req: NextRequest) {
   // 마지막 경유지(배송 종료 지점) 주소가 있고 좌표가 안 넘어왔으면 지오코딩 — 거리 정렬은 상차지·마지막경유지 중 가까운 쪽 기준.
   let resolvedDropoffLat = typeof dropoff_lat === "number" ? dropoff_lat : null;
   let resolvedDropoffLng = typeof dropoff_lng === "number" ? dropoff_lng : null;
-  if (dropoff_address && resolvedDropoffLat === null && resolvedDropoffLng === null) {
-    const { geo } = await geocodeAddressWithFallback(String(dropoff_address));
+  if (resolvedDropoffLat === null && resolvedDropoffLng === null) {
+    const { geo } = await geocodeAddressWithFallback(normalizedDropoffAddress);
     if (geo) {
       resolvedDropoffLat = geo.lat;
       resolvedDropoffLng = geo.lng;
@@ -299,25 +388,25 @@ export async function POST(req: NextRequest) {
     .insert({
       title: title.trim(),
       body: jobBody.trim(),
-      branch: resolvedBranchName,
-      branch_id: typeof branch_id === "number" ? branch_id : null,
-      client_id: resolvedClientId,
+      branch: routing.branchName,
+      branch_id: routing.branchId,
+      client_id: routing.clientId,
       slot: slot ?? null,
       slot_keys: normalizedSlotKeys ?? null,
       start_date: start_date ?? null,
       vehicle_required: vehicle_required ?? true,
-      pickup_address: pickup_address ?? null,
+      pickup_address: normalizedPickupAddress,
       pickup_lat: resolvedPickupLat,
       pickup_lng: resolvedPickupLng,
-      dropoff_address: dropoff_address ?? null,
+      dropoff_address: normalizedDropoffAddress,
       dropoff_lat: resolvedDropoffLat,
       dropoff_lng: resolvedDropoffLng,
-      pay_info: pay_info ?? null,
+      pay_info: normalizedPayInfo,
       policy_notes: policy_notes ?? null,
       pay_type: pay_type ?? null,
       pay_amount: typeof pay_amount === "number" ? pay_amount : null,
       ai_facts: ai_facts ?? null,
-      capacity: capacity ?? 1,
+      capacity,
       // 기본 internal — 파일럿 배포 채널이 pull(맞춤링크) 전용이라, 미전송 시 external이면 지원자에게 안 보이는 함정.
       // (유일 호출자 등록 모달은 recruit_mode를 항상 전송하므로 이 기본값은 방어용.) asRecruitMode의 레거시 파싱 fallback은 별개로 external 유지.
       recruit_mode: recruit_mode ?? "internal",
@@ -331,11 +420,35 @@ export async function POST(req: NextRequest) {
       sos_request_id: typeof sos_request_id === "number" ? sos_request_id : null,
       // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
       channel_bodies: channel_bodies && typeof channel_bodies === "object" ? channel_bodies : null,
+      client_request_id: createRequestId,
+      creation_request_fingerprint: createRequestFingerprint,
     })
     .select()
     .single();
 
   if (error || !data) {
+    // 두 요청이 동시에 들어오면 둘 다 사전 조회를 통과할 수 있다. unique 승자가 저장한 행을
+    // 다시 읽어 같은 payload면 성공 replay, 다른 payload면 409로 처리한다.
+    if (error?.code === "23505") {
+      const { data: concurrentCreate, error: concurrentCreateError } = await supabase
+        .from("jobs")
+        .select("*")
+        .eq("client_request_id", createRequestId)
+        .maybeSingle();
+      if (concurrentCreateError) {
+        console.error("[jobs POST idempotency concurrent lookup]", concurrentCreateError);
+        return NextResponse.json({ error: "공고 중복 등록 여부를 확인하지 못했습니다." }, { status: 500 });
+      }
+      if (concurrentCreate) {
+        if (jobCreateReplayDecision(concurrentCreate.creation_request_fingerprint, createRequestFingerprint) === "replay") {
+          return NextResponse.json({ job: concurrentCreate, deduplicated: true });
+        }
+        return NextResponse.json(
+          { error: "이미 처리된 공고 등록 요청과 내용이 다릅니다. 공고 목록을 확인한 뒤 새 창에서 다시 등록해주세요." },
+          { status: 409 },
+        );
+      }
+    }
     console.error("[jobs POST]", error);
     // 제약 위반은 사용자 입력 문제다 — 어느 칸이 문제인지 이름으로 돌려준다(500 침묵 금지).
     const readable = describeDbConstraintError(error);
