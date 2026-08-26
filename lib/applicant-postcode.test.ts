@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 type ApplicantPostcodeModule = {
+  applicantPostcodeBlocksSubmission?: (
+    lookupState: "idle" | "loading" | "error",
+    searchOpen: boolean,
+  ) => boolean;
   embedApplicantPostcode?: (input: {
     container: unknown;
     create: () => { embed: (container: unknown) => void };
@@ -75,6 +79,16 @@ test("a successful postcode embed does not invoke recovery", async () => {
   assert.equal(result, true);
   assert.equal(embeddedContainer, container);
   assert.equal(recoveryCount, 0);
+});
+
+test("postcode loading or an open search blocks application submission", async () => {
+  const { applicantPostcodeBlocksSubmission } = await loadModule();
+  assert.equal(typeof applicantPostcodeBlocksSubmission, "function");
+
+  assert.equal(applicantPostcodeBlocksSubmission!("idle", false), false);
+  assert.equal(applicantPostcodeBlocksSubmission!("error", false), false);
+  assert.equal(applicantPostcodeBlocksSubmission!("loading", false), true);
+  assert.equal(applicantPostcodeBlocksSubmission!("idle", true), true);
 });
 
 test("postcode presentation keeps search primary until an address is selected", async () => {

@@ -59,6 +59,8 @@ export const activeStage: Stage = {
         available_date: ctx.applicant.available_date,
         own_vehicle: ctx.applicant.own_vehicle,
         introduction: ctx.applicant.introduction,
+        marketing_consent: ctx.applicant.marketing_consent,
+        sms_opt_out_at: ctx.applicant.sms_opt_out_at,
       },
       history: ctx.history,
       latestInbound: inboundText,

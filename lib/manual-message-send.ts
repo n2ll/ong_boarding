@@ -18,7 +18,8 @@ export type ManualMessageFailureCode =
   | "job_scope_unavailable"
   | "recipient_mismatch"
   | "recipient_unavailable"
-  | "applicant_required";
+  | "applicant_required"
+  | "marketing_consent_required";
 
 export function manualMessageRecipientEligibility(
   request: { applicantId: number | null; phone: string },

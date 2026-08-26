@@ -42,6 +42,11 @@ import { sendSlackText } from "@/lib/slack";
 import { getSystemMessage, fillTemplate } from "@/lib/agent/system-messages";
 import { resolveAutomatedOutboundText } from "@/lib/agent/outbound-safety";
 import { recordUsage, toMessageTokens } from "@/lib/agent/usage";
+import {
+  hasFutureJobPromotion,
+  isExplicitSmsOptOutText,
+  shouldApplyExplicitSmsOptOut,
+} from "@/lib/sms-consent-policy";
 
 // (참고) baemin은 폼 작성 후에 job_candidates를 생성하므로 ensureBaeminSystemJob을 여기서 호출 안 함.
 
@@ -144,28 +149,78 @@ async function processInbound(
   const receivedAt = msg.created_at;
 
   // 3) phone으로 기존 applicant 매칭 시도
-  let applicant: { id: number; name: string | null } | null = null;
+  let applicant: { id: number; name: string | null; marketing_consent_at: string | null } | null = null;
   if (msg.applicant_id) {
     const { data } = await supabase
       .from("applicants")
-      .select("id, name")
+      .select("id, name, marketing_consent_at")
       .eq("id", msg.applicant_id)
       .maybeSingle();
-    applicant = (data as { id: number; name: string | null } | null) ?? null;
+    applicant = (data as { id: number; name: string | null; marketing_consent_at: string | null } | null) ?? null;
   } else {
     const { data: matched } = await supabase
       .from("applicants")
-      .select("id, name")
+      .select("id, name, marketing_consent_at")
       .eq("phone", phone)
       .order("created_at", { ascending: false })
       .limit(1);
-    applicant = (matched?.[0] as { id: number; name: string | null } | undefined) ?? null;
+    applicant = (matched?.[0] as { id: number; name: string | null; marketing_consent_at: string | null } | undefined) ?? null;
   }
 
   // ───────────────────────────────────────────────────────────────
   // 4a) 매칭됨 → message에 applicant_id 채우고 active candidate에 router 호출
   // ───────────────────────────────────────────────────────────────
   if (applicant) {
+    // 명시적인 문자 중단 요청은 공고 라우팅·AI 분류보다 먼저 결정적으로 처리한다.
+    // 지원자 상태를 한 UPDATE로 함께 기록하고, 실패하면 멱등 클레임을 풀어 후속 회수가 재시도하게 한다.
+    if (isExplicitSmsOptOutText(text)) {
+      await supabase.from("messages").update({ applicant_id: applicant.id }).eq("id", msg.id);
+      if (!shouldApplyExplicitSmsOptOut({
+        inboundAt: receivedAt,
+        marketingConsentAt: applicant.marketing_consent_at,
+      })) {
+        return {
+          ok: true,
+          matched: true,
+          agent_invoked: false,
+          reason: "stale explicit opt-out ignored after later consent",
+        };
+      }
+      const optedOutAt = new Date().toISOString();
+      const { data: persisted, error: persistError } = await supabase
+        .from("applicants")
+        .update({
+          sms_opt_out_at: optedOutAt,
+          availability: "휴면",
+          availability_updated_at: optedOutAt,
+        })
+        .eq("id", applicant.id)
+        .select("id")
+        .maybeSingle();
+      if (persistError || !persisted) {
+        console.error("[supabase-webhook] explicit opt-out persistence failed", persistError);
+        const { error: resetError } = await supabase
+          .from("messages")
+          .update({ webhook_processed_at: null })
+          .eq("id", msg.id);
+        if (resetError) {
+          console.error("[supabase-webhook] explicit opt-out claim reset failed", resetError);
+        }
+        return {
+          ok: false,
+          matched: true,
+          agent_invoked: false,
+          reason: "explicit opt-out persistence failed",
+        };
+      }
+      return {
+        ok: true,
+        matched: true,
+        agent_invoked: false,
+        reason: "explicit opt-out persisted",
+      };
+    }
+
     // 어느 공고 건인지는 **lib/agent/inbound-routing 한 곳**이 정한다(웹훅·sweeper·draft 공통).
     // 예전엔 이 세 경로가 각자 다른 기준을 써서, 같은 답장이 어느 경로로 잡히느냐에 따라 다른 공고로
     // 응대됐다. 앵커(직전 outbound)에서 **대량·캠페인 발송을 제외**하는 것도 여기서 처리한다 —
@@ -581,7 +636,7 @@ async function processInbound(
 
     // 3) 지원자에게 안내 SMS 발송.
     //    평시: apply 폼 URL 안내(baemin_apply_invite) — 정식 지원 유도.
-    //    비마트 임시중단(baemin_suspended ON): 폼 링크를 보내지 않고 '중단 + 인재풀 동의'(baemin_start) 안내.
+    //    비마트 임시중단(baemin_suspended ON): 폼 링크·향후 일자리 약속 없이 현재 중단 사실만 고정 안내.
     //    ⚠️ 중단 기간엔 B마트 지원서 링크를 절대 보내지 않는다(모집 중처럼 안내 금지).
     const baeminSuspended = !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
     let sendBody: string;
@@ -590,18 +645,14 @@ async function processInbound(
     if (baeminSuspended) {
       const nameFill =
         ext.name?.trim() && ext.name.trim() !== "(이름 미확인)" ? ext.name.trim() : "";
-      const storedStart = (await getSystemMessage(supabase, "baemin_start"))?.trim();
       const suspendedFallback = [
         `안녕하세요${nameFill ? ` ${nameFill}님` : ""}, 지원해 주셔서 감사합니다!`,
         "",
         "현재 배민 비마트 배송 업무가 배민 측 사정으로 잠시 중단된 상태라, 지금 바로 진행은 어려운 점 양해 부탁드려요.",
         "",
-        "다만 지원해 주신 분들은 인재풀에 등록해 두고, 다른 배송·물류 업무 수요가 생기면 가장 먼저 안내드리고 있어요.",
-        "",
-        `괜찮으시면 다른 업무가 생겼을 때 연락드려도 될까요? "네"라고만 답장 주시면 등록해 둘게요 😊`,
+        "보내주신 내용은 담당 매니저가 확인하겠습니다. 궁금한 점은 이 번호로 답장해 주세요.",
       ].join("\n");
-      const filledStored = storedStart ? fillTemplate(storedStart, { 이름: nameFill }) : null;
-      const resolved = resolveAutomatedOutboundText(filledStored, suspendedFallback);
+      const resolved = resolveAutomatedOutboundText(null, suspendedFallback);
       if (!resolved) {
         console.error("[supabase-webhook] unsafe baemin suspended message blocked");
         return { ok: true, classification: "pending", reason: "unsafe automated message", triage };
@@ -636,6 +687,11 @@ async function processInbound(
       }
       sendBody = resolved;
       sentByLabel = "system-baemin-invite";
+    }
+
+    if (hasFutureJobPromotion(sendBody)) {
+      console.error("[supabase-webhook] unconsented future-job promotion blocked");
+      return { ok: true, classification: "pending", reason: "future-job promotion blocked", triage };
     }
 
     let inviteMessageId: string | null = null;

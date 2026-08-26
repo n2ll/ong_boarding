@@ -15,7 +15,7 @@
  *            이후 지원자 답장은 인입 웹훅이 agent_stage 기준으로 라우터에 연결한다.
  *
  * 충원 완료 공고(매니저 확정 인원(applicants.status='확정인력') ≥ capacity)에는 스크리닝 대신
- * 투명한 대기 안내 1통만 보낸다 — 자리·새 공고 시 재안내 약속 포함.
+ * 현재 공고의 충원 완료 사실을 알리는 운영 문자 1통만 보낸다.
  *
  * ⚠️ 확정 뉘앙스 금지 — 모든 문구는 질문/안내일 뿐, 배정·확정·출근 지시 표현을 절대 쓰지 않는다.
  */
@@ -34,6 +34,8 @@ import {
 import { getAgentMode, type AgentMode } from "./kill-switch";
 import { getSystemMessage, fillTemplate } from "./system-messages";
 import { resolveAutomatedOutboundText } from "./outbound-safety";
+import { currentJobWaitlistNotice } from "./engage-message";
+import { hasFutureJobPromotion } from "../sms-consent-policy";
 import {
   isExposed,
   normalizeRule,
@@ -54,10 +56,6 @@ export function smsJobTitle(title: string): string {
  *  웹발신 가독성: 문장 단위 줄바꿈, 질문은 마지막 줄에 하나. */
 const FALLBACK_ENGAGE = (name: string, jobTitle: string) =>
   `${name}님, '${jobTitle}' 관심 감사합니다!\n빠른 진행을 위해 몇 가지만 여쭤볼게요.\n\n지금 운행하시는 차량(차종)이 어떻게 되세요?`;
-
-/** 충원 완료 대기 안내 — 자리·새 공고 시 재안내를 약속하는 투명한 안내(확정 뉘앙스 없음). */
-const WAITLIST_NOTICE = (name: string, jobTitle: string) =>
-  `${name}님, '${jobTitle}' 관심 감사합니다!\n지금은 이 공고 자리가 모두 차 있어요.\n자리가 나거나 조건이 맞는 새 공고가 올라오면 이 번호로 먼저 안내드릴게요.`;
 
 /** KST 21시~익일 08시 — 야간엔 즉시 발송 대신 큐잉하고 아침 9시 cron이 발송한다. */
 export function isNightKst(d: Date = new Date()): boolean {
@@ -306,7 +304,7 @@ export async function runInterestEngage(params: {
   const waitlist = await isJobFullyStaffed(supabase, jobId, capacity);
   let text: string | null;
   if (waitlist) {
-    const waitlistFallback = WAITLIST_NOTICE(name, smsJobTitle(job.title));
+    const waitlistFallback = currentJobWaitlistNotice(name, smsJobTitle(job.title));
     text = resolveAutomatedOutboundText(null, waitlistFallback);
   } else {
     const stored = (await getSystemMessage(supabase, "interest_engage"))?.trim();
@@ -315,7 +313,12 @@ export async function runInterestEngage(params: {
     const filledStored = stored
       ? fillTemplate(stored, { 이름: name, 공고명: cleanTitle })
       : null;
-    text = resolveAutomatedOutboundText(filledStored, fallback);
+    const resolved = resolveAutomatedOutboundText(filledStored, fallback);
+    // 관심 클릭 자동 응대는 현재 공고 안내만 허용한다. 편집 템플릿에 향후 일자리 홍보가 섞였으면
+    // 동의 상태를 추정하지 않고 고정된 현재 공고 질문으로 되돌린다.
+    text = resolved && hasFutureJobPromotion(resolved)
+      ? resolveAutomatedOutboundText(null, fallback)
+      : resolved;
   }
   if (!text) return { action: "skipped", reason: "unsafe_message" };
 
@@ -560,7 +563,7 @@ export function engageOutcomeLabel(outcome: EngageOutcome): string {
     case "engaged":
       return "⚡ AI 스크리닝 시작됨 — 첫 질문 문자를 자동 발송했어요.";
     case "waitlist_sent":
-      return "충원 완료 공고 — 대기 안내 문자 1통 발송(자리·새 공고 시 재안내 약속).";
+      return "충원 완료 공고 — 현재 공고의 마감 안내 문자 1통을 발송했어요.";
     case "copilot_manual":
       return "🤖 코파일럿 모드 — 인바운드가 없어 초안 생성 불가. 관심 큐에서 [빠른 컨택]으로 수동 진행해주세요.";
     case "send_failed":

@@ -12,7 +12,19 @@ import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence } from "motion/react";
-import { Applicant, calcAge, SLOTS, SLOT_LABEL, SLOT_UNKNOWN, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
+import {
+  Applicant,
+  calcAge,
+  SLOTS,
+  SLOT_LABEL,
+  SLOT_UNKNOWN,
+  applicantAvailableSlots,
+  campaignSmsSendability,
+  pipelineBulkPurpose,
+  pipelineBulkSendability,
+  pipelineWaitlistJobAfterAction,
+  type SlotKey,
+} from "@/lib/admin/types";
 import { distanceToJobKm, jobAnchors, type GeoJob } from "@/lib/geo";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
@@ -45,6 +57,7 @@ import {
   recoverPipelineApplicantSelection,
 } from "@/lib/admin/pipeline-navigation";
 import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
+import { CURRENT_JOB_WAITLIST_SMS_BODY } from "@/lib/sms-consent-policy";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
 function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number; bytes: number } {
@@ -158,6 +171,7 @@ interface CardData {
   availability: string | null;
   availabilityUpdatedAt: string | null;
   smsOptOutAt: string | null;
+  marketingConsent: boolean | null;
   sido: string | null;
   createdAtIso: string | null;
   lastMessageAtIso: string | null;
@@ -207,7 +221,7 @@ const RECONTACT_B_BODY = `[옹고잉] #{이름}님, 안녕하세요. 얼마 전 
 
 // 관심 대기 안내 (사후관리) — '관심 있음'을 눌렀지만 자리가 부족해 바로 배정 안내를 못 하는 인원용.
 // 확정 뉘앙스 금지 — '먼저 연락드릴게요'까지만, 배정·확정을 약속하지 않는다.
-const WAITLIST_BODY = `#{이름}님, 관심 감사합니다. 현재 순차적으로 안내드리고 있어요. 자리가 정리되는 대로 먼저 연락드릴게요! (안내 중단: '그만' 회신)`;
+const WAITLIST_BODY = CURRENT_JOB_WAITLIST_SMS_BODY;
 
 interface ColumnData {
   id: string;
@@ -303,17 +317,25 @@ const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 182;
 // 14일 경계 — '최근 14일 다시 연락 제외' 필터 기준
 const FOURTEEN_DAYS_MS = 1000 * 60 * 60 * 24 * 14;
 
-// 발송 가능 여부 판정 — 연락처·맞춤 공고 링크(access_token)·수신거부 3조건. 불가 사유를 함께 도출.
-// 캠페인 발송이 서버에서 차단되는 상태 — app/api/admin/messages/bulk-send(EXCLUDED_POOL_STATUS)와 **같은 집합**이어야 한다.
-// '기타'는 서버가 막지 않으므로 여기서도 막지 않는다(막으면 화면에만 안 보이는 조용한 제외가 된다).
-const POOL_EXCLUDED_STATUS = new Set(["부적합", "이탈"]);
-
 function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
-  if (!c.phone) return { sendable: false, reason: "연락처 없음" };
-  if (!c.hasCustomLink) return { sendable: false, reason: "맞춤 공고 링크 없음" };
-  if (c.smsOptOutAt) return { sendable: false, reason: "수신거부" };
-  if (POOL_EXCLUDED_STATUS.has(c.status)) return { sendable: false, reason: `인력풀 제외(${c.status})` };
-  return { sendable: true, reason: null };
+  return campaignSmsSendability({
+    phone: c.phone,
+    hasCustomLink: c.hasCustomLink,
+    smsOptOutAt: c.smsOptOutAt,
+    marketingConsent: c.marketingConsent,
+    status: c.status,
+  });
+}
+
+function bulkSendableOf(c: CardData, waitlist: boolean): { sendable: boolean; reason: string | null } {
+  return pipelineBulkSendability({
+    waitlist,
+    phone: c.phone,
+    hasCustomLink: c.hasCustomLink,
+    smsOptOutAt: c.smsOptOutAt,
+    marketingConsent: c.marketingConsent,
+    status: c.status,
+  });
 }
 
 // 원지원일 표기 — 'YYYY-MM' (연락 이력 relTime과 구분)
@@ -372,6 +394,7 @@ function toCard(a: ApplicantRow): CardData {
     availability: a.availability ?? null,
     availabilityUpdatedAt: a.availability_updated_at ?? null,
     smsOptOutAt: a.sms_opt_out_at ?? null,
+    marketingConsent: a.marketing_consent ?? null,
     sido: a.sido ?? null,
     createdAtIso: a.created_at ?? null,
     lastMessageAtIso: a.last_message_at ?? null,
@@ -1090,8 +1113,13 @@ export function Pipeline() {
   // 부적합·이탈 표시는 뷰와 무관하게 반영한다 — 리스트·지도가 같은 모집단을 쓰게(칸반엔 해당 컬럼이 없어 영향 없음).
   const listCards = showExcluded ? [...allCards, ...excludedCards] : allCards;
 
-  // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용(서버가 발송 시 자동 제외)
+  // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용.
   const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
+  const isWaitlistBulk = bulkMsgBody.trim() === WAITLIST_BODY.trim();
+  // 수신거부와 별개인 새 일자리 문자 동의 — false/null 모두 캠페인 발송 불가다.
+  const selectedNoMarketingConsentCount = listCards.filter(
+    (c) => !isWaitlistBulk && selectedRows.has(c.id) && !c.smsOptOutAt && c.marketingConsent !== true,
+  ).length;
   // 선택 인원 중 이미 확정된 사람 — 서버는 막지 않는다(운행이 중단됐다가 재확정되는 케이스가 실제로 있어
   // '다른 라인 안내'가 정당한 발송일 수 있다). 다만 모르고 보내면 안 되므로 모달에서 수를 알려준다.
   const selectedConfirmedCount = listCards.filter((c) => selectedRows.has(c.id) && c.status === "확정인력").length;
@@ -1382,9 +1410,14 @@ export function Pipeline() {
   // 실제로는 직접 고른 사람이 섞였을 수 있다는 사실을 숨기지 않기 위해.
   const selectedOutsideCondition = [...selectedRows].filter((id) => !filteredIdSet.has(id)).length;
 
-  // 발송 모달 실제 수신 대상 — 화면 표시(filteredCards) ∩ 선택 ∩ 연락처 보유. handleBulkSend의 발송 대상과 동일 기준.
+  // 발송 모달 실제 수신 대상 — 화면 표시(filteredCards) ∩ 선택 ∩ 캠페인 발송 가능. handleBulkSend와 동일 기준.
   // selectedRows.size 그대로 쓰면 필터로 화면에서 빠진 인원까지 세어 인원·비용이 부풀려진다.
-  const modalRecipientCount = filteredCards.filter((c) => selectedRows.has(c.id) && c.phone).length;
+  const waitlistContextMissing = isWaitlistBulk && waitlistJobId === null;
+  const modalRecipientCount = waitlistContextMissing
+    ? 0
+    : filteredCards.filter(
+        (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlistBulk).sendable,
+      ).length;
   const modalExcludedCount = selectedRows.size - modalRecipientCount;
 
   // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
@@ -1541,9 +1574,13 @@ export function Pipeline() {
 
   const toggleRow = (id: string) => {
     const newSet = new Set(selectedRows);
-    if (newSet.has(id)) newSet.delete(id);
+    const removing = newSet.has(id);
+    if (removing) newSet.delete(id);
     else newSet.add(id);
     setSelectedRows(newSet);
+    setWaitlistJobId((current) =>
+      pipelineWaitlistJobAfterAction(current, removing ? "manual_remove" : "manual_add")
+    );
   };
 
   const toggleAll = () => {
@@ -1649,17 +1686,22 @@ export function Pipeline() {
     if (!text) return toast.error("메시지 내용을 입력해주세요.");
 
     // 발송 대상 = 현재 화면 표시분(filteredCards)과 선택의 교집합 — 화면에 없는 인원 오발송 방지.
-    const selected = filteredCards.filter((c) => selectedRows.has(c.id) && c.phone);
+    const isWaitlist = text === WAITLIST_BODY.trim();
+    if (isWaitlist && waitlistJobId === null) {
+      return toast.error("먼저 상단의 '공고 관심자 선택'에서 안내할 공고를 골라주세요.");
+    }
+    const selected = filteredCards.filter(
+      (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlist).sendable,
+    );
     const recipients = selected.map((c) => ({
       phone: c.phone as string,
       applicant_id: Number(c.id),
     }));
     // 실패 명단에 이름을 붙이기 위한 조회표(전화번호 → 이름) — 서버 결과는 phone만 돌려준다.
     const nameByPhone = new Map<string, string>(selected.map((c) => [String(c.phone), c.name]));
-    if (recipients.length === 0) return toast.error("발송 가능한 연락처가 없어요.");
+    if (recipients.length === 0) return toast.error("캠페인 발송 가능한 대상이 없어요. 동의·수신거부·맞춤 링크를 확인해 주세요.");
 
     // 대기 안내 프리셋이면 purpose='waitlist'(+ 공고 관심자 선택으로 고른 공고 id)를 실어 발송 이력을 남긴다.
-    const isWaitlist = text === WAITLIST_BODY.trim();
     // 비용은 치환자 원문이 아닌 대표 샘플 치환 후 기준 — SMS/LMS 판정 오차 방지.
     const est = estimateSmsCost(fillSampleVars(text));
     const night = isNightKstNow();
@@ -1692,9 +1734,8 @@ export function Pipeline() {
             body: JSON.stringify({
               recipients: chunk,
               body: text,
-              ...(isWaitlist
-                ? { purpose: "waitlist", ...(waitlistJobId !== null ? { job_id: waitlistJobId } : {}) }
-                : {}),
+              purpose: pipelineBulkPurpose(isWaitlist),
+              ...(isWaitlist && waitlistJobId !== null ? { job_id: waitlistJobId } : {}),
             }),
           });
         } catch {
@@ -1740,13 +1781,17 @@ export function Pipeline() {
       }
       // 서버 results[].error 집계 — 수신거부/인력풀 제외/중복/링크토큰 없음은 '실패'가 아니라 의도된 제외로 구분 표기
       const optOut = failErrors.filter((e) => e.includes("수신거부")).length;
+      const noConsent = failErrors.filter(
+        (e) => e.includes("신규 일자리 문자 미동의") || e.includes("신규 일자리 문자 동의 확인 불가"),
+      ).length;
       const poolExcluded = failErrors.filter((e) => e.includes("인력풀 제외")).length;
       const recentDup = failErrors.filter((e) => e.includes("중복 방지")).length;
       const noToken = failErrors.filter((e) => e.includes("토큰 없음")).length;
-      const failed = failErrors.length - optOut - poolExcluded - recentDup - noToken;
+      const failed = failErrors.length - optOut - noConsent - poolExcluded - recentDup - noToken;
       const skipped = selectedRows.size - recipients.length;
       const parts = [`${sent}명 발송`];
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
+      if (noConsent) parts.push(`새 일자리 문자 미동의·미확인 ${noConsent}명 제외`);
       if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
       if (recentDup) parts.push(`중복 방지 ${recentDup}명`);
       if (noToken) parts.push(`맞춤 공고 링크 없음 ${noToken}명 제외`);
@@ -2241,7 +2286,13 @@ export function Pipeline() {
 
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="text-[12px] font-bold text-white/55">연락</span>
-                      <Button variant="brand" onClick={() => setBulkMsgModalOpen(true)} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
+                      <Button variant="brand" onClick={() => {
+                        setWaitlistJobId((current) =>
+                          pipelineWaitlistJobAfterAction(current, "open_composer")
+                        );
+                        setBulkFailures([]);
+                        setBulkMsgModalOpen(true);
+                      }} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
@@ -2558,7 +2609,10 @@ export function Pipeline() {
                                     </Badge>
                                   ) : (
                                     !send.sendable && send.reason && (
-                                      <Badge title="문자 발송 불가" className="text-muted-foreground">
+                                      <Badge
+                                        variant={send.reason === "새 일자리 문자 미동의" ? "warning" : "default"}
+                                        title={`캠페인 발송 불가: ${send.reason}`}
+                                      >
                                         {send.reason}
                                       </Badge>
                                     )
@@ -2949,12 +3003,24 @@ export function Pipeline() {
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
               {modalExcludedCount > 0 && (
                 <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-warning/35 text-[13px] font-bold text-warning-strong">
-                  선택 {selectedRows.size}명 중 {modalExcludedCount}명은 지금 조건에서 벗어났거나 연락처가 없어 제외됩니다.
+                  선택 {selectedRows.size}명 중 {modalExcludedCount}명은 {isWaitlistBulk
+                    ? "대기 안내 발송 조건(수신거부·연락처·인력풀 상태)"
+                    : "캠페인 발송 조건(동의·수신거부·연락처·맞춤 링크)"}을 충족하지 않아 제외됩니다.
+                </div>
+              )}
+              {waitlistContextMissing && (
+                <div className="px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-bold text-error-strong">
+                  관심 대기 안내는 현재 공고 관계가 확인돼야 해요. 먼저 상단의 &lsquo;공고 관심자 선택&rsquo;에서 공고를 골라주세요.
                 </div>
               )}
               {selectedOptOutCount > 0 && (
                 <div className="px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[13px] font-bold text-error-strong">
-                  수신거부 {selectedOptOutCount}명은 서버가 자동 제외합니다.
+                  수신거부 {selectedOptOutCount}명은 발송 대상에서 제외됩니다.
+                </div>
+              )}
+              {selectedNoMarketingConsentCount > 0 && (
+                <div className="px-4 py-2.5 rounded-2xl bg-warning-soft border border-warning/35 text-[13px] font-bold text-warning-strong">
+                  새 일자리 문자 미동의·미확인 {selectedNoMarketingConsentCount}명은 캠페인에서 제외됩니다.
                 </div>
               )}
               {/* 확정인력 포함 — 막지 않는다. 운행이 멈춰 대기 중인 확정자에게 다른 라인을 안내하는 건 정당한 발송이다.
@@ -3113,7 +3179,7 @@ export function Pipeline() {
                     </div>
                   </div>
                 )}
-                <Button variant="primary" size="lg" onClick={handleBulkSend} isLoading={bulkSending}>
+                <Button variant="primary" size="lg" onClick={handleBulkSend} isLoading={bulkSending} disabled={waitlistContextMissing}>
                   {!bulkSending && <Mail size={16} />} {bulkSending ? "발송 중..." : "캠페인 발송"}
                 </Button>
               </div>

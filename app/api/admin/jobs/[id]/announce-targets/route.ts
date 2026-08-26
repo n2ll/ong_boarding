@@ -1,13 +1,13 @@
 /**
  * GET /api/admin/jobs/[id]/announce-targets — 새 공고 안내(N1) 대상 산정.
  *
- * "새 공고 올라오면 먼저 안내드릴게요" 약속(충원완료·마감 안내 waitlist_notice)과
+ * 과거 공고의 충원·마감 안내 이력(waitlist_notice)과
  * pull 마감 카드 알림 신청(notify_request)의 이행 대상을, 공고 게시 순간 원클릭 발송용으로 내려준다.
  * 발송 자체는 클라이언트가 bulk-send(purpose='new_job')로 수행 — 수신거부·인력풀 제외·10분 중복 가드는 거기서 재차 방어.
  *
  * 우선순위 그룹 (S > A > B > C, 상위 그룹 우선으로 중복 제거):
  *   S suntop    — 선탑(동승) 완료자(suntop_done, 기간 무관) — 현장을 미리 경험한 프리보딩 인력, 압도적 우선
- *   A promised  — waitlist_notice 수신자 (전 공고 대상 — 약속은 공고 무관 "새 공고" 약속)
+ *   A promised  — waitlist_notice 수신자 (과거 공고에서 충원·마감 안내를 받은 관심 이력)
  *   B requested — notify_request 이력자 (pull 마감 카드 '먼저 알려주세요')
  *   C matched   — 최근 14일 ping_sent 코호트 중 이 공고 앵커(상차지·마지막 경유지) 15km 이내
  *                 + (공고 vehicle_required=true면 own_vehicle='있음')
@@ -28,6 +28,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { isNightKst, smsJobTitle } from "@/lib/agent/engage";
 import { isExposed, normalizeRule, type ExposureMode } from "@/lib/exposure";
+import { smsSendBlockReason } from "@/lib/sms-consent-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ interface ApplicantRow {
   access_token: string | null;
   status: string | null;
   sms_opt_out_at: string | null;
+  marketing_consent: boolean | null;
   own_vehicle: string | null;
   // 희망 시간대 판정 재료 — 노출 규칙에 시간대 축이 있으면 이 값으로 판정한다.
   work_hours: string | null;
@@ -90,8 +92,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: sunErr.message }, { status: 500 });
   }
 
-  // A 약속자 — waitlist_notice는 "새 공고가 올라오면 먼저 안내" 약속(충원완료 자동 안내·마감 안내 공통).
-  // 약속이 공고 무관이므로 job_id 필터 없이 전 공고 수신자를 본다.
+  // A 충원 안내 이력 — waitlist_notice는 충원완료 자동 안내·마감 안내 공통 이력이다.
+  // 새 공고 후보군에는 전 공고 수신자를 포함하되, 아래에서 명시적 문자 동의를 별도로 확인한다.
   const { data: promisedRows, error: promErr } = await supabase
     .from("pool_events")
     .select("applicant_id")
@@ -137,6 +139,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       targets: [],
       night,
       sms_title: smsTitle,
+      dropped_by_consent: { total: 0, promised: 0 },
     });
   }
 
@@ -167,7 +170,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: apps, error: appErr } = await supabase
     .from("applicants")
-    .select("id, name, phone, access_token, status, sms_opt_out_at, own_vehicle, work_hours, available_slots, lat, lng, sido, sigungu, availability, applied_at, created_at")
+    .select("id, name, phone, access_token, status, sms_opt_out_at, marketing_consent, own_vehicle, work_hours, available_slots, lat, lng, sido, sigungu, availability, applied_at, created_at")
     .in("id", unionIds);
   if (appErr) {
     console.error("[announce-targets] applicants", appErr);
@@ -222,19 +225,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // 새 공고 안내 제외 상태: 인력풀 제외(부적합·이탈) + 이미 투입 확정된 인력(확정인력) —
   // 확정자는 재컨택 대상이 아니다(라우터 AI 침묵 PR#65와 대칭). waitlist_notice 보유자여도 제외.
   const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈", "확정인력"]);
-  // 지정 노출 명단 때문에 빠진 인원 집계 — waitlist_notice('새 공고 올라오면 먼저 안내드릴게요')는
-  // **공고 무관 약속**이라, 공고를 지정 노출로 좁히면 약속자가 조용히 대상에서 사라진다.
+  // 지정 노출 명단 때문에 빠진 인원 집계 — 과거 충원 안내 이력이 있는 후보도
+  // 공고를 지정 노출로 좁히면 대상에서 빠질 수 있다.
   // 그러면 모달은 그냥 작은 숫자를 보여주고, 0명일 때는 "이력이 없다"고 잘못 안내한다.
   // 매니저가 '좁힌 명단 때문에 빠졌다'는 걸 알 수 있게 이유를 숫자로 돌려준다.
   const droppedByExposure = { total: 0, promised: 0 };
   // **7일 피로도로 빠진 수** — 공고를 며칠에 걸쳐 여러 개 올리면 두 번째 공고부터 이 이유로 대상이 0명이 된다.
   // 예전엔 이 수를 돌려주지 않아, 화면이 "이력이 없습니다"라는 **사실과 다른 이유**를 말했다.
   const droppedByFatigue = { total: 0, promised: 0 };
+  // 신규 일자리 안내는 명시적으로 동의한 지원자에게만 보낸다. 동의 누락으로 0명이 된 경우를
+  // "대상 이력 없음"으로 오인하지 않도록 다른 제외 사유와 같은 형태로 집계한다.
+  const droppedByConsent = { total: 0, promised: 0 };
   const eligible = (a: ApplicantRow, group: AnnounceGroup): boolean => {
     if (!a.phone || !a.access_token) return false; // 문구에 맞춤링크가 들어가므로 발송 불가 인원 제외
-    if (a.sms_opt_out_at) return false;
     if (EXCLUDED_POOL_STATUS.has(a.status ?? "")) return false;
     if (candSet.has(a.id)) return false;
+    const consentBlock = smsSendBlockReason({
+      category: "promotional",
+      marketingConsent: a.marketing_consent,
+      smsOptOutAt: a.sms_opt_out_at,
+    });
+    if (consentBlock === "opt_out") return false;
+    if (consentBlock) {
+      droppedByConsent.total++;
+      if (group === "suntop" || group === "promised") droppedByConsent.promised++;
+      return false;
+    }
     if (fatigueSet.has(a.id)) {
       droppedByFatigue.total++;
       if (group === "suntop" || group === "promised") droppedByFatigue.promised++;
@@ -296,5 +312,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // 최근 7일 안에 다른 공고 안내를 이미 받아 빠진 수 — 0명의 진짜 이유를 화면이 말할 수 있게.
     dropped_by_fatigue: droppedByFatigue,
     fatigue_days: NEW_JOB_FATIGUE_DAYS,
+    // 명시 동의(marketing_consent=true)가 없어 빠진 수. null/false 모두 포함한다.
+    dropped_by_consent: droppedByConsent,
   });
 }

@@ -10,6 +10,10 @@ import {
 export type JobApplicationOutcome = "linked" | "unchanged" | "unavailable" | "failed" | "not_requested";
 export type CandidateLinkOutcome = "linked" | "already_linked" | "unchanged_closed" | "unavailable" | null;
 export type ApplicationInitialMessageDelivery = "sent" | "not_sent" | "unknown";
+export type ApplicationAvailableDatePolicy = { minimumDate: string } | null;
+
+export const APPLICATION_AVAILABLE_DATE_ERROR_MESSAGE =
+  "근무 가능 시작일은 오늘 또는 이후 날짜로 선택해주세요.";
 
 export interface ApplicationSubmissionAttempt {
   fingerprint: string;
@@ -119,6 +123,11 @@ export function validateApplicationSubmissionId(
 export function applicationSubmissionPayloadFingerprint(
   request: ApplicantFormData & { source: string; jobId: number | null },
 ): string {
+  // Tally가 이 질문을 보내지 않던 기존 제출은 false로 지문화됐다. 저장 의미는
+  // null(미확인)로 바로잡되, 지연 재전송이 충돌하지 않도록 homepage 지문만 호환한다.
+  const fingerprintMarketingConsent = request.source === "homepage" && request.marketingConsent === null
+    ? false
+    : request.marketingConsent;
   return JSON.stringify([
     request.name,
     request.birthDate,
@@ -134,7 +143,7 @@ export function applicationSubmissionPayloadFingerprint(
     request.introduction,
     request.availableDate,
     request.selfOwnership,
-    request.marketingConsent,
+    fingerprintMarketingConsent,
     request.source,
     request.jobId,
   ]);
@@ -428,6 +437,42 @@ const ADVANCED_APPLICATION_STATUSES = new Set([
 ]);
 
 const VALID_LICENSES = new Set(["1종 보통", "2종 보통", "1종 대형"]);
+const KOREA_TIME_OFFSET_MS = 9 * 60 * 60 * 1_000;
+
+export function applicationAvailableDateMinimum(now = new Date()): string {
+  return new Date(now.getTime() + KOREA_TIME_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+export function applicationAvailableDatePolicyForRequest(input: {
+  trustedInternal: boolean;
+  now?: Date;
+}): ApplicationAvailableDatePolicy {
+  return input.trustedInternal
+    ? null
+    : { minimumDate: applicationAvailableDateMinimum(input.now) };
+}
+
+function isIsoCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+export function isValidApplicationAvailableDate(
+  value: string,
+  policy: Exclude<ApplicationAvailableDatePolicy, null>,
+): boolean {
+  return isIsoCalendarDate(value)
+    && isIsoCalendarDate(policy.minimumDate)
+    && value >= policy.minimumDate;
+}
 
 export function applicationStatusForSubmission(
   existingStatus: string | null,
@@ -451,6 +496,7 @@ export function applicationFilterPasses(input: {
   selfOwnership: string;
   vehicleRequired: boolean;
 }): boolean {
+  if (input.selfOwnership !== "문제 없음") return false;
   if (!input.vehicleRequired) return true;
   return input.ownVehicle === "있음"
     && VALID_LICENSES.has(input.licenseType)
@@ -481,32 +527,55 @@ const LICENSE_TYPE_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: App
   { field: "licenseType", message: "운전면허 종류를 선택해주세요.", isValid: (form) => Boolean(form.licenseType) };
 
 const SELF_OWNERSHIP_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
-  { field: "selfOwnership", message: "본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) };
+  { field: "selfOwnership", message: "정산계좌 본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) };
+
+const MARKETING_RESPONSE_REQUIREMENT: ApplicantValidationIssue & { isValid: (form: ApplicantFormData) => boolean } =
+  { field: "marketingConsent", message: "새 일자리 문자 수신 여부를 선택해주세요.", isValid: (form) => typeof form.marketingConsent === "boolean" };
 
 function applicationRequirements(
   form: ApplicantFormData,
   vehicleRequired: boolean,
   branchRequired: boolean,
   roadAddressRequired: boolean,
+  availableDatePolicy: ApplicationAvailableDatePolicy,
+  marketingResponseRequired: boolean,
 ) {
+  const policyRequirements = availableDatePolicy
+    ? BASE_REQUIREMENTS.map((requirement) => requirement.field === "availableDate"
+      ? {
+          field: "availableDate" as const,
+          message: form.availableDate
+            ? APPLICATION_AVAILABLE_DATE_ERROR_MESSAGE
+            : "근무 가능 시작일을 선택해주세요.",
+          isValid: (candidate: ApplicantFormData) => isValidApplicationAvailableDate(
+            candidate.availableDate,
+            availableDatePolicy,
+          ),
+        }
+      : requirement)
+    : BASE_REQUIREMENTS;
   const locationRequirements = roadAddressRequired
-    ? BASE_REQUIREMENTS
-    : BASE_REQUIREMENTS.map((requirement) => (
+    ? policyRequirements
+    : policyRequirements.map((requirement) => (
         requirement.field === "location" ? LEGACY_LOCATION_REQUIREMENT : requirement
       ));
   const baseRequirements = branchRequired
     ? locationRequirements
     : locationRequirements.filter((requirement) => requirement.field !== "branch1");
-  return vehicleRequired
+  const requirements = vehicleRequired
     ? [
         ...baseRequirements.slice(0, 4),
         ...VEHICLE_REQUIREMENTS,
         ...(form.ownVehicle === "있음" ? [VEHICLE_TYPE_REQUIREMENT] : []),
         LICENSE_TYPE_REQUIREMENT,
         ...baseRequirements.slice(4),
-        SELF_OWNERSHIP_REQUIREMENT,
       ]
     : baseRequirements;
+  return [
+    ...requirements,
+    SELF_OWNERSHIP_REQUIREMENT,
+    ...(marketingResponseRequired ? [MARKETING_RESPONSE_REQUIREMENT] : []),
+  ];
 }
 
 export function validateApplicationSubmission(
@@ -514,12 +583,16 @@ export function validateApplicationSubmission(
   vehicleRequired: boolean,
   branchRequired = true,
   roadAddressRequired = true,
+  availableDatePolicy: ApplicationAvailableDatePolicy = null,
+  marketingResponseRequired = true,
 ): ApplicantValidationIssue | null {
   const invalid = applicationRequirements(
     form,
     vehicleRequired,
     branchRequired,
     roadAddressRequired,
+    availableDatePolicy,
+    marketingResponseRequired,
   ).find((requirement) => !requirement.isValid(form));
   return invalid ? { field: invalid.field, message: invalid.message } : null;
 }
@@ -529,8 +602,17 @@ export function applicationSubmissionProgress(
   vehicleRequired: boolean,
   branchRequired = true,
   roadAddressRequired = true,
+  availableDatePolicy: ApplicationAvailableDatePolicy = null,
+  marketingResponseRequired = true,
 ): { completed: number; total: number; percent: number } {
-  const requirements = applicationRequirements(form, vehicleRequired, branchRequired, roadAddressRequired);
+  const requirements = applicationRequirements(
+    form,
+    vehicleRequired,
+    branchRequired,
+    roadAddressRequired,
+    availableDatePolicy,
+    marketingResponseRequired,
+  );
   const completed = requirements.filter((requirement) => requirement.isValid(form)).length;
   const total = requirements.length;
   return {
@@ -650,4 +732,38 @@ export function applicationOptionalAnswer(input: {
   if (submitted) return submitted;
   if (!input.required && input.existing?.trim()) return input.existing.trim();
   return "미확인";
+}
+
+export function applicationMarketingConsentFields(input: {
+  submittedConsent: boolean | null;
+  trustedInternal: boolean;
+  existingConsent: boolean | null | undefined;
+  existingConsentAt: string | null | undefined;
+  existingSmsOptOutAt: string | null | undefined;
+  now: string;
+}): {
+  marketingConsent: boolean | null;
+  marketingConsentAt: string | null;
+  smsOptOutAt: string | null;
+} {
+  // 레거시 내부 어댑터는 이 질문을 보내지 않는다. 응답 누락을 거절로 바꿔 기존의
+  // 명시적 선택을 지우지 않고, 실제 boolean 답변이 들어온 경우에만 최신 선택으로 갱신한다.
+  if (input.trustedInternal && input.submittedConsent === null) {
+    return {
+      marketingConsent: input.existingConsent ?? null,
+      marketingConsentAt: input.existingConsent === true
+        ? input.existingConsentAt ?? null
+        : null,
+      smsOptOutAt: input.existingSmsOptOutAt ?? null,
+    };
+  }
+
+  const marketingConsent = input.submittedConsent === true;
+  return {
+    marketingConsent,
+    marketingConsentAt: marketingConsent ? input.now : null,
+    // 공개 폼에서 본인이 다시 "수신"을 고른 최신 의사만 이전 수신거부를 해제한다.
+    // 거절·내부 어댑터 누락은 기존 하드 수신거부를 보존한다.
+    smsOptOutAt: marketingConsent ? null : input.existingSmsOptOutAt ?? null,
+  };
 }

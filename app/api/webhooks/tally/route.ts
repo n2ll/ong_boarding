@@ -20,6 +20,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { sendSlackText } from "@/lib/slack";
 import {
   blocksTallyFallback,
+  normalizeTallyMarketingConsent,
   normalizeTallySelfOwnership,
   normalizeTallyVehicleOwnership,
   tallySubmissionUuid,
@@ -122,6 +123,9 @@ export async function POST(req: NextRequest) {
   const workTime = pick(fields, "희망 근로 시간", "근로 시간", "시간대");
   const workHours = [workDays, workTime].filter(Boolean);
   const selfOwnership = pick(fields, "본인 계좌");
+  const marketingConsent = normalizeTallyMarketingConsent(
+    pick(fields, "새 일자리 문자 수신 여부", "새 일자리 안내 문자"),
+  );
   const availableDate = pick(fields, "투입 가능한 날짜", "희망 날짜");
   const career = pick(fields, "경력 사항");
   const similar = pick(fields, "유사한 일");
@@ -149,7 +153,7 @@ export async function POST(req: NextRequest) {
     experience,
     availableDate,
     selfOwnership,
-    marketingConsent: false,
+    marketingConsent,
   };
   const requestFingerprint = await applicationSubmissionPayloadDigest({
     ...applicationForm,
@@ -224,6 +228,7 @@ export async function POST(req: NextRequest) {
         work_hours: workHours.join(", "),
         experience: experience || null,
         self_ownership: canonicalSelfOwnership,
+        marketing_consent: marketingConsent,
         available_date: availableDate || null,
         sido: sido || null,
         sigungu: sigungu || null,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
 import { detectManualOutboundSafetyViolation } from "@/lib/agent/outbound-safety";
+import { classifyManualSmsCategory, smsRecipientBlockReason } from "@/lib/sms-consent-policy";
 import {
   deliverManualMessage,
   manualDraftSendEligibility,
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
       draft_id,
       draft_was_edited,
       job_id,
+      purpose,
       idempotency_key,
     } = await req.json();
     // 매니저 답장의 공고 컨텍스트 — 스레드 job_id 필터·인계 큐 매칭이 어긋나지 않게 함께 저장.
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
     const targetPhone = typeof phone === "string" ? phone.trim() : "";
     const messageBody = typeof body === "string" ? body.trim() : "";
     const sender = typeof sent_by === "string" && sent_by.trim() ? sent_by.trim() : "관리자";
+    const messagePurpose = typeof purpose === "string" ? purpose.trim() : "";
 
     if (!targetPhone || !messageBody) {
       return NextResponse.json(
@@ -168,6 +171,7 @@ export async function POST(req: NextRequest) {
       send: async () => {
         // 같은 key의 recorded replay는 deliverManualMessage가 이 callback을 건너뛴다.
         // 신규 외부 발송 직전에만 초안의 지원자·공고·미처리 상태를 재검증한다.
+        let hasVerifiedCurrentJobContext = false;
         if (draftId) {
           const draftResult = await supabase
             .from("message_drafts")
@@ -195,20 +199,36 @@ export async function POST(req: NextRequest) {
                 : "현재 지원자·공고의 초안이 아니라 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
             };
           }
+          hasVerifiedCurrentJobContext = jobId !== null;
         }
-        let recipientLookup: { phone: string | null; failed: boolean } = {
+        let recipientLookup: {
+          phone: string | null;
+          marketingConsent: boolean | null;
+          smsOptOutAt: string | null;
+          failed: boolean;
+        } = {
           phone: null,
+          marketingConsent: null,
+          smsOptOutAt: null,
           failed: false,
         };
         if (applicantId !== null) {
           try {
             const recipient = await supabase
               .from("applicants")
-              .select("phone")
+              .select("phone, marketing_consent, sms_opt_out_at")
               .eq("id", applicantId)
               .maybeSingle();
             recipientLookup = {
               phone: typeof recipient.data?.phone === "string" ? recipient.data.phone : null,
+              marketingConsent: recipient.data?.marketing_consent === true
+                ? true
+                : recipient.data?.marketing_consent === false
+                  ? false
+                  : null,
+              smsOptOutAt: typeof recipient.data?.sms_opt_out_at === "string"
+                ? recipient.data.sms_opt_out_at
+                : null,
               failed: Boolean(recipient.error),
             };
             if (recipient.error) {
@@ -216,7 +236,12 @@ export async function POST(req: NextRequest) {
             }
           } catch (error) {
             console.error("[manual message recipient validation exception]", error);
-            recipientLookup = { phone: null, failed: true };
+            recipientLookup = {
+              phone: null,
+              marketingConsent: null,
+              smsOptOutAt: null,
+              failed: true,
+            };
           }
         }
         const recipientEligibility = manualMessageRecipientEligibility(
@@ -281,6 +306,31 @@ export async function POST(req: NextRequest) {
                   : "지원자 정보를 확인할 수 없어 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
             };
           }
+          hasVerifiedCurrentJobContext = true;
+        }
+        const smsCategory = classifyManualSmsCategory({
+          purpose: messagePurpose,
+          hasVerifiedCurrentJobContext,
+          body: messageBody,
+        });
+        const consentBlock = smsRecipientBlockReason({
+          category: smsCategory,
+          recipientPhone: targetPhone,
+          applicant: {
+            phone: recipientLookup.phone,
+            marketingConsent: recipientLookup.marketingConsent,
+            smsOptOutAt: recipientLookup.smsOptOutAt,
+          },
+        });
+        if (consentBlock) {
+          return {
+            success: false as const,
+            failureKind: "declared" as const,
+            failureCode: "marketing_consent_required" as const,
+            error: consentBlock === "opt_out"
+              ? "문자 수신거부 상태라 보내지 않았습니다. 필요하면 유선 연락을 이용해주세요."
+              : "신규 일자리 문자 미동의·미확인 상태라 보내지 않았습니다. 캠페인 발송에서 동의 대상을 선택해주세요.",
+          };
         }
         return sendSms(
           targetPhone,
@@ -484,6 +534,20 @@ export async function POST(req: NextRequest) {
             deduplicated: delivery.deduplicated,
           },
           { status: 400 },
+        );
+      }
+      if (delivery.failureCode === "marketing_consent_required") {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "marketing_consent_required",
+            error: delivery.providerError,
+            delivery: "failed",
+            recorded: false,
+            retryable: false,
+            deduplicated: delivery.deduplicated,
+          },
+          { status: 409 },
         );
       }
       return NextResponse.json(

@@ -50,7 +50,7 @@ const LIST_COLUMNS = [
   "own_vehicle", "vehicle_type",
   "branch1", "work_hours", "experience", "status", "branch", "source", "last_message_at", "confirmed_slot", "confirmed_branch", "current_branch", "baemin_id", "guide_sent", "onboarding_call_status", "sigungu", "sido", "lat", "lng", "geo_precision",
   // 파일럿 축 — 가용성 필터·수신거부 표시·임포트 구분에 필수 (없으면 UI 필터가 조용히 0명이 된다)
-  "availability", "availability_updated_at", "sms_opt_out_at", "airtable_record_id",
+  "availability", "availability_updated_at", "sms_opt_out_at", "marketing_consent", "airtable_record_id",
   // 재컨택 선별 정확도 — 발송가능 판정(맞춤링크 토큰)·원지원 신선도 정렬/코호트 필터
   "access_token", "applied_at",
   // 답장 큐 공고별 필터 — 진행 중 공고 포인터

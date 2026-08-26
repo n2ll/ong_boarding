@@ -307,7 +307,7 @@ export default function PoolPage() {
     setSendingId(null);
   };
 
-  // 마감된 공고 카드의 "이런 일자리가 또 나오면 먼저 알려주세요" — 다음 기회 안내 의사 수집
+  // 마감된 공고 카드의 "새 일자리 안내 문자를 받을게요" — 향후 일자리 문자 수신 의사 수집
   const expressNotify = async (job: PoolJob) => {
     if (sendingId !== null || notifyIds.has(job.id)) return;
     setActionError(null);
@@ -438,12 +438,12 @@ export default function PoolPage() {
                     </p>
                   )}
                   <p className="mt-2 text-[14px] text-muted-foreground leading-relaxed">
-                    이 공고는 마감됐어요. 비슷한 일자리가 나오면 먼저 안내받으실 수 있어요.
+                    이 공고는 마감됐어요. 아래 버튼을 누르면 비슷한 새 일자리를 문자로 안내드려요.
                   </p>
                   {notified ? (
                     <p className="mt-3 flex items-center justify-center gap-2 py-3 text-center text-[16px] font-bold text-success-strong">
                       <CheckCircle2 size={18} aria-hidden="true" className="shrink-0" />
-                      <span>다음 기회 안내 요청이 저장됐어요</span>
+                      <span>새 일자리 문자 안내를 신청했어요</span>
                     </p>
                   ) : (
                     <button
@@ -457,7 +457,7 @@ export default function PoolPage() {
                           ? "접수 중…"
                           : actionError?.jobId === job.id && actionError.retryable
                             ? "다시 시도하기"
-                            : "이런 일자리가 또 나오면 먼저 알려주세요"}
+                            : "새 일자리 안내 문자를 받을게요"}
                       </span>
                     </button>
                   )}

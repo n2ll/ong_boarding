@@ -840,7 +840,7 @@ test("every new send verifies the recipient phone owner before contacting the SM
 
   assert.match(
     sendBoundary,
-    /\.from\("applicants"\)[\s\S]*?\.select\("phone"\)[\s\S]*?\.eq\("id",\s*applicantId\)/,
+    /\.from\("applicants"\)[\s\S]*?\.select\("phone, marketing_consent, sms_opt_out_at"\)[\s\S]*?\.eq\("id",\s*applicantId\)/,
   );
   assert.match(sendBoundary, /manualMessageRecipientEligibility/);
   assert.ok(sendBoundary.indexOf('.from("applicants")') < sendBoundary.indexOf("return sendSms("));

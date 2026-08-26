@@ -32,6 +32,11 @@ import { activeStage } from "./stages/active";
 import { recordUsage, toMessageTokens, type UsagePurpose } from "./usage";
 import { getAgentMode, COPILOT_DRAFT_MARKER, type AgentMode } from "./kill-switch";
 import { detectAutomatedOutboundSafetyViolation } from "./outbound-safety";
+import {
+  hasFutureJobPromotion,
+  isExplicitSmsOptOutText,
+  shouldApplyExplicitSmsOptOut,
+} from "../sms-consent-policy";
 import type {
   AgentState,
   ApplicantContext,
@@ -99,6 +104,69 @@ function transitionLabelOf(transition: StageTransition): string {
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
   const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at, forceDraft = false } = input;
 
+  // 수신거부는 에이전트 모드·웹훅 복구 경로보다 먼저 처리한다. 웹훅이 중간에 유실돼
+  // inbound-sweeper가 이 함수를 직접 호출해도 답장을 만들거나 발송하지 않는다.
+  if (isExplicitSmsOptOutText(inbound_text)) {
+    if (simulate) {
+      return { ok: true, skipped: "explicit SMS opt-out — simulated agent skipped" };
+    }
+    const { data: optOutCandidate, error: candidateError } = await supabase
+      .from("job_candidates")
+      .select("applicant_id")
+      .eq("id", candidate_id)
+      .single();
+    const applicantId = (optOutCandidate as { applicant_id?: number } | null)?.applicant_id;
+    if (candidateError || !applicantId) {
+      return { ok: false, error: `explicit SMS opt-out candidate lookup failed: ${candidateError?.message ?? "missing applicant"}` };
+    }
+    const { data: current, error: currentError } = await supabase
+      .from("applicants")
+      .select("availability, sms_opt_out_at, marketing_consent_at")
+      .eq("id", applicantId)
+      .single();
+    if (currentError || !current) {
+      return { ok: false, error: `explicit SMS opt-out applicant lookup failed: ${currentError?.message ?? "missing applicant"}` };
+    }
+    const now = new Date().toISOString();
+    const previous = current as {
+      availability: string | null;
+      sms_opt_out_at: string | null;
+      marketing_consent_at: string | null;
+    };
+    if (!shouldApplyExplicitSmsOptOut({
+      inboundAt: received_at,
+      marketingConsentAt: previous.marketing_consent_at,
+    })) {
+      return { ok: true, skipped: "stale explicit SMS opt-out ignored after later consent" };
+    }
+    const { error: updateError } = await supabase
+      .from("applicants")
+      .update({
+        availability: "휴면",
+        availability_updated_at: now,
+        ...(previous.sms_opt_out_at ? {} : { sms_opt_out_at: now }),
+      })
+      .eq("id", applicantId);
+    if (updateError) {
+      return { ok: false, error: `explicit SMS opt-out persistence failed: ${updateError.message}` };
+    }
+    if (!previous.sms_opt_out_at) {
+      const { error: eventError } = await supabase.from("pool_events").insert({
+        applicant_id: applicantId,
+        event_type: "availability_set",
+        meta: {
+          from: previous.availability,
+          to: "휴면",
+          source: "explicit_inbound",
+          message_id: inbound_message_id,
+          opt_out: true,
+        },
+      });
+      if (eventError) console.error("[router] explicit SMS opt-out event failed", eventError);
+    }
+    return { ok: true, skipped: "explicit SMS opt-out recorded — agent skipped" };
+  }
+
   // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
   // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
   const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase);
@@ -134,7 +202,8 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       ),
       applicants:applicant_id (
         id, name, phone, birth_date, location, own_vehicle, license_type, vehicle_type,
-        branch1, branch2, work_hours, available_slots, available_date, self_ownership, introduction, experience, status, baemin_id
+        branch1, branch2, work_hours, available_slots, available_date, self_ownership, introduction, experience, status, baemin_id,
+        marketing_consent, marketing_consent_at, sms_opt_out_at
       )
     `)
     .eq("id", candidate_id)
@@ -349,7 +418,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   }
 
   // 실질 마감 공고 감지 — 일반 라인이면 스크리닝이 '마감 안내 모드'로 전환된다
-  // (충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환). 응대를 멈추지 않는다.
+  // (충원완료 안내 + 새 일자리 문자 동의 확인 + 선탑 전환). 응대를 멈추지 않는다.
   const jobClosed = !!job && isJobEffectivelyClosed(job.status ?? null, job.closes_at ?? null);
 
   // 배민 비마트 임시중단 — 배민 시스템 공고 후보이면서 'baemin_suspended' 플래그가 켜져 있을 때만.
@@ -395,6 +464,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   // stage가 applicants 행에 patch할 필드를 실어보냈으면 적용 (예: onboarding의 baemin_id 추출값)
   // draft(코파일럿) 모드에서는 applicants 변경 부수효과 0 — 건너뛴다.
+  let applicantPatchPersisted = false;
   if (!draftMode && result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
     // ⚠️ 노출 규칙 축(available_slots·own_vehicle)을 바꾸는 patch는 **노출을 좁히는 쓰기**다.
     // 대화로 시간대가 '평일오후'로 확정되면, '평일오전' 규칙으로 좁힌 공고에서 이 사람이 빠진다 —
@@ -428,6 +498,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       .from("applicants")
       .update(result.applicant_patch)
       .eq("id", applicant.id);
+    applicantPatchPersisted = !patchErr;
     if (patchErr) console.error("[router] applicant_patch failed", patchErr);
   }
 
@@ -454,6 +525,29 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       kind: "pause",
       reason: `자동 발송 안전 위반(${safetyHit.kind}: "${safetyHit.match}") — 발송 보류, 매니저 확인 필요`,
       suggestedAction: "자동 응답이 확정 전 안내 또는 개인정보 안전 규칙을 위반해 발송을 막았습니다. 내용 확인 후 매니저가 직접 응대하세요.",
+    };
+  }
+  const effectiveMarketingConsent = (() => {
+    const patch = applicantPatchPersisted ? result.applicant_patch : undefined;
+    const consent = patch && "marketing_consent" in patch
+      ? patch.marketing_consent === true
+      : applicant.marketing_consent === true;
+    const optOut = patch && "sms_opt_out_at" in patch
+      ? typeof patch.sms_opt_out_at === "string" && patch.sms_opt_out_at.length > 0
+      : Boolean(applicant.sms_opt_out_at);
+    return consent && !optOut;
+  })();
+  const marketingSafetyHit = Boolean(
+    result.reply_text
+    && hasFutureJobPromotion(result.reply_text)
+    && !effectiveMarketingConsent,
+  );
+  if (marketingSafetyHit) {
+    console.warn("[router] 새 일자리 홍보·약속을 동의 없이 생성해 발송 보류");
+    result.transition = {
+      kind: "pause",
+      reason: "새 일자리 문자 동의가 확인되지 않아 자동 응답 발송 보류",
+      suggestedAction: "지원자의 새 일자리 문자 동의와 수신거부 상태를 확인한 뒤 매니저가 직접 응대하세요.",
     };
   }
 
@@ -490,10 +584,12 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
             // 안전 가드에 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
             missing_info: safetyHit
               ? `자동 발송 안전 위반(${safetyHit.kind}: "${safetyHit.match}") — 내용 수정 후 발송하세요.`
+              : marketingSafetyHit
+                ? "새 일자리 문자 동의가 확인되지 않아 미래 일자리 안내 문구를 발송할 수 없습니다."
               : crossHit
                 ? `다른 공고 응대 백스톱(${crossHit.why}) — ${crossHit.transition.kind === "pause" ? crossHit.transition.reason : "현재 공고 진행 보류"}`
                 : null,
-            status: safetyHit || crossHit ? "need_info" : "pending",
+            status: safetyHit || marketingSafetyHit || crossHit ? "need_info" : "pending",
           });
           if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
           else draftCreated = true;
@@ -640,10 +736,15 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     }
   }
 
-  // 마감 안내 모드 응대(일반 라인 + 실질 마감)에서 답장이 나갔으면 '결원·새 공고 먼저 안내' 약속을
-  // 원장(pool_events waitlist_notice)에 기록 — announce-targets A그룹(먼저 안내 약속)의 근거.
+  // 마감 안내 모드에서 현재 공고 응답이 실제 발송됐으면 원장(pool_events waitlist_notice)에 기록한다.
+  // 이 이벤트는 현재 공고 충원 안내 이력이며, 새 일자리 문자 동의는 발송 시점에 별도로 확인한다.
   // 지원자·공고당 1회만(중복 방지). 실패해도 응대 파이프라인은 죽이지 않는다.
-  if (replySent && !simulate && jobClosed && isGeneralLineJob(job)) {
+  if (
+    replySent &&
+    !simulate &&
+    jobClosed &&
+    isGeneralLineJob(job)
+  ) {
     try {
       const { data: existing } = await supabase
         .from("pool_events")

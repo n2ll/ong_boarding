@@ -169,12 +169,13 @@ test("an untouched form is not retained while any user choice or retry attempt i
     introduction: "",
     availableDate: "",
     selfOwnership: "",
-    marketingConsent: false,
+    marketingConsent: null,
   };
 
   assert.equal(hasApplicationFormDraftContent!(emptyForm, false, null), false);
   assert.equal(hasApplicationFormDraftContent!({ ...emptyForm, name: "김지원" }, false, null), true);
   assert.equal(hasApplicationFormDraftContent!({ ...emptyForm, workHours: ["평일 오전"] }, false, null), true);
+  assert.equal(hasApplicationFormDraftContent!({ ...emptyForm, marketingConsent: false }, false, null), true);
   assert.equal(hasApplicationFormDraftContent!({ ...emptyForm, marketingConsent: true }, false, null), true);
   assert.equal(hasApplicationFormDraftContent!(emptyForm, true, null), true);
   assert.equal(hasApplicationFormDraftContent!(emptyForm, false, snapshot.submissionAttempt), true);
@@ -221,7 +222,44 @@ test("the complete form and submission attempt round-trip in one versioned snaps
   );
   assert.deepEqual(
     JSON.parse(storage.values.get(applicationFormDraftStorageKey!(scope)) ?? "null"),
-    { version: 1, ...snapshot },
+    { version: 2, ...snapshot },
+  );
+});
+
+test("a v1 draft restores every field but treats its default false consent as unanswered", async () => {
+  const { applicationFormDraftStorageKey, readApplicationFormDraftSnapshot } = await loadModule();
+  assert.equal(typeof applicationFormDraftStorageKey, "function");
+  assert.equal(typeof readApplicationFormDraftSnapshot, "function");
+  const storage = new MemoryStorage();
+  const key = applicationFormDraftStorageKey!(scope);
+  storage.values.set(key, JSON.stringify({
+    version: 1,
+    ...snapshot,
+    form: { ...form, marketingConsent: false },
+  }));
+
+  assert.deepEqual(
+    readApplicationFormDraftSnapshot!(scope, storage, snapshot.savedAt),
+    {
+      ...snapshot,
+      form: { ...form, marketingConsent: null },
+    },
+  );
+});
+
+test("a v1 draft preserves an affirmative consent choice", async () => {
+  const { applicationFormDraftStorageKey, readApplicationFormDraftSnapshot } = await loadModule();
+  assert.equal(typeof applicationFormDraftStorageKey, "function");
+  assert.equal(typeof readApplicationFormDraftSnapshot, "function");
+  const storage = new MemoryStorage();
+  storage.values.set(applicationFormDraftStorageKey!(scope), JSON.stringify({
+    version: 1,
+    ...snapshot,
+  }));
+
+  assert.deepEqual(
+    readApplicationFormDraftSnapshot!(scope, storage, snapshot.savedAt),
+    snapshot,
   );
 });
 
@@ -234,12 +272,12 @@ test("malformed, partial, and unknown-version records never restore PII", async 
 
   for (const value of [
     "{",
-    JSON.stringify({ version: 1, ...snapshot, form: { ...form, phone: 1012345678 } }),
-    JSON.stringify({ version: 1, ...snapshot, form: { ...form, workHours: ["평일 오전", 3] } }),
-    JSON.stringify({ version: 1, ...snapshot, generalOptIn: "false" }),
-    JSON.stringify({ version: 1, ...snapshot, submissionAttempt: { id: snapshot.submissionAttempt!.id } }),
+    JSON.stringify({ version: 2, ...snapshot, form: { ...form, phone: 1012345678 } }),
+    JSON.stringify({ version: 2, ...snapshot, form: { ...form, workHours: ["평일 오전", 3] } }),
+    JSON.stringify({ version: 2, ...snapshot, generalOptIn: "false" }),
+    JSON.stringify({ version: 2, ...snapshot, submissionAttempt: { id: snapshot.submissionAttempt!.id } }),
     JSON.stringify({
-      version: 1,
+      version: 2,
       ...snapshot,
       submissionAttempt: {
         fingerprint: "application-fingerprint",
@@ -247,17 +285,17 @@ test("malformed, partial, and unknown-version records never restore PII", async 
       },
     }),
     JSON.stringify({
-      version: 1,
+      version: 2,
       ...snapshot,
       submissionAttempt: { ...snapshot.submissionAttempt, jobId: 0 },
     }),
     JSON.stringify({
-      version: 1,
+      version: 2,
       ...snapshot,
       submissionAttempt: { fingerprint: "application-fingerprint", id: "server-generated" },
     }),
-    JSON.stringify({ version: 1, ...snapshot, savedAt: "yesterday" }),
-    JSON.stringify({ version: 2, ...snapshot }),
+    JSON.stringify({ version: 2, ...snapshot, savedAt: "yesterday" }),
+    JSON.stringify({ version: 3, ...snapshot }),
   ]) {
     storage.values.set(key, value);
     assert.equal(readApplicationFormDraftSnapshot!(scope, storage, snapshot.savedAt), null);

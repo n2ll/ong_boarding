@@ -33,6 +33,8 @@ export interface Applicant {
   current_branch: string | null;
   churned_at: string | null;
   churn_reason: string | null;
+  /** 새 일자리 안내 문자 수신 동의. true만 캠페인 발송 가능, false/null은 미동의·미확인. */
+  marketing_consent: boolean | null;
   agent_stage?: string | null;
   baemin_id: string | null;
   guide_sent: boolean;
@@ -48,6 +50,116 @@ export interface Applicant {
   availability_updated_at: string | null;
   line_experience: string[] | null;
   hired_at: string | null;
+}
+
+export type MarketingSmsState = "consented" | "not_consented" | "opted_out";
+
+/**
+ * 매니저 화면의 새 일자리 문자 상태. 수신거부는 과거 동의 여부보다 강한 현재 상태다.
+ */
+export function marketingSmsState(input: {
+  marketingConsent: boolean | null | undefined;
+  smsOptOutAt: string | null | undefined;
+}): MarketingSmsState {
+  if (input.smsOptOutAt) return "opted_out";
+  return input.marketingConsent === true ? "consented" : "not_consented";
+}
+
+const CAMPAIGN_EXCLUDED_STATUS = new Set(["부적합", "이탈"]);
+
+/** 파이프라인 캠페인의 표시·카운트·실제 대상이 공유하는 발송 가능 판정. */
+export function campaignSmsSendability(input: {
+  phone: string | null | undefined;
+  hasCustomLink: boolean;
+  smsOptOutAt: string | null | undefined;
+  marketingConsent: boolean | null | undefined;
+  status: string;
+}): { sendable: boolean; reason: string | null } {
+  const consentState = marketingSmsState(input);
+  if (consentState === "opted_out") return { sendable: false, reason: "수신거부" };
+  if (consentState === "not_consented") return { sendable: false, reason: "새 일자리 문자 미동의" };
+  if (!input.phone) return { sendable: false, reason: "연락처 없음" };
+  if (!input.hasCustomLink) return { sendable: false, reason: "맞춤 공고 링크 없음" };
+  if (CAMPAIGN_EXCLUDED_STATUS.has(input.status)) {
+    return { sendable: false, reason: `인력풀 제외(${input.status})` };
+  }
+  return { sendable: true, reason: null };
+}
+
+/** 파이프라인 벌크 발송은 자유 문구여도 목적을 생략하지 않는다. */
+export function pipelineBulkPurpose(waitlist: boolean): "waitlist" | "campaign" {
+  return waitlist ? "waitlist" : "campaign";
+}
+
+/** 관심 공고 선택은 모달을 열거나 일부를 빼도 유지하고, 다른 지원자를 더하면 혼합 선택으로 해제한다. */
+export function pipelineWaitlistJobAfterAction(
+  currentJobId: number | null,
+  action: "open_composer" | "manual_add" | "manual_remove",
+): number | null {
+  return action === "manual_add" ? null : currentJobId;
+}
+
+/** 대기 안내는 현재 관심 건의 운영 안내라 마케팅 동의·맞춤 링크를 요구하지 않는다. */
+export function pipelineBulkSendability(input: {
+  waitlist: boolean;
+  phone: string | null | undefined;
+  hasCustomLink: boolean;
+  smsOptOutAt: string | null | undefined;
+  marketingConsent: boolean | null | undefined;
+  status: string;
+}): { sendable: boolean; reason: string | null } {
+  if (!input.waitlist) return campaignSmsSendability(input);
+  if (input.smsOptOutAt) return { sendable: false, reason: "수신거부" };
+  if (!input.phone) return { sendable: false, reason: "연락처 없음" };
+  if (CAMPAIGN_EXCLUDED_STATUS.has(input.status)) {
+    return { sendable: false, reason: `인력풀 제외(${input.status})` };
+  }
+  return { sendable: true, reason: null };
+}
+
+interface AnnounceDropCount {
+  total: number;
+  promised: number;
+}
+
+/** 새 공고 안내 대상이 0명일 때 실제로 가장 먼저 적용된 제외 사유를 설명한다. */
+export function announceZeroTargetDescription(input: {
+  consent: AnnounceDropCount;
+  fatigue: AnnounceDropCount;
+  exposure: AnnounceDropCount;
+  fatigueDays: number;
+}): string | null {
+  if (input.consent.total > 0) {
+    return `새 일자리 문자 수신에 동의하지 않았거나 동의 여부가 확인되지 않은 ${input.consent.total}명이 제외됐어요${
+      input.consent.promised > 0
+        ? `(그중 ${input.consent.promised}명은 충원 안내 이력 보유자·선탑 완료자)`
+        : ""
+    }. 이번 지원의 진행 안내와 별개로, 새 일자리 문자는 동의가 확인된 분에게만 보낼 수 있어요.`;
+  }
+  if (input.fatigue.total > 0) {
+    return `최근 ${input.fatigueDays}일 안에 다른 공고 안내를 이미 받은 ${input.fatigue.total}명이 있어 이번엔 빠졌어요${
+      input.fatigue.promised > 0
+        ? `(그중 ${input.fatigue.promised}명은 충원 안내 이력 보유자·선탑 완료자)`
+        : ""
+    }. 문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`;
+  }
+  if (input.exposure.total > 0) {
+    return `이 공고는 지정 노출이라 노출 명단 밖 ${input.exposure.total}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 동의가 확인된 대상을 선별하세요.`;
+  }
+  return null;
+}
+
+const INTENTIONAL_CAMPAIGN_GUARD_TOKENS = [
+  "수신거부",
+  "인력풀 제외",
+  "중복 방지",
+  "토큰 없음",
+  "신규 일자리 문자 미동의",
+  "신규 일자리 문자 동의 확인 불가",
+];
+
+export function isIntentionalCampaignGuardError(error: string): boolean {
+  return INTENTIONAL_CAMPAIGN_GUARD_TOKENS.some((token) => error.includes(token));
 }
 
 /** availability 유효값 — null(미확인)은 별도 처리 */

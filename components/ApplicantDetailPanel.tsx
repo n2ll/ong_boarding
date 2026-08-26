@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { calcAge, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots } from "@/lib/admin/types";
+import { calcAge, SLOTS, SLOT_LABEL, matchesSlot, applicantAvailableSlots, marketingSmsState } from "@/lib/admin/types";
 import { isSystemJobTitle } from "@/lib/jobs";
 import { isGeneralLineJob } from "@/lib/agent/general-line";
 import { isLiveLinkResolved, type LiveJobLink } from "@/lib/candidate-links";
@@ -106,6 +106,7 @@ interface ApplicantFull {
   availability: string | null;
   availability_updated_at: string | null;
   sms_opt_out_at: string | null;
+  marketing_consent: boolean | null;
   access_token: string | null;
   // 옹고잉 TMS 활동 신호 캐시(tms-sync cron) — NULL=미확인 / true / false
   tms_active_signal: boolean | null;
@@ -560,6 +561,10 @@ export function ApplicantDetailContent({
   }
 
   const a = detail.applicant;
+  const smsState = marketingSmsState({
+    marketingConsent: a.marketing_consent,
+    smsOptOutAt: a.sms_opt_out_at,
+  });
   const cands = detail.candidates;
   const age = calcAge(a.birth_date);
   // 시간대 판정 — 노출 규칙·조건 바와 **같은 함수**. 화면과 판정이 어긋나면 매니저가 원인을 못 찾는다.
@@ -973,20 +978,22 @@ export function ApplicantDetailContent({
       registering
         ? {
             title: `${a.name}님을 수신거부로 등록할까요?`,
-            description: "캠페인 발송이 영구 중단됩니다. 수동 문자는 계속 보낼 수 있어요.",
+            description: "이 지원자에게 보내는 모든 문자가 중단됩니다. 필요한 연락은 유선으로 진행해주세요.",
             confirmText: "수신거부 등록",
             destructive: true,
           }
         : {
             title: `${a.name}님 수신거부를 해제할까요?`,
-            description: "다시 캠페인 발송 대상에 포함됩니다.",
+            description: "수신거부 상태만 해제합니다. 새 일자리 문자는 별도 동의가 확인된 경우에만 캠페인 발송 대상이 됩니다.",
             confirmText: "해제",
           }
     );
     if (!ok) return;
     await patch(
       { sms_opt_out_at: registering ? new Date().toISOString() : null },
-      registering ? "수신거부로 등록했어요. 캠페인 발송에서 제외됩니다." : "수신거부를 해제했어요."
+      registering
+        ? "수신거부로 등록했어요. 모든 문자 발송에서 제외됩니다."
+        : "수신거부를 해제했어요. 새 일자리 문자 동의 여부는 별도로 확인됩니다."
     );
   };
 
@@ -1134,8 +1141,12 @@ export function ApplicantDetailContent({
               활동 중(옹고잉)
             </Badge>
           )}
-          {a.sms_opt_out_at && (
-            <Badge variant="error" className="px-2.5 py-1" title={`수신거부 등록 ${relTime(a.sms_opt_out_at)} — 캠페인 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</Badge>
+          {smsState === "opted_out" ? (
+            <Badge variant="error" className="px-2.5 py-1" title={`수신거부 등록 ${relTime(a.sms_opt_out_at!)} — 모든 문자 발송 제외. 해제는 아래 '상세 정보'에서`}>수신거부</Badge>
+          ) : smsState === "consented" ? (
+            <Badge variant="success" className="px-2.5 py-1" title="지원자가 새 일자리 안내 문자 수신에 명시적으로 동의했어요">새 일자리 문자 동의</Badge>
+          ) : (
+            <Badge variant="warning" className="px-2.5 py-1" title="동의하지 않았거나 기존 지원 데이터에서 동의 여부를 확인할 수 없어요 — 캠페인 발송 제외">새 일자리 문자 미동의·미확인</Badge>
           )}
           {detail.blacklisted && (
             <Badge variant="solid" className="px-2.5 py-1" title="재채용 블랙리스트 — 절대 재채용 불가. 콜드 발송에서 하드 제외됩니다">블랙리스트</Badge>
@@ -1467,30 +1478,31 @@ export function ApplicantDetailContent({
           open={profileOpen}
           onToggle={() => toggleSection("profile", profileOpen)}
         >
-          <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
             <span className="text-[12px] font-bold text-muted-foreground">문자 수신</span>
-            {a.sms_opt_out_at ? (
-              <div className="flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-full text-[12px] font-bold bg-error-soft text-error-strong border border-error/30" title={`수신거부 등록: ${relTime(a.sms_opt_out_at)}`}>수신거부 — 캠페인 발송 제외</span>
-                <button
-                  onClick={toggleOptOut}
-                  disabled={busy}
-                  title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
-                  className="px-2 py-0.5 rounded-full text-[12px] font-bold text-gray-700 bg-card hover:bg-muted border border-border-strong transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  해제
-                </button>
-              </div>
-            ) : (
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {smsState === "opted_out" ? (
+                <Badge variant="error" title={`수신거부 등록: ${relTime(a.sms_opt_out_at!)}`}>수신거부</Badge>
+              ) : smsState === "consented" ? (
+                <Badge variant="success" title="새 일자리 안내 문자 수신에 명시적으로 동의했어요">새 일자리 문자 동의</Badge>
+              ) : (
+                <Badge variant="warning" title="미동의 또는 동의 여부 미확인 — 캠페인 발송 제외">새 일자리 문자 미동의·미확인</Badge>
+              )}
               <button
                 onClick={toggleOptOut}
                 disabled={busy}
-                title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
-                className="px-2 py-0.5 rounded-full text-[12px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={a.sms_opt_out_at
+                  ? "수신거부 해제 — 새 일자리 문자 동의 여부는 별도로 확인됩니다"
+                  : "수신거부 수동 등록 — 모든 문자 발송을 중단합니다"}
+                className={`px-2 py-0.5 rounded-full text-[12px] font-bold bg-card border transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  a.sms_opt_out_at
+                    ? "text-gray-700 hover:bg-muted border-border-strong"
+                    : "text-error-strong hover:bg-error-soft border-error/30"
+                }`}
               >
-                수신거부 등록
+                {a.sms_opt_out_at ? "해제" : "수신거부 등록"}
               </button>
-            )}
+            </div>
           </div>
           {filledProfile.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">

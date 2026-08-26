@@ -152,17 +152,26 @@ type ApplicationSubmissionModule = {
     selfOwnership: string;
     vehicleRequired: boolean;
   }) => boolean;
+  applicationAvailableDateMinimum?: (now: Date) => string;
+  applicationAvailableDatePolicyForRequest?: (input: {
+    trustedInternal: boolean;
+    now: Date;
+  }) => { minimumDate: string } | null;
   validateApplicationSubmission?: (
     form: ApplicantFormData,
     vehicleRequired: boolean,
     branchRequired?: boolean,
     roadAddressRequired?: boolean,
+    availableDatePolicy?: { minimumDate: string } | null,
+    marketingResponseRequired?: boolean,
   ) => { field: keyof ApplicantFormData; message: string } | null;
   applicationSubmissionProgress?: (
     form: ApplicantFormData,
     vehicleRequired: boolean,
     branchRequired?: boolean,
     roadAddressRequired?: boolean,
+    availableDatePolicy?: { minimumDate: string } | null,
+    marketingResponseRequired?: boolean,
   ) => { completed: number; total: number; percent: number };
   applicationCompletionKind?: (outcome: JobApplicationOutcome) =>
     | "job_linked"
@@ -184,6 +193,18 @@ type ApplicationSubmissionModule = {
     existing: string | null | undefined;
     required: boolean;
   }) => string;
+  applicationMarketingConsentFields?: (input: {
+    submittedConsent: boolean | null;
+    trustedInternal: boolean;
+    existingConsent: boolean | null | undefined;
+    existingConsentAt: string | null | undefined;
+    existingSmsOptOutAt: string | null | undefined;
+    now: string;
+  }) => {
+    marketingConsent: boolean | null;
+    marketingConsentAt: string | null;
+    smsOptOutAt: string | null;
+  };
   applicationOperationalFieldsForSubmission?: (input: {
     updateMode: boolean;
     isDuplicate: boolean;
@@ -329,7 +350,6 @@ test("an unchanged retry keeps the original job and validation context when the 
     ownVehicle: "",
     licenseType: "",
     vehicleType: "",
-    selfOwnership: "",
   };
   const first = prepareApplicationSubmission!(
     null,
@@ -452,6 +472,32 @@ test("the durable fingerprint covers the complete submitted application payload"
   ]) {
     assert.notEqual(applicationSubmissionPayloadFingerprint!(changed), baseline);
   }
+});
+
+test("a homepage submission keeps its legacy fingerprint when marketing consent is unanswered", async () => {
+  const { applicationSubmissionPayloadFingerprint } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof applicationSubmissionPayloadFingerprint, "function");
+  const legacy = {
+    ...completeForm,
+    marketingConsent: false,
+    source: "homepage",
+    jobId: null,
+  };
+  const unanswered = { ...legacy, marketingConsent: null };
+
+  assert.equal(
+    applicationSubmissionPayloadFingerprint!(unanswered),
+    applicationSubmissionPayloadFingerprint!(legacy),
+  );
+  assert.notEqual(
+    applicationSubmissionPayloadFingerprint!({ ...legacy, marketingConsent: true }),
+    applicationSubmissionPayloadFingerprint!(legacy),
+  );
+  assert.notEqual(
+    applicationSubmissionPayloadFingerprint!({ ...unanswered, source: "direct" }),
+    applicationSubmissionPayloadFingerprint!({ ...legacy, source: "direct" }),
+  );
 });
 
 test("the persisted request fingerprint is a digest rather than applicant PII", async () => {
@@ -731,7 +777,7 @@ test("an active applicant resubmission preserves every advanced pipeline status"
   assert.equal(applicationStatusForSubmission!(null, "스크리닝 중"), "스크리닝 중");
 });
 
-test("a real job without a vehicle requirement skips the legacy vehicle trio", async () => {
+test("a real job without a vehicle requirement skips vehicle fields but still requires settlement-account eligibility", async () => {
   const {
     applicationVehicleRequired,
     applicationFilterPasses,
@@ -754,25 +800,30 @@ test("a real job without a vehicle requirement skips the legacy vehicle trio", a
     licenseType: "없음",
     selfOwnership: "문제 있음",
     vehicleRequired,
-  }), true);
-  assert.equal(validateApplicationSubmission!({
+  }), false);
+  assert.deepEqual(validateApplicationSubmission!({
     ...completeForm,
     ownVehicle: "",
     licenseType: "",
     vehicleType: "",
     selfOwnership: "",
-  }, vehicleRequired), null);
+  }, vehicleRequired), {
+    field: "selfOwnership",
+    message: "정산계좌 본인 명의 가능 여부를 선택해주세요.",
+  });
   assert.deepEqual(applicationSubmissionProgress!({
     ...completeForm,
     ownVehicle: "",
     licenseType: "",
     vehicleType: "",
-    selfOwnership: "",
-  }, vehicleRequired), { completed: 7, total: 7, percent: 100 });
+  }, vehicleRequired), { completed: 9, total: 9, percent: 100 });
   assert.deepEqual(applicationSubmissionProgress!({
     ...completeForm,
     location: "",
-  }, vehicleRequired), { completed: 6, total: 7, percent: 86 });
+    ownVehicle: "",
+    licenseType: "",
+    vehicleType: "",
+  }, vehicleRequired), { completed: 8, total: 9, percent: 89 });
 });
 
 test("branchless applications exclude a hidden branch field from validation and progress", async () => {
@@ -788,7 +839,7 @@ test("branchless applications exclude a hidden branch field from validation and 
   assert.equal(validateApplicationSubmission!(branchless, false, false), null);
   assert.deepEqual(
     applicationSubmissionProgress!(branchless, false, false),
-    { completed: 6, total: 6, percent: 100 },
+    { completed: 8, total: 8, percent: 100 },
   );
   assert.deepEqual(validateApplicationSubmission!(branchless, false, true), {
     field: "branch1",
@@ -812,7 +863,7 @@ test("submission validation rejects impossible birth dates and excludes them fro
   });
   assert.deepEqual(
     applicationSubmissionProgress!(impossibleBirthDate, true),
-    { completed: 10, total: 11, percent: 91 },
+    { completed: 11, total: 12, percent: 92 },
   );
 });
 
@@ -880,7 +931,7 @@ test("vehicle type is required only for applicants who own a vehicle", async () 
     ...completeForm,
     ownVehicle: "없음",
     vehicleType: "",
-  }, true), { completed: 10, total: 10, percent: 100 });
+  }, true), { completed: 11, total: 11, percent: 100 });
   assert.deepEqual(validateApplicationSubmission!({
     ...completeForm,
     ownVehicle: "예",
@@ -941,6 +992,128 @@ test("vehicle-required validation follows the visible form order", async () => {
     field: "availableDate",
     message: "근무 가능 시작일을 선택해주세요.",
   });
+  assert.deepEqual(validateApplicationSubmission!({
+    ...completeForm,
+    selfOwnership: "",
+  }, true), {
+    field: "selfOwnership",
+    message: "정산계좌 본인 명의 가능 여부를 선택해주세요.",
+  });
+});
+
+test("public submission requires an explicit SMS decision while allowing refusal", async () => {
+  const { validateApplicationSubmission, applicationSubmissionProgress } = await loadApplicationSubmissionModule();
+  const unanswered = { ...completeForm, marketingConsent: null };
+
+  assert.deepEqual(validateApplicationSubmission!(unanswered, false), {
+    field: "marketingConsent",
+    message: "새 일자리 문자 수신 여부를 선택해주세요.",
+  });
+  assert.deepEqual(applicationSubmissionProgress!(unanswered, false), {
+    completed: 8,
+    total: 9,
+    percent: 89,
+  });
+  assert.equal(validateApplicationSubmission!({ ...unanswered, marketingConsent: false }, false), null);
+  assert.equal(validateApplicationSubmission!({ ...unanswered, marketingConsent: true }, false), null);
+  assert.equal(validateApplicationSubmission!(unanswered, false, true, true, null, false), null);
+});
+
+test("the public application date follows the Korea calendar boundary", async () => {
+  const { applicationAvailableDateMinimum } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof applicationAvailableDateMinimum, "function");
+  assert.equal(
+    applicationAvailableDateMinimum!(new Date("2026-08-25T14:59:59.000Z")),
+    "2026-08-25",
+  );
+  assert.equal(
+    applicationAvailableDateMinimum!(new Date("2026-08-25T15:00:00.000Z")),
+    "2026-08-26",
+  );
+});
+
+test("only public requests enforce the current application date minimum", async () => {
+  const { applicationAvailableDatePolicyForRequest } = await loadApplicationSubmissionModule();
+  const now = new Date("2026-08-25T15:00:00.000Z");
+
+  assert.equal(typeof applicationAvailableDatePolicyForRequest, "function");
+  assert.deepEqual(
+    applicationAvailableDatePolicyForRequest!({ trustedInternal: false, now }),
+    { minimumDate: "2026-08-26" },
+  );
+  assert.equal(
+    applicationAvailableDatePolicyForRequest!({ trustedInternal: true, now }),
+    null,
+  );
+});
+
+test("public submission rejects past or malformed available dates without changing the requirement count", async () => {
+  const {
+    validateApplicationSubmission,
+    applicationSubmissionProgress,
+  } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.equal(typeof applicationSubmissionProgress, "function");
+  const minimumAvailableDate = "2026-08-26";
+  const availableDatePolicy = { minimumDate: minimumAvailableDate };
+  const expectedIssue = {
+    field: "availableDate",
+    message: "근무 가능 시작일은 오늘 또는 이후 날짜로 선택해주세요.",
+  };
+
+  for (const availableDate of ["2026-08-25", "2026-02-30", "협의"]) {
+    const form = { ...completeForm, availableDate };
+    assert.deepEqual(
+      validateApplicationSubmission!(form, false, true, true, availableDatePolicy),
+      expectedIssue,
+    );
+    assert.deepEqual(
+      applicationSubmissionProgress!(form, false, true, true, availableDatePolicy),
+      { completed: 8, total: 9, percent: 89 },
+    );
+  }
+
+  for (const availableDate of ["2026-08-26", "2026-08-27", "2028-02-29"]) {
+    assert.equal(
+      validateApplicationSubmission!(
+        { ...completeForm, availableDate },
+        false,
+        true,
+        true,
+        availableDatePolicy,
+      ),
+      null,
+    );
+  }
+
+  assert.deepEqual(
+    validateApplicationSubmission!(
+      { ...completeForm, availableDate: "" },
+      false,
+      true,
+      true,
+      availableDatePolicy,
+    ),
+    { field: "availableDate", message: "근무 가능 시작일을 선택해주세요." },
+  );
+});
+
+test("trusted internal submission keeps accepting a nonempty legacy available date", async () => {
+  const { validateApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof validateApplicationSubmission, "function");
+  assert.equal(
+    validateApplicationSubmission!(
+      { ...completeForm, availableDate: "협의" },
+      false,
+      true,
+      false,
+      null,
+    ),
+    null,
+  );
 });
 
 test("only a confirmed candidate link produces the job-linked completion state", async () => {
@@ -1198,4 +1371,61 @@ test("an omitted vehicle answer keeps a known profile value for a no-vehicle job
     existing: "오토바이",
     required: false,
   }), "승용차");
+});
+
+test("application consent preserves omitted answers and only explicit re-consent clears opt-out", async () => {
+  const { applicationMarketingConsentFields } = await loadApplicationSubmissionModule();
+  const now = "2026-08-26T03:00:00.000Z";
+  const existingConsentAt = "2026-08-20T01:00:00.000Z";
+  const existingSmsOptOutAt = "2026-08-25T01:00:00.000Z";
+
+  assert.equal(typeof applicationMarketingConsentFields, "function");
+  assert.deepEqual(applicationMarketingConsentFields!({
+    submittedConsent: null,
+    trustedInternal: true,
+    existingConsent: true,
+    existingConsentAt,
+    existingSmsOptOutAt,
+    now,
+  }), {
+    marketingConsent: true,
+    marketingConsentAt: existingConsentAt,
+    smsOptOutAt: existingSmsOptOutAt,
+  });
+  assert.deepEqual(applicationMarketingConsentFields!({
+    submittedConsent: null,
+    trustedInternal: true,
+    existingConsent: null,
+    existingConsentAt: null,
+    existingSmsOptOutAt: null,
+    now,
+  }), {
+    marketingConsent: null,
+    marketingConsentAt: null,
+    smsOptOutAt: null,
+  });
+  assert.deepEqual(applicationMarketingConsentFields!({
+    submittedConsent: false,
+    trustedInternal: true,
+    existingConsent: true,
+    existingConsentAt,
+    existingSmsOptOutAt,
+    now,
+  }), {
+    marketingConsent: false,
+    marketingConsentAt: null,
+    smsOptOutAt: existingSmsOptOutAt,
+  });
+  assert.deepEqual(applicationMarketingConsentFields!({
+    submittedConsent: true,
+    trustedInternal: false,
+    existingConsent: false,
+    existingConsentAt: null,
+    existingSmsOptOutAt,
+    now,
+  }), {
+    marketingConsent: true,
+    marketingConsentAt: now,
+    smsOptOutAt: null,
+  });
 });

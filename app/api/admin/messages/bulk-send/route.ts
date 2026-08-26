@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
 import { fetchBlacklistedPhones } from "@/lib/blacklist";
+import {
+  CURRENT_JOB_WAITLIST_SMS_BODY,
+  classifyBulkSmsCategory,
+  currentJobClosedSmsBody,
+  smsRecipientBlockReason,
+} from "@/lib/sms-consent-policy";
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 // 한 요청이 최대 50명에게 순차 발송한다 — 기본 제한(10s/60s)으로는 중간에 끊겨
@@ -48,6 +55,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const requestedCategory = classifyBulkSmsCategory({ purpose, body: text });
+    if (requestedCategory === "unknown") {
+      return NextResponse.json({ error: "알 수 없는 발송 목적입니다." }, { status: 400 });
+    }
+
     const supabase = createServiceClient();
     const results: Array<{ phone: string; success: boolean; error?: string }> = [];
 
@@ -57,25 +69,102 @@ export async function POST(req: NextRequest) {
     const needsFill = text.includes("#{이름}") || text.includes("#{맞춤링크}");
     const infoById = new Map<
       number,
-      { name: string | null; access_token: string | null; sms_opt_out_at: string | null; status: string | null }
+      {
+        name: string | null;
+        phone: string | null;
+        access_token: string | null;
+        sms_opt_out_at: string | null;
+        marketing_consent: boolean | null;
+        status: string | null;
+      }
     >();
     {
       const ids = recipients
         .map((r) => r.applicant_id)
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       if (ids.length > 0) {
-        const { data: rows } = await supabase
+        const { data: rows, error: applicantError } = await supabase
           .from("applicants")
-          .select("id, name, access_token, sms_opt_out_at, status")
+          .select("id, name, phone, access_token, sms_opt_out_at, marketing_consent, status")
           .in("id", ids);
+        if (applicantError) {
+          console.error("[bulk-send] applicants lookup failed", applicantError);
+        }
         for (const row of rows ?? []) {
           infoById.set(row.id as number, {
             name: (row.name as string | null) ?? null,
+            phone: (row.phone as string | null) ?? null,
             access_token: (row.access_token as string | null) ?? null,
             sms_opt_out_at: (row.sms_opt_out_at as string | null) ?? null,
+            marketing_consent: (row.marketing_consent as boolean | null) ?? null,
             status: (row.status as string | null) ?? null,
           });
         }
+      }
+    }
+    // 현재 지원 건의 운영 안내는 목적 태그만 신뢰하지 않는다. 공고 후보 또는 해당 공고에
+    // 관심을 남긴 지원자로 서버에서 확인된 수신자만 운영 문자로 인정한다.
+    const verifiedCurrentJobApplicantIds = new Set<number>();
+    let hasApprovedCurrentJobBody = false;
+    if (
+      purposeJobId !== null
+      && (purpose === "waitlist" || purpose === "job_closed")
+    ) {
+      const [candidateResult, interestResult] = await Promise.all([
+        supabase
+          .from("job_candidates")
+          .select("applicant_id")
+          .eq("job_id", purposeJobId),
+        supabase
+          .from("pool_events")
+          .select("applicant_id")
+          .eq("event_type", "interest_click")
+          .eq("job_id", purposeJobId),
+      ]);
+      if (candidateResult.error) {
+        console.error("[bulk-send] current-job candidates lookup failed", candidateResult.error);
+      } else {
+        for (const row of candidateResult.data ?? []) {
+          if (typeof row.applicant_id === "number") {
+            verifiedCurrentJobApplicantIds.add(row.applicant_id);
+          }
+        }
+      }
+      if (interestResult.error) {
+        console.error("[bulk-send] current-job interests lookup failed", interestResult.error);
+      } else {
+        for (const row of interestResult.data ?? []) {
+          if (typeof row.applicant_id === "number") {
+            verifiedCurrentJobApplicantIds.add(row.applicant_id);
+          }
+        }
+      }
+    }
+    if (purpose === "waitlist" && text !== CURRENT_JOB_WAITLIST_SMS_BODY) {
+      return NextResponse.json({ error: "승인된 대기 안내 문구만 사용할 수 있습니다." }, { status: 400 });
+    }
+    if (purpose === "job_closed") {
+      if (purposeJobId === null) {
+        return NextResponse.json({ error: "마감 안내 공고를 확인할 수 없습니다." }, { status: 400 });
+      }
+      const { data: currentJob, error: currentJobError } = await supabase
+        .from("jobs")
+        .select("title, client:clients ( client_type )")
+        .eq("id", purposeJobId)
+        .maybeSingle();
+      if (currentJobError) {
+        console.error("[bulk-send] current job lookup failed", currentJobError);
+        return NextResponse.json({ error: "마감 안내 공고를 확인하지 못했습니다." }, { status: 503 });
+      }
+      if (currentJob) {
+        const joined = currentJob as unknown as { title: string; client?: unknown };
+        hasApprovedCurrentJobBody = text === currentJobClosedSmsBody(
+          joined.title,
+          isGeneralLineJob({ title: joined.title, client_type: joinedClientType(joined.client) }),
+        );
+      }
+      if (!hasApprovedCurrentJobBody) {
+        return NextResponse.json({ error: "승인된 현재 공고 마감 안내 문구만 사용할 수 있습니다." }, { status: 400 });
       }
     }
     // 인력풀 제외자는 캠페인 발송 대상이 아니다 — 방어선(선택 UI가 걸러도 백엔드에서 재차 차단).
@@ -110,7 +199,7 @@ export async function POST(req: NextRequest) {
     const CROSS_NOTICE_WINDOW_MS = 24 * 60 * 60 * 1000;
     // 'campaign' = 목적 없이 나간 공고 안내 성격의 캠페인. 24시간 교차 가드에는 포함하되,
     // 'new_job'과는 구분한다 — 공고탭 '대기자에게 안내'의 7일 피로도 필터가 new_job만 보기 때문에
-    // 재컨택 발송을 new_job으로 태깅하면 '새 공고 먼저 안내' 약속 대상이 안내 목록에서 사라진다.
+    // 재컨택 발송을 new_job으로 태깅하면 충원 안내 이력 보유자가 안내 목록에서 사라진다.
     const CROSS_NOTICE_PURPOSES = new Set(["job_closed", "new_job", "campaign"]);
     // 목적을 안 실은 발송도 가드를 태운다 — 목적은 클라이언트가 '프리셋 본문과 글자까지 같을 때만' 싣기 때문에,
     // 자유 본문으로 공고를 하나씩 알리면(다공고 동시 게시에서 실제 일어나는 동선) 가드가 조회조차 되지 않아
@@ -170,10 +259,51 @@ export async function POST(req: NextRequest) {
       }
 
       const info = typeof r.applicant_id === "number" ? infoById.get(r.applicant_id) : undefined;
+      const hasVerifiedCurrentJobContext =
+        typeof r.applicant_id === "number"
+        && verifiedCurrentJobApplicantIds.has(r.applicant_id);
+      if ((purpose === "waitlist" || purpose === "job_closed") && !hasVerifiedCurrentJobContext) {
+        results.push({ phone, success: false, error: "현재 공고 관계 확인 불가(발송 제외)" });
+        continue;
+      }
+      const smsCategory = classifyBulkSmsCategory({
+        purpose,
+        body: text,
+        hasVerifiedCurrentJobContext,
+        hasApprovedCurrentJobBody,
+      });
 
-      // 수신거부 하드 가드 — '그만' 답장 등으로 sms_opt_out_at이 기록된 지원자는 영구 제외.
-      if (info?.sms_opt_out_at) {
+      // 신규 일자리·캠페인은 applicant_id와 전화번호가 실제 지원자 행에 일치하고,
+      // marketing_consent=true인 경우만 발송한다. ID 누락·조회 실패·행 누락도 동의 없음으로 차단한다.
+      const policyBlock = smsRecipientBlockReason({
+        category: smsCategory,
+        recipientPhone: phone,
+        applicant: info
+          ? {
+              phone: info.phone,
+              marketingConsent: info.marketing_consent,
+              smsOptOutAt: info.sms_opt_out_at,
+            }
+          : undefined,
+      });
+      if (policyBlock === "opt_out") {
         results.push({ phone, success: false, error: "수신거부(발송 제외)" });
+        continue;
+      }
+      if (policyBlock === "recipient_unverified") {
+        results.push({ phone, success: false, error: "지원자 정보 확인 불가(발송 제외)" });
+        continue;
+      }
+      if (policyBlock === "consent_required") {
+        results.push({
+          phone,
+          success: false,
+          error: "신규 일자리 문자 미동의(발송 제외)",
+        });
+        continue;
+      }
+      if (policyBlock === "unknown_category") {
+        results.push({ phone, success: false, error: "발송 목적 확인 불가(발송 제외)" });
         continue;
       }
       // 인력풀 제외(부적합/이탈) 하드 가드 — 풀에서 뺀 지원자에겐 캠페인이 나가지 않는다.
@@ -241,8 +371,8 @@ export async function POST(req: NextRequest) {
           });
           if (evErr) console.error("[bulk-send] pool_events ping_sent failed", evErr);
 
-          // 공고 마감 안내(purpose='job_closed')는 waitlist_notice로도 기록 —
-          // 공고 재개 시 '결원 우선 안내' 대상 역조회와 중복 안내 방지의 근거(engage의 충원 완료 안내와 동일 event_type).
+          // 현재 공고의 마감 안내를 실제로 보낸 이력. 새 일자리 문자 동의와는 별개이며,
+          // announce-targets가 재안내 시점에 동의·수신거부를 다시 확인한다.
           if (purpose === "job_closed" && purposeJobId !== null) {
             const { error: wlErr } = await supabase.from("pool_events").insert({
               applicant_id: r.applicant_id,
@@ -252,6 +382,7 @@ export async function POST(req: NextRequest) {
             });
             if (wlErr) console.error("[bulk-send] pool_events waitlist_notice failed", wlErr);
           }
+
         }
       }
 

@@ -38,7 +38,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   const supabase = createServiceClient();
   const { data: applicant, error } = await supabase
     .from("applicants")
-    .select("id, name, lat, lng, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at")
+    .select("id, name, lat, lng, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at, marketing_consent, sms_opt_out_at")
     .eq("access_token", token)
     .maybeSingle();
 
@@ -88,7 +88,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     .eq("applicant_id", applicant.id)
     .eq("event_type", "notify_request");
   if (notifiesErr) console.error("[pool GET] notify_request fetch failed — '이미 신청함' 표시 없이 응답", notifiesErr);
-  const notifiedJobIds = new Set((notifies ?? []).map((r) => r.job_id as number));
+  // 과거 notify_request 이력만 있고 현재 동의가 없거나 수신거부한 지원자는 다시 명시적으로 신청할 수 있어야 한다.
+  // CTA 완료 상태는 이벤트 존재가 아니라 현재 유효한 동의까지 함께 충족할 때만 복원한다.
+  const hasEffectiveNotifyConsent =
+    (applicant as { marketing_consent?: boolean | null }).marketing_consent === true
+    && !(applicant as { sms_opt_out_at?: string | null }).sms_opt_out_at;
+  const notifiedJobIds = new Set(
+    hasEffectiveNotifyConsent ? (notifies ?? []).map((r) => r.job_id as number) : [],
+  );
 
   // 지정 노출(targeted) 게이팅 — 이 지원자가 대상인 공고만 노출. 규칙(자동)+수동(include/exclude) 판정.
   // exclude > include > 규칙. 대상 아니면 목록에서 제외(공고 존재 자체를 숨김).

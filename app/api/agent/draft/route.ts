@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const { data } = await supabase
       .from("applicants")
       .select(
-        "id, name, phone, branch1, branch2, confirmed_branch, current_branch, work_hours, status, available_date, own_vehicle, introduction"
+        "id, name, phone, branch1, branch2, confirmed_branch, current_branch, work_hours, status, available_date, own_vehicle, introduction, marketing_consent, sms_opt_out_at"
       )
       .eq("id", rec.applicant_id)
       .single();
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     const { data } = await supabase
       .from("applicants")
       .select(
-        "id, name, phone, branch1, branch2, confirmed_branch, current_branch, work_hours, status, available_date, own_vehicle, introduction"
+        "id, name, phone, branch1, branch2, confirmed_branch, current_branch, work_hours, status, available_date, own_vehicle, introduction, marketing_consent, sms_opt_out_at"
       )
       .eq("phone", rec.applicant_phone)
       .maybeSingle();
@@ -102,6 +102,8 @@ export async function POST(req: NextRequest) {
       available_date: null,
       own_vehicle: null,
       introduction: null,
+      marketing_consent: null,
+      sms_opt_out_at: null,
     };
   }
 

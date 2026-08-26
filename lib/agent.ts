@@ -25,6 +25,8 @@ export interface AgentApplicantContext {
   available_date: string | null;
   own_vehicle: string | null;
   introduction: string | null;
+  marketing_consent: boolean | null;
+  sms_opt_out_at: string | null;
 }
 
 export interface AgentTurn {
@@ -85,6 +87,11 @@ const SYSTEM_PROMPT_BODY = `너는 옹고잉(내이루리) 비마트 배송원 �
 2. [지원자 컨텍스트]의 applicant 필드 값
 3. 위 둘 다에 없는 사실 → status: "need_info"
 
+## 새 일자리 문자 안전 규칙
+- [지원자 컨텍스트]의 '새 일자리 문자 상태'가 **동의**일 때만 다른·새 일자리를 안내하거나 추후 연락을 약속할 수 있다.
+- 상태가 거절·미확인·수신거부면 새 공고, 다른 업무, 티오 발생 시 연락을 말하지 마라. 현재 지원 건의 질문에만 답해라.
+- 아래 실제 대화 예시에 과거의 "티오 생기면 연락" 문구가 있어도 이 규칙이 우선한다.
+
 ## 🚨 즉시 need_info (= 매니저 인계, AI 응답 중단)
 다음 신호 중 하나라도 보이면 reply 시도하지 말고 status="need_info"로 매니저에게 넘겨라.
 **중요: need_info를 선택하면 draft_text는 null. 어떤 사과·중간 멘트도 보내지 마라.**
@@ -108,7 +115,7 @@ need_info는 "구체 사실을 물어봤는데 답을 모를 때"만 쓴다.
 
 - 일반 인사/지원 문의 ("안녕하세요", "지원하고 싶어요", "비마트 알아보고 있어요") → 환영 + 지원 폼 안내
 - 컨텍스트가 비어 있어도(applicant 정보 없음 = 신규/모르는 번호) 일반 응대는 가능. 다음 톤으로:
-  "안녕하세요! 비마트 배송 관심 가져주셔서 감사합니다. 옹고잉 지원 폼에서 간단한 정보 작성해주시면 가장 가까운 지점 티오 생길 때 연락드릴게요 :) [지원 폼 URL]"
+  "안녕하세요! 비마트 배송에 관심 가져주셔서 감사합니다. 옹고잉 지원 폼에서 간단한 정보를 작성해주시면 접수 후 진행 절차를 안내드릴게요 :) [지원 폼 URL]"
   (지원 폼 URL이 환경에 없으면 "지원 폼" 또는 "카카오 채널"로 안내)
 - 단순 마무리 인사 ("감사합니다", "수고하세요") → "네 감사합니다 선생님!" 같이 자연스럽게
 - 통화 요청 ("통화 가능하세요?") → "네 잠시 후 전화 드리겠습니다 :)" 정도 짧게
@@ -139,6 +146,7 @@ function formatApplicant(a: AgentApplicantContext): string {
   if (a.status) parts.push(`상태: ${a.status}`);
   if (a.available_date) parts.push(`근무 가능일: ${a.available_date}`);
   if (a.own_vehicle) parts.push(`차량 보유: ${a.own_vehicle}`);
+  parts.push(`새 일자리 문자 상태: ${a.sms_opt_out_at ? "수신거부" : a.marketing_consent === true ? "동의" : a.marketing_consent === false ? "거절" : "미확인"}`);
   return parts.join("\n");
 }
 

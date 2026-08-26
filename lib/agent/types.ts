@@ -128,6 +128,9 @@ export interface ApplicantContext {
   experience: string | null;
   status: string | null;
   baemin_id: string | null;
+  marketing_consent: boolean | null;
+  marketing_consent_at: string | null;
+  sms_opt_out_at: string | null;
 }
 
 export interface ConversationTurn {
@@ -168,7 +171,7 @@ export interface StageContext {
   /** 이 지원자가 동시에 진행 중인 '다른' 공고들. 비어있으면 단일 공고(기존과 동일). */
   otherActiveJobs?: OtherActiveJob[];
   /** 현재 공고가 실질 마감 상태 — 일반 라인 스크리닝이 '마감 안내 모드'(신규 진행 대신
-   *  충원완료 안내 + 결원 시 우선 안내 약속 + 선탑 전환)로 동작하는 근거. */
+   *  충원완료 안내 + 새 일자리 문자 동의 확인 + 선탑 전환)로 동작하는 근거. */
   jobClosed?: boolean;
   /** 배민 비마트 임시중단 상태(배민 시스템 공고 + 'baemin_suspended' 플래그 ON).
    *  배민 스크리닝이 '중단·인재풀 동의 모드'로 동작 — 비마트 진행 뉘앙스 금지, onboarding 전이 금지. */

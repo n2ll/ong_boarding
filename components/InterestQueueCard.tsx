@@ -209,6 +209,7 @@ export function InterestQueueCard({ initialJobId }: { initialJobId?: number | nu
           body,
           sent_by: "manager",
           job_id: quick.job_id,
+          purpose: "current_application",
           idempotency_key: attempt.key,
         }),
       });

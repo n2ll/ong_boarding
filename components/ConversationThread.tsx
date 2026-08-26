@@ -721,7 +721,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, idempotency_key: attempt.key }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, purpose: "current_application", idempotency_key: attempt.key }),
       });
       const json = await res.json().catch(() => ({}));
       const resolution = manualMessageClientResolution(json, res.ok);
@@ -819,7 +819,7 @@ export function ConversationThread({
       const res = await fetch("/api/admin/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, idempotency_key: attempt.key }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, body, sent_by: "관리자", job_id: jobId ?? undefined, purpose: "current_application", idempotency_key: attempt.key }),
       });
       const json = await res.json();
       const resolution = manualMessageClientResolution(json, res.ok);
@@ -939,6 +939,7 @@ export function ConversationThread({
           job_id: draftJobId ?? undefined,
           draft_id: scopedPendingDraft.id,
           draft_was_edited: draftWasEdited,
+          purpose: "current_application",
           idempotency_key: attempt.key,
         }),
       });
@@ -1010,13 +1011,13 @@ export function ConversationThread({
       registering
         ? {
             title: `${applicantName}님을 수신거부로 등록할까요?`,
-            description: "캠페인 발송이 영구 중단됩니다. 수동 문자는 계속 보낼 수 있어요.",
+            description: "이 지원자에게 보내는 모든 문자가 중단됩니다. 필요한 연락은 유선으로 진행해주세요.",
             confirmText: "수신거부 등록",
             destructive: true,
           }
         : {
             title: `${applicantName}님 수신거부를 해제할까요?`,
-            description: "다시 캠페인 발송 대상에 포함됩니다.",
+            description: "수신거부 상태만 해제합니다. 새 일자리 문자는 별도 동의가 확인된 경우에만 캠페인 발송 대상이 됩니다.",
             confirmText: "해제",
           }
     );
@@ -1033,7 +1034,11 @@ export function ConversationThread({
         toast.error(j.error || "수신거부 변경에 실패했어요");
         return;
       }
-      toast.success(registering ? "수신거부로 등록했어요. 캠페인 발송에서 제외됩니다." : "수신거부를 해제했어요.");
+      toast.success(
+        registering
+          ? "수신거부로 등록했어요. 모든 문자 발송에서 제외됩니다."
+          : "수신거부를 해제했어요. 새 일자리 문자 동의 여부는 별도로 확인됩니다.",
+      );
       onChanged?.();
     } catch {
       toast.error("수신거부 변경에 실패했어요");
@@ -1134,11 +1139,11 @@ export function ConversationThread({
             )}
             {smsOptOutAt ? (
               <>
-                <span className="flex items-center gap-1.5 text-xs font-bold text-error-strong bg-error-soft px-3 py-1.5 rounded-lg border border-error/30"><Ban size={14} /> 수신거부 — 캠페인 발송 제외</span>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-error-strong bg-error-soft px-3 py-1.5 rounded-lg border border-error/30"><Ban size={14} /> 수신거부 — 모든 문자 발송 제외</span>
                 <button
                   onClick={handleToggleOptOut}
                   disabled={optOutBusy}
-                  title="수신거부 해제 — 다시 캠페인 발송 대상에 포함"
+                  title="수신거부 해제 — 새 일자리 문자 동의 여부는 별도로 확인됩니다"
                   className="text-[12px] font-bold text-gray-700 bg-background hover:bg-muted border border-border-strong px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   해제
@@ -1148,7 +1153,7 @@ export function ConversationThread({
               <button
                 onClick={handleToggleOptOut}
                 disabled={optOutBusy}
-                title="수신거부 수동 등록 — 캠페인 발송이 영구 중단됩니다"
+                title="수신거부 수동 등록 — 모든 문자 발송을 중단합니다"
                 className="flex items-center gap-1 text-[12px] font-bold text-error-strong bg-card hover:bg-error-soft border border-error/30 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Ban size={12} /> 수신거부 등록

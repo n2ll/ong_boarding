@@ -10,13 +10,15 @@
  *   4) applicants.current_job_id 갱신 (충돌 시 정책: 기존 진행중이면 매니저 경고)
  *   5) messages 테이블에 outbound 기록 (job_id 포함)
  *
- * 마케팅 수신 미동의자는 자동 제외.
+ * 추천·수동 편입 후보처럼 홍보 발송인 경우에만 명시적 마케팅 동의를 요구한다.
+ * 해당 공고에 직접 지원하거나 관심을 표시한 후보에게 보내는 현재 지원 안내는 운영 문자로 분리한다.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
+import { classifyDispatchSmsCategory, smsSendBlockReason } from "@/lib/sms-consent-policy";
 
 interface Applicant {
   id: number;
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // 후보 후보군 조회
   let jcQuery = supabase
     .from("job_candidates")
-    .select("id, applicant_id, sent_at")
+    .select("id, applicant_id, sent_at, agent_state")
     .eq("job_id", jobId);
   if (Array.isArray(payload.applicant_ids) && payload.applicant_ids.length > 0) {
     jcQuery = jcQuery.in("applicant_id", payload.applicant_ids);
@@ -88,6 +90,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     (applicants ?? []).map((a) => [a.id as number, a as Applicant])
   );
 
+  // 동일 공고에 지원자가 직접 남긴 관심 근거. 조회 실패 시에는 운영으로 추정하지 않고 홍보로 분류해
+  // 명시 동의를 요구한다(fail-closed). web_apply 근거는 candidate.agent_state에서 별도로 확인한다.
+  const interestClickIds = new Set<number>();
+  const { data: interestRows, error: interestError } = await supabase
+    .from("pool_events")
+    .select("applicant_id")
+    .eq("job_id", jobId)
+    .eq("event_type", "interest_click")
+    .in("applicant_id", aids);
+  if (interestError) {
+    console.error("[dispatch] interest evidence query", interestError);
+  } else {
+    for (const row of interestRows ?? []) {
+      if (typeof row.applicant_id === "number") interestClickIds.add(row.applicant_id);
+    }
+  }
+
   // 발송 루프
   let sent = 0;
   let skipped = 0;
@@ -112,16 +131,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       skipReasons.no_phone++;
       continue;
     }
-    // 마케팅 수신 미동의 → 발송 제외 (광고성 일괄)
-    if (a.marketing_consent === false) {
-      skipped++;
-      skipReasons.no_consent++;
-      continue;
-    }
-    // 수신거부 하드 가드 — '그만' 답장 등으로 기록된 지원자는 영구 제외
-    if (a.sms_opt_out_at) {
+    const smsCategory = classifyDispatchSmsCategory({
+      agentState: c.agent_state,
+      hasInterestClick: interestClickIds.has(a.id),
+    });
+    const policyBlock = smsSendBlockReason({
+      category: smsCategory,
+      marketingConsent: a.marketing_consent,
+      smsOptOutAt: a.sms_opt_out_at,
+    });
+    // 수신거부 하드 가드 — '그만' 답장 등으로 기록된 지원자는 영구 제외.
+    if (policyBlock === "opt_out") {
       skipped++;
       skipReasons.opt_out++;
+      continue;
+    }
+    // 추천·수동 편입 등 홍보 발송은 true 동의만 허용한다. null도 미동의로 처리한다.
+    if (policyBlock) {
+      skipped++;
+      skipReasons.no_consent++;
       continue;
     }
     // 다른 공고 진행 중이면 보류 (정책: 한 사람 = 하나의 '진행 중' 공고)
@@ -187,7 +215,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       applicant_id: a.id,
       job_id: jobId,
       event_type: "ping_sent",
-      meta: { source: "dispatch" },
+      meta: {
+        source: "dispatch",
+        purpose: smsCategory === "promotional" ? "campaign" : "current_application",
+      },
     });
     if (evErr) console.error("[dispatch] pool_events ping_sent failed", evErr);
 

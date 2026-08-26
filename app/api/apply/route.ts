@@ -22,9 +22,11 @@ import {
   normalizeTallyVehicleOwnership,
 } from "@/lib/tally-webhook";
 import {
+  applicationAvailableDatePolicyForRequest,
   applicationFilterPasses,
   applicationInitialMessagePlan,
   applicationJobOutcome,
+  applicationMarketingConsentFields,
   applicationOptionalAnswer,
   applicationOperationalFieldsForSubmission,
   applicationStatusForSubmission,
@@ -59,6 +61,7 @@ const APPLICATION_REPLAY_APPLICANT_FIELDS = [
   "vehicle_type", "self_ownership", "filter_pass", "available_slots",
   "available_slots_updated_at", "application_submission_id",
   "application_request_fingerprint", "application_auto_engagement_required",
+  "marketing_consent", "marketing_consent_at", "sms_opt_out_at",
 ].join(", ");
 
 interface ApplicationReplayApplicant {
@@ -83,6 +86,9 @@ interface ApplicationReplayApplicant {
   application_submission_id: string | null;
   application_request_fingerprint: string | null;
   application_auto_engagement_required: boolean;
+  marketing_consent: boolean | null;
+  marketing_consent_at: string | null;
+  sms_opt_out_at: string | null;
 }
 
 // 희망 근무 시간대 축약 — "평일(월~금) 오전 타임..., 주말..." → "평일오전, 주말오후"
@@ -165,7 +171,7 @@ export async function POST(req: NextRequest) {
       introduction: typeof introduction === "string" ? introduction : "",
       availableDate: typeof availableDate === "string" ? availableDate : "",
       selfOwnership: typeof selfOwnership === "string" ? selfOwnership : "",
-      marketingConsent: marketingConsent === true,
+      marketingConsent: typeof marketingConsent === "boolean" ? marketingConsent : null,
     };
     const submissionFingerprint = await applicationSubmissionPayloadDigest({
       ...submittedForm,
@@ -490,6 +496,8 @@ export async function POST(req: NextRequest) {
         vehicleRequired,
         branchChoiceRequired,
         !trustedInternal,
+        applicationAvailableDatePolicyForRequest({ trustedInternal }),
+        !trustedInternal,
       );
       if (validationIssue) {
         return NextResponse.json(
@@ -718,7 +726,14 @@ export async function POST(req: NextRequest) {
       : null;
 
     // ── Supabase에 저장 (UPDATE or INSERT) ─────────────────
-    const consent = marketingConsent === true;
+    const consentFields = applicationMarketingConsentFields({
+      submittedConsent: canonicalSubmittedForm.marketingConsent,
+      trustedInternal,
+      existingConsent: existingRow?.marketing_consent,
+      existingConsentAt: existingRow?.marketing_consent_at,
+      existingSmsOptOutAt: existingRow?.sms_opt_out_at,
+      now: new Date().toISOString(),
+    });
     const rowPayload = {
       name,
       birth_date: birthDate,
@@ -741,7 +756,7 @@ export async function POST(req: NextRequest) {
       introduction: introduction?.trim() || null,
       experience: experience || null,
       available_date: availableDate,
-      self_ownership: applicationOptionalAnswer({ submitted: canonicalSubmittedForm.selfOwnership, existing: existingRow?.self_ownership, required: vehicleRequired }),
+      self_ownership: applicationOptionalAnswer({ submitted: canonicalSubmittedForm.selfOwnership, existing: existingRow?.self_ownership, required: true }),
       source: operationalFields.source,
       branch: resolvedBranch.branch1,
       status: updateMode
@@ -749,8 +764,9 @@ export async function POST(req: NextRequest) {
         : autoStatus,
       filter_pass: operationalFields.filterPass,
       note: operationalFields.note,
-      marketing_consent: consent,
-      marketing_consent_at: consent ? new Date().toISOString() : null,
+      marketing_consent: consentFields.marketingConsent,
+      marketing_consent_at: consentFields.marketingConsentAt,
+      sms_opt_out_at: consentFields.smsOptOutAt,
       lat: geo?.lat ?? null,
       lng: geo?.lng ?? null,
       sido: geo?.sido ?? null,
@@ -889,48 +905,53 @@ export async function POST(req: NextRequest) {
         sendBody = existingInitialMessageRequest!.body;
         sentByLabel = existingInitialMessageRequest!.sent_by;
       } else if (insertedLegacyBmartIntake) {
-        // 배민 비마트 임시중단 기간엔 배민 유입만 'baemin_start'(중단·인재풀 동의)로 시작 멘트를 바꾼다.
+        // 배민 비마트 임시중단 기간엔 폼에서 이미 받은 명시적 문자 선택을 그대로 존중한다.
+        // 편집 가능한 과거 baemin_start는 미동의자에게 재동의를 묻거나 미래 안내를 약속할 수 있어 쓰지 않는다.
         // 플래그가 꺼져 있으면(=재개) 배민도 평시대로 danggeun_start를 공유한다.
         const baeminSuspended =
           inserted.source === "baemin" &&
           !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
-        const startKey = baeminSuspended ? "baemin_start" : "danggeun_start";
-        const startMsg = (await getSystemMessage(supabase, startKey))?.trim();
-        if (startMsg) {
-          // 시작 멘트 {{이름}}/{{지점}}/{{시간대}} 치환
-          const filledStart = fillTemplate(startMsg, {
-            이름: inserted.name,
-            지점: insertedBranchName ?? "",
-            시간대: shortWorkHours(inserted.work_hours),
-          });
-          const suspendedFallback = [
+        if (baeminSuspended) {
+          const effectiveMarketingConsent =
+            inserted.marketing_consent === true && !inserted.sms_opt_out_at;
+          sendBody = [
             `${inserted.name}님, 지원해 주셔서 감사합니다.`,
-            "현재 해당 배송 업무는 잠시 중단되어 바로 진행하기 어렵습니다.",
-            "다른 업무 안내를 원하시면 이 문자에 답장해주세요. 근무 여부는 매니저 검토 후 별도로 안내합니다.",
+            "현재 배민 비마트 배송 업무는 배민 측 사정으로 잠시 중단되어 바로 진행하기 어렵습니다.",
+            effectiveMarketingConsent
+              ? "새 일자리 안내 문자 수신에 동의해주셔서, 비슷한 배송 업무 공고가 생기면 이 번호로 안내드릴게요."
+              : "새 일자리 안내 문자는 보내지 않고, 이번 비마트 지원 상태와 관련 문의에만 답변드릴게요.",
+            "근무 여부는 매니저 검토 후 별도로 안내되며, 지금 확정된 것은 아닙니다.",
           ].join("\n\n");
-          const resolvedStart = resolveAutomatedOutboundText(
-            filledStart,
-            baeminSuspended ? suspendedFallback : defaultReceived,
-          );
-          if (!resolvedStart) throw new Error("unsafe automated start message");
-          sendBody = resolvedStart;
-          sentByLabel = "baemin-start";
+          sentByLabel = "baemin-suspended";
           useTemplate = "danggeun";
         } else {
-          // DB에 시작 멘트 미저장 — 폴백으로 접수 안내
-          const stored = (await getSystemMessage(supabase, "apply_received"))?.trim();
-          // 저장 템플릿도 placeholder 치환 필수 — 미치환 시 '{{이름}}님' 문자가 그대로 나간다
-          const filledStored = stored
-            ? fillTemplate(stored, {
-                이름: inserted.name,
-                지점: insertedBranchName ?? "",
-                접수일시: receivedAt,
-              })
-            : null;
-          const resolvedReceipt = resolveAutomatedOutboundText(filledStored, defaultReceived);
-          if (!resolvedReceipt) throw new Error("unsafe automated receipt message");
-          sendBody = resolvedReceipt;
-          sentByLabel = "system-auto";
+          const startMsg = (await getSystemMessage(supabase, "danggeun_start"))?.trim();
+          if (!startMsg) {
+            const stored = (await getSystemMessage(supabase, "apply_received"))?.trim();
+            const filledStored = stored
+              ? fillTemplate(stored, {
+                  이름: inserted.name,
+                  지점: insertedBranchName ?? "",
+                  접수일시: receivedAt,
+                })
+              : null;
+            const resolvedReceipt = resolveAutomatedOutboundText(filledStored, defaultReceived);
+            if (!resolvedReceipt) throw new Error("unsafe automated receipt message");
+            sendBody = resolvedReceipt;
+            sentByLabel = "system-auto";
+          } else {
+            // 시작 멘트 {{이름}}/{{지점}}/{{시간대}} 치환
+            const filledStart = fillTemplate(startMsg, {
+              이름: inserted.name,
+              지점: insertedBranchName ?? "",
+              시간대: shortWorkHours(inserted.work_hours),
+            });
+            const resolvedStart = resolveAutomatedOutboundText(filledStart, defaultReceived);
+            if (!resolvedStart) throw new Error("unsafe automated start message");
+            sendBody = resolvedStart;
+            sentByLabel = "baemin-start";
+            useTemplate = "danggeun";
+          }
         }
       } else {
         const stored = (await getSystemMessage(supabase, "apply_received"))?.trim();

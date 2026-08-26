@@ -13,8 +13,13 @@ export interface ApplicantFormData {
   introduction: string;
   availableDate: string;
   selfOwnership: string;
-  marketingConsent: boolean;
+  marketingConsent: boolean | null;
 }
+
+export const APPLICANT_SETTLEMENT_ACCOUNT_OPTIONS = [
+  { value: "문제 없음", label: "네, 가능해요" },
+  { value: "문제 있음", label: "아니요, 어려워요" },
+] as const;
 
 export type RequiredApplicantField =
   | "name"
@@ -27,7 +32,8 @@ export type RequiredApplicantField =
   | "branch1"
   | "workHours"
   | "availableDate"
-  | "selfOwnership";
+  | "selfOwnership"
+  | "marketingConsent";
 
 export interface ApplicantValidationIssue {
   field: RequiredApplicantField;
@@ -91,7 +97,8 @@ const FINAL_REQUIREMENTS: ApplicantRequirement[] = [
   { field: "branch1", message: "희망 지점을 선택해주세요.", isValid: (form) => Boolean(form.branch1) },
   { field: "workHours", message: "희망 근무 시간대를 1개 이상 선택해주세요.", isValid: (form) => form.workHours.length > 0 },
   { field: "availableDate", message: "근무 가능 시작일을 선택해주세요.", isValid: (form) => Boolean(form.availableDate) },
-  { field: "selfOwnership", message: "본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) },
+  { field: "selfOwnership", message: "정산계좌 본인 명의 가능 여부를 선택해주세요.", isValid: (form) => Boolean(form.selfOwnership) },
+  { field: "marketingConsent", message: "새 일자리 문자 수신 여부를 선택해주세요.", isValid: (form) => typeof form.marketingConsent === "boolean" },
 ];
 
 function applicantRequirements(form: ApplicantFormData): ApplicantRequirement[] {

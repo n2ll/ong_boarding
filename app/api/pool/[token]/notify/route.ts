@@ -1,10 +1,11 @@
 /**
- * POST /api/pool/[token]/notify — 마감된 공고 카드의 "다음 급구 때 먼저 알려주세요" 클릭.
+ * POST /api/pool/[token]/notify — 마감된 공고 카드의 "새 일자리 안내 문자를 받을게요" 클릭.
  *
  * 놓친 지원자를 자산화하는 두 번째 수확 (확정 뉘앙스 금지 — 알림 요청은 '가능 의사 수집'일 뿐):
- *   1. pool_events(notify_request) 기록 — 다음 긴급 건의 우선 발송 목록 재료
+ *   1. pool_events(notify_request)와 신규 일자리 문자 수신 동의 기록 — 다음 긴급 건의 우선 발송 목록 재료
  *   2. Slack 알림 — 매니저가 다음 웨이브 타깃으로 인지
  * 다음 기회 알림은 이번 주 근무 가능 응답이 아니므로 applicants.availability는 바꾸지 않는다.
+ * 본인이 공개 링크에서 다시 명시적으로 신청하면 기존 수신거부도 함께 해제한다.
  * 마감된 공고이므로 job_candidates는 연결하지 않는다(공고 보드 노이즈 방지).
  */
 
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "이미 다른 요청에 사용된 요청 정보예요." }, { status: 409 });
   }
   if (replay === "deduped") {
+    // 최초 이벤트와 동의 저장은 한 트랜잭션이다. 과거 요청을 다시 실행하면
+    // 그 뒤의 수신거부를 덮어쓸 수 있으므로 저장된 성공만 그대로 복구한다.
     return NextResponse.json({ success: true, deduped: true });
   }
 

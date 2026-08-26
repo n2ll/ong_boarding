@@ -217,6 +217,7 @@ test("public application routes scope and enforce branch context on the server",
   assert.match(applyRoute, /branch2:\s*resolvedBranch\.branch2/);
   assert.match(applyRoute, /applicationBranchReceiptLine/);
   assert.match(applyRoute, /applicationUsesLegacyBmartFlow/);
+  assert.match(applyRoute, /applicationAvailableDatePolicyForRequest\(\{\s*trustedInternal\s*\}\)/);
   assert.match(applyRoute, /road_address:\s*trustedInternal \? geo\?\.road_address \?\? null : normalizedLocation/);
   assert.doesNotMatch(applyRoute, /`▶ 지원지점:/);
   assert.doesNotMatch(applyRoute, /source === "danggeun" \|\| source === "baemin"/);
@@ -244,8 +245,8 @@ test("the applicant UI renders branches only from an explicit server-backed cont
   assert.match(page, /branch_mode:\s*"none" \| "fixed" \| "choice"/);
   assert.match(page, /branchMode === "choice"/);
   assert.match(page, /branchMode === "fixed"/);
-  assert.match(page, /validateApplicationSubmission\(form, vehicleRequired, branchChoiceRequired\)/);
-  assert.match(page, /applicationSubmissionProgress\(form, vehicleRequired, branchChoiceRequired\)/);
+  assert.match(page, /validateApplicationSubmission\(\s*form,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*currentAvailableDatePolicy,\s*\)/);
+  assert.match(page, /applicationSubmissionProgress\(\s*form,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*availableDatePolicy,\s*\)/);
   assert.doesNotMatch(page, /직접 입력 가능/);
   assert.doesNotMatch(page, /placeholder="희망 지점을 입력해주세요"/);
   assert.match(page, /applicationSourceRequiresBranchChoice\(source\)/);

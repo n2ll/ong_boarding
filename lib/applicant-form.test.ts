@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 type ApplicantFormData = {
@@ -16,7 +17,7 @@ type ApplicantFormData = {
   introduction: string;
   availableDate: string;
   selfOwnership: string;
-  marketingConsent: boolean;
+  marketingConsent: boolean | null;
 };
 
 const EMPTY_FORM: ApplicantFormData = {
@@ -34,7 +35,7 @@ const EMPTY_FORM: ApplicantFormData = {
   introduction: "",
   availableDate: "",
   selfOwnership: "",
-  marketingConsent: false,
+  marketingConsent: null,
 };
 
 async function loadApplicantFormModule(): Promise<Record<string, unknown>> {
@@ -46,7 +47,33 @@ async function loadApplicantFormModule(): Promise<Record<string, unknown>> {
   }
 }
 
-test("required progress starts at zero and ignores optional answers", async () => {
+test("settlement-account choices use clear applicant labels while preserving operational values", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+
+  assert.deepEqual(applicantFormModule.APPLICANT_SETTLEMENT_ACCOUNT_OPTIONS, [
+    { value: "문제 없음", label: "네, 가능해요" },
+    { value: "문제 있음", label: "아니요, 어려워요" },
+  ]);
+});
+
+test("mobile required choices use radio semantics and explain the consequence without forcing consent", async () => {
+  const applyPage = await readFile(new URL("../app/apply/page.tsx", import.meta.url), "utf8");
+  const settlementStart = applyPage.indexOf('id="field-selfOwnership"');
+  const marketingStart = applyPage.indexOf('id="field-marketingConsent"');
+
+  assert.notEqual(settlementStart, -1);
+  assert.notEqual(marketingStart, -1);
+
+  const settlementBlock = applyPage.slice(settlementStart, marketingStart);
+  const marketingBlock = applyPage.slice(marketingStart, applyPage.indexOf('type="submit"', marketingStart));
+  assert.match(settlementBlock, /role="radiogroup"/);
+  assert.match(settlementBlock, /type="radio"/);
+  assert.match(settlementBlock, /지원 진행이 어려울 수 있어요/);
+  assert.match(marketingBlock, /응답 필수/);
+  assert.match(marketingBlock, /아니요, 받지 않을게요/);
+});
+
+test("required progress includes an explicit new-job SMS choice", async () => {
   const applicantFormModule = await loadApplicantFormModule();
   const applicantFormProgress = applicantFormModule.applicantFormProgress as
     | ((form: ApplicantFormData) => { completed: number; total: number; percent: number })
@@ -61,7 +88,7 @@ test("required progress starts at zero and ignores optional answers", async () =
       introduction: "성실하게 일하겠습니다.",
       marketingConsent: true,
     }),
-    { completed: 0, total: 10, percent: 0 },
+    { completed: 1, total: 11, percent: 9 },
   );
 });
 
@@ -81,7 +108,7 @@ test("progress only counts required answers that are valid", async () => {
       location: "   ",
       ownVehicle: "있음",
     }),
-    { completed: 3, total: 11, percent: 27 },
+    { completed: 3, total: 12, percent: 25 },
   );
 });
 
@@ -209,11 +236,12 @@ test("a complete valid form reaches 100 percent and passes validation", async ()
     workHours: ["평일 오전"],
     availableDate: "2026-08-20",
     selfOwnership: "문제 없음",
+    marketingConsent: false,
   };
 
   assert.equal(typeof applicantFormProgress, "function");
   assert.equal(typeof validateApplicantForm, "function");
-  assert.deepEqual(applicantFormProgress!(completeForm), { completed: 11, total: 11, percent: 100 });
+  assert.deepEqual(applicantFormProgress!(completeForm), { completed: 12, total: 12, percent: 100 });
   assert.equal(validateApplicantForm!(completeForm), null);
 });
 
@@ -236,6 +264,7 @@ test("vehicle type is required only after the applicant says they own a vehicle"
     workHours: ["평일 오전"],
     availableDate: "2026-08-20",
     selfOwnership: "문제 없음",
+    marketingConsent: false,
   };
 
   assert.deepEqual(validateApplicantForm!({
@@ -261,5 +290,32 @@ test("vehicle type is required only after the applicant says they own a vehicle"
   assert.deepEqual(applicantFormProgress!({
     ...otherwiseComplete,
     ownVehicle: "없음",
-  }), { completed: 10, total: 10, percent: 100 });
+  }), { completed: 11, total: 11, percent: 100 });
+});
+
+test("new-job SMS consent requires a decision but never requires agreement", async () => {
+  const applicantFormModule = await loadApplicantFormModule();
+  const validateApplicantForm = applicantFormModule.validateApplicantForm as
+    | ((form: ApplicantFormData) => { field: keyof ApplicantFormData; message: string } | null)
+    | undefined;
+  const otherwiseComplete: ApplicantFormData = {
+    ...EMPTY_FORM,
+    name: "김지원",
+    birthDate: "600101",
+    phone: "01012345678",
+    location: "서울 강남구 테헤란로 123",
+    ownVehicle: "없음",
+    licenseType: "없음",
+    branch1: "강남점",
+    workHours: ["평일 오전"],
+    availableDate: "2026-08-20",
+    selfOwnership: "문제 없음",
+  };
+
+  assert.deepEqual(validateApplicantForm!(otherwiseComplete), {
+    field: "marketingConsent",
+    message: "새 일자리 문자 수신 여부를 선택해주세요.",
+  });
+  assert.equal(validateApplicantForm!({ ...otherwiseComplete, marketingConsent: false }), null);
+  assert.equal(validateApplicantForm!({ ...otherwiseComplete, marketingConsent: true }), null);
 });

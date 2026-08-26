@@ -10,6 +10,13 @@ export type ApplicantPostcodePresentation = {
   statusMessage: string | null;
 };
 
+export function applicantPostcodeBlocksSubmission(
+  lookupState: "idle" | "loading" | "error",
+  searchOpen: boolean,
+): boolean {
+  return lookupState === "loading" || searchOpen;
+}
+
 export function applicantPostcodePresentation(
   address: string,
   manualEntry: boolean,

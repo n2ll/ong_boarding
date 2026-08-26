@@ -25,7 +25,7 @@ export interface ApplicationFormDraftStorage {
 }
 
 interface StoredApplicationFormDraftSnapshot extends ApplicationFormDraftSnapshot {
-  version: 1;
+  version: 2;
 }
 
 const FORM_STRING_FIELDS: Array<Exclude<keyof ApplicantFormData, "workHours" | "marketingConsent">> = [
@@ -77,7 +77,7 @@ function isApplicantFormData(value: unknown): value is ApplicantFormData {
   return FORM_STRING_FIELDS.every((field) => typeof value[field] === "string")
     && Array.isArray(value.workHours)
     && value.workHours.every((slot) => typeof slot === "string")
-    && typeof value.marketingConsent === "boolean";
+    && (typeof value.marketingConsent === "boolean" || value.marketingConsent === null);
 }
 
 export function hasApplicationFormDraftContent(
@@ -89,7 +89,7 @@ export function hasApplicationFormDraftContent(
   if (generalOptIn || submissionAttempt) return true;
   const base = baseline;
   if (FORM_STRING_FIELDS.some((field) => form[field] !== (base?.[field] ?? ""))) return true;
-  if (form.marketingConsent !== (base?.marketingConsent ?? false)) return true;
+  if (form.marketingConsent !== (base?.marketingConsent ?? null)) return true;
   const baseWorkHours = base?.workHours ?? [];
   return form.workHours.length !== baseWorkHours.length
     || form.workHours.some((slot, index) => slot !== baseWorkHours[index]);
@@ -143,7 +143,14 @@ function parseSnapshot(raw: string): ApplicationFormDraftSnapshot | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || !isSnapshot(parsed)) return null;
+  if (
+    !isRecord(parsed)
+    || (parsed.version !== 1 && parsed.version !== 2)
+    || !isSnapshot(parsed)
+  ) return null;
+  const marketingConsent = parsed.version === 1 && parsed.form.marketingConsent === false
+    ? null
+    : parsed.form.marketingConsent;
   return {
     form: {
       name: parsed.form.name,
@@ -160,7 +167,7 @@ function parseSnapshot(raw: string): ApplicationFormDraftSnapshot | null {
       introduction: parsed.form.introduction,
       availableDate: parsed.form.availableDate,
       selfOwnership: parsed.form.selfOwnership,
-      marketingConsent: parsed.form.marketingConsent,
+      marketingConsent,
     },
     generalOptIn: parsed.generalOptIn,
     submissionAttempt: parsed.submissionAttempt === null
@@ -210,7 +217,7 @@ export function writeApplicationFormDraftSnapshot(
   storage: ApplicationFormDraftStorage | null,
 ): boolean {
   if (!storage || !isSnapshot(snapshot)) return false;
-  const stored: StoredApplicationFormDraftSnapshot = { version: 1, ...snapshot };
+  const stored: StoredApplicationFormDraftSnapshot = { version: 2, ...snapshot };
   try {
     storage.setItem(applicationFormDraftStorageKey(scope), JSON.stringify(stored));
     return true;

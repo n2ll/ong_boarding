@@ -42,6 +42,10 @@ import { runAgentForCandidate } from "@/lib/agent/router";
 import { pickCandidateForInbound, handleAmbiguousInbound } from "@/lib/agent/inbound-routing";
 import { classifyAvailabilitySignal } from "@/lib/agent/availability";
 import { sendSms } from "@/lib/solapi";
+import {
+  isExplicitSmsOptOutText,
+  shouldApplyExplicitSmsOptOut,
+} from "@/lib/sms-consent-policy";
 import type { AgentState } from "@/lib/agent/types";
 
 export const dynamic = "force-dynamic";
@@ -77,14 +81,8 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
 
   const mode = await getAgentMode(supabase);
-  if (mode === "off") {
-    return NextResponse.json({ mode, swept: 0, note: "mode off — 회수 안 함" });
-  }
-
   const kstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
-  if (kstHour < 9 || kstHour >= 21) {
-    return NextResponse.json({ mode, swept: 0, note: `야간(KST ${kstHour}시) — 09시 이후 처리` });
-  }
+  const agentRecoveryAllowed = mode !== "off" && kstHour >= 9 && kstHour < 21;
 
   const now = Date.now();
   const since = new Date(now - SWEEP_WINDOW_MS).toISOString();
@@ -119,6 +117,86 @@ export async function GET(req: NextRequest) {
   for (const [applicantId, inbound] of latestByApplicant) {
     if (swept >= BATCH_LIMIT) break;
     try {
+      const inboundText = String(inbound.body ?? "").trim();
+      // 명시적 수신거부는 웹훅이 유실돼도 에이전트 모드·야간·공고 판별보다 먼저 저장한다.
+      // 다중 활성 공고로 라우팅이 ambiguous여도 되묻기나 AI 분류로 내려가지 않는다.
+      if (isExplicitSmsOptOutText(inboundText)) {
+        const { data: current, error: currentError } = await supabase
+          .from("applicants")
+          .select("availability, sms_opt_out_at, marketing_consent_at")
+          .eq("id", applicantId)
+          .maybeSingle();
+        if (currentError || !current) {
+          results.push({
+            applicant_id: applicantId,
+            action: "explicit_opt_out_failed",
+            reason: currentError?.message ?? "applicant missing",
+          });
+          continue;
+        }
+        const row = current as {
+          availability: string | null;
+          sms_opt_out_at: string | null;
+          marketing_consent_at: string | null;
+        };
+        if (!shouldApplyExplicitSmsOptOut({
+          inboundAt: inbound.created_at,
+          marketingConsentAt: row.marketing_consent_at,
+        })) {
+          results.push({
+            applicant_id: applicantId,
+            action: "stale_explicit_opt_out_ignored",
+            reason: "later explicit consent preserved",
+          });
+          continue;
+        }
+        if (row.sms_opt_out_at) {
+          results.push({
+            applicant_id: applicantId,
+            action: "explicit_opt_out_already_recorded",
+          });
+          continue;
+        }
+        const optedOutAt = new Date().toISOString();
+        const { error: updateError } = await supabase
+          .from("applicants")
+          .update({
+            sms_opt_out_at: optedOutAt,
+            availability: "휴면",
+            availability_updated_at: optedOutAt,
+          })
+          .eq("id", applicantId);
+        if (updateError) {
+          results.push({
+            applicant_id: applicantId,
+            action: "explicit_opt_out_failed",
+            reason: updateError.message,
+          });
+          continue;
+        }
+        const { error: eventError } = await supabase.from("pool_events").insert({
+          applicant_id: applicantId,
+          event_type: "availability_set",
+          meta: {
+            from: row.availability,
+            to: "휴면",
+            source: "inbound_sweeper_explicit_opt_out",
+            message_id: String(inbound.id),
+            opt_out: true,
+          },
+        });
+        if (eventError) console.error("[inbound-sweeper] 수신거부 이벤트 기록 실패", eventError);
+        swept++;
+        results.push({
+          applicant_id: applicantId,
+          action: "explicit_opt_out_recorded",
+        });
+        continue;
+      }
+
+      // 전역 OFF와 야간에는 일반 AI 회수만 멈춘다. 위 수신거부 저장은 항상 수행한다.
+      if (!agentRecoveryAllowed) continue;
+
       // b) 인바운드 이후 outbound가 있으면 이미 응답된 것 — 제외
       const { data: outAfter } = await supabase
         .from("messages")
@@ -158,7 +236,7 @@ export async function GET(req: NextRequest) {
       // c) 어느 공고 건인지는 **웹훅과 같은 함수**가 정한다(lib/agent/inbound-routing).
       //    예전엔 여기서 '활성 단계 최신 1건'을 그냥 골라, 같은 답장이 웹훅으로 잡히면 A 공고
       //    sweeper로 잡히면 B 공고로 응대되는 갈림이 있었다.
-      const route = await pickCandidateForInbound(supabase, applicantId, String(inbound.body ?? "").trim());
+      const route = await pickCandidateForInbound(supabase, applicantId, inboundText);
       if (!route.ok) {
         // 판별 불가는 여기서도 고르지 않는다 — 되묻거나(자동 1회) 매니저에게 넘긴다.
         if (route.reason === "ambiguous") {
@@ -172,7 +250,7 @@ export async function GET(req: NextRequest) {
           // (sweeper가 잡는 건 웹훅이 놓친 문자라 분류 자체가 안 된 상태다.)
           let inboundOptOut: boolean | null = null;
           try {
-            const cls = await classifyAvailabilitySignal({ body: String(inbound.body ?? "") });
+            const cls = await classifyAvailabilitySignal({ body: inboundText });
             inboundOptOut = cls.signal === "opt_out";
           } catch (e) {
             console.error("[inbound-sweeper] 수신거부 분류 실패(unknown으로 진행)", e);
@@ -204,7 +282,7 @@ export async function GET(req: NextRequest) {
         supabase,
         candidate_id: jc.id,
         inbound_message_id: String(inbound.id),
-        inbound_text: String(inbound.body ?? "").trim(),
+        inbound_text: inboundText,
         received_at: inbound.created_at,
       });
       swept++;
@@ -252,6 +330,9 @@ export async function GET(req: NextRequest) {
     mode,
     checked: latestByApplicant.size,
     swept,
+    ...(!agentRecoveryAllowed
+      ? { note: mode === "off" ? "mode off — 수신거부만 회수" : `야간(KST ${kstHour}시) — 수신거부만 회수` }
+      : {}),
     results,
   });
 }

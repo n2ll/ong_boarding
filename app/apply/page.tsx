@@ -16,6 +16,7 @@ import {
 import {
   APPLICANT_BIRTH_DATE_ERROR_MESSAGE,
   APPLICANT_ROAD_ADDRESS_ERROR_MESSAGE,
+  APPLICANT_SETTLEMENT_ACCOUNT_OPTIONS,
   applicantRoadAddressFromPostcode,
   isValidApplicantBirthDate,
   isValidApplicantRoadAddress,
@@ -23,6 +24,7 @@ import {
   type ApplicantValidationIssue,
 } from "@/lib/applicant-form";
 import {
+  applicantPostcodeBlocksSubmission,
   applicantPostcodePresentation,
   embedApplicantPostcode,
 } from "@/lib/applicant-postcode";
@@ -38,14 +40,18 @@ import {
   type ApplicationFormDraftScope,
 } from "@/lib/application-form-draft-storage";
 import {
+  APPLICATION_AVAILABLE_DATE_ERROR_MESSAGE,
+  applicationAvailableDateMinimum,
   applicationCompletionKind,
   applicationInitialMessageUiState,
   applicationSubmissionProgress,
+  isValidApplicationAvailableDate,
   isApplicationSubmissionResult,
   prepareApplicationSubmission,
   resolveApplicationSubmissionContext,
   shouldAbandonApplicationSubmissionAttempt,
   validateApplicationSubmission,
+  type ApplicationAvailableDatePolicy,
   type ApplicationSubmissionAttempt,
   type ApplicationSubmissionResult,
 } from "@/lib/application-submission";
@@ -137,7 +143,7 @@ const INITIAL: FormState = {
   introduction: "",
   availableDate: "",
   selfOwnership: "",
-  marketingConsent: false,
+  marketingConsent: null,
 };
 
 const APPLICATION_ERROR_FIELDS = new Set<ApplyFormIssue["field"]>([
@@ -153,6 +159,7 @@ const APPLICATION_ERROR_FIELDS = new Set<ApplyFormIssue["field"]>([
   "workHours",
   "availableDate",
   "selfOwnership",
+  "marketingConsent",
 ]);
 
 // SOURCE_LABELS에 정의된 소스만 허용하고, 알 수 없는 값은 'direct'로 처리한다.
@@ -242,6 +249,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const [addressSearchOpen, setAddressSearchOpen] = useState(false);
   const [addressManualEntry, setAddressManualEntry] = useState(false);
   const [addressSearchHeight, setAddressSearchHeight] = useState(430);
+  const [minimumAvailableDate, setMinimumAvailableDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submittingReplay, setSubmittingReplay] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -266,6 +274,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   const retryJobButtonRef = useRef<HTMLButtonElement>(null);
   const retryBranchesButtonRef = useRef<HTMLButtonElement>(null);
   const addressLookupButtonRef = useRef<HTMLButtonElement>(null);
+  const addressSearchCloseButtonRef = useRef<HTMLButtonElement>(null);
   const locationInputRef = useRef<HTMLInputElement>(null);
   const addressSearchContainerRef = useRef<HTMLDivElement>(null);
   const secondBranchDetailsRef = useRef<HTMLDetailsElement>(null);
@@ -351,11 +360,23 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     form.location,
     addressManualEntry,
   );
+  const addressLookupBlocksSubmission = applicantPostcodeBlocksSubmission(
+    addressLookupState,
+    addressSearchOpen,
+  );
+  const availableDatePolicy: ApplicationAvailableDatePolicy = pendingSubmissionReplay
+    || !minimumAvailableDate
+    ? null
+    : { minimumDate: minimumAvailableDate };
 
   useEffect(() => {
     void loadKakaoPostcodeScript().catch(() => {
       // 주소 찾기 버튼에서 재시도하며, 선로딩 실패만으로 폼 전체 오류를 띄우지 않는다.
     });
+  }, []);
+
+  useEffect(() => {
+    setMinimumAvailableDate(applicationAvailableDateMinimum());
   }, []);
 
   // 공고 지원 링크(?job=ID)로 들어오면 공고 맥락을 불러와 헤더에 표기하고 지점을 미리 채운다.
@@ -739,6 +760,10 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     setAddressLookupState("loading");
     try {
       await loadKakaoPostcodeScript();
+      if (submitInFlightRef.current) {
+        setAddressLookupState("idle");
+        return;
+      }
       const Postcode = window.kakao?.Postcode;
       if (!Postcode) throw new Error("postcode constructor missing");
       setAddressSearchOpen(true);
@@ -762,6 +787,10 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               const roadAddress = applicantRoadAddressFromPostcode(data);
               setAddressSearchOpen(false);
               container.replaceChildren();
+              if (submitInFlightRef.current) {
+                setAddressLookupState("idle");
+                return;
+              }
               if (!roadAddress) {
                 setAddressLookupState("idle");
                 setValidationIssue({
@@ -887,9 +916,34 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       target?.focus({ preventScroll: true });
       return;
     }
-    const issue = pendingSubmissionReplay
-      ? null
-      : validateApplicationSubmission(form, vehicleRequired, branchChoiceRequired);
+    if (addressLookupBlocksSubmission) {
+      const issue: ApplyFormIssue = {
+        field: "location",
+        message: "주소 검색에서 주소를 선택하거나 검색창을 닫은 뒤 제출해주세요.",
+      };
+      setError(issue.message);
+      setValidationIssue(issue);
+      requestAnimationFrame(() => {
+        const target = addressSearchCloseButtonRef.current ?? addressLookupButtonRef.current;
+        target?.scrollIntoView({ behavior: "auto", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    let issue: ApplyFormIssue | null = null;
+    if (!pendingSubmissionReplay) {
+      const currentAvailableDatePolicy = {
+        minimumDate: applicationAvailableDateMinimum(),
+      };
+      setMinimumAvailableDate(currentAvailableDatePolicy.minimumDate);
+      issue = validateApplicationSubmission(
+        form,
+        vehicleRequired,
+        branchChoiceRequired,
+        true,
+        currentAvailableDatePolicy,
+      );
+    }
     if (issue) {
       setError(issue.message);
       setValidationIssue(issue);
@@ -975,7 +1029,13 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     }
   };
 
-  const progress = applicationSubmissionProgress(form, vehicleRequired, branchChoiceRequired);
+  const progress = applicationSubmissionProgress(
+    form,
+    vehicleRequired,
+    branchChoiceRequired,
+    true,
+    availableDatePolicy,
+  );
   const showApplyForm = recoverySessionActive || currentApplyFormAvailable;
   const hasUnavailableJobLink = !replayUiActive
     && (jobIntent.kind === "invalid" || jobLoadState === "unavailable");
@@ -1202,6 +1262,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
         )}
 
         {showApplyForm && draftReady && <form
+          noValidate
           aria-busy={submitting}
           onSubmit={(event) => {
             event.preventDefault();
@@ -1478,6 +1539,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <div className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4">
                 <span className="text-[15px] font-extrabold text-foreground">도로명 주소 검색</span>
                 <button
+                  ref={addressSearchCloseButtonRef}
                   type="button"
                   onClick={closeAddressSearch}
                   aria-label="주소 검색 닫기"
@@ -1575,7 +1637,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             </>
           ) : (
             <div className="rounded-2xl border border-success/20 bg-success-soft px-4 py-3 text-[15px] font-bold leading-relaxed text-success-strong">
-              차량·면허·본인 명의 조건은 이 공고의 필수 항목이 아니므로 입력하지 않아도 됩니다.
+              차량·면허 조건은 이 공고의 필수 항목이 아니므로 입력하지 않아도 됩니다.
             </div>
           )}
         </div>
@@ -1718,30 +1780,80 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           {/* 근무 가능 시작일 */}
           <div id="field-availableDate">
             <label htmlFor="availableDate" className={labelCls}>근무 가능 시작일{requiredMark}</label>
-            <input id="availableDate" name="availableDate" type="date" aria-required="true" {...fieldA11y("availableDate")} className={fieldInputClass("availableDate")} value={form.availableDate} onChange={(e) => set("availableDate", e.target.value)} />
+            <input
+              id="availableDate"
+              name="availableDate"
+              type="date"
+              min={availableDatePolicy?.minimumDate}
+              aria-required="true"
+              {...fieldA11y("availableDate", "availableDate-help")}
+              className={fieldInputClass("availableDate")}
+              value={form.availableDate}
+              onFocus={() => setMinimumAvailableDate(applicationAvailableDateMinimum())}
+              onChange={(event) => set("availableDate", event.target.value)}
+              onBlur={() => {
+                if (pendingSubmissionReplay) return;
+                const policy = { minimumDate: applicationAvailableDateMinimum() };
+                setMinimumAvailableDate(policy.minimumDate);
+                if (form.availableDate && !isValidApplicationAvailableDate(form.availableDate, policy)) {
+                  setValidationIssue({
+                    field: "availableDate",
+                    message: APPLICATION_AVAILABLE_DATE_ERROR_MESSAGE,
+                  });
+                }
+              }}
+            />
+            <p id="availableDate-help" className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+              실제로 근무를 시작할 수 있는 가장 빠른 날짜를 선택해주세요.
+            </p>
             <FieldError field="availableDate" issue={validationIssue} />
           </div>
 
-          {vehicleRequired && (
-            <div id="field-selfOwnership">
-              <div id="selfOwnership-label" className={labelCls}>배달앱·정산계좌 본인 명의 가능 여부{requiredMark}</div>
-              <div role="group" aria-labelledby="selfOwnership-label" {...fieldA11y("selfOwnership")} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {["문제 없음", "문제 있음"].map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    aria-pressed={form.selfOwnership === opt}
-                    {...fieldA11y("selfOwnership")}
-                    onClick={() => set("selfOwnership", opt)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-h-12 rounded-2xl border-2 py-3.5 text-[16px] font-bold transition-colors ${form.selfOwnership === opt ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-gray-700 hover:border-foreground/50"}`}
+          <div id="field-selfOwnership">
+            <div id="selfOwnership-label" className={labelCls}>정산금을 본인 명의 계좌로 받을 수 있나요?{requiredMark}</div>
+            <p id="selfOwnership-help" className="mb-3 text-[15px] leading-relaxed text-muted-foreground">
+              정산을 위해 본인 명의 계좌가 필요해요. 계좌번호는 지금 입력하지 않습니다.
+            </p>
+            <div
+              role="radiogroup"
+              aria-labelledby="selfOwnership-label"
+              aria-required="true"
+              {...fieldA11y("selfOwnership", form.selfOwnership === "문제 있음" ? "selfOwnership-help selfOwnership-note" : "selfOwnership-help")}
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            >
+              {APPLICANT_SETTLEMENT_ACCOUNT_OPTIONS.map((option) => {
+                const selected = form.selfOwnership === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-[16px] font-bold transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${selected ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-foreground hover:border-foreground/50"}`}
                   >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-              <FieldError field="selfOwnership" issue={validationIssue} />
+                    <input
+                      type="radio"
+                      name="selfOwnership"
+                      value={option.value}
+                      checked={selected}
+                      onChange={() => set("selfOwnership", option.value)}
+                      className="peer sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${selected ? "border-brand-yellow" : "border-control-border"}`}
+                    >
+                      {selected ? <span className="h-2 w-2 rounded-full bg-brand-yellow" /> : null}
+                    </span>
+                    <span>{option.label}</span>
+                  </label>
+                );
+              })}
             </div>
-          )}
+            {form.selfOwnership === "문제 있음" ? (
+              <p id="selfOwnership-note" className="mt-3 text-[15px] font-semibold leading-relaxed text-warning-strong">
+                본인 명의 계좌가 없으면 지원 진행이 어려울 수 있어요.
+              </p>
+            ) : null}
+            <FieldError field="selfOwnership" issue={validationIssue} />
+          </div>
         </div>
 
         <details className="group mt-5 overflow-hidden rounded-2xl border border-border-strong bg-card shadow-sm">
@@ -1756,8 +1868,8 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           <div className="flex flex-col gap-6 border-t border-border px-5 pb-5 pt-5 sm:px-8 sm:pb-8">
             {/* 경력 */}
             <div>
-              <label htmlFor="experience" className={labelCls}>배달·운전 경력 (선택)</label>
-              <textarea id="experience" name="experience" className={`${inputCls} min-h-[90px] resize-y`} value={form.experience} onChange={(e) => set("experience", e.target.value)} placeholder="예: 쿠팡이츠 도보 배달 1년" />
+              <label htmlFor="experience" className={labelCls}>배송·운전 경력 (선택)</label>
+              <textarea id="experience" name="experience" className={`${inputCls} min-h-[90px] resize-y`} value={form.experience} onChange={(e) => set("experience", e.target.value)} placeholder="예: 근거리 배송 업무 1년" />
             </div>
 
             {/* 자기소개 */}
@@ -1765,16 +1877,62 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <label htmlFor="introduction" className={labelCls}>간단한 자기소개 (선택)</label>
               <textarea id="introduction" name="introduction" className={`${inputCls} min-h-[90px] resize-y`} value={form.introduction} onChange={(e) => set("introduction", e.target.value)} placeholder="자유롭게 작성해주세요" />
             </div>
-
-            {/* 마케팅 동의 */}
-            <label htmlFor="marketingConsent" className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl py-1 transition-colors hover:bg-muted/50">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center">
-                <input id="marketingConsent" name="marketingConsent" type="checkbox" checked={form.marketingConsent} onChange={(e) => set("marketingConsent", e.target.checked)} className="h-6 w-6 accent-brand-yellow" />
-              </span>
-              <span className="py-2 text-[15px] leading-relaxed text-gray-700">채용·근무 관련 안내 문자 수신에 동의합니다. (선택)</span>
-            </label>
           </div>
         </details>
+
+        <div id="field-marketingConsent" className="mt-4 rounded-2xl border border-border-strong bg-card px-4 py-4 shadow-sm sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div id="marketingConsent-label" className="text-[16px] font-extrabold leading-relaxed text-foreground">
+              새 일자리 안내 문자 수신 여부
+            </div>
+            <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-[12px] font-bold text-muted-foreground">
+              응답 필수
+            </span>
+          </div>
+          <p id="marketingConsent-help" className="mt-1 text-[15px] leading-relaxed text-muted-foreground">
+            지원하신 조건과 비슷한 새 일자리가 생기면 문자로 알려드려요.
+          </p>
+          <div
+            role="radiogroup"
+            aria-labelledby="marketingConsent-label"
+            aria-required="true"
+            {...fieldA11y("marketingConsent", "marketingConsent-help marketingConsent-note")}
+            className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            {[
+              { value: true, label: "네, 받아볼게요" },
+              { value: false, label: "아니요, 받지 않을게요" },
+            ].map((option) => {
+              const selected = form.marketingConsent === option.value;
+              return (
+                <label
+                  key={String(option.value)}
+                  className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-[16px] font-bold transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${selected ? "border-foreground bg-foreground text-white" : "border-control-border bg-card text-foreground hover:border-foreground/50"}`}
+                >
+                  <input
+                    type="radio"
+                    name="marketingConsent"
+                    value={String(option.value)}
+                    checked={selected}
+                    onChange={() => set("marketingConsent", option.value)}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${selected ? "border-brand-yellow" : "border-control-border"}`}
+                  >
+                    {selected ? <span className="h-2 w-2 rounded-full bg-brand-yellow" /> : null}
+                  </span>
+                  <span>{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p id="marketingConsent-note" className="mt-3 text-[15px] font-medium leading-relaxed text-muted-foreground">
+            어느 쪽을 선택해도 이번 지원의 접수·진행 안내는 받을 수 있어요.
+          </p>
+          <FieldError field="marketingConsent" issue={validationIssue} />
+        </div>
 
         <button
           type="submit"

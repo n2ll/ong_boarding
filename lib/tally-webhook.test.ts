@@ -13,6 +13,7 @@ type TallyWebhookModule = {
   blocksTallyFallback?: (status: number, errorBody: unknown) => boolean;
   normalizeTallyVehicleOwnership?: (value: string) => "있음" | "없음" | "";
   normalizeTallySelfOwnership?: (value: string) => "문제 없음" | "문제 있음" | "";
+  normalizeTallyMarketingConsent?: (value: string) => boolean | null;
 };
 
 async function loadTallyWebhookModule(): Promise<TallyWebhookModule> {
@@ -127,6 +128,22 @@ test("Tally keeps legacy raw labels in its durable fingerprint and canonicalizes
   );
 });
 
+test("a Tally submission without a marketing answer keeps consent unknown", async () => {
+  const { normalizeTallyMarketingConsent } = await loadTallyWebhookModule();
+
+  assert.equal(typeof normalizeTallyMarketingConsent, "function");
+  assert.equal(normalizeTallyMarketingConsent!(""), null);
+});
+
+test("only explicit Tally marketing answers become consent booleans", async () => {
+  const { normalizeTallyMarketingConsent } = await loadTallyWebhookModule();
+
+  assert.equal(typeof normalizeTallyMarketingConsent, "function");
+  assert.equal(normalizeTallyMarketingConsent!("네, 받아볼게요"), true);
+  assert.equal(normalizeTallyMarketingConsent!("아니요, 받지 않을게요"), false);
+  assert.equal(normalizeTallyMarketingConsent!("나중에 결정"), null);
+});
+
 test("a generic JSON 503 from canonical apply blocks the direct Tally fallback", async () => {
   const { blocksTallyFallback } = await loadTallyWebhookModule();
   const route = await readFile(
@@ -151,6 +168,21 @@ test("a non-JSON 503 from canonical apply blocks the direct Tally fallback", asy
   assert.equal(blocksTallyFallback!(500, null), false);
 });
 
+test("a missing settlement-account answer cannot fall through to the Tally fallback", async () => {
+  const { blocksTallyFallback } = await loadTallyWebhookModule();
+
+  assert.equal(typeof blocksTallyFallback, "function");
+  assert.equal(blocksTallyFallback!(400, {
+    code: "APPLICATION_CONTEXT_CHANGED",
+    field: "selfOwnership",
+    error: "정산계좌 본인 명의 가능 여부를 선택해주세요.",
+  }), true);
+  assert.equal(blocksTallyFallback!(400, {
+    code: "APPLICATION_CONTEXT_CHANGED",
+    field: "location",
+  }), false);
+});
+
 test("the Tally direct fallback atomically claims the stable submission ledger", async () => {
   const [route, migration] = await Promise.all([
     readFile(new URL("../app/api/webhooks/tally/route.ts", import.meta.url), "utf8"),
@@ -173,4 +205,36 @@ test("the Tally direct fallback atomically claims the stable submission ledger",
   assert.match(migration, /insert into public\.application_submission_mappings/i);
   assert.match(migration, /grant execute on function public\.claim_tally_fallback_submission[\s\S]*to service_role/i);
   assert.match(migration, /revoke execute on function public\.claim_tally_fallback_submission[\s\S]*from anon, authenticated/i);
+});
+
+test("a new Tally fallback claim applies an explicit marketing choice only after the final applicant wins", async () => {
+  const [route, migration] = await Promise.all([
+    readFile(new URL("../app/api/webhooks/tally/route.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../docs/migrations/2026-08-tally-fallback-marketing-consent.sql", import.meta.url),
+      "utf8",
+    ).catch(() => ""),
+  ]);
+
+  assert.match(route, /marketing_consent:\s*marketingConsent/);
+  assert.match(migration, /create or replace function public\.claim_tally_fallback_submission/i);
+  assert.match(migration, /jsonb_typeof\(p_applicant\s*->\s*'marketing_consent'\)\s*=\s*'boolean'/i);
+  assert.match(migration, /marketing_consent\s*=\s*\(p_applicant\s*->>\s*'marketing_consent'\)::boolean/i);
+  assert.match(migration, /marketing_consent_at\s*=\s*case[\s\S]*?then now\(\)[\s\S]*?else null/i);
+  assert.match(migration, /sms_opt_out_at\s*=\s*case[\s\S]*?then null[\s\S]*?else sms_opt_out_at/i);
+
+  const finalWinner = migration.indexOf("if v_existing_applicant_id is distinct from v_applicant_id then");
+  const consentUpdate = migration.indexOf("set marketing_consent =");
+  assert.ok(finalWinner >= 0 && consentUpdate > finalWinner);
+});
+
+test("an exact Tally fallback replay returns before consent can overwrite a later opt-out", async () => {
+  const migration = await readFile(
+    new URL("../docs/migrations/2026-08-tally-fallback-marketing-consent.sql", import.meta.url),
+    "utf8",
+  ).catch(() => "");
+  const exactReplay = migration.indexOf("return query select v_existing_applicant_id, false;");
+  const consentUpdate = migration.indexOf("set marketing_consent =");
+
+  assert.ok(exactReplay >= 0 && consentUpdate > exactReplay);
 });

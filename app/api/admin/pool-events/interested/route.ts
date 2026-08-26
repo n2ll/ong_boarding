@@ -12,11 +12,11 @@
  * ── ?detail=1 (공고 마감 안내 대상 산정 — Jobs 마감 모달용) ──
  * 미선발 관심자 = (interest_click ∪ 이 공고 job_candidates 전 단계) 중
  *   확정인력·인력풀 제외(부적합/이탈)·수신거부·이미 대기 안내(waitlist_notice) 수신·
- *   전화번호/access_token 없음(맞춤링크 발송 불가)을 뺀 인원.
+ *   전화번호 없음을 뺀 인원.
  * 발송 자체는 bulk-send가 재차 가드하지만, 모달의 'N명' 표시가 실제 발송 수와
  * 어긋나지 않게 여기서 미리 걸러 준다.
  *
- * 응답: { applicantIds, targets: {id,name,phone,access_token}[], waitlistNotifiedCount }
+ * 응답: { applicantIds, targets: {id,name,phone}[], waitlistNotifiedCount }
  *   waitlistNotifiedCount = 이 공고 waitlist_notice 수신 인원(distinct)
  *   — 공고 재개 시 '대기자 N명' 힌트의 근거('결원 시 우선 안내' 역조회).
  */
@@ -77,11 +77,11 @@ export async function GET(req: NextRequest) {
     ...new Set([...applicantIds, ...(cands ?? []).map((r) => r.applicant_id as number)]),
   ];
 
-  let targets: { id: number; name: string | null; phone: string; access_token: string }[] = [];
+  let targets: { id: number; name: string | null; phone: string }[] = [];
   if (unionIds.length > 0) {
     const { data: apps, error: appErr } = await supabase
       .from("applicants")
-      .select("id, name, phone, access_token, status, sms_opt_out_at")
+      .select("id, name, phone, status, sms_opt_out_at")
       .in("id", unionIds);
     if (appErr) {
       console.error("[pool-events/interested] applicants", appErr);
@@ -94,14 +94,12 @@ export async function GET(req: NextRequest) {
         if (status === "부적합" || status === "이탈") return false; // 인력풀 제외
         if (a.sms_opt_out_at) return false; // 수신거부
         if (notified.has(a.id as number)) return false; // 이미 대기 안내 수신
-        // 문구에 맞춤링크가 들어가므로 번호·토큰 없는 인원은 대상에서 제외(발송 시 깨짐 방지).
-        return !!a.phone && !!a.access_token;
+        return !!a.phone;
       })
       .map((a) => ({
         id: a.id as number,
         name: (a.name as string | null) ?? null,
         phone: a.phone as string,
-        access_token: a.access_token as string,
       }));
   }
 

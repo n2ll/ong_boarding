@@ -30,6 +30,11 @@ import {
   fetchFreshAgentMode,
   type AdminAgentModeResponse,
 } from "@/lib/admin/agent-mode-view";
+import {
+  announceZeroTargetDescription,
+  isIntentionalCampaignGuardError,
+} from "@/lib/admin/types";
+import { currentJobClosedSmsBody } from "@/lib/sms-consent-policy";
 
 interface JobRow {
   id: string;
@@ -217,35 +222,15 @@ const STAGE_KO: Record<string, string> = {
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
   active: "활동 중", paused: "수동 응대", abort: "중단",
 };
-// 공고 마감 안내 문구 — #{이름}/#{맞춤링크}는 bulk-send가 수신자별 치환, #{공고명}은 발송 시점에 치환.
-// 맞춤링크(/p/[token])가 활성 공고를 자동으로 보여주므로 타 공고 안내는 링크 하나로 끝난다.
-// 톤: 진행 중이던 지원자가 이탈하지 않도록 죄송·친절 우선(지원자 경험 원칙, 2026-07-14) —
-// 배송 라인은 결원이 금방 생기고 비슷한 공고가 계속 올라오므로 '먼저 안내' 약속으로 관계를 잇는다.
-// '먼저 안내'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙).
-const JOB_CLOSED_NOTICE = `#{이름}님, '#{공고명}'에 관심 가져주시고 함께해 주셔서 진심으로 감사합니다.
-안내드리는 사이에 이번 자리가 먼저 채워졌어요. 기다리시게 해서 정말 죄송합니다.
-
-배송 라인은 결원이 금방 생기기도 하고, 비슷한 공고도 계속 올라올 예정이에요.
-새 자리가 나오는 대로 이 번호로 가장 먼저 안내드릴게요.
-
-지금 모집 중인 다른 공고는 여기서 보실 수 있어요: #{맞춤링크}`;
-
-// 일반 배송 라인(비마트 외 실제 공고) 마감 안내에만 덧붙는 선탑 제안 — 답장하면 AI '마감 안내 모드'가 받아
-// 선탑 가능 시간대를 수집하고 매니저에게 인계한다. (선탑≠투입 확정 — '우선순위' 표현까지만)
-const JOB_CLOSED_SUNTOP_LINE = `
-그동안 선탑(동승)으로 현장을 미리 경험해두실 수도 있어요. 비슷한 라인 투입 때 우선순위가 생깁니다. 원하시면 이 번호로 '선탑'이라고 답장 주세요.`;
-
 // 마감 안내 최종 본문 — 일반 배송 라인이면 선탑 제안 포함. 모달 미리보기와 실제 발송이 같은 본문을 쓴다.
 const closeNoticeBody = (job: JobRow) =>
-  (JOB_CLOSED_NOTICE + (job.generalLine ? JOB_CLOSED_SUNTOP_LINE : ""))
-    .replace(/#\{공고명\}/g, stripSystemPrefix(job.title));
+  currentJobClosedSmsBody(job.title, job.generalLine);
 
 // 마감 안내 발송 대상(미선발 관심자) — interested API(detail=1)가 수신거부·확정인력·기수신자 등을 걸러 내려준다.
 interface CloseNotifyTarget {
   id: number;
   name: string | null;
   phone: string;
-  access_token: string;
 }
 
 // 새 공고 안내 문구 — #{이름}/#{맞춤링크}는 bulk-send가 수신자별 치환, {공고명}은 발송 전 모달에서
@@ -253,11 +238,11 @@ interface CloseNotifyTarget {
 // '조건 확인'까지만 — 확정·배정 뉘앙스 금지(AGENTS.md 절대 규칙). '그만' 회신 안내로 수신거부 경로 유지.
 const NEW_JOB_NOTICE = `#{이름}님, 새 배송 건이 올라왔어요!\n{공고명}\n\n조건 확인: #{맞춤링크}\n(안내 중단: '그만' 회신)`;
 
-// 새 공고 안내 대상 — announce-targets API 응답. group은 S 선탑 완료 > A 약속자 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
+// 새 공고 안내 대상 — announce-targets API 응답. group은 S 선탑 완료 > A 충원 안내 이력 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
 type AnnounceGroup = "suntop" | "promised" | "requested" | "matched";
 const ANNOUNCE_GROUP_LABEL: Record<AnnounceGroup, string> = {
   suntop: "선탑 완료(최우선)",
-  promised: "먼저 안내 약속",
+  promised: "충원 안내 이력",
   requested: "알림 신청",
   matched: "조건 맞는 최근 관심",
 };
@@ -276,9 +261,11 @@ interface AnnounceTargetsRes {
   sms_title: string;
   /** 'targeted'면 이 공고는 노출 명단 밖에 있는 사람에게 안내를 보내지 않는다. */
   exposure?: "all" | "targeted";
-  /** 노출 명단 때문에 빠진 수 — promised는 그중 '먼저 안내 약속'·선탑 완료자(약속을 어기는 쪽). */
+  /** 노출 명단 때문에 빠진 수 — promised는 그중 충원 안내 이력·선탑 완료자. */
   dropped_by_exposure?: { total: number; promised: number };
   dropped_by_fatigue?: { total: number; promised: number };
+  /** 새 일자리 문자 동의가 false/null이라 빠진 수. */
+  dropped_by_consent?: { total: number; promised: number };
   fatigue_days?: number;
 }
 
@@ -1499,7 +1486,7 @@ export function Jobs() {
       setAiModalOpen(false);
       resetNewJobForm();
       await loadJobs();
-      // 새 공고를 기다리던 사람들(안내 약속·알림 신청·조건 맞는 최근 관심) 원클릭 안내 — 대상 ≥1일 때만 모달.
+      // 새 공고 안내 후보(충원 안내 이력·알림 신청·조건 맞는 최근 관심) 원클릭 안내 — 대상 ≥1일 때만 모달.
       // 조회 실패는 등록 흐름에 영향 없음(행 '대기자에게 안내'로 나중에 가능).
       const newJobId = typeof json.job?.id === "number" ? json.job.id : null;
       if (newJobId !== null) {
@@ -1507,6 +1494,17 @@ export function Jobs() {
           const at = await fetchAnnounceTargets(newJobId);
           if (at.targets.length > 0) {
             setAnnounceModal({ jobId: newJobId, smsTitle: at.sms_title, targets: at.targets, groups: at.groups, night: at.night, dropped: at.dropped_by_exposure });
+          } else if ((at.dropped_by_consent?.total ?? 0) > 0) {
+            const description = announceZeroTargetDescription({
+              consent: at.dropped_by_consent!,
+              fatigue: at.dropped_by_fatigue ?? { total: 0, promised: 0 },
+              exposure: at.dropped_by_exposure ?? { total: 0, promised: 0 },
+              fatigueDays: at.fatigue_days ?? 7,
+            });
+            toast.info("따로 안내 문자를 보낼 대상은 없어요", {
+              description: description ?? undefined,
+              duration: 9000,
+            });
           } else if ((at.dropped_by_fatigue?.total ?? 0) > 0) {
             // **두 번째 공고부터의 침묵을 없앤다** — 대상 0명의 이유가 '이력 없음'이 아니라
             // '최근 N일 안에 다른 공고 안내를 이미 받음'이다. 그분들 맞춤 링크에는 이 공고도 함께 보인다.
@@ -1514,7 +1512,7 @@ export function Jobs() {
             toast.info("따로 안내 문자를 보낼 대상은 없어요", {
               description:
                 `최근 ${at.fatigue_days ?? 7}일 안에 다른 공고 안내를 이미 받은 ${f.total}명이 있어 이번엔 빠졌어요` +
-                `${f.promised > 0 ? `(그중 ${f.promised}명은 '먼저 안내드릴게요' 약속)` : ""}. ` +
+                `${f.promised > 0 ? `(그중 ${f.promised}명은 충원 안내 이력 보유자·선탑 완료자)` : ""}. ` +
                 `문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`,
               duration: 9000,
             });
@@ -1522,7 +1520,7 @@ export function Jobs() {
             // 대상 0명이 '이력이 없어서'가 아니라 '노출 명단이 좁아서'인 경우 — 등록 경로에서도 침묵하지 않는다.
             toast.info("안내할 대기자가 없어요", {
               description: `이 공고는 지정 노출이라 명단 밖 ${at.dropped_by_exposure?.total}명이 대상에서 빠졌어요${
-                (at.dropped_by_exposure?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_exposure?.promised}명은 '먼저 안내드릴게요' 약속)` : ""
+                (at.dropped_by_exposure?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_exposure?.promised}명은 충원 안내 이력 보유자·선탑 완료자)` : ""
               }. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`,
             });
           }
@@ -1860,26 +1858,23 @@ export function Jobs() {
         chunkFailed += chunk.length;
       }
     }
-    // 결과 구분 보고 — 가드에 걸린 인원(수신거부·인력풀 제외·중복 방지·토큰 없음)은 '실패'가 아니라 의도된 제외.
-    const guarded = failErrors.filter((e) =>
-      e.includes("수신거부") || e.includes("인력풀 제외") || e.includes("중복 방지") || e.includes("토큰 없음")
-    ).length;
+    // 결과 구분 보고 — 가드에 걸린 인원(수신거부·동의·인력풀 제외·중복 방지·토큰 없음)은 '실패'가 아니라 의도된 제외.
+    const guarded = failErrors.filter(isIntentionalCampaignGuardError).length;
     const failed = failErrors.length - guarded + chunkFailed;
     const parts = [`${sent}명 발송`];
     if (guarded) parts.push(`가드 제외 ${guarded}명`);
     if (failed) parts.push(`실패 ${failed}명`);
-    (sent > 0 ? toast.success : toast.error)(
+    (sent > 0 ? toast.success : failed > 0 ? toast.error : toast.info)(
       `${label}: ${parts.join(" · ")}`,
-      sent === 0 && zeroSentNote
-        ? { description: zeroSentNote }
-        : failed > 0
-          ? { description: "실패분은 파이프라인 캠페인 발송으로 다시 보낼 수 있어요." }
-          : undefined
+      failed > 0
+        ? sent === 0 && zeroSentNote
+          ? { description: zeroSentNote }
+          : { description: "실패분은 파이프라인 캠페인 발송으로 다시 보낼 수 있어요." }
+        : undefined
     );
   };
 
-  // 미선발 관심자 마감 안내 발송 — purpose='job_closed'로 보내면 서버가
-  // pool_events(waitlist_notice, trigger:'job_closed')를 남겨 이후 '결원 시 우선 안내' 대상 역조회의 근거가 된다.
+  // 미선발 관심자에게 현재 지원 건의 마감 사실만 안내한다. 새 일자리 안내 약속은 별도 명시 동의 후에만 기록한다.
   const sendCloseNotices = async (job: JobRow, targets: CloseNotifyTarget[]) => {
     await sendBulkNotices(targets, closeNoticeBody(job), "job_closed", Number(job.id), "마감 안내", "발송은 실패했지만 공고 마감은 완료됐어요.");
   };
@@ -1921,17 +1916,16 @@ export function Jobs() {
       const at = await fetchAnnounceTargets(Number(job.id));
       const dropped = at.dropped_by_exposure?.total ?? 0;
       const fatigued = at.dropped_by_fatigue?.total ?? 0;
+      const consentMissing = at.dropped_by_consent?.total ?? 0;
       if (at.targets.length === 0) {
         toast.info("안내할 대기자가 없어요", {
-          // 0명의 이유가 '이력 없음'이 아니라 '노출 명단이 좁아서'일 수 있다 — 원인을 바꿔 말하지 않는다.
-          description:
-            fatigued > 0
-              ? `최근 ${at.fatigue_days ?? 7}일 안에 다른 공고 안내를 이미 받은 ${fatigued}명이 있어 이번엔 빠졌어요` +
-                `${(at.dropped_by_fatigue?.promised ?? 0) > 0 ? `(그중 ${at.dropped_by_fatigue?.promised}명은 '먼저 안내드릴게요' 약속)` : ""}. ` +
-                `문자를 또 보내지 않는 것이 맞고, 그분들 맞춤 공고 링크에는 이 공고도 함께 보입니다.`
-              : dropped > 0
-                ? `이 공고는 지정 노출이라 노출 명단 밖 ${dropped}명이 대상에서 빠졌어요. 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.`
-                : "먼저 안내 약속·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
+          // 동의 → 피로도 → 노출 순으로 서버가 실제 적용한 첫 제외 사유를 그대로 설명한다.
+          description: announceZeroTargetDescription({
+            consent: at.dropped_by_consent ?? { total: consentMissing, promised: 0 },
+            fatigue: at.dropped_by_fatigue ?? { total: fatigued, promised: 0 },
+            exposure: at.dropped_by_exposure ?? { total: dropped, promised: 0 },
+            fatigueDays: at.fatigue_days ?? 7,
+          }) ?? "충원 안내·알림 신청·최근 관심 이력에서 발송 가능한 대상이 없습니다.",
         });
         return;
       }
@@ -3169,7 +3163,7 @@ export function Jobs() {
               {closeModal.job.inProgress > 0 && (
                 closeModal.job.generalLine ? (
                   <div className="mt-3 px-3 py-2 rounded-lg bg-yellow-50 border border-warning-soft text-[13px] font-bold text-warning-strong">
-                    💬 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대는 &lsquo;마감 안내 모드&rsquo;로 전환돼요 — 충원 완료 안내, 결원 시 먼저 안내 약속, 선탑(동승) 제안까지 응대를 이어갑니다.
+                    💬 진행 중인 후보 {closeModal.job.inProgress}명의 AI 응대는 &lsquo;마감 안내 모드&rsquo;로 전환돼요 — 충원 완료 안내, 새 일자리 문자 수신 여부 확인, 선탑(동승) 제안까지 이어갑니다.
                   </div>
                 ) : (
                   <div className="mt-3 px-3 py-2 rounded-lg bg-error-soft border border-error-soft text-[13px] font-bold text-error-strong">
@@ -3197,7 +3191,7 @@ export function Jobs() {
                       <div className="mt-2 px-3 py-2.5 rounded-lg bg-background border border-border-strong text-[12px] text-muted-foreground leading-relaxed whitespace-pre-line">
                         {closeNoticeBody(closeModal.job)}
                       </div>
-                      <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
+                      <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}은 수신자별로 자동 치환돼요. 현재 지원 건의 마감만 알리는 운영 문자입니다."}</p>
                     </>
                   )}
                 </div>
@@ -3222,17 +3216,17 @@ export function Jobs() {
       )}
 
       {/* 새 공고 안내 확인 모달 — 등록 직후(대상 ≥1) 자동 + 행 '대기자에게 안내' 재사용.
-          "먼저 안내드릴게요" 약속(waitlist_notice)·알림 신청(notify_request) 이행을 게시 순간 원클릭으로. */}
+          충원 안내 이력(waitlist_notice)·알림 신청(notify_request) 기반 후보를 게시 순간 원클릭으로. */}
       {announceModal && (
         <Modal bare open={Boolean(announceModal)} onClose={() => setAnnounceModal(null)} size="md"
                title="공고 안내 발송"
                className="">
             <div className="px-7 pt-6 pb-2">
-              <h2 className="text-[18px] font-extrabold text-foreground">새 공고를 기다리던 분들에게 안내할까요?</h2>
+              <h2 className="text-[18px] font-extrabold text-foreground">새 공고 안내 대상에게 보낼까요?</h2>
               <p className="text-[14px] text-muted-foreground mt-2 leading-relaxed">
                 {`'${announceModal.smsTitle}' 공고를 ${announceModal.targets.length}명에게 문자로 안내합니다.`}
               </p>
-              {/* 그룹별 인원 — A 약속 > B 알림 신청 > C 조건 매칭, 상위 그룹 우선으로 중복 제거된 수 */}
+              {/* 그룹별 인원 — A 충원 안내 이력 > B 알림 신청 > C 조건 매칭, 상위 그룹 우선으로 중복 제거된 수 */}
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {(Object.keys(ANNOUNCE_GROUP_LABEL) as AnnounceGroup[])
                   .filter((g) => announceModal.groups[g] > 0)
@@ -3246,12 +3240,11 @@ export function Jobs() {
                 {NEW_JOB_NOTICE.replace("{공고명}", announceModal.smsTitle)}
               </div>
               <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
-              {/* 지정 노출로 좁힌 공고는 명단 밖 대기자에게 안내를 보내지 않는다 —
-                  '먼저 안내드릴게요' 약속은 공고 무관이라, 이 수를 숨기면 약속이 조용히 깨진다. */}
+              {/* 지정 노출로 좁힌 공고는 명단 밖 후보에게 안내를 보내지 않는다. */}
               {(announceModal.dropped?.total ?? 0) > 0 && (
                 <div className="mt-3 px-3 py-2 rounded-lg bg-yellow-50 border border-warning/35 text-[12px] text-warning-strong leading-relaxed">
                   이 공고는 <b>지정 노출</b>이라 노출 명단 밖 <b>{announceModal.dropped?.total}명</b>이 대상에서 빠졌어요
-                  {(announceModal.dropped?.promised ?? 0) > 0 && <> — 그중 <b>{announceModal.dropped?.promised}명</b>은 &lsquo;먼저 안내드릴게요&rsquo; 약속·선탑 완료자예요</>}.
+                  {(announceModal.dropped?.promised ?? 0) > 0 && <> — 그중 <b>{announceModal.dropped?.promised}명</b>은 충원 안내 이력 보유자·선탑 완료자예요</>}.
                   이분들께도 알리려면 노출 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.
                 </div>
               )}

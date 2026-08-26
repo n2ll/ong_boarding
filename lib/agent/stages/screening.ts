@@ -10,6 +10,11 @@
 
 import { emptyScreening, isComplete, mergeAgentState } from "../checklist";
 import { applicantAvailableSlots } from "../../admin/types";
+import {
+  explicitMarketingConsentResponse,
+  marketingConsentPatchFromExplicitResponse,
+  marketingConsentStatusLabel,
+} from "../../sms-consent-policy";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
@@ -264,22 +269,24 @@ transition_reason에 한 줄로 신호를 적어라.
 screening_turn tool로만 응답.`;
 
 // 마감(충원 완료) 공고 응대 모드 — 마감돼도 일반 라인 AI 응대를 멈추지 않는다(관계 유지 + 선탑 전환).
-// 확정 뉘앙스 금지 원칙은 그대로: 선탑≠투입 확정, 결원·새 공고 시 '먼저 안내'까지만 약속한다.
+// 새 일자리 문자는 명시 동의가 있을 때만 안내한다. 선탑≠투입 확정 원칙도 그대로 유지한다.
 const CLOSED_MODE_BLOCK = `
 
 ## ⚠️ 마감 안내 모드 — 이 공고는 충원이 완료돼 마감된 상태다
-신규 스크리닝 진행이 목적이 아니다. 목적은 ①솔직한 마감 안내 ②관계 유지 ③선탑(동승) 전환이다.
+신규 스크리닝 진행이 목적이 아니다. 목적은 ①솔직한 마감 안내 ②새 일자리 문자 수신 의사 확인 ③선탑(동승) 전환이다.
 1. 이번 대화에서 아직 마감 안내를 하지 않았다면 첫 응답에서 **정중한 사과와 함께** 안내해라:
-   확인을 도와드리는 사이 이번 자리가 먼저 채워졌다는 사실 + 기다리시게 해 죄송하다는 말 +
-   "배송 라인은 결원이 금방 생기기도 하고 비슷한 공고도 계속 올라와요. 새 자리가 나오는 대로
-   이 번호로 가장 먼저 안내드릴게요." (지원자가 헛수고했다고 느끼지 않게 — 관계를 잇는 게 목적)
-2. **선탑(동승)은 마감과 무관하게 언제든 가능**하다는 점도 함께 안내해라 — 미리 현장을 경험해두면
+   확인을 도와드리는 사이 이번 자리가 먼저 채워졌다는 사실 + 기다리시게 해 죄송하다는 말.
+2. 지원자 정보의 '새 일자리 문자 동의'가 미확인이면 "비슷한 새 일자리가 생길 때 문자로
+   안내받으시겠어요? 원하지 않으셔도 이번 지원에는 영향이 없어요."라고 물어라. 동의 전에는 향후
+   안내를 약속하지 마라. 이번 턴 답이 명확한 동의면 marketing_consent=true, 거절이면 false로 반환한다.
+   이미 거절로 표시된 지원자에게는 다시 묻거나 설득하지 마라.
+3. **선탑(동승)은 마감과 무관하게 언제든 가능**하다는 점도 함께 안내해라 — 미리 현장을 경험해두면
    비슷한 라인 투입 때 우선순위가 생긴다. 단 선탑≠투입 확정(뉘앙스 금지), 일정 확약 금지(매니저 몫).
-3. 지원자가 선탑에 관심을 보이면 가능 요일·시간대를 물어 collected.선탑_가능시간에 기록하고
+4. 지원자가 선탑에 관심을 보이면 가능 요일·시간대를 물어 collected.선탑_가능시간에 기록하고
    transition: "pause" (transition_reason: "마감 공고 — 선탑 희망, 매니저 일정 조율 필요").
-4. 선탑 관심이 없으면 정중히 마무리하고 transition: "stay" — 이후 질문에도 계속 응대한다.
-5. 새 확인질문(차종·명의·시작일)을 네가 먼저 던지지 마라. 지원자가 스스로 준 정보는 collected에 기록만.
-6. FAQ 질문에는 평소처럼 답해라. transition: "advance"는 이 모드에서 금지다.`;
+5. 선탑 관심이 없으면 정중히 마무리하고 transition: "stay" — 이후 질문에도 계속 응대한다.
+6. 새 확인질문(차종·명의·시작일)을 네가 먼저 던지지 마라. 지원자가 스스로 준 정보는 collected에 기록만.
+7. FAQ 질문에는 평소처럼 답해라. transition: "advance"는 이 모드에서 금지다.`;
 
 // 배민 비마트 임시중단 모드 — 배민 유입 후보에게 이미 시작 문자로 '중단 + 타업무 인재풀 동의' 안내가 나간 상태.
 // 이 모드에선 비마트 스크리닝(자차·명의·공휴일·배민ID·앱설치 등)을 진행하지 않는다. 목적은 관계 유지 + 인재풀 동의 확보다.
@@ -327,11 +334,13 @@ const SYSTEM_PROMPT_BODY_BAEMIN_SUSPENDED = `너는 옹고잉(내이루리) 배�
 - 재개 시점을 단정하지 마라("다음 주에 열려요" 류 금지). 모르면 "확정되면 안내드릴게요"까지만.
 
 ## 목적 (이 모드에서 네가 할 일)
-1. 지원자가 **다른 배송·물류 업무 생기면 연락받는 데 동의**하는지 확인한다.
-2. 동의하면: 따뜻하게 감사 인사 + "자리가 생기면 이 번호로 가장 먼저 안내드릴게요" 정도로 마무리하고,
+1. 지원자 정보가 미확인일 때만 **다른 배송·물류 업무 생기면 연락받는 데 동의**하는지 확인한다.
+   이미 거절로 표시된 지원자에게는 다시 묻거나 설득하지 말고 질문에 답한 뒤 정중히 마무리한다.
+2. 명확히 동의하면 marketing_consent=true, 거절하면 false로 반환한다. 애매하면 생략하고 다시 확인한다.
+3. 동의하면: 따뜻하게 감사 인사 + "자리가 생기면 이 번호로 안내드릴게요" 정도로 마무리하고,
    transition: "pause" (transition_reason: "비마트 임시중단 — 타업무 안내 동의 확보, 인재풀 등록/확인 요망").
-3. 거절하거나 원치 않으면: 정중히 인사하고 transition: "stay". 재촉·설득 금지.
-4. 지원자가 질문하면: 답할 수 있는 일반적 안내만 간단히. 수당·정책·계약·재개 일정 등 확답이 필요한 질문은
+4. 거절하거나 원치 않으면: 정중히 인사하고 transition: "stay". 재촉·설득 금지.
+5. 지원자가 질문하면: 답할 수 있는 일반적 안내만 간단히. 수당·정책·계약·재개 일정 등 확답이 필요한 질문은
    추측하지 말고 transition: "pause" (reason 한 줄).
 
 ## 톤
@@ -385,6 +394,8 @@ interface ScreeningToolInput {
   collected?: GeneralScreeningCollected;
   transition: "stay" | "advance" | "abort" | "pause";
   transition_reason: string;
+  /** 마감·비마트 중단 모드에서 지원자가 이번 턴에 명시한 신규 일자리 문자 수신 의사. */
+  marketing_consent?: boolean;
   handoff_category?: string;
   suggested_action?: string;
   /** 이번 답변이 다른 공고에 관한 것이면 그 공고 id(모델 자기신고). 라우터가 코드로 검증한다. */
@@ -429,6 +440,11 @@ const TOOL = {
       transition_reason: {
         type: "string",
         description: "abort/pause/advance 사유 한 줄. stay면 빈 문자열.",
+      },
+      marketing_consent: {
+        type: "boolean",
+        description:
+          "마감 안내·비마트 임시중단 모드에서만 사용. 지원자가 새 일자리 문자 수신을 명시적으로 동의하면 true, 명시적으로 거절하면 false. 질문·애매한 답이면 생략.",
       },
       ...handoffToolProperties,
       ...crossJobToolProperties,
@@ -491,6 +507,11 @@ const TOOL_GENERAL = {
       transition_reason: {
         type: "string",
         description: "abort/pause/advance 사유 한 줄. stay면 빈 문자열.",
+      },
+      marketing_consent: {
+        type: "boolean",
+        description:
+          "마감 안내 모드에서만 사용. 지원자가 새 일자리 문자 수신을 명시적으로 동의하면 true, 명시적으로 거절하면 false. 아직 묻지 않았거나 애매하면 생략.",
       },
       ...handoffToolProperties,
       ...crossJobToolProperties,
@@ -572,6 +593,7 @@ function formatApplicant(a: StageContext["applicant"]): string {
     `차량 보유(폼): ${a.own_vehicle ?? "-"} / 차종: ${a.vehicle_type ?? "-"}`,
     `면허: ${a.license_type ?? "-"}`,
     `본인명의(폼): ${a.self_ownership ?? "-"}`,
+    `새 일자리 문자 상태: ${marketingConsentStatusLabel(a.marketing_consent, a.sms_opt_out_at)}`,
     `거주지: ${a.location ?? "-"}`,
   ].join("\n");
 }
@@ -648,7 +670,7 @@ ${inboundText}
         return failResult("no tool_use block");
       }
 
-      const result = toStageResult(block.input, ctx);
+      const result = toStageResult(block.input, ctx, inboundText);
       result.usage = { model: MODEL, ...(data.usage ?? {}) };
       return result;
     } catch (e) {
@@ -663,7 +685,11 @@ function countTrueFlags(obj: Record<string, unknown> | undefined): number {
   return obj ? Object.values(obj).filter(Boolean).length : 0;
 }
 
-function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult {
+function toStageResult(
+  out: ScreeningToolInput,
+  ctx: StageContext,
+  inboundText: string,
+): StageResult {
   const general = isGeneralLineJob(ctx.job);
   // advance(→onboarding) 금지 모드 두 가지:
   //  - 일반 라인 마감 안내 모드: 목적이 스크리닝 완주가 아니라 마감 안내 + 선탑 전환.
@@ -786,6 +812,30 @@ function toStageResult(out: ScreeningToolInput, ctx: StageContext): StageResult 
         available_slots_updated_at: new Date().toISOString(),
       };
     }
+  }
+
+  const marketingConsentActive = Boolean(ctx.baeminSuspended || (general && ctx.jobClosed));
+  const priorOutboundText = [...ctx.history]
+    .reverse()
+    .find((turn) => turn.direction === "outbound")?.body ?? null;
+  const verifiedMarketingConsent = explicitMarketingConsentResponse({
+    active: marketingConsentActive,
+    inboundText,
+    priorOutboundText,
+  });
+  const marketingConsentPatch = marketingConsentPatchFromExplicitResponse({
+    active: marketingConsentActive,
+    response: verifiedMarketingConsent,
+    now: new Date().toISOString(),
+  });
+  if (marketingConsentPatch) {
+    applicant_patch = { ...(applicant_patch ?? {}), ...marketingConsentPatch };
+    state_update.meta = {
+      ...state_update.meta,
+      marketing_consent_source: ctx.baeminSuspended
+        ? "baemin_suspended_reply"
+        : "closed_job_reply",
+    };
   }
 
   return {

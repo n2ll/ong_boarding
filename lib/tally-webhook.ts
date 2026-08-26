@@ -14,10 +14,21 @@ export function normalizeTallySelfOwnership(value: string): "문제 없음" | "�
   return "";
 }
 
+export function normalizeTallyMarketingConsent(value: string): boolean | null {
+  const normalized = value.trim();
+  if (normalized.startsWith("네") || normalized.startsWith("예")) return true;
+  if (normalized.startsWith("아니")) return false;
+  return null;
+}
+
 export function blocksTallyFallback(status: number, errorBody: unknown): boolean {
   if (status === 429 || status === 503) return true;
   if (!errorBody || typeof errorBody !== "object") return false;
-  return (errorBody as { code?: unknown }).code === "APPLICATION_ADMISSION_UNAVAILABLE";
+  const error = errorBody as { code?: unknown; field?: unknown };
+  if (error.code === "APPLICATION_ADMISSION_UNAVAILABLE") return true;
+  return status === 400
+    && error.code === "APPLICATION_CONTEXT_CHANGED"
+    && error.field === "selfOwnership";
 }
 
 export function tallySubmissionUuid(input: {

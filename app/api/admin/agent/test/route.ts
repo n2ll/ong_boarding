@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
       available_date: null,
       own_vehicle: null,
       introduction: null,
+      marketing_consent: null,
+      sms_opt_out_at: null,
     };
 
     const history: AgentTurn[] = Array.isArray(body.manual_history)
