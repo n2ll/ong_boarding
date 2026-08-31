@@ -245,8 +245,8 @@ test("the applicant UI renders branches only from an explicit server-backed cont
   assert.match(page, /branch_mode:\s*"none" \| "fixed" \| "choice"/);
   assert.match(page, /branchMode === "choice"/);
   assert.match(page, /branchMode === "fixed"/);
-  assert.match(page, /validateApplicationSubmission\(\s*form,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*currentAvailableDatePolicy,\s*\)/);
-  assert.match(page, /applicationSubmissionProgress\(\s*form,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*availableDatePolicy,\s*\)/);
+  assert.match(page, /validateApplicationSubmission\(\s*applicationForm,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*currentAvailableDatePolicy,\s*\)/);
+  assert.match(page, /applicationSubmissionProgress\(\s*applicationForm,\s*vehicleRequired,\s*branchChoiceRequired,\s*true,\s*availableDatePolicy,\s*\)/);
   assert.doesNotMatch(page, /직접 입력 가능/);
   assert.doesNotMatch(page, /placeholder="희망 지점을 입력해주세요"/);
   assert.match(page, /applicationSourceRequiresBranchChoice\(source\)/);

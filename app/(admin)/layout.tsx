@@ -10,11 +10,13 @@ import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { AdminUnsavedNavigationProvider } from "@/components/AdminUnsavedNavigation";
 import { jsonFetcher } from "@/lib/swr";
 import { resolveHeader } from "@/lib/admin/nav";
+import { topbarRouteCapabilities } from "@/lib/admin/topbar-state";
 
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const { pageTitle, crumb } = resolveHeader(pathname);
+  const topbarCapabilities = topbarRouteCapabilities(pathname);
 
   return (
     <SWRConfig
@@ -53,7 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Sidebar />
 
           <div className="flex h-[100dvh] w-full min-w-0 flex-col px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:ml-[104px] lg:w-[calc(100%-104px)] lg:px-0 lg:pb-4 lg:pr-4 wide:ml-[272px] wide:w-[calc(100%-272px)]">
-            <Topbar crumb={crumb} pageTitle={pageTitle} />
+            <Topbar crumb={crumb} pageTitle={pageTitle} {...topbarCapabilities} />
             <main
               id="app-content"
               tabIndex={-1}

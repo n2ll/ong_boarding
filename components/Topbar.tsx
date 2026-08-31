@@ -8,11 +8,14 @@ import { useBranchScope } from "@/lib/branch-scope";
 import { nextSearchDialogFocusIndex } from "@/lib/admin/search-dialog";
 import { topbarCollectionState } from "@/lib/admin/topbar-state";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAdminUnsavedNavigation } from "@/components/AdminUnsavedNavigation";
 
 interface TopbarProps {
   crumb: string;
   pageTitle: string;
+  showBranchScope: boolean;
+  showCreateJobAction: boolean;
 }
 
 interface ApplicantHit { id: number; name: string | null; phone: string | null; status: string | null; branch: string | null }
@@ -20,7 +23,7 @@ interface JobHit { id: number; title: string; status: string | null }
 interface Notice { id: string; tone: "red" | "amber" | "slate"; title: string; desc: string; path: string }
 interface BranchOpt { id: number; name: string; active: boolean }
 
-export function Topbar({ crumb, pageTitle }: TopbarProps) {
+export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction }: TopbarProps) {
   const router = useRouter();
   const { requestNavigation } = useAdminUnsavedNavigation();
   const { branch: scopeBranch, setBranch: setScopeBranch } = useBranchScope();
@@ -35,9 +38,8 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
   const [searchError, setSearchError] = useState(false);
   const [searchAttempt, setSearchAttempt] = useState(0);
   const [results, setResults] = useState<{ applicants: ApplicantHit[]; jobs: JobHit[] }>({ applicants: [], jobs: [] });
+  const [resultsQuery, setResultsQuery] = useState("");
 
-  const branchRef = useRef<HTMLDivElement>(null);
-  const notifRef = useRef<HTMLDivElement>(null);
   const searchDialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -55,6 +57,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     setSearchOpen(false);
     setQuery("");
     setResults({ applicants: [], jobs: [] });
+    setResultsQuery("");
     setSearchError(false);
     requestAnimationFrame(() => returnTarget?.focus());
   }, []);
@@ -91,18 +94,14 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeSearch, openSearch, searchOpen]);
 
-  // 외부 클릭 시 드롭다운 닫기
   useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (branchRef.current && !branchRef.current.contains(e.target as Node)) setBranchOpen(false);
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
-    };
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, []);
+    if (!showBranchScope) setBranchOpen(false);
+  }, [showBranchScope]);
 
   // 지점 목록 — 다른 화면도 같은 키로 부르므로 useSWR로 캐시를 공유한다(중복 호출 제거).
-  const { data: branchRes, error: branchError, mutate: mutateBranches } = useSWR<{ data?: BranchOpt[] }>("/api/admin/branches");
+  const { data: branchRes, error: branchError, mutate: mutateBranches } = useSWR<{ data?: BranchOpt[] }>(
+    showBranchScope ? "/api/admin/branches" : null,
+  );
   const branches = useMemo(() => (branchRes?.data ?? []).filter((b) => b.active), [branchRes]);
   const branchState = topbarCollectionState({ items: branchRes?.data, error: branchError });
 
@@ -124,6 +123,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     const q = query.trim();
     if (!q) {
       setResults({ applicants: [], jobs: [] });
+      setResultsQuery("");
       setSearching(false);
       setSearchError(false);
       return;
@@ -139,6 +139,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         if (!res.ok) throw new Error("search failed");
         const json = await res.json();
         setResults({ applicants: json.applicants ?? [], jobs: json.jobs ?? [] });
+        setResultsQuery(q);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setSearchError(true);
@@ -182,7 +183,8 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
     setBranchOpen(false);
   };
 
-  const hasResults = results.applicants.length > 0 || results.jobs.length > 0;
+  const resultsAreCurrent = resultsQuery === query.trim();
+  const hasResults = resultsAreCurrent && (results.applicants.length > 0 || results.jobs.length > 0);
 
   return (
     <>
@@ -217,24 +219,29 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
         </button>
 
         {/* Branch Filter (전역 스코프) */}
-        <div className="relative shrink-0" ref={branchRef}>
-          <button
-            // sm 미만에서는 라벨을 감추므로 아이콘만 남는다 — 이름을 여기서 보장한다.
-            aria-label={`지점 필터 — 현재 ${scopeBranch ?? "전체 지점"}`}
-            aria-expanded={branchOpen}
-            onClick={() => {
-              setBranchOpen(!branchOpen);
-              setNotifOpen(false);
-            }}
-            className={`flex items-center gap-2 bg-white border rounded-md min-h-11 py-[9px] px-[14px] text-sm font-semibold cursor-pointer whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${scopeBranch ? "border-brand-yellow text-foreground bg-yellow-50" : "border-border-strong text-gray-800 hover:border-gray-400"}`}
-          >
-            <MapPin size={16} className={scopeBranch ? "text-warning-strong" : "text-muted-foreground"} />
-            <span className="hidden max-w-[140px] truncate sm:inline">{scopeBranch ?? "전체 지점"}</span>
-            <ChevronDown size={14} className="text-muted-foreground" />
-          </button>
+        {showBranchScope && (
+          <Popover open={branchOpen} onOpenChange={(open) => {
+            setBranchOpen(open);
+            if (open) setNotifOpen(false);
+          }}>
+            <PopoverTrigger asChild>
+              <button
+                // sm 미만에서는 라벨을 감추므로 아이콘만 남는다 — 이름을 여기서 보장한다.
+                aria-label={`지점 필터 — 현재 ${scopeBranch ?? "전체 지점"}`}
+                className={`flex min-h-11 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border bg-white px-[14px] py-[9px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${scopeBranch ? "border-brand-yellow bg-yellow-50 text-foreground" : "border-border-strong text-gray-800 hover:border-gray-400"}`}
+              >
+                <MapPin size={16} className={scopeBranch ? "text-warning-strong" : "text-muted-foreground"} />
+                <span className="hidden max-w-[140px] truncate sm:inline">{scopeBranch ?? "전체 지점"}</span>
+                <ChevronDown size={14} className="text-muted-foreground" />
+              </button>
+            </PopoverTrigger>
 
-          {branchOpen && (
-            <div className="absolute top-[50px] right-0 w-[220px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-glass-xl p-1.5 z-40 animate-in fade-in slide-in-from-top-2 max-h-[360px] overflow-y-auto scrollbar-custom">
+            <PopoverContent
+              align="end"
+              sideOffset={6}
+              aria-label="지점 필터"
+              className="max-h-[360px] w-[220px] overflow-y-auto rounded-2xl border-border-glass bg-glass-3 p-1.5 shadow-glass-xl backdrop-blur-xl backdrop-saturate-150 scrollbar-custom"
+            >
               <div className="text-xs font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
@@ -269,30 +276,38 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   {scopeBranch === b.name && <Check size={14} className="text-warning-strong shrink-0" />}
                 </button>
               ))}
-            </div>
-          )}
-        </div>
+            </PopoverContent>
+          </Popover>
+        )}
 
         {/* Notifications */}
-        <div className="relative shrink-0" ref={notifRef}>
-          <button
-            onClick={() => {
-              setNotifOpen(!notifOpen);
-              setBranchOpen(false);
-              if (!notifOpen) loadNotices();
-            }}
-            aria-label={notices.length > 0 ? `알림 ${notices.length}건 열기` : "알림 열기"} aria-expanded={notifOpen} className="relative w-11 h-11 rounded-md border border-border-strong hover:border-gray-400 bg-white flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Bell size={19} className="text-gray-700" />
-            {notices.length > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-error border-2 border-white text-white text-xs font-extrabold flex items-center justify-center">
-                {notices.length}
-              </span>
-            )}
-          </button>
+        <Popover open={notifOpen} onOpenChange={(open) => {
+          setNotifOpen(open);
+          if (open) {
+            setBranchOpen(false);
+            loadNotices();
+          }
+        }}>
+          <PopoverTrigger asChild>
+            <button
+              aria-label={notices.length > 0 ? `알림 ${notices.length}건 열기` : "알림 열기"}
+              className="relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border-strong bg-white transition-colors hover:border-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Bell size={19} className="text-gray-700" />
+              {notices.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-error px-1 text-xs font-extrabold text-white">
+                  {notices.length}
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
 
-          {notifOpen && (
-            <div className="absolute top-[50px] right-0 w-[340px] bg-glass-3 backdrop-blur-xl backdrop-saturate-150 border border-border-glass rounded-2xl shadow-glass-xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
+          <PopoverContent
+            align="end"
+            sideOffset={6}
+            aria-label="알림"
+            className="w-[340px] overflow-hidden rounded-2xl border-border-glass bg-glass-3 p-0 shadow-glass-xl backdrop-blur-xl backdrop-saturate-150"
+          >
               <div className="flex items-center justify-between px-4 py-3.5 border-b border-muted">
                 <span className="text-sm font-bold text-foreground">알림 {notices.length > 0 && <span className="text-error">{notices.length}</span>}</span>
                 <button
@@ -350,14 +365,13 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   </button>
                 </div>
               )}
-            </div>
-          )}
-        </div>
+          </PopoverContent>
+        </Popover>
 
-        <Button variant="brand" className="shrink-0 rounded-full" aria-label="공고 등록" onClick={() => navigate("/jobs?new=1")}>
+        {showCreateJobAction && <Button variant="brand" className="shrink-0 rounded-full" aria-label="공고 등록" onClick={() => navigate("/jobs?new=1")}>
           <Plus size={18} strokeWidth={2.5} />
           <span className="hidden sm:inline">공고 등록</span>
-        </Button>
+        </Button>}
         </div>
       </header>
 
@@ -393,7 +407,14 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                 ESC
               </button>
             </div>
-            <div aria-live="polite" className="p-3 bg-background max-h-[50vh] overflow-y-auto scrollbar-custom">
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+              {query.trim() && searching
+                ? "검색 중"
+                : query.trim() && !searchError
+                  ? `검색 결과 ${hasResults ? results.applicants.length + results.jobs.length : 0}건`
+                  : ""}
+            </div>
+            <div className="p-3 bg-background max-h-[50vh] overflow-y-auto scrollbar-custom">
               {!query.trim() && (
                 <div className="text-center py-10 text-muted-foreground">
                   <div className="text-[13px] font-bold text-muted-foreground">지원자·공고를 검색하세요</div>
@@ -411,7 +432,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   <div className="text-[13px] font-bold text-muted-foreground">‘{query.trim()}’ 검색 결과가 없어요</div>
                 </div>
               )}
-              {results.applicants.length > 0 && (
+              {resultsAreCurrent && results.applicants.length > 0 && (
                 <>
                   <div className="text-[12px] font-bold text-muted-foreground px-3 pb-2 pt-1">지원자</div>
                   <div className="flex flex-col mb-2">
@@ -435,7 +456,7 @@ export function Topbar({ crumb, pageTitle }: TopbarProps) {
                   </div>
                 </>
               )}
-              {results.jobs.length > 0 && (
+              {resultsAreCurrent && results.jobs.length > 0 && (
                 <>
                   <div className="text-[12px] font-bold text-muted-foreground px-3 pb-2 pt-1">채용공고</div>
                   <div className="flex flex-col">

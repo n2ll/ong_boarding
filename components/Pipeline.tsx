@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, Layers, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye, ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuCheckboxItem } from "./ui/dropdown-menu";
 import { Modal } from "./ui/modal";
@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ApplicantStatusBadge } from "@/components/ui/stage-badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   PIPELINE_AVAILABILITY_FILTERS,
   PIPELINE_STATUS_FILTERS,
@@ -432,7 +433,6 @@ export function Pipeline() {
     COLUMN_DEFS.map((d) => ({ ...d, count: 0, cards: [] }))
   );
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { branch: scopeBranch } = useBranchScope();
   // 상세 패널 선택 — **사람과 공고를 한 값으로 묶는다.** 두 state로 두면 사람은 바뀌었는데 공고가
   // 남아 엉뚱한 공고 기준으로 확정·발송이 열릴 수 있다. wantJobId는 '이 공고 기준으로 열어라'는 요청이고,
@@ -461,7 +461,7 @@ export function Pipeline() {
   const [view, setView] = useState<PipelineView>(() => pipelineViewFromSearch(searchParams.toString()));
   const changeView = (next: PipelineView) => {
     setView(next);
-    router.replace(pipelineViewHref(next, searchParams.toString()), { scroll: false });
+    window.history.replaceState(window.history.state, "", pipelineViewHref(next, searchParams.toString()));
   };
   // 목록 밀도 — 568명을 훑을 때 한 화면에 몇 명이 보이는지가 곧 처리 속도다.
   // 매번 다시 고르게 하면 안 쓰게 되므로 브라우저에 기억시킨다.
@@ -602,8 +602,7 @@ export function Pipeline() {
   useEffect(() => {
     const q = searchParams.get("q");
     if (q) setQuery(q);
-    const v = searchParams.get("view");
-    if (v === "map" || v === "kanban" || v === "list" || v === "funnel") setView(v);
+    setView(pipelineViewFromSearch(searchParams.toString()));
     const region = searchParams.get("region");
     if (region === "capital") setRegionFilter("capital");
     const vehicle = searchParams.get("vehicle");
@@ -1945,21 +1944,23 @@ export function Pipeline() {
       >
         {/* 1층: 화면 전환과 보기 밀도. 설명 밴드를 별도 층으로 두지 않아 첫 데이터가 바로 보이게 한다. */}
         <div className="z-10 flex shrink-0 items-center gap-2 border-b border-border-strong bg-card px-5 py-2">
-          <p className="sr-only">전체 인력을 조건별로 찾고 분류해 연락하는 곳입니다.</p>
-          <div role="tablist" aria-label="인재풀 보기 방식" className="flex shrink-0 rounded-lg border border-border-strong bg-muted p-0.5">
-            <button aria-label="인력 목록" aria-selected={view === "list"} role="tab" onClick={() => changeView("list")} className={`flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${view === "list" ? "bg-white text-foreground shadow-xs" : "text-muted-foreground hover:text-gray-700"}`}>
+          <h1 className="sr-only">전체 인력을 조건별로 찾고 분류해 연락하는 곳입니다.</h1>
+          <Tabs value={view} onValueChange={(nextView) => changeView(nextView as PipelineView)} activationMode="automatic" className="shrink-0 gap-0">
+          <TabsList aria-label="인재풀 보기 방식" className="h-auto w-auto shrink-0 justify-start rounded-lg border border-border-strong bg-muted p-0.5">
+            <TabsTrigger value="list" id="pipeline-view-tab-list" aria-label="인력 목록" aria-controls="pipeline-view-panel" className="h-auto min-h-9 flex-none rounded-md border-0 px-2.5 text-[12px] font-bold text-muted-foreground shadow-none outline-none transition-colors data-[state=inactive]:hover:text-gray-700 data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-xs dark:data-[state=active]:bg-white focus-visible:outline-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               <ListIcon size={15} /> 목록
-            </button>
-            <button aria-label="진행 단계" aria-selected={view === "kanban"} role="tab" onClick={() => changeView("kanban")} className={`flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${view === "kanban" ? "bg-white text-foreground shadow-xs" : "text-muted-foreground hover:text-gray-700"}`}>
+            </TabsTrigger>
+            <TabsTrigger value="kanban" id="pipeline-view-tab-kanban" aria-label="진행 단계" aria-controls="pipeline-view-panel" className="h-auto min-h-9 flex-none rounded-md border-0 px-2.5 text-[12px] font-bold text-muted-foreground shadow-none outline-none transition-colors data-[state=inactive]:hover:text-gray-700 data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-xs dark:data-[state=active]:bg-white focus-visible:outline-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               <LayoutGrid size={15} /> 진행
-            </button>
-            <button aria-label="지역 분포" aria-selected={view === "map"} role="tab" onClick={() => changeView("map")} className={`flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${view === "map" ? "bg-white text-foreground shadow-xs" : "text-muted-foreground hover:text-gray-700"}`}>
+            </TabsTrigger>
+            <TabsTrigger value="map" id="pipeline-view-tab-map" aria-label="지역 분포" aria-controls="pipeline-view-panel" className="h-auto min-h-9 flex-none rounded-md border-0 px-2.5 text-[12px] font-bold text-muted-foreground shadow-none outline-none transition-colors data-[state=inactive]:hover:text-gray-700 data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-xs dark:data-[state=active]:bg-white focus-visible:outline-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               <MapIcon size={15} /> 지역
-            </button>
-            <button aria-label="연락 단계 현황" aria-selected={view === "funnel"} role="tab" onClick={() => changeView("funnel")} className={`flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${view === "funnel" ? "bg-white text-foreground shadow-xs" : "text-muted-foreground hover:text-gray-700"}`}>
+            </TabsTrigger>
+            <TabsTrigger value="funnel" id="pipeline-view-tab-funnel" aria-label="연락 단계 현황" aria-controls="pipeline-view-panel" className="h-auto min-h-9 flex-none rounded-md border-0 px-2.5 text-[12px] font-bold text-muted-foreground shadow-none outline-none transition-colors data-[state=inactive]:hover:text-gray-700 data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-xs dark:data-[state=active]:bg-white focus-visible:outline-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               <Funnel size={15} /> 연락 현황
-            </button>
-          </div>
+            </TabsTrigger>
+          </TabsList>
+          </Tabs>
 
           {/* 스플릿 뷰 — 상세를 옆에 붙여 목록을 살려둔다 */}
           {view === "list" && (
@@ -2355,7 +2356,7 @@ export function Pipeline() {
         )}
 
         {/* Main Content Area */}
-        <div className="flex-1 overflow-hidden relative">
+        <div id="pipeline-view-panel" role="tabpanel" aria-labelledby={`pipeline-view-tab-${view}`} className="flex-1 overflow-hidden relative">
           {loading && view !== "funnel" && <PipelineSkeleton />}
           {applicantsState === "error" && view !== "funnel" && (
             <div className="absolute inset-x-8 top-6 z-30 rounded-2xl border border-error/30 bg-error-soft p-4 shadow-sm" role="alert">
@@ -3542,7 +3543,8 @@ function FunnelBoard({ data, error, days, onDaysChange, onRefresh, isValidating,
 // 첫 진입(캐시 없음) 로딩 중 빈 화면 대신 보여주는 목록 스켈레톤. 콘텐츠 영역을 덮는 오버레이.
 function PipelineSkeleton() {
   return (
-    <div className="absolute inset-0 z-10 bg-white p-8 overflow-hidden">
+    <div role="status" aria-live="polite" className="absolute inset-0 z-10 bg-white p-8 overflow-hidden">
+      <span className="sr-only">인재풀을 불러오는 중</span>
       <Skeleton className="h-10 w-full rounded-lg mb-3" />
       {Array.from({ length: 10 }).map((_, i) => (
         <div key={i} className="flex items-center gap-4 py-3 border-b border-muted">

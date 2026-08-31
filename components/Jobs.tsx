@@ -13,6 +13,7 @@ import { Badge } from "./ui/badge";
 import { SelectField, TextareaField, TextField } from "./ui/field";
 import { StageBadge } from "./ui/stage-badge";
 import { Modal } from "./ui/modal";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
 import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
@@ -2800,7 +2801,7 @@ export function Jobs() {
       >
         <div className="grid gap-2 md:grid-cols-[minmax(180px,1.15fr)_repeat(4,minmax(105px,0.72fr))]">
           <div className="flex min-w-0 flex-col justify-center px-1 py-0.5">
-            <h2 id="jobs-operations-title" className="text-[14px] font-extrabold text-foreground">공고 운영</h2>
+            <h1 id="jobs-operations-title" className="text-[14px] font-extrabold text-foreground">공고 운영</h1>
             <p className="mt-0.5 text-[12px] font-semibold leading-snug text-muted-foreground">확인이 필요한 후보부터 처리하세요.</p>
             <Link
               href="/pipeline"
@@ -2819,7 +2820,7 @@ export function Jobs() {
                 <span className="text-[21px] font-extrabold tabular-nums leading-none">{item.value ?? "—"}</span>
                 {item.value !== null && <span className="text-[12px] font-bold opacity-75">{item.unit}</span>}
               </div>
-              <div className="mt-1 truncate text-[11px] font-semibold opacity-75">{item.note}</div>
+              <div className="mt-1 line-clamp-2 min-h-8 text-[12px] font-semibold leading-4 opacity-75">{item.note}</div>
             </div>
           ))}
         </div>
@@ -2829,26 +2830,39 @@ export function Jobs() {
         {/* Toolbar — 상태·행동과 검색 조건을 두 줄로 고정해 1024px에서도 예측 가능하게 읽힌다. */}
         <div className="space-y-2 border-b border-border-strong p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex gap-1.5" role="tablist" aria-label="공고 상태">
-            <button aria-selected={activeTab === 'all'} role="tab"
-              onClick={() => setActiveTab('all')}
-              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'all' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as JobListTab)}
+              activationMode="automatic"
+              className="w-fit gap-0"
             >
-              전체
-            </button>
-            <button aria-selected={activeTab === 'active'} role="tab"
-              onClick={() => setActiveTab('active')}
-              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'active' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
-            >
-              진행 중 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => !j.effectivelyClosed).length}</span>
-            </button>
-            <button aria-selected={activeTab === 'closed'} role="tab"
-              onClick={() => setActiveTab('closed')}
-              className={`min-h-11 rounded-xl px-3 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${activeTab === 'closed' ? 'bg-foreground text-white' : 'bg-card border border-border-strong text-gray-700 hover:bg-background'}`}
-            >
-              마감됨 <span className="opacity-60 ml-1 font-medium">{jobs.filter(j => j.effectivelyClosed).length}</span>
-            </button>
-          </div>
+              <TabsList aria-label="공고 상태" className="h-auto w-auto justify-start gap-1.5 rounded-none bg-transparent p-0 text-inherit">
+                <TabsTrigger
+                  value="all"
+                  id="jobs-tab-all"
+                  aria-controls="jobs-list-panel"
+                  className="h-auto min-h-11 flex-none rounded-xl border border-transparent bg-card px-3 py-0 text-[13px] font-bold text-gray-700 transition-colors data-[state=inactive]:border-border-strong data-[state=inactive]:hover:bg-background data-[state=active]:border-transparent data-[state=active]:bg-foreground data-[state=active]:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  전체
+                </TabsTrigger>
+                <TabsTrigger
+                  value="active"
+                  id="jobs-tab-active"
+                  aria-controls="jobs-list-panel"
+                  className="h-auto min-h-11 flex-none rounded-xl border border-transparent bg-card px-3 py-0 text-[13px] font-bold text-gray-700 transition-colors data-[state=inactive]:border-border-strong data-[state=inactive]:hover:bg-background data-[state=active]:border-transparent data-[state=active]:bg-foreground data-[state=active]:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  진행 중 <span className="ml-1 font-medium opacity-60">{jobs.filter(j => !j.effectivelyClosed).length}</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="closed"
+                  id="jobs-tab-closed"
+                  aria-controls="jobs-list-panel"
+                  className="h-auto min-h-11 flex-none rounded-xl border border-transparent bg-card px-3 py-0 text-[13px] font-bold text-gray-700 transition-colors data-[state=inactive]:border-border-strong data-[state=inactive]:hover:bg-background data-[state=active]:border-transparent data-[state=active]:bg-foreground data-[state=active]:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  마감됨 <span className="ml-1 font-medium opacity-60">{jobs.filter(j => j.effectivelyClosed).length}</span>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
             <div className="flex items-center gap-2">
               <Button
@@ -2954,7 +2968,7 @@ export function Jobs() {
         </div>
 
         {/* Table Body */}
-        <div className="flex flex-col flex-1">
+        <div id="jobs-list-panel" role="tabpanel" aria-labelledby={`jobs-tab-${activeTab}`} className="flex flex-col flex-1">
           {jobsError ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
               <div className="w-16 h-16 bg-error-soft rounded-full flex items-center justify-center mb-4">

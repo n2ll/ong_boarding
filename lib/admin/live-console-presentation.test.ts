@@ -6,6 +6,10 @@ const live = readFileSync(
   new URL("../../components/LiveConsole.tsx", import.meta.url),
   "utf8",
 );
+const tabs = readFileSync(
+  new URL("../../components/ui/tabs.tsx", import.meta.url),
+  "utf8",
+);
 const applicantsRoute = readFileSync(
   new URL("../../app/api/admin/applicants/route.ts", import.meta.url),
   "utf8",
@@ -18,13 +22,37 @@ const applicantDetail = readFileSync(
 test("the confirmation queue stays visibly pre-confirmation", () => {
   assert.match(
     live,
-    /activeTab === "confirm"[\s\S]*?border-stage-screening-ink\/20 bg-stage-screening-soft text-stage-screening-ink/,
+    /value="confirm"[^>]*data-\[state=active\]:border-stage-screening-ink\/20[^>]*data-\[state=active\]:bg-stage-screening-soft[^>]*data-\[state=active\]:text-stage-screening-ink/,
   );
   assert.match(
     live,
     /<Badge variant="stage-screening">스크리닝 완료 · 확정 전<\/Badge>/,
   );
   assert.doesNotMatch(live, />온보딩 완료<\/Badge>/);
+});
+
+test("the operations queue uses the shared Radix tab contract", () => {
+  const operationsTabs = live.slice(
+    live.indexOf("<Tabs"),
+    live.indexOf('manualMessageAttentionState === "error"'),
+  );
+
+  assert.match(tabs, /TabsPrimitive\.Root/);
+  assert.match(tabs, /TabsPrimitive\.List/);
+  assert.match(tabs, /TabsPrimitive\.Trigger/);
+  assert.match(live, /import \{ Tabs, TabsList, TabsTrigger \} from "@\/components\/ui\/tabs"/);
+  assert.match(operationsTabs, /<Tabs[\s\S]*?value=\{activeTab\}[\s\S]*?onValueChange=/);
+  assert.match(operationsTabs, /activationMode="manual"/);
+  assert.match(operationsTabs, /<TabsList[^>]*aria-label="지원자 운영 작업 큐"/);
+  assert.match(operationsTabs, /<TabsTrigger[^>]*value="all"/);
+  assert.match(operationsTabs, /<TabsTrigger[^>]*value="intervention"/);
+  assert.match(operationsTabs, /<TabsTrigger[^>]*value="confirm"/);
+  assert.match(operationsTabs, /<TabsTrigger[^>]*value="inbox"/);
+  assert.match(operationsTabs, /value="all"[^>]*data-\[state=active\]:bg-foreground/);
+  assert.match(operationsTabs, /value="intervention"[^>]*data-\[state=active\]:bg-priority-critical-soft/);
+  assert.match(operationsTabs, /value="confirm"[^>]*data-\[state=active\]:bg-stage-screening-soft/);
+  assert.match(operationsTabs, /value="inbox"[^>]*data-\[state=active\]:bg-priority-attention-soft/);
+  assert.doesNotMatch(operationsTabs, /<button/);
 });
 
 test("a failed conversation collection renders an actionable retry state", () => {

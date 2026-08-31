@@ -2,15 +2,19 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, BriefcaseBusiness, CheckCircle2, ChevronDown, FileText, Loader2, MapPin, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, BriefcaseBusiness, Check, CheckCircle2, ChevronDown, FileText, Loader2, MapPin, RefreshCw, Search, X } from "lucide-react";
 import Image from "next/image";
 import { SOURCE_LABELS } from "@/lib/applicant-source";
 import {
+  APPLICATION_WORK_HOUR_OPTIONS,
+  applicationFixedWorkHours,
   applyJobLoadErrorDescription,
   applyJobIntent,
   applySubmissionJobContext,
+  applicationWorkHourOption,
   isApplicationBranchContextReady,
   shouldShowApplyForm,
+  type ApplicationWorkHourKey,
   type ApplyJobLoadState,
 } from "@/lib/apply-job-flow";
 import {
@@ -56,13 +60,6 @@ import {
   type ApplicationSubmissionResult,
 } from "@/lib/application-submission";
 import { isRequestTimeoutError, requestWithTimeout } from "@/lib/request-timeout";
-
-const TIMESLOTS = [
-  { label: "평일 오전", sub: "월~금 09:00 ~ 14:00", value: "평일(월~금) 오전 타임 (09:00 ~ 14:00)" },
-  { label: "평일 오후", sub: "월~금 12:00 ~ 17:00", value: "평일(월~금) 오후 타임 (12:00 ~ 17:00)" },
-  { label: "주말 오전", sub: "토~일 09:00 ~ 14:00", value: "주말(토~일) 오전 타임 (09:00 ~ 14:00)" },
-  { label: "주말 오후", sub: "토~일 12:00 ~ 17:00", value: "주말(토~일) 오후 타임 (12:00 ~ 17:00)" },
-];
 
 const LICENSE_TYPES = ["1종 보통", "2종 보통", "1종 대형", "없음"];
 const APPLICATION_REQUEST_TIMEOUT_MS = 15_000;
@@ -180,13 +177,17 @@ function getDraftStorage(): Storage | null {
   }
 }
 
-function initialForm(branch: string | null): FormState {
-  return { ...INITIAL, branch1: branch ?? "" };
+function initialForm(branch: string | null, fixedWorkHour: string | null = null): FormState {
+  return {
+    ...INITIAL,
+    branch1: branch ?? "",
+    workHours: fixedWorkHour ? [fixedWorkHour] : [],
+  };
 }
 
 const labelCls = "block text-[16px] font-bold text-foreground mb-2";
 const inputCls =
-  "w-full px-4 py-3.5 border border-control-border rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring focus:ring-2 focus-visible:ring-ring/40 bg-input-background";
+  "w-full px-4 py-3.5 border border-control-border rounded-2xl text-[16px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring/40 bg-input-background";
 const requiredMark = (
   <>
     <span aria-hidden="true" className="text-error ml-0.5">*</span>
@@ -223,6 +224,10 @@ interface JobContext {
   client_name: string | null;
   recruiting: boolean;
   vehicle_required: boolean;
+  fixed_work_hour: {
+    key: ApplicationWorkHourKey;
+    display: string;
+  } | null;
 }
 
 interface ApplyFormProps {
@@ -297,12 +302,31 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   });
   const currentSubmissionJobId = currentJobContext.jobId;
   const currentVehicleRequired = currentJobContext.vehicleRequired;
+  const jobFixedWorkHour = currentSubmissionJobId !== null && verifiedJob
+    ? verifiedJob.fixed_work_hour
+    : null;
+  const formWithJobDefaults = !submissionAttemptRef.current && jobFixedWorkHour
+    ? {
+        ...form,
+        workHours: applicationFixedWorkHours(form.workHours, jobFixedWorkHour.key),
+      }
+    : form;
   const submissionContext = resolveApplicationSubmissionContext(
     submissionAttemptRef.current,
-    { ...form, source, jobId: currentSubmissionJobId },
+    { ...formWithJobDefaults, source, jobId: currentSubmissionJobId },
     currentVehicleRequired,
   );
   const pendingSubmissionReplay = submissionContext.reusesAttempt;
+  const fixedWorkHour = jobFixedWorkHour && (
+    !pendingSubmissionReplay
+    || applicationFixedWorkHours(form.workHours, jobFixedWorkHour.key) === form.workHours
+  )
+    ? jobFixedWorkHour
+    : null;
+  const fixedWorkHourValue = applicationWorkHourOption(fixedWorkHour?.key)?.value ?? null;
+  const applicationForm = !pendingSubmissionReplay && jobFixedWorkHour
+    ? formWithJobDefaults
+    : form;
   const hasSubmissionAttempt = submissionAttemptRef.current !== null;
   const recoverySessionActive = recoveryFormVisible || hasSubmissionAttempt;
   const replayUiActive = pendingSubmissionReplay && (!submitting || submittingReplay);
@@ -370,12 +394,6 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     : { minimumDate: minimumAvailableDate };
 
   useEffect(() => {
-    void loadKakaoPostcodeScript().catch(() => {
-      // 주소 찾기 버튼에서 재시도하며, 선로딩 실패만으로 폼 전체 오류를 띄우지 않는다.
-    });
-  }, []);
-
-  useEffect(() => {
     setMinimumAvailableDate(applicationAvailableDateMinimum());
   }, []);
 
@@ -420,7 +438,16 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
           if (!cancelled) setJobLoadState("error");
           return;
         }
-        setJob(j);
+        const fixedWorkHourOption = applicationWorkHourOption(j.fixed_work_hour?.key);
+        const fixedWorkHourDisplay = typeof j.fixed_work_hour?.display === "string"
+          ? j.fixed_work_hour.display.trim()
+          : "";
+        setJob({
+          ...j,
+          fixed_work_hour: fixedWorkHourOption && fixedWorkHourDisplay
+            ? { key: fixedWorkHourOption.key, display: fixedWorkHourDisplay }
+            : null,
+        });
         setJobLoadState("loaded");
       } catch (loadError) {
         if (!cancelled) {
@@ -527,6 +554,14 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   ]);
 
   useEffect(() => {
+    if (!draftReady || pendingSubmissionReplay || !jobFixedWorkHour) return;
+    setForm((current) => {
+      const workHours = applicationFixedWorkHours(current.workHours, jobFixedWorkHour.key);
+      return workHours === current.workHours ? current : { ...current, workHours };
+    });
+  }, [draftReady, form.workHours, jobFixedWorkHour, pendingSubmissionReplay]);
+
+  useEffect(() => {
     if (!draftReady || pendingSubmissionReplay || form.ownVehicle === "있음" || !form.vehicleType) {
       return;
     }
@@ -553,7 +588,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       form,
       generalOptIn,
       submissionAttempt,
-      initialForm(defaultBranch),
+      initialForm(defaultBranch, fixedWorkHourValue),
     )) {
       removeApplicationFormDraftSnapshot(draftScope, storage);
       persistedDraftKeyRef.current = null;
@@ -575,6 +610,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     draftScope.job,
     draftScope.source,
     form,
+    fixedWorkHourValue,
     generalOptIn,
     submissionResult,
   ]);
@@ -690,7 +726,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     completedDraftKeyRef.current = null;
     pendingServerValidationRef.current = null;
     removeApplicationFormDraftSnapshot(draftScope, getDraftStorage());
-    setForm(initialForm(defaultBranch));
+    setForm(initialForm(defaultBranch, fixedWorkHourValue));
     setAddressManualEntry(false);
     setError(null);
     setValidationIssue(null);
@@ -937,7 +973,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       };
       setMinimumAvailableDate(currentAvailableDatePolicy.minimumDate);
       issue = validateApplicationSubmission(
-        form,
+        applicationForm,
         vehicleRequired,
         branchChoiceRequired,
         true,
@@ -962,14 +998,14 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     try {
       const prepared = prepareApplicationSubmission(
         submissionAttemptRef.current,
-        { ...form, source, jobId: currentSubmissionJobId },
+        { ...applicationForm, source, jobId: currentSubmissionJobId },
         currentVehicleRequired,
         () => crypto.randomUUID(),
       );
       submissionAttemptRef.current = prepared.attempt;
-      const preparedDraftKey = applicationFormDraftContentKey(form, generalOptIn, prepared.attempt);
+      const preparedDraftKey = applicationFormDraftContentKey(applicationForm, generalOptIn, prepared.attempt);
       const saved = writeApplicationFormDraftSnapshot(draftScope, {
-        form,
+        form: applicationForm,
         generalOptIn,
         submissionAttempt: prepared.attempt,
         savedAt: Date.now(),
@@ -1030,7 +1066,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
   };
 
   const progress = applicationSubmissionProgress(
-    form,
+    applicationForm,
     vehicleRequired,
     branchChoiceRequired,
     true,
@@ -1338,7 +1374,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
             )}
           </section>
         )}
-        <div className={`sticky top-0 z-20 -mx-2 mb-5 bg-background/95 px-2 py-2 backdrop-blur-sm ${error ? "" : "landscape:static landscape:z-auto landscape:mx-0 landscape:mb-3 landscape:bg-transparent landscape:px-0 landscape:py-0 landscape:backdrop-blur-none"}`}>
+        <div className="sticky top-0 z-20 -mx-2 mb-5 bg-background/95 px-2 py-2 backdrop-blur-sm landscape:static landscape:z-auto landscape:mx-0 landscape:mb-3 landscape:bg-transparent landscape:px-0 landscape:py-0 landscape:backdrop-blur-none">
           <div className="bg-card border border-border-strong rounded-2xl px-4 py-3 shadow-sm landscape:px-3 landscape:py-2">
             <div className="flex items-center justify-between gap-4 text-[14px]">
               <span className="font-extrabold text-foreground">필수 항목 {progress.completed} / {progress.total}</span>
@@ -1356,7 +1392,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
               <div className="h-full rounded-full bg-brand-yellow transition-[width] motion-reduce:transition-none" style={{ width: `${progress.percent}%` }} />
             </div>
             {error && (
-              <div role="alert" aria-live="assertive" className="mt-3 flex items-start gap-2 border-t border-error/20 pt-3 text-[15px] font-bold text-error-strong">
+              <div className="mt-3 flex items-start gap-2 border-t border-error/20 pt-3 text-[15px] font-bold text-error-strong">
                 <AlertCircle size={18} className="mt-0.5 shrink-0" /> {error}
               </div>
             )}
@@ -1750,31 +1786,50 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
           {/* 희망 근무 시간대 */}
           <div id="field-workHours">
-            <div id="workHours-label" className={labelCls}>희망 근무 시간대 (1개 이상 선택){requiredMark}</div>
-            <div role="group" aria-labelledby="workHours-label" {...fieldA11y("workHours")} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {TIMESLOTS.map((slot) => {
-                const checked = form.workHours.includes(slot.value);
-                return (
-                  <button
-                    key={slot.value}
-                    type="button"
-                    aria-pressed={checked}
-                    {...fieldA11y("workHours")}
-                    onClick={() => toggleWorkHour(slot.value)}
-                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-control-border bg-card hover:border-foreground/50"}`}
-                  >
-                    <div>
-                      <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
-                      <div className="text-[15px] text-muted-foreground">{slot.sub}</div>
-                    </div>
-                    <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-control-border"}`}>
-                      {checked && <CheckCircle2 size={16} className="text-foreground" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <FieldError field="workHours" issue={validationIssue} />
+            {fixedWorkHour ? (
+              <>
+                <div id="workHours-label" className={labelCls}>공고에 안내된 근무시간</div>
+                <div aria-labelledby="workHours-label" className="flex items-start gap-3 rounded-2xl border border-success/25 bg-success-soft px-4 py-3.5">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success text-white">
+                    <CheckCircle2 size={17} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="break-words text-[17px] font-extrabold leading-snug text-foreground">{fixedWorkHour.display}</p>
+                    <p className="mt-1 text-[15px] font-medium leading-relaxed text-success-strong">
+                      이 공고의 근무시간으로 지원서에 자동 반영했어요.
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div id="workHours-label" className={labelCls}>희망 근무 시간대 (1개 이상 선택){requiredMark}</div>
+                <div role="group" aria-labelledby="workHours-label" {...fieldA11y("workHours")} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {APPLICATION_WORK_HOUR_OPTIONS.map((slot) => {
+                    const checked = form.workHours.includes(slot.value);
+                    return (
+                      <button
+                        key={slot.value}
+                        type="button"
+                        aria-pressed={checked}
+                        {...fieldA11y("workHours")}
+                        onClick={() => toggleWorkHour(slot.value)}
+                        className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 text-left transition-all ${checked ? "border-brand-yellow bg-yellow-50" : "border-control-border bg-card hover:border-foreground/50"}`}
+                      >
+                        <div>
+                          <div className="text-[16px] font-bold text-foreground">{slot.label}</div>
+                          <div className="text-[15px] text-muted-foreground">{slot.sub}</div>
+                        </div>
+                        <div aria-hidden="true" className={`w-6 h-6 rounded-[6px] border-2 flex items-center justify-center ${checked ? "border-brand-yellow bg-brand-yellow" : "border-control-border"}`}>
+                          {checked && <Check size={16} strokeWidth={3} className="text-foreground" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <FieldError field="workHours" issue={validationIssue} />
+              </>
+            )}
           </div>
 
           {/* 근무 가능 시작일 */}

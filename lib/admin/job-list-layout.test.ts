@@ -143,3 +143,24 @@ test("the jobs header and every desktop row share one responsive grid contract",
   );
   assert.equal(/grid-cols-\[1\.9fr_0\.9fr_0\.9fr/.test(jobs), false, "legacy six-column row grid must be removed");
 });
+
+test("the jobs status filter uses the shared controlled Radix tab contract", () => {
+  const jobs = readFileSync(new URL("../../components/Jobs.tsx", import.meta.url), "utf8");
+
+  assert.match(jobs, /import \{ Tabs, TabsList, TabsTrigger \} from "\.\/ui\/tabs"/);
+  assert.match(jobs, /<Tabs[\s\S]*?value=\{activeTab\}[\s\S]*?onValueChange=\{\(value\) => setActiveTab\(value as JobListTab\)\}[\s\S]*?activationMode="automatic"/);
+  assert.match(jobs, /<TabsList[^>]*aria-label="공고 상태"/);
+  assert.match(jobs, /<TabsTrigger[^>]*value="all"[^>]*aria-controls="jobs-list-panel"/);
+  assert.match(jobs, /<TabsTrigger[^>]*value="active"[^>]*aria-controls="jobs-list-panel"/);
+  assert.match(jobs, /<TabsTrigger[^>]*value="closed"[^>]*aria-controls="jobs-list-panel"/);
+  assert.match(jobs, /data-\[state=active\]:bg-foreground/);
+  assert.match(jobs, /data-\[state=active\]:text-white/);
+  assert.match(jobs, /id="jobs-list-panel"[^>]*role="tabpanel"[^>]*aria-labelledby=\{`jobs-tab-\$\{activeTab\}`\}/);
+});
+
+test("job summary explanations stay readable instead of truncating at 11px", () => {
+  const jobs = readFileSync(new URL("../../components/Jobs.tsx", import.meta.url), "utf8");
+
+  assert.match(jobs, /line-clamp-2[^"\n]*text-\[12px\][^"\n]*leading-4[^>]*>\{item\.note\}/);
+  assert.doesNotMatch(jobs, /truncate text-\[11px\][^>]*>\{item\.note\}/);
+});

@@ -43,6 +43,20 @@ test("resting controls use a dedicated boundary with at least 3:1 contrast", () 
   assert.doesNotMatch(apply, /border-gray-300/);
 });
 
+test("the admin shell font utility keeps the intended Pretendard typography", () => {
+  const theme = source("styles/theme.css");
+  const adminLayout = source("app/(admin)/layout.tsx");
+  const themeBlock = theme.match(/@theme inline \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  const fontSans = themeBlock.match(/--font-sans:\s*([^;]+);/)?.[1] ?? "";
+
+  assert.match(adminLayout, /className="[^"]*font-sans/);
+  assert.match(
+    fontSans,
+    /Pretendard Variable/,
+    "font-sans must not replace the intended Korean UI font with Tailwind's system default",
+  );
+});
+
 test("shared field errors announce themselves and remain programmatically connected", () => {
   const field = source("components/ui/field.tsx");
   const input = source("components/ui/input.tsx");

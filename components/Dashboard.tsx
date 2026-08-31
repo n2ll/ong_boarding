@@ -14,7 +14,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { remoteSourcesState } from "@/lib/admin/remote-data-state";
-import { dashboardUrgencyLabel, isDashboardPrimaryPriority, orderDashboardUrgentItems, type DashboardUrgency } from "@/lib/admin/dashboard-priority";
+import { dashboardGatewayPresentation, dashboardUrgencyLabel, isDashboardPrimaryPriority, orderDashboardUrgentItems, type DashboardUrgency } from "@/lib/admin/dashboard-priority";
 import { dashboardQueueStatus } from "@/lib/admin/dashboard-queue-status";
 import {
   dashboardMetricTiles,
@@ -36,7 +36,8 @@ interface UrgentItem {
   title: string;
   desc: string;
   cta: string;
-  path: string;
+  path?: string;
+  action?: "retry-heartbeat";
 }
 
 interface AppRow {
@@ -62,7 +63,7 @@ interface SosOpenRow {
 
 interface HeartbeatRow {
   device_id: string;
-  last_seen_at: string;
+  last_seen_at: string | null;
   pending_count: number;
 }
 
@@ -140,7 +141,7 @@ export function Dashboard() {
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
   const { data: sosRes, error: sosError, mutate: mutateSos } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
-  const { data: hbRes } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
+  const { data: hbRes, error: hbError, isValidating: heartbeatValidating, mutate: mutateHeartbeat } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
   const { data: interestRes, error: interestError, mutate: mutateInterest } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
@@ -179,6 +180,7 @@ export function Dashboard() {
     confirmations: { data: confirmRes, error: confirmError },
     sos: { data: sosRes?.open, error: sosError },
     interest: { data: interestRes, error: interestError },
+    heartbeat: { data: hbRes, error: hbError },
     replies: {
       data: replyCounts.state === "ready" ? replyCounts : undefined,
       error: replyCounts.state === "error" ? true : undefined,
@@ -197,11 +199,12 @@ export function Dashboard() {
     confirmations: "확정 검토",
     sos: "긴급 건",
     interest: "관심 표시",
+    heartbeat: "문자 발송폰",
     replies: "답장 대기",
   };
   const retryUrgentSources = () => {
     setReplyRetrySignal((signal) => signal + 1);
-    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest()]);
+    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest(), mutateHeartbeat()]);
   };
   const rawApps = appsRes?.data ?? [];
   const hasAppsSnapshot = appsRes?.data !== undefined;
@@ -357,6 +360,10 @@ export function Dashboard() {
   const interestCount = interestRes?.count ?? 0;
   const interestImmediate = interestRes?.immediate_count ?? 0;
   const confirmPendingCount = confirmRes?.total ?? confirmRes?.pending?.length ?? 0;
+  const gateway = useMemo(
+    () => dashboardGatewayPresentation({ response: hbRes, error: hbError, now: nowTick }),
+    [hbError, hbRes, nowTick],
+  );
   const urgent = useMemo(() => {
     const u: UrgentItem[] = [];
     const elapsedMinutes = (iso: string | null | undefined) =>
@@ -371,6 +378,17 @@ export function Dashboard() {
     };
     if (notiCounts?.aiDisabled) {
       u.push({ id: "ai-off", urgency: "blocker", ageMinutes: null, title: "AI 자동응대가 중단된 상태예요", desc: "전역 응답 스위치가 꺼져 있어 신규 인입에 자동 응대하지 않습니다.", cta: "자동화 현황으로", path: "/automation" });
+    }
+    if (gateway?.urgent) {
+      u.push({
+        id: "sms-gateway",
+        urgency: gateway.urgent.urgency,
+        ageMinutes: gateway.urgent.ageMinutes,
+        title: gateway.urgent.title,
+        desc: gateway.urgent.desc,
+        cta: "상태 다시 확인",
+        action: "retry-heartbeat",
+      });
     }
     if (sosOpen.length > 0) {
       const oldest = Math.min(...sosOpen.map((s) => new Date(s.created_at).getTime()));
@@ -419,18 +437,20 @@ export function Dashboard() {
       u.push({ id: "pool-reply", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
     }
     return orderDashboardUrgentItems(u);
-  }, [notiCounts, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
+  }, [notiCounts, gateway, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
 
-  // 문자 발송폰(법인폰) 상태 칩 — 최신 기기 1건 기준. 10분 무신호 또는 발송 대기 적체 시 경고색.
-  const gateway = useMemo(() => {
-    if (!hbRes) return null; // 첫 로딩 전엔 칩 미노출(깜빡임 방지)
-    const latest = hbRes.data?.[0];
-    if (!latest) return { label: "문자 발송폰 신호 없음", bad: true };
-    const min = Math.floor(Math.max(0, nowTick - new Date(latest.last_seen_at).getTime()) / 60_000);
-    const ago = min < 1 ? "방금" : min < 60 ? `${min}분 전` : `${Math.floor(min / 60)}시간 전`;
-    const pending = latest.pending_count ?? 0;
-    return { label: `문자폰 ${ago} · 대기 ${pending}건`, bad: min > 10 || pending > 0 };
-  }, [hbRes, nowTick]);
+  const openUrgentItem = (item: UrgentItem) => {
+    if (item.action === "retry-heartbeat") {
+      void mutateHeartbeat();
+      return;
+    }
+    if (!item.path) return;
+    if (item.path.startsWith("#")) {
+      document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      router.push(item.path);
+    }
+  };
 
   const aiModeTone = agentModeCopy.kind === "error" || agentModeCopy.kind === "off"
     ? "text-error-on-dark"
@@ -515,9 +535,9 @@ export function Dashboard() {
               {gateway && (
                 <span
                   title="문자를 실제로 보내고 받는 법인폰 상태예요. 신호가 10분 이상 없으면 문자 수·발신이 멈췄을 수 있어요."
-                  className={`flex items-center gap-1.5 ${gateway.bad ? "text-error-on-dark" : "text-white/75"}`}
+                  className={`flex items-center gap-1.5 ${gateway.tone === "blocker" ? "text-error-on-dark" : gateway.tone === "attention" ? "text-warning-on-dark" : "text-white/75"}`}
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${gateway.bad ? "bg-error animate-pulse" : "bg-success"}`}></span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${gateway.tone === "blocker" ? "bg-error animate-pulse" : gateway.tone === "attention" ? "bg-warning" : "bg-success"}`}></span>
                   {gateway.label}
                 </span>
               )}
@@ -543,14 +563,14 @@ export function Dashboard() {
                 size="sm"
                 variant="primary"
                 className="rounded-lg shadow-none hover:translate-y-0"
-                title="운영 차단을 먼저, 같은 단계에서는 가장 오래 기다린 업무를 엽니다"
+                title={urgent[0].action === "retry-heartbeat" ? "문자 발송폰 연결 상태를 다시 확인합니다" : "운영 차단을 먼저, 같은 단계에서는 가장 오래 기다린 업무를 엽니다"}
+                isLoading={urgent[0].action === "retry-heartbeat" && heartbeatValidating}
                 onClick={() => {
                   const t = urgent[0];
-                  if (t.path.startsWith("#")) document.getElementById(t.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  else router.push(t.path);
+                  openUrgentItem(t);
                 }}
               >
-                우선순위 1번 열기 <ChevronRight size={15} />
+                {urgent[0].action === "retry-heartbeat" ? "문자폰 상태 다시 확인" : <>우선순위 1번 열기 <ChevronRight size={15} /></>}
               </Button>
             )}
           </div>
@@ -610,11 +630,7 @@ export function Dashboard() {
                 <button
                   type="button"
                   key={item.id}
-                  onClick={() =>
-                    item.path.startsWith("#")
-                      ? document.getElementById(item.path.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" })
-                      : router.push(item.path)
-                  }
+                  onClick={() => openUrgentItem(item)}
                   className={`group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-[148px] ${surface}`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-current/15 bg-card/70 ${accent}`}>

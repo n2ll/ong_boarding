@@ -6,6 +6,8 @@ type ApplyJobIntent =
   | { kind: "job"; id: number }
   | { kind: "invalid" };
 
+type ApplicationWorkHourKey = "평일오전" | "평일오후" | "주말오전" | "주말오후";
+
 type ApplyJobFlowModule = {
   applyJobLoadErrorDescription?: (timedOut: boolean) => string;
   applyJobIntent?: (raw: string | null) => ApplyJobIntent;
@@ -36,6 +38,18 @@ type ApplyJobFlowModule = {
     branchLookupRequired: boolean;
     branchListLoadState: "idle" | "loading" | "loaded" | "unavailable" | "error";
   }) => boolean;
+  applicationFixedWorkHourKey?: (input: {
+    slot: unknown;
+    slotKeys: unknown;
+  }) => ApplicationWorkHourKey | null;
+  applicationFixedWorkHours?: (
+    current: string[],
+    fixedKey: ApplicationWorkHourKey | null,
+  ) => string[];
+  applicationFixedWorkHour?: (input: {
+    slot: unknown;
+    slotKeys: unknown;
+  }) => { key: ApplicationWorkHourKey; display: string } | null;
 };
 
 async function loadApplyJobFlowModule(): Promise<ApplyJobFlowModule> {
@@ -56,6 +70,82 @@ test("a malformed job link is not silently treated as a general application", as
   for (const raw of ["", "0", "-4", "3.5", "abc", "9007199254740993"]) {
     assert.deepEqual(applyJobIntent!(raw), { kind: "invalid" });
   }
+});
+
+test("one canonical job slot becomes the applicant form's fixed work hour", async () => {
+  const { applicationFixedWorkHourKey } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof applicationFixedWorkHourKey, "function");
+  assert.equal(applicationFixedWorkHourKey!({
+    slot: "월~금 오전 9시~오후 2시",
+    slotKeys: ["평일오전"],
+  }), "평일오전");
+  assert.equal(applicationFixedWorkHourKey!({
+    slot: "주말오후",
+    slotKeys: null,
+  }), "주말오후");
+});
+
+test("ambiguous or custom job schedules keep the applicant's work-hour choices", async () => {
+  const { applicationFixedWorkHourKey } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof applicationFixedWorkHourKey, "function");
+  assert.equal(applicationFixedWorkHourKey!({
+    slot: "평일오전",
+    slotKeys: ["평일오전", "평일오후"],
+  }), null);
+  assert.equal(applicationFixedWorkHourKey!({
+    slot: "월~토 오전 7시부터",
+    slotKeys: [],
+  }), null);
+  assert.equal(applicationFixedWorkHourKey!({
+    slot: "평일오전",
+    slotKeys: ["알수없음"],
+  }), null);
+});
+
+test("a fixed job slot replaces stale choices and preserves an already-correct answer", async () => {
+  const { applicationFixedWorkHours } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof applicationFixedWorkHours, "function");
+  assert.deepEqual(
+    applicationFixedWorkHours!(["주말(토~일) 오후 타임 (12:00 ~ 17:00)"], "평일오전"),
+    ["평일(월~금) 오전 타임 (09:00 ~ 14:00)"],
+  );
+  const alreadyCorrect = ["평일(월~금) 오전 타임 (09:00 ~ 14:00)"];
+  assert.equal(applicationFixedWorkHours!(alreadyCorrect, "평일오전"), alreadyCorrect);
+  assert.equal(applicationFixedWorkHours!(alreadyCorrect, null), alreadyCorrect);
+});
+
+test("the fixed-hour summary preserves a job's actual schedule without exposing a legacy token", async () => {
+  const { applicationFixedWorkHour } = await loadApplyJobFlowModule();
+
+  assert.equal(typeof applicationFixedWorkHour, "function");
+  assert.deepEqual(applicationFixedWorkHour!({
+    slot: "월~금 오전 7시~낮 12시",
+    slotKeys: ["평일오전"],
+  }), {
+    key: "평일오전",
+    display: "월~금 오전 7시~낮 12시",
+  });
+  assert.deepEqual(applicationFixedWorkHour!({
+    slot: "평일오전",
+    slotKeys: ["평일오전"],
+  }), {
+    key: "평일오전",
+    display: "평일 오전",
+  });
+  assert.deepEqual(applicationFixedWorkHour!({
+    slot: null,
+    slotKeys: ["주말오후"],
+  }), {
+    key: "주말오후",
+    display: "주말 오후",
+  });
+  assert.equal(applicationFixedWorkHour!({
+    slot: "월~토 오전 7시~낮 12시",
+    slotKeys: ["평일오전", "주말오전"],
+  }), null);
 });
 
 test("a job lookup query failure is retryable instead of masquerading as missing", async () => {

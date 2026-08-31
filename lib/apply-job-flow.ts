@@ -5,6 +5,59 @@ export type ApplyJobIntent =
 
 export type ApplyJobLoadState = "idle" | "loading" | "loaded" | "unavailable" | "error";
 
+export const APPLICATION_WORK_HOUR_OPTIONS = [
+  { key: "평일오전", label: "평일 오전", sub: "월~금 09:00 ~ 14:00", value: "평일(월~금) 오전 타임 (09:00 ~ 14:00)" },
+  { key: "평일오후", label: "평일 오후", sub: "월~금 12:00 ~ 17:00", value: "평일(월~금) 오후 타임 (12:00 ~ 17:00)" },
+  { key: "주말오전", label: "주말 오전", sub: "토~일 09:00 ~ 14:00", value: "주말(토~일) 오전 타임 (09:00 ~ 14:00)" },
+  { key: "주말오후", label: "주말 오후", sub: "토~일 12:00 ~ 17:00", value: "주말(토~일) 오후 타임 (12:00 ~ 17:00)" },
+] as const;
+
+export type ApplicationWorkHourKey = typeof APPLICATION_WORK_HOUR_OPTIONS[number]["key"];
+
+export function applicationWorkHourOption(key: unknown) {
+  return APPLICATION_WORK_HOUR_OPTIONS.find((option) => option.key === key) ?? null;
+}
+
+export function applicationFixedWorkHourKey(input: {
+  slot: unknown;
+  slotKeys: unknown;
+}): ApplicationWorkHourKey | null {
+  if (input.slotKeys !== null && input.slotKeys !== undefined) {
+    if (!Array.isArray(input.slotKeys)) return null;
+    if (input.slotKeys.length > 0) {
+      if (input.slotKeys.length !== 1) return null;
+      return applicationWorkHourOption(input.slotKeys[0])?.key ?? null;
+    }
+  }
+
+  const legacySlot = typeof input.slot === "string" ? input.slot.trim() : null;
+  return applicationWorkHourOption(legacySlot)?.key ?? null;
+}
+
+export function applicationFixedWorkHour(input: {
+  slot: unknown;
+  slotKeys: unknown;
+}): { key: ApplicationWorkHourKey; display: string } | null {
+  const key = applicationFixedWorkHourKey(input);
+  const option = applicationWorkHourOption(key);
+  if (!option) return null;
+
+  const slot = typeof input.slot === "string" ? input.slot.trim() : "";
+  return {
+    key: option.key,
+    display: slot && !applicationWorkHourOption(slot) ? slot : option.label,
+  };
+}
+
+export function applicationFixedWorkHours(
+  current: string[],
+  fixedKey: ApplicationWorkHourKey | null,
+): string[] {
+  const fixedValue = applicationWorkHourOption(fixedKey)?.value;
+  if (!fixedValue || (current.length === 1 && current[0] === fixedValue)) return current;
+  return [fixedValue];
+}
+
 export type ApplyJobLookup<T> =
   | { kind: "found"; job: T }
   | { kind: "missing"; status: 404 }

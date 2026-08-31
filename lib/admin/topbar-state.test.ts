@@ -7,6 +7,10 @@ type TopbarStateModule = {
     | "error"
     | "empty"
     | "ready";
+  topbarRouteCapabilities?: (pathname: string) => {
+    showBranchScope: boolean;
+    showCreateJobAction: boolean;
+  };
 };
 
 async function loadModule(): Promise<TopbarStateModule> {
@@ -25,4 +29,26 @@ test("topbar remote collections do not collapse loading or failure into empty", 
   assert.equal(topbarCollectionState!({ items: [], error: new Error("offline") }), "error");
   assert.equal(topbarCollectionState!({ items: [] }), "empty");
   assert.equal(topbarCollectionState!({ items: [{}] }), "ready");
+});
+
+test("topbar only exposes controls that affect the current page", async () => {
+  const { topbarRouteCapabilities } = await loadModule();
+
+  assert.equal(typeof topbarRouteCapabilities, "function");
+  assert.deepEqual(topbarRouteCapabilities!("/"), {
+    showBranchScope: true,
+    showCreateJobAction: true,
+  });
+  assert.deepEqual(topbarRouteCapabilities!("/pipeline"), {
+    showBranchScope: true,
+    showCreateJobAction: true,
+  });
+  assert.deepEqual(topbarRouteCapabilities!("/live"), {
+    showBranchScope: false,
+    showCreateJobAction: true,
+  });
+  assert.deepEqual(topbarRouteCapabilities!("/jobs"), {
+    showBranchScope: false,
+    showCreateJobAction: false,
+  });
 });

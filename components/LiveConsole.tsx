@@ -49,6 +49,7 @@ import { defaultFocusJobId, type LiveJobLink } from "@/lib/candidate-links";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ApplicantStatusBadge, StageBadge } from "@/components/ui/stage-badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { nextQueueApplicantId } from "@/lib/admin/nav";
 import { remoteCollectionState, type RemoteCollectionState } from "@/lib/admin/remote-data-state";
 import {
@@ -1279,12 +1280,19 @@ export function LiveConsole() {
             <Link href="/pipeline" className="hidden min-h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring wide:flex">
               대량 발송 <ArrowRight size={13} />
             </Link>
-            <div role="tablist" aria-label="지원자 운영 작업 큐" className="flex min-w-0 gap-1.5">
-              <button type="button" id="operations-tab-all" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "all"} onClick={() => setActiveTab("all")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "all" ? "border-foreground bg-foreground text-card" : "border-border-strong bg-card text-gray-700 hover:bg-muted"}`}>전체 <span className="ml-1 tabular-nums opacity-70">{appsState === "loading" || appsState === "error" ? "—" : chats.length}</span></button>
-              <button type="button" id="operations-tab-intervention" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "intervention"} onClick={() => setActiveTab("intervention")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "intervention" ? "border-priority-critical/30 bg-priority-critical-soft text-priority-critical-ink" : "border-border-strong bg-card text-gray-700 hover:bg-priority-critical-soft"}`}>사람 확인 <span className="ml-1 tabular-nums opacity-70">{handoffsState === "loading" || handoffsState === "error" ? "—" : handoffApplicantIds.length}</span></button>
-              <button type="button" id="operations-tab-confirm" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "confirm"} onClick={() => setActiveTab("confirm")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "confirm" ? "border-stage-screening-ink/20 bg-stage-screening-soft text-stage-screening-ink" : "border-border-strong bg-card text-gray-700 hover:bg-stage-screening-soft"}`}>확정 검토 <span className="ml-1 tabular-nums opacity-70">{confirmState === "loading" || confirmState === "error" ? "—" : confirmPending.length}</span></button>
-              <button type="button" id="operations-tab-inbox" role="tab" aria-controls="operations-panel" aria-selected={activeTab === "inbox"} onClick={() => setActiveTab("inbox")} className={`min-h-10 rounded-lg border px-2.5 text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === "inbox" ? "border-priority-attention-ink/25 bg-priority-attention-soft text-priority-attention-ink" : "border-border-strong bg-card text-gray-700 hover:bg-priority-attention-soft"}`}>분류 필요 <span className="ml-1 tabular-nums opacity-70">{inboxCount}</span></button>
-            </div>
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as OperationsTab)}
+              activationMode="manual"
+              className="min-w-0 gap-0"
+            >
+              <TabsList aria-label="지원자 운영 작업 큐" className="h-auto w-auto min-w-0 justify-start gap-1.5 rounded-none bg-transparent p-0 text-inherit">
+                <TabsTrigger value="all" id="operations-tab-all" aria-controls="operations-panel" className="h-auto min-h-10 flex-none rounded-lg border border-border-strong bg-card px-2.5 text-[12px] font-bold text-gray-700 outline-none transition-colors data-[state=inactive]:hover:bg-muted data-[state=active]:border-foreground data-[state=active]:bg-foreground data-[state=active]:text-card focus-visible:ring-2 focus-visible:ring-ring">전체 <span className="ml-1 tabular-nums opacity-70">{appsState === "loading" || appsState === "error" ? "—" : chats.length}</span></TabsTrigger>
+                <TabsTrigger value="intervention" id="operations-tab-intervention" aria-controls="operations-panel" className="h-auto min-h-10 flex-none rounded-lg border border-border-strong bg-card px-2.5 text-[12px] font-bold text-gray-700 outline-none transition-colors data-[state=inactive]:hover:bg-priority-critical-soft data-[state=active]:border-priority-critical/30 data-[state=active]:bg-priority-critical-soft data-[state=active]:text-priority-critical-ink focus-visible:ring-2 focus-visible:ring-ring">사람 확인 <span className="ml-1 tabular-nums opacity-70">{handoffsState === "loading" || handoffsState === "error" ? "—" : handoffApplicantIds.length}</span></TabsTrigger>
+                <TabsTrigger value="confirm" id="operations-tab-confirm" aria-controls="operations-panel" className="h-auto min-h-10 flex-none rounded-lg border border-border-strong bg-card px-2.5 text-[12px] font-bold text-gray-700 outline-none transition-colors data-[state=inactive]:hover:bg-stage-screening-soft data-[state=active]:border-stage-screening-ink/20 data-[state=active]:bg-stage-screening-soft data-[state=active]:text-stage-screening-ink focus-visible:ring-2 focus-visible:ring-ring">확정 검토 <span className="ml-1 tabular-nums opacity-70">{confirmState === "loading" || confirmState === "error" ? "—" : confirmPending.length}</span></TabsTrigger>
+                <TabsTrigger value="inbox" id="operations-tab-inbox" aria-controls="operations-panel" className="h-auto min-h-10 flex-none rounded-lg border border-border-strong bg-card px-2.5 text-[12px] font-bold text-gray-700 outline-none transition-colors data-[state=inactive]:hover:bg-priority-attention-soft data-[state=active]:border-priority-attention-ink/25 data-[state=active]:bg-priority-attention-soft data-[state=active]:text-priority-attention-ink focus-visible:ring-2 focus-visible:ring-ring">분류 필요 <span className="ml-1 tabular-nums opacity-70">{inboxCount}</span></TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
         </div>
       </div>

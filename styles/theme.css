@@ -299,6 +299,9 @@
      1440px부터만 넓은 운영 셸을 쓰는 제품 전용 브레이크포인트. */
   --breakpoint-wide: 90rem;
 
+  /* font-sans가 body의 Pretendard를 시스템 기본 글꼴로 다시 덮지 않게 셸과 본문을 통일한다. */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+
   /* 중립 램프 — 2026-08-18 웜 스톤으로 재조율(hue 24~38°·저채도). 종이·크림 세계와
      글씨·보더의 쿨 슬레이트가 싸우던 것을 값 차원에서 통일했다. 라이브러리(src/index.css)
      원본과는 이제 값이 다르다 — 컴포넌트를 옮겨오면 자동으로 웜 톤을 입는 것이 의도. */

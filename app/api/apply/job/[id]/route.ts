@@ -12,7 +12,11 @@ import {
   applicationBranchContext,
   applicationBranchName,
 } from "@/lib/application-branch";
-import { applyJobIntent, classifyApplyJobLookup } from "@/lib/apply-job-flow";
+import {
+  applicationFixedWorkHour,
+  applyJobIntent,
+  classifyApplyJobLookup,
+} from "@/lib/apply-job-flow";
 import { publicJobAvailability } from "@/lib/public-job";
 import { createServiceClient } from "@/lib/supabase";
 
@@ -29,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("jobs")
-    .select("id, title, branch, status, closes_at, client_id, branch_id, exposure, recruit_mode, vehicle_required")
+    .select("id, title, branch, status, closes_at, client_id, branch_id, exposure, recruit_mode, vehicle_required, slot, slot_keys")
     .eq("id", id)
     .maybeSingle();
 
@@ -168,6 +172,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       client_name: clientName,
       recruiting: availability === "open",
       vehicle_required: job.vehicle_required !== false,
+      fixed_work_hour: applicationFixedWorkHour({
+        slot: job.slot,
+        slotKeys: job.slot_keys,
+      }),
     },
   });
 }
