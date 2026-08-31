@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "./jobs";
+import { fetchAllPostgrestRows } from "./admin/postgrest-pagination";
 
 export interface LiveJobLink {
   job_id: number;
@@ -75,24 +76,43 @@ export async function gatherLiveJobLinks(
   const links = new Map<number, LiveJobLink[]>();
   if (ids.length === 0) return { links, error: null };
 
-  // 649명 × 결속이면 한 번의 조회가 PostgREST 기본 상한(1000행)에 **오류 없이 잘린다**(error=null).
-  // 잘리면 배지가 조용히 사라져 '공고에 안 붙은 사람'으로 보이므로 페이지로 나눠 전부 가져온다.
+  // 지원자가 많으면 단일 IN URL 자체가 과대해진다. 250명씩 나누고 각 묶음도 PostgREST
+  // 기본 상한(1000행) 뒤까지 읽어, 배지가 조용히 사라지는 부분 성공을 막는다.
   // 종료(abort)는 어차피 버릴 행이라 DB에서 먼저 뺀다 — 단 NULL(관심)은 반드시 남겨야 한다
   // (`.neq("agent_stage","abort")`만 쓰면 NULL이 통째로 빠져 이 모듈의 존재 이유가 사라진다).
-  const PAGE = 1000;
-  const rows: Record<string, unknown>[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("job_candidates")
-      .select("applicant_id, job_id, agent_stage, created_at, updated_at, jobs:job_id ( id, title, branch, status, closes_at )")
-      .in("applicant_id", ids)
-      .or("agent_stage.is.null,agent_stage.neq.abort")
-      .order("created_at", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) return { links, error: error.message };
-    const page = data ?? [];
-    rows.push(...(page as unknown as Record<string, unknown>[]));
-    if (page.length < PAGE) break;
+  const ID_BATCH_SIZE = 250;
+  const idBatches: number[][] = [];
+  for (let offset = 0; offset < ids.length; offset += ID_BATCH_SIZE) {
+    idBatches.push(ids.slice(offset, offset + ID_BATCH_SIZE));
+  }
+
+  let rows: Record<string, unknown>[];
+  try {
+    const rowsByBatch = await Promise.all(idBatches.map((idBatch) =>
+      fetchAllPostgrestRows(async (from, to) => {
+        const result = await supabase
+          .from("job_candidates")
+          .select("id, applicant_id, job_id, agent_stage, created_at, updated_at, jobs:job_id ( id, title, branch, status, closes_at )")
+          .in("applicant_id", idBatch)
+          .or("agent_stage.is.null,agent_stage.neq.abort")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
+        return {
+          data: result.data as unknown as Record<string, unknown>[] | null,
+          error: result.error,
+        };
+      }, "지원자 공고 연결")
+    ));
+    rows = rowsByBatch.flat();
+  } catch (error) {
+    const message = typeof error === "object" && error !== null && "message" in error
+      ? String(error.message)
+      : "지원자 공고 연결 조회 실패";
+    return {
+      links,
+      error: message,
+    };
   }
 
   for (const row of rows) {

@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,15 @@ interface SummaryEntry {
   last_link_view_at: string | null;
   last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
   last_reply_at: string | null;
+}
+
+interface PoolEventRow {
+  id: number;
+  applicant_id: number;
+  job_id: number | null;
+  event_type: string;
+  meta: { immediate?: unknown } | null;
+  created_at: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,33 +60,40 @@ export async function POST(req: NextRequest) {
   const numIds = applicantIds.map((v) => Number(v));
   const supabase = createServiceClient();
 
-  // 관련 event_type IN + applicant_id IN 1회 스캔 → JS 집계 (last-ping과 동일 패턴).
-  // created_at desc 정렬이므로 각 (지원자, 유형)의 첫 등장이 마지막 이벤트.
-  const { data: events, error } = await supabase
-    .from("pool_events")
-    .select("applicant_id, job_id, event_type, meta, created_at")
-    .in("event_type", EVENT_TYPES)
-    .in("applicant_id", numIds)
-    .order("created_at", { ascending: false })
-    // supabase 기본 1000행 절단 방지 — 500명×여러 이벤트에서 유형별 최신값이 잘리지 않게.
-    .limit(5000);
-
-  if (error) {
+  // 관련 event_type IN + applicant_id IN 결과를 끝까지 읽어 JS 집계한다.
+  // 같은 created_at에서도 id desc로 고정해야 각 (지원자, 유형)의 첫 등장이 결정적으로 최신이다.
+  let events: PoolEventRow[];
+  try {
+    events = await fetchAllPostgrestRows(async (from, to) => {
+      const { data, error } = await supabase
+        .from("pool_events")
+        .select("id, applicant_id, job_id, event_type, meta, created_at")
+        .in("event_type", EVENT_TYPES)
+        .in("applicant_id", numIds)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
+      return { data: data as PoolEventRow[] | null, error };
+    }, "pool event summary");
+  } catch (error) {
     console.error("[pool-events/summary]", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "조회 실패" },
+      { status: 500 },
+    );
   }
 
   const summaryById: Record<number, SummaryEntry> = {};
-  for (const ev of events ?? []) {
-    const id = ev.applicant_id as number;
+  for (const ev of events) {
+    const id = ev.applicant_id;
     const entry = (summaryById[id] ??= {
       last_ping_at: null,
       last_link_view_at: null,
       last_interest: null,
       last_reply_at: null,
     });
-    const at = ev.created_at as string;
-    switch (ev.event_type as string) {
+    const at = ev.created_at;
+    switch (ev.event_type) {
       case "ping_sent":
         if (!entry.last_ping_at) entry.last_ping_at = at;
         break;
@@ -89,11 +106,10 @@ export async function POST(req: NextRequest) {
       case "interest_click":
         if (!entry.last_interest) {
           // immediate 판정은 interest-queue와 동일 — meta.immediate가 true 또는 "true".
-          const meta = ev.meta as { immediate?: unknown } | null;
           entry.last_interest = {
-            job_id: typeof ev.job_id === "number" ? ev.job_id : null,
+            job_id: ev.job_id,
             at,
-            immediate: meta?.immediate === true || meta?.immediate === "true",
+            immediate: ev.meta?.immediate === true || ev.meta?.immediate === "true",
           };
         }
         break;

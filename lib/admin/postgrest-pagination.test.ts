@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 
 type PageResult<T> = {
   data: T[] | null;
@@ -20,6 +23,99 @@ async function loadModule(): Promise<PaginationModule> {
   } catch {
     return {};
   }
+}
+
+type JsonResponse = {
+  body: Record<string, unknown>;
+  status: number;
+};
+
+type RouteModule = {
+  GET: (request: { url: string }, context?: { params: Promise<{ id: string }> }) => Promise<JsonResponse>;
+};
+
+type QueryResult = {
+  data: unknown[] | Record<string, unknown> | null;
+  error: { message: string } | null;
+};
+
+type QueryResolver = (
+  table: string,
+  operation: "range" | "single",
+  from: number,
+  to: number,
+) => QueryResult;
+
+function createSupabaseStub(
+  resolve: QueryResolver,
+  onIn?: (table: string, column: string, values: unknown[]) => void,
+) {
+  class QueryBuilder {
+    readonly table: string;
+
+    constructor(table: string) {
+      this.table = table;
+    }
+
+    select() { return this; }
+    neq() { return this; }
+    order() { return this; }
+    eq() { return this; }
+    in(column: string, values: unknown[]) {
+      onIn?.(this.table, column, values);
+      return this;
+    }
+
+    async range(from: number, to: number) {
+      return resolve(this.table, "range", from, to);
+    }
+
+    async single() {
+      return resolve(this.table, "single", 0, 0);
+    }
+  }
+
+  return {
+    from(table: string) {
+      return new QueryBuilder(table);
+    },
+  };
+}
+
+function loadRouteModule(
+  route: URL,
+  supabase: ReturnType<typeof createSupabaseStub>,
+): RouteModule {
+  const output = ts.transpileModule(readFileSync(route, "utf8"), {
+    compilerOptions: {
+      esModuleInterop: true,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  const compiledModule = { exports: {} as Record<string, unknown> };
+  const nextResponse = {
+    json(body: Record<string, unknown>, init?: { status?: number }): JsonResponse {
+      return { body, status: init?.status ?? 200 };
+    },
+  };
+  const stubs: Record<string, Record<string, unknown>> = {
+    "next/server": { NextResponse: nextResponse },
+    "@/lib/supabase": { createServiceClient: () => supabase },
+    "@/lib/agent/danggeun-job": { DANGGEUN_SYSTEM_JOB_TITLE: "__system__" },
+    "@/lib/jobs": { isJobEffectivelyClosed: () => false },
+    "@/lib/admin/job-operations": { isReviewReadyCandidate: () => false },
+    "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
+  };
+
+  runInNewContext(output, {
+    URL,
+    console: { error() {} },
+    exports: compiledModule.exports,
+    module: compiledModule,
+    require: (specifier: string) => stubs[specifier] ?? {},
+  });
+  return compiledModule.exports as RouteModule;
 }
 
 test("reads every row after the PostgREST 1000-row boundary", async () => {
@@ -97,4 +193,142 @@ test("candidate board fails only for candidate pages and degrades optional job g
     getSource.indexOf("const candidates = rows.map"),
   );
   assert.doesNotMatch(optionalGeoHandling, /return NextResponse\.json|throw new Error/);
+});
+
+test("admin job list returns rows after the PostgREST 1000-row boundary", async () => {
+  const jobs = Array.from({ length: 1_001 }, (_, index) => ({
+    id: index + 1,
+    status: "active",
+    closes_at: null,
+  }));
+  const supabase = createSupabaseStub((table, operation, from, to) => {
+    assert.equal(operation, "range");
+    if (table === "jobs") return { data: jobs.slice(from, to + 1), error: null };
+    return { data: [], error: null };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+  const returnedJobs = response.body.jobs as Array<{ id: number }>;
+
+  assert.equal(response.status, 200);
+  assert.equal(returnedJobs.length, 1_001);
+  assert.equal(returnedJobs[1_000].id, 1_001);
+});
+
+test("admin job aggregates chunk accumulated job ids before building PostgREST in filters", async () => {
+  const jobs = Array.from({ length: 1_001 }, (_, index) => ({
+    id: index + 1,
+    status: "active",
+    closes_at: null,
+  }));
+  const aggregateFilters: Array<{ table: string; ids: number[] }> = [];
+  const supabase = createSupabaseStub(
+    (table, operation, from, to) => {
+      assert.equal(operation, "range");
+      if (table === "jobs") return { data: jobs.slice(from, to + 1), error: null };
+      return { data: [], error: null };
+    },
+    (table, column, values) => {
+      if ((table === "job_candidates" || table === "pool_events") && column === "job_id") {
+        aggregateFilters.push({ table, ids: values as number[] });
+      }
+    },
+  );
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+
+  assert.equal(response.status, 200);
+  for (const table of ["job_candidates", "pool_events"]) {
+    const chunks = aggregateFilters.filter((entry) => entry.table === table);
+    assert.ok(chunks.length > 1, `${table} should use more than one id chunk`);
+    assert.ok(chunks.every((entry) => entry.ids.length <= 250));
+    assert.deepEqual(
+      [...new Set(chunks.flatMap((entry) => entry.ids))],
+      jobs.map((job) => job.id),
+    );
+  }
+});
+
+test("admin job list rejects a later page error instead of returning a partial list", async () => {
+  const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
+    id: index + 1,
+    status: "active",
+    closes_at: null,
+  }));
+  const supabase = createSupabaseStub((table, _operation, from) => {
+    assert.equal(table, "jobs");
+    if (from === 0) return { data: firstPage, error: null };
+    return { data: null, error: { message: "database unavailable" } };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error, "조회 실패");
+});
+
+test("single job detail counts candidates after the PostgREST 1000-row boundary", async () => {
+  const candidates = Array.from({ length: 1_001 }, (_, index) => ({
+    id: index + 1,
+    agent_stage: index === 1_000 ? null : "screening",
+  }));
+  const supabase = createSupabaseStub((table, operation, from, to) => {
+    if (table === "jobs" && operation === "single") {
+      return { data: { id: 7, title: "테스트 공고" }, error: null };
+    }
+    assert.equal(table, "job_candidates");
+    return { data: candidates.slice(from, to + 1), error: null };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/[id]/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET(
+    { url: "http://localhost/api/admin/jobs/7" },
+    { params: Promise.resolve({ id: "7" }) },
+  );
+
+  assert.equal(response.status, 200);
+  const counts = response.body.counts as Record<string, number>;
+  assert.equal(counts.screening, 1_000);
+  assert.equal(counts.sent, 1);
+});
+
+test("single job detail rejects a later candidate page error instead of returning partial counts", async () => {
+  const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
+    id: index + 1,
+    agent_stage: "screening",
+  }));
+  const supabase = createSupabaseStub((table, operation, from) => {
+    if (table === "jobs" && operation === "single") {
+      return { data: { id: 7, title: "테스트 공고" }, error: null };
+    }
+    if (from === 0) return { data: firstPage, error: null };
+    return { data: null, error: { message: "database unavailable" } };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/[id]/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET(
+    { url: "http://localhost/api/admin/jobs/7" },
+    { params: Promise.resolve({ id: "7" }) },
+  );
+
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error, "후보 집계 조회 실패");
 });

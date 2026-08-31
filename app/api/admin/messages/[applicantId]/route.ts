@@ -5,6 +5,11 @@ import {
   shouldLoadCandidateAgentState,
 } from "@/lib/admin/pending-draft-scope";
 import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention";
+import { fetchCompleteMessageHistory } from "@/lib/admin/message-history";
+import {
+  fetchReasoningByMessageIds,
+  fetchRecentPoolEvents,
+} from "@/lib/admin/message-context";
 
 export const dynamic = "force-dynamic";
 
@@ -48,40 +53,19 @@ export async function GET(
       .eq("id", applicantId)
       .single();
 
-    // applicant_id 또는 phone 번호로 대화 내역 조회 (트리거 미실행 대비)
-    let messages;
-    let error;
-
+    // applicant_id 또는 phone 번호로 대화 내역 조회 (트리거 미실행 대비).
     // job_id 필터는 NULL도 함께 통과시킨다 — 캠페인 핑·과거 수동 발송 등 job_id 없는
     // 메시지가 공고 탭에서 사라져 "매니저 답장이 안 보이는" 문제 방지.
-    if (applicant?.phone) {
-      let q = supabase
-        .from("messages")
-        .select("*")
-        .or(`applicant_id.eq.${applicantId},applicant_phone.eq.${applicant.phone}`)
-        .order("created_at", { ascending: true });
-      if (jobIdFilter !== null && Number.isFinite(jobIdFilter)) {
-        q = q.or(`job_id.eq.${jobIdFilter},job_id.is.null`);
-      }
-      const result = await q;
-      messages = result.data;
-      error = result.error;
-    } else {
-      let q = supabase
-        .from("messages")
-        .select("*")
-        .eq("applicant_id", applicantId)
-        .order("created_at", { ascending: true });
-      if (jobIdFilter !== null && Number.isFinite(jobIdFilter)) {
-        q = q.or(`job_id.eq.${jobIdFilter},job_id.is.null`);
-      }
-      const result = await q;
-      messages = result.data;
-      error = result.error;
-    }
-
-    if (error) {
-      console.error("[messages fetch error]", error);
+    // 1000행 단위로 끝까지 읽되, 어느 페이지든 실패하면 부분 대화를 정상값으로 반환하지 않는다.
+    let messages;
+    try {
+      messages = await fetchCompleteMessageHistory(supabase, {
+        applicantId,
+        applicantPhone: typeof applicant?.phone === "string" ? applicant.phone : null,
+        jobId: jobIdFilter,
+      });
+    } catch (messageError) {
+      console.error("[messages fetch error]", messageError);
       return NextResponse.json(
         { error: "메시지 조회 실패" },
         { status: 500 }
@@ -114,21 +98,17 @@ export async function GET(
 
     // 메시지별 reasoning 매핑 — message_drafts.used_message_id 기준
     // (router.ts가 자동 발송 시 status='auto_sent'로 함께 insert함)
-    const messagesList = messages ?? [];
+    const messagesList = messages;
     const outboundIds = messagesList
       .filter((m) => m.direction === "outbound")
       .map((m) => m.id);
-    const reasoningByMessageId = new Map<string, string>();
-    if (outboundIds.length > 0) {
-      const { data: drafts } = await supabase
-        .from("message_drafts")
-        .select("used_message_id, reasoning")
-        .in("used_message_id", outboundIds);
-      for (const d of drafts ?? []) {
-        if (d.used_message_id && d.reasoning) {
-          reasoningByMessageId.set(d.used_message_id as string, d.reasoning as string);
-        }
-      }
+    let reasoningByMessageId = new Map<string, string>();
+    let reasoningContextState: "ready" | "error" = "ready";
+    try {
+      reasoningByMessageId = await fetchReasoningByMessageIds(supabase, outboundIds);
+    } catch (reasoningError) {
+      console.error("[messages API] reasoning fetch failed", reasoningError);
+      reasoningContextState = "error";
     }
     const messagesWithReasoning = messagesList.map((m) => ({
       ...m,
@@ -140,15 +120,18 @@ export async function GET(
     // (job_id 필터와 무관하게 지원자 단위 — "이 답장이 무엇에 대한 것인지"의 맥락은 공고를 가리지 않는다)
     const RECONTACT_EVENT_TYPES = ["ping_sent", "link_view", "interest_click", "availability_set", "opt_out_set", "handoff_resolved"];
     const eventsSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: poolEvents, error: poolEvErr } = await supabase
-      .from("pool_events")
-      .select("id, event_type, job_id, meta, created_at")
-      .eq("applicant_id", applicantId)
-      .in("event_type", RECONTACT_EVENT_TYPES)
-      .gte("created_at", eventsSince)
-      .order("created_at", { ascending: true });
-    if (poolEvErr) console.error("[messages API] pool_events fetch failed", poolEvErr);
-    const eventsList = poolEvents ?? [];
+    let eventsList: Awaited<ReturnType<typeof fetchRecentPoolEvents>> = [];
+    let poolEventsContextState: "ready" | "error" = "ready";
+    try {
+      eventsList = await fetchRecentPoolEvents(supabase, {
+        applicantId,
+        eventTypes: RECONTACT_EVENT_TYPES,
+        since: eventsSince,
+      });
+    } catch (poolEventsError) {
+      console.error("[messages API] pool_events fetch failed", poolEventsError);
+      poolEventsContextState = "error";
+    }
 
     // 멀티-잡 인지(Phase 2 UX): 이 대화에 등장하는 공고 라벨 맵.
     // 한 지원자가 여러 공고를 동시 진행할 때, 말풍선에 "어느 공고 건"인지 칩으로 표시하기 위함.
@@ -166,17 +149,23 @@ export async function GET(
       )
     );
     const jobsMap: Record<number, { title: string; branch: string | null }> = {};
+    let jobLabelsContextState: "ready" | "error" = "ready";
     if (jobIdsInThread.length > 0) {
-      const { data: jobRows } = await supabase
+      const { data: jobRows, error: jobLabelsError } = await supabase
         .from("jobs")
         .select("id, title, branch")
         .in("id", jobIdsInThread);
-      for (const j of jobRows ?? []) {
-        if (typeof j.title === "string" && j.title.startsWith("__")) continue;
-        jobsMap[j.id as number] = {
-          title: (j.title as string) ?? "",
-          branch: (j.branch as string | null) ?? null,
-        };
+      if (jobLabelsError) {
+        console.error("[messages API] job labels fetch failed", jobLabelsError);
+        jobLabelsContextState = "error";
+      } else {
+        for (const j of jobRows ?? []) {
+          if (typeof j.title === "string" && j.title.startsWith("__")) continue;
+          jobsMap[j.id as number] = {
+            title: (j.title as string) ?? "",
+            branch: (j.branch as string | null) ?? null,
+          };
+        }
       }
     }
 
@@ -211,6 +200,11 @@ export async function GET(
       agent_state: agentState,
       jobs: jobsMap,
       manual_message_attention: manualMessageAttention,
+      context_status: {
+        reasoning: reasoningContextState,
+        pool_events: poolEventsContextState,
+        job_labels: jobLabelsContextState,
+      },
     });
   } catch (err) {
     console.error("[messages API error]", err);

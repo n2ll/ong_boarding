@@ -458,6 +458,28 @@ test("closed-job, suspended B mart, and manual paths persist or enforce explicit
   assert.match(manualSend, /신규 일자리 문자 미동의/);
 });
 
+test("manual and dispatch sends enforce phone-level opt-out immediately before the provider", async () => {
+  const [manualSend, dispatch] = await Promise.all([
+    readFile(new URL("../app/api/admin/messages/send/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/jobs/[id]/dispatch/route.ts", import.meta.url), "utf8"),
+  ]);
+  const manualBoundary = manualSend.slice(
+    manualSend.indexOf("send: async () =>"),
+    manualSend.indexOf("markUnknown: async"),
+  );
+  const dispatchLoop = dispatch.slice(
+    dispatch.indexOf("for (const c of candidates)"),
+    dispatch.indexOf("return NextResponse.json", dispatch.indexOf("for (const c of candidates)")),
+  );
+
+  assert.match(manualBoundary, /fetchPhoneMessageIdentityIndex/);
+  assert.match(manualBoundary, /hasActiveSmsOptOut/);
+  assert.ok(manualBoundary.indexOf("hasActiveSmsOptOut") < manualBoundary.indexOf("return sendSms("));
+  assert.match(dispatch, /fetchPhoneMessageIdentityIndex/);
+  assert.match(dispatchLoop, /hasActiveSmsOptOut/);
+  assert.ok(dispatchLoop.indexOf("hasActiveSmsOptOut") < dispatchLoop.indexOf("await sendSms("));
+});
+
 test("every automated SMS path blocks future-job promotion without effective consent", async () => {
   const [router, active, agent, webhook, applyRoute, engage] = await Promise.all([
     readFile(new URL("./agent/router.ts", import.meta.url), "utf8"),

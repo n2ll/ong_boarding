@@ -79,10 +79,10 @@ test("manual send attention remains visible across every operations tab", () => 
   assert.match(sharedHeader, /발송 확인 \{manualMessageAttentionCount\}건 · 재발송 금지/);
 });
 
-test("live job-link failures cannot be collapsed into a trustworthy empty list", () => {
+test("job-link failures cannot be collapsed into a trustworthy empty list", () => {
   assert.match(
     applicantsRoute,
-    /if \(linkErr && liveScope\)[\s\S]*?status:\s*503/,
+    /if \(linkErr\)[\s\S]*?status:\s*503/,
   );
   assert.match(live, /if \(!res\.ok\) throw new Error/);
   assert.match(live, /activeJobsStatus/);

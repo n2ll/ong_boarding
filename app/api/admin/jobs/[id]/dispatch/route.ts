@@ -19,6 +19,11 @@ import { createServiceClient } from "@/lib/supabase";
 import { sendSms } from "@/lib/solapi";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { classifyDispatchSmsCategory, smsSendBlockReason } from "@/lib/sms-consent-policy";
+import {
+  fetchPhoneMessageIdentityIndex,
+  type PhoneMessageIdentityIndex,
+} from "@/lib/admin/phone-message-identity";
+import { normalizePhone } from "@/lib/ongmanaging";
 
 interface Applicant {
   id: number;
@@ -89,6 +94,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const aMap = new Map<number, Applicant>(
     (applicants ?? []).map((a) => [a.id as number, a as Applicant])
   );
+  let phoneIdentityIndex: PhoneMessageIdentityIndex;
+  try {
+    phoneIdentityIndex = await fetchPhoneMessageIdentityIndex(supabase);
+  } catch (identityError) {
+    console.error("[dispatch] phone identity lookup", identityError);
+    return NextResponse.json({ error: "문자 수신 상태 조회 실패" }, { status: 503 });
+  }
 
   // 동일 공고에 지원자가 직접 남긴 관심 근거. 조회 실패 시에는 운영으로 추정하지 않고 홍보로 분류해
   // 명시 동의를 요구한다(fail-closed). web_apply 근거는 candidate.agent_state에서 별도로 확인한다.
@@ -113,7 +125,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const conflicts: number[] = [];        // 다른 active job에 묶여있어 보류한 applicant
   const sentApplicantIds: number[] = [];
   // 제외 사유별 집계 — 매니저가 "왜 빠졌는지" 바로 알 수 있게
-  const skipReasons = { no_phone: 0, no_consent: 0, opt_out: 0, conflict: 0, no_token: 0, send_fail: 0 };
+  const skipReasons = {
+    no_phone: 0,
+    no_consent: 0,
+    opt_out: 0,
+    conflict: 0,
+    no_token: 0,
+    duplicate_phone: 0,
+    send_fail: 0,
+  };
+  const attemptedPhones = new Set<string>();
   const now = new Date().toISOString();
 
   // 수신자별 치환 — #{이름}, #{맞춤링크} (bulk-send와 동일 규칙)
@@ -129,6 +150,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!a || !a.phone) {
       skipped++;
       skipReasons.no_phone++;
+      continue;
+    }
+    const normalizedPhone = normalizePhone(a.phone);
+    const phoneIdentity = phoneIdentityIndex.byPhone.get(normalizedPhone);
+    if (!phoneIdentity) {
+      skipped++;
+      skipReasons.no_phone++;
+      continue;
+    }
+    if (phoneIdentity.hasActiveSmsOptOut) {
+      skipped++;
+      skipReasons.opt_out++;
       continue;
     }
     const smsCategory = classifyDispatchSmsCategory({
@@ -153,7 +186,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       continue;
     }
     // 다른 공고 진행 중이면 보류 (정책: 한 사람 = 하나의 '진행 중' 공고)
-    if (a.current_job_id && a.current_job_id !== jobId) {
+    if (
+      (a.current_job_id && a.current_job_id !== jobId)
+      || phoneIdentity.currentJobIds.some((currentJobId) => currentJobId !== jobId)
+    ) {
       conflicts.push(a.id);
       skipped++;
       skipReasons.conflict++;
@@ -173,6 +209,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         personalText = personalText.replace(/#\{맞춤링크\}/g, `${normalizedBase}/p/${a.access_token}`);
       }
     }
+
+    // 동의·충돌·맞춤링크까지 통과한 첫 후보만 이 전화번호의 대표가 된다.
+    // 공급자 실패 뒤 형제 행으로 재시도하면 같은 요청에서 중복 발송 결과가 생길 수 있으므로,
+    // 실제 발송 시도 직전에 선점하고 성공 여부와 관계없이 한 번만 호출한다.
+    if (attemptedPhones.has(normalizedPhone)) {
+      skipped++;
+      skipReasons.duplicate_phone++;
+      continue;
+    }
+    attemptedPhones.add(normalizedPhone);
 
     const result = await sendSms(a.phone, personalText);
     if (!result.success) {

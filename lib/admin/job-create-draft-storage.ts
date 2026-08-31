@@ -1,5 +1,6 @@
-export const JOB_CREATE_DRAFT_STORAGE_KEY = "ongboarding:job-create-draft:v1";
+export const JOB_CREATE_DRAFT_STORAGE_KEY = "ongboarding:job-create-draft:v2";
 export const JOB_CREATE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const LEGACY_JOB_CREATE_DRAFT_STORAGE_KEY = "ongboarding:job-create-draft:v1";
 
 type SelectId = number | "";
 type ChannelDrafts = { danggeun: string; albamon: string; sms: string };
@@ -53,10 +54,39 @@ export interface JobCreateDraftStorage {
 }
 
 type StoredEnvelope = {
-  version: 1;
+  version: 2;
+  ownerId: string;
+  writerId: string;
+  generationId: string;
+  revision: number;
   savedAt: number;
   draft: JobCreateStoredDraft;
 };
+
+export interface JobCreateDraftIdentity {
+  ownerId: string;
+  writerId: string;
+}
+
+export interface JobCreateDraftSnapshot {
+  draft: JobCreateStoredDraft;
+  generationId: string;
+  revision: number;
+  writerId: string;
+}
+
+export type JobCreateDraftSaveResult =
+  | { status: "saved"; generationId: string; revision: number }
+  | { status: "conflict"; snapshot: JobCreateDraftSnapshot }
+  | { status: "unavailable" };
+
+export type JobCreateDraftDeleteToken = Pick<JobCreateDraftSnapshot, "writerId" | "generationId" | "revision">;
+
+export type JobCreateDraftRemoveResult =
+  | { status: "removed" }
+  | { status: "missing" }
+  | { status: "conflict"; snapshot: JobCreateDraftSnapshot }
+  | { status: "unavailable" };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -153,19 +183,57 @@ function validDraft(value: unknown): value is JobCreateStoredDraft {
   return true;
 }
 
-export function encodeJobCreateDraft(draft: JobCreateStoredDraft, now = Date.now()): string {
-  const envelope: StoredEnvelope = { version: 1, savedAt: now, draft };
+export function jobCreateDraftStorageKey(ownerId: string): string {
+  return `${JOB_CREATE_DRAFT_STORAGE_KEY}:${ownerId}`;
+}
+
+export function removeLegacyJobCreateDraft(storage: JobCreateDraftStorage): void {
+  try {
+    storage.removeItem(LEGACY_JOB_CREATE_DRAFT_STORAGE_KEY);
+  } catch {
+    // 이전 ownerless 초안 정리는 best-effort다. 저장소 차단이 공고 작성까지 막아서는 안 된다.
+  }
+}
+
+export function encodeJobCreateDraft(
+  draft: JobCreateStoredDraft,
+  identity: JobCreateDraftIdentity,
+  revision: number,
+  now = Date.now(),
+  generationId = globalThis.crypto.randomUUID(),
+): string {
+  const envelope: StoredEnvelope = {
+    version: 2,
+    ownerId: identity.ownerId,
+    writerId: identity.writerId,
+    generationId,
+    revision,
+    savedAt: now,
+    draft,
+  };
   return JSON.stringify(envelope);
 }
 
-export function decodeJobCreateDraft(raw: string | null, now = Date.now()): JobCreateStoredDraft | null {
+export function decodeJobCreateDraft(
+  raw: string | null,
+  ownerId: string,
+  now = Date.now(),
+): JobCreateDraftSnapshot | null {
   if (!raw) return null;
 
   try {
     const envelope = record(JSON.parse(raw));
     if (
       !envelope
-      || envelope.version !== 1
+      || envelope.version !== 2
+      || envelope.ownerId !== ownerId
+      || typeof envelope.writerId !== "string"
+      || !UUID_PATTERN.test(envelope.writerId)
+      || typeof envelope.generationId !== "string"
+      || !UUID_PATTERN.test(envelope.generationId)
+      || typeof envelope.revision !== "number"
+      || !Number.isSafeInteger(envelope.revision)
+      || envelope.revision < 1
       || typeof envelope.savedAt !== "number"
       || !Number.isFinite(envelope.savedAt)
       || envelope.savedAt > now
@@ -174,7 +242,12 @@ export function decodeJobCreateDraft(raw: string | null, now = Date.now()): JobC
     ) {
       return null;
     }
-    return envelope.draft;
+    return {
+      draft: envelope.draft,
+      generationId: envelope.generationId,
+      revision: envelope.revision,
+      writerId: envelope.writerId,
+    };
   } catch {
     return null;
   }
@@ -182,13 +255,16 @@ export function decodeJobCreateDraft(raw: string | null, now = Date.now()): JobC
 
 export function loadJobCreateDraft(
   storage: JobCreateDraftStorage,
+  ownerId: string,
   now = Date.now(),
-): JobCreateStoredDraft | null {
+): JobCreateDraftSnapshot | null {
+  if (!UUID_PATTERN.test(ownerId)) return null;
+  const key = jobCreateDraftStorageKey(ownerId);
   try {
-    const raw = storage.getItem(JOB_CREATE_DRAFT_STORAGE_KEY);
-    const draft = decodeJobCreateDraft(raw, now);
-    if (raw && !draft) storage.removeItem(JOB_CREATE_DRAFT_STORAGE_KEY);
-    return draft;
+    const raw = storage.getItem(key);
+    const snapshot = decodeJobCreateDraft(raw, ownerId, now);
+    if (raw && !snapshot) storage.removeItem(key);
+    return snapshot;
   } catch {
     return null;
   }
@@ -197,20 +273,74 @@ export function loadJobCreateDraft(
 export function saveJobCreateDraft(
   storage: JobCreateDraftStorage,
   draft: JobCreateStoredDraft,
+  identity: JobCreateDraftIdentity,
+  claimedSnapshot: JobCreateDraftDeleteToken | null,
   now = Date.now(),
-): boolean {
+  createGenerationId = () => globalThis.crypto.randomUUID(),
+): JobCreateDraftSaveResult {
+  if (!UUID_PATTERN.test(identity.ownerId) || !UUID_PATTERN.test(identity.writerId)) {
+    return { status: "unavailable" };
+  }
+  const key = jobCreateDraftStorageKey(identity.ownerId);
   try {
-    storage.setItem(JOB_CREATE_DRAFT_STORAGE_KEY, encodeJobCreateDraft(draft, now));
-    return true;
+    const raw = storage.getItem(key);
+    const current = decodeJobCreateDraft(raw, identity.ownerId, now);
+    if (raw && !current) storage.removeItem(key);
+
+    if (
+      current
+      && current.writerId !== identity.writerId
+      && (
+        claimedSnapshot?.writerId !== current.writerId
+        || claimedSnapshot.generationId !== current.generationId
+        || claimedSnapshot.revision !== current.revision
+      )
+    ) {
+      return { status: "conflict", snapshot: current };
+    }
+
+    const generationId = current?.generationId ?? createGenerationId();
+    if (!UUID_PATTERN.test(generationId)) return { status: "unavailable" };
+    const revision = (current?.revision ?? 0) + 1;
+    storage.setItem(key, encodeJobCreateDraft(draft, identity, revision, now, generationId));
+    return { status: "saved", generationId, revision };
   } catch {
-    return false;
+    return { status: "unavailable" };
   }
 }
 
-export function removeJobCreateDraft(storage: JobCreateDraftStorage): void {
+export function removeJobCreateDraft(
+  storage: JobCreateDraftStorage,
+  ownerId: string,
+  expected: JobCreateDraftDeleteToken,
+  now = Date.now(),
+): JobCreateDraftRemoveResult {
+  if (
+    !UUID_PATTERN.test(ownerId)
+    || !UUID_PATTERN.test(expected.writerId)
+    || !UUID_PATTERN.test(expected.generationId)
+    || !Number.isSafeInteger(expected.revision)
+    || expected.revision < 1
+  ) return { status: "unavailable" };
+
+  const key = jobCreateDraftStorageKey(ownerId);
   try {
-    storage.removeItem(JOB_CREATE_DRAFT_STORAGE_KEY);
+    const raw = storage.getItem(key);
+    const current = decodeJobCreateDraft(raw, ownerId, now);
+    if (raw && !current) storage.removeItem(key);
+    if (!current) return { status: "missing" };
+    if (
+      current.writerId !== expected.writerId
+      || current.generationId !== expected.generationId
+      || current.revision !== expected.revision
+    ) {
+      return { status: "conflict", snapshot: current };
+    }
+
+    storage.removeItem(key);
+    return { status: "removed" };
   } catch {
     // 저장소가 차단된 브라우저에서도 폼 닫기·등록 성공 흐름은 계속한다.
+    return { status: "unavailable" };
   }
 }

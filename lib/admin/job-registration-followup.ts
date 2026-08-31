@@ -17,10 +17,12 @@ export function beginJobRegistrationFollowup<T, TDuplicateSource>(input: {
   title: string;
   note: string | null;
   duplicateSource: TDuplicateSource;
+  announcement?: JobRegistrationAnnouncement<T>;
 }): JobRegistrationFollowup<T, TDuplicateSource> {
+  const { announcement = { status: "checking" }, ...followup } = input;
   return {
-    ...input,
-    announcement: { status: "checking" },
+    ...followup,
+    announcement,
   };
 }
 

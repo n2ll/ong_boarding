@@ -33,8 +33,12 @@ import {
   bindConversationDraftJobContext,
   bindConversationJobContext,
   conversationAgentPresentation,
+  conversationContextStatus,
+  conversationContextWarning,
+  conversationRefreshWarning,
   conversationJobContextPresentation,
   conversationMessagesView,
+  type ConversationContextStatus,
   type ConversationJobContext,
 } from "@/lib/conversation-thread-view";
 import { shouldAdvanceLiveReplyAfterSend } from "@/lib/admin/live-reply-navigation";
@@ -259,6 +263,7 @@ export function ConversationThread({
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [events, setEvents] = useState<PoolEvent[]>([]);
+  const [contextStatus, setContextStatus] = useState<ConversationContextStatus | null>(null);
   const [manualMessageAttention, setManualMessageAttention] = useState<ManualMessageAttentionCollection>(
     EMPTY_MANUAL_MESSAGE_ATTENTION,
   );
@@ -267,6 +272,7 @@ export function ConversationThread({
   const [agentStage, setAgentStage] = useState<string | null>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [messagesLoadErrorIdentity, setMessagesLoadErrorIdentity] = useState<{ key: string; revision: number } | null>(null);
+  const [messagesRefreshErrorIdentity, setMessagesRefreshErrorIdentity] = useState<{ key: string; revision: number } | null>(null);
   const [loadedScopeIdentity, setLoadedScopeIdentity] = useState<{ key: string; revision: number } | null>(null);
   const [sending, setSending] = useState(false);
   const [manualComposer, setManualComposer] = useState<ManualMessageComposerSnapshot & {
@@ -377,6 +383,7 @@ export function ConversationThread({
         ) return;
         setMessages((json.messages ?? []) as ApiMessage[]);
         setEvents((json.events ?? []) as PoolEvent[]);
+        setContextStatus(conversationContextStatus(json.context_status));
         const nextManualMessageAttention = json.manual_message_attention as ManualMessageAttentionCollection | undefined;
         setManualMessageAttention(
           nextManualMessageAttention?.state === "ready" || nextManualMessageAttention?.state === "error"
@@ -396,6 +403,7 @@ export function ConversationThread({
         loadedScopeIdentityRef.current = loadedIdentity;
         setLoadedScopeIdentity(loadedIdentity);
         setMessagesLoadErrorIdentity(null);
+        setMessagesRefreshErrorIdentity(null);
       } catch {
         if (
           !mountedRef.current
@@ -406,6 +414,12 @@ export function ConversationThread({
         // 메시지는 마지막 성공 스냅샷을 유지해도, 재발송 안전 신호는 현재 조회 실패를
         // 과거의 ready/0으로 덮으면 안 된다. 다음 성공 폴링 전까지 fail-closed로 표시한다.
         setManualMessageAttention(FAILED_MANUAL_MESSAGE_ATTENTION);
+        setContextStatus(conversationContextStatus(undefined));
+        setMessagesRefreshErrorIdentity((current) =>
+          current?.key === requestedScopeKey && current.revision === requestedScopeRevision
+            ? current
+            : { key: requestedScopeKey, revision: requestedScopeRevision },
+        );
         if (
           loadedScopeIdentityRef.current?.key !== requestedScopeKey
           || loadedScopeIdentityRef.current.revision !== requestedScopeRevision
@@ -443,6 +457,15 @@ export function ConversationThread({
   const currentMessages = scopeReady ? messages : [];
   const currentEvents = scopeReady ? events : [];
   const currentJobsMap = scopeReady ? jobsMap : {};
+  const currentContextStatus = scopeReady ? contextStatus : null;
+  const messagesRefreshFailed = scopeReady
+    && messagesRefreshErrorIdentity?.key === threadScopeKey
+    && messagesRefreshErrorIdentity.revision === threadScopeRevision;
+  const refreshWarning = conversationRefreshWarning({ stale: messagesRefreshFailed });
+  const auxiliaryContextWarning = currentContextStatus
+    ? conversationContextWarning(currentContextStatus)
+    : null;
+  const contextWarning = refreshWarning ?? auxiliaryContextWarning;
   const currentManualMessageAttention = scopeReady ? manualMessageAttention : null;
   const manualMessageAttentionView = currentManualMessageAttention?.state === "ready"
     ? manualMessageAttentionPresentation(currentManualMessageAttention.items)
@@ -1205,6 +1228,32 @@ export function ConversationThread({
       )}
 
       {/* 메시지 영역 */}
+      {contextWarning && messagesView !== "error" && (
+        <div
+          role={refreshWarning ? "alert" : "status"}
+          aria-live={refreshWarning ? "assertive" : "polite"}
+          aria-atomic="true"
+          className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-warning/35 bg-warning-soft px-4 py-2.5 text-warning-strong lg:px-5"
+        >
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            <AlertTriangle aria-hidden="true" size={17} className="mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[13px] font-extrabold">{contextWarning.title}</div>
+              <p className="mt-0.5 text-[12px] font-semibold leading-5 text-foreground">
+                {contextWarning.detail}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadMessages()}
+            disabled={loadingMsgs}
+            className="min-h-11 shrink-0 rounded-xl border border-warning/35 bg-card px-3 text-[12px] font-bold text-warning-strong outline-none transition-colors hover:bg-background disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {loadingMsgs ? "확인 중…" : "다시 확인"}
+          </button>
+        </div>
+      )}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
         {messagesView === "loading" && <div className="text-[13px] text-muted-foreground text-center py-8">대화 내역 불러오는 중…</div>}
         {messagesView === "error" && (
@@ -1293,10 +1342,10 @@ export function ConversationThread({
                   {currentManualMessageAttention.totalCount ?? manualMessageAttentionView.count}건
                 </span>
               </div>
-              <p className="mt-1 max-w-3xl text-[12px] font-semibold leading-5 text-gray-800">
+              <p className="mt-1 max-w-3xl text-[12px] font-semibold leading-5 text-foreground">
                 {manualMessageAttentionView.description}
               </p>
-              <p className="max-w-3xl text-[12px] font-semibold leading-5 text-gray-800">
+              <p className="max-w-3xl text-[12px] font-semibold leading-5 text-foreground">
                 이 지원자의 전체 공고 기준입니다. 시스템은 자동으로 재발송하지 않으니, 같은 내용을 새로 보내지 말고 대화 흐름을 먼저 확인해 주세요.
               </p>
               {oldestManualMessageAttentionAt && (
@@ -1310,7 +1359,7 @@ export function ConversationThread({
         </div>
       )}
 
-      {currentManualMessageAttention?.state === "error" && (
+      {currentManualMessageAttention?.state === "error" && !messagesRefreshFailed && (
         <div
           role="alert"
           aria-atomic="true"

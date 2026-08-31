@@ -8,6 +8,68 @@ export function conversationMessagesView(input: {
   return input.itemCount === 0 ? "empty" : "ready";
 }
 
+export interface ConversationContextStatus {
+  reasoning: "ready" | "error";
+  poolEvents: "ready" | "error";
+  jobLabels: "ready" | "error";
+}
+
+/** 보조 맥락 상태가 없거나 예상 형식이 아니면 정상으로 추정하지 않는다. */
+export function conversationContextStatus(input: unknown): ConversationContextStatus {
+  const value = typeof input === "object" && input !== null
+    ? input as Record<string, unknown>
+    : {};
+  return {
+    reasoning: value.reasoning === "ready" ? "ready" : "error",
+    poolEvents: value.pool_events === "ready" ? "ready" : "error",
+    jobLabels: value.job_labels === "ready" ? "ready" : "error",
+  };
+}
+
+export function conversationContextWarning(
+  input: ConversationContextStatus,
+): { title: string; detail: string } | null {
+  const reasoningFailed = input.reasoning === "error";
+  const poolEventsFailed = input.poolEvents === "error";
+  const jobLabelsFailed = input.jobLabels === "error";
+  if (!reasoningFailed && !poolEventsFailed && !jobLabelsFailed) return null;
+
+  if (!reasoningFailed && !poolEventsFailed && jobLabelsFailed) {
+    return {
+      title: "공고 라벨을 불러오지 못했어요",
+      detail: "대화 내용은 계속 볼 수 있지만, 공고 칩이 누락될 수 있으니 현재 화면만으로 판단하지 마세요.",
+    };
+  }
+
+  let title = reasoningFailed && poolEventsFailed
+    ? "AI 판단 근거와 재접촉 기록을 불러오지 못했어요"
+    : reasoningFailed
+      ? "AI 판단 근거를 불러오지 못했어요"
+      : "재접촉 기록을 불러오지 못했어요";
+  if (jobLabelsFailed) {
+    title = reasoningFailed && poolEventsFailed
+      ? "AI 판단 근거와 재접촉 기록, 공고 라벨을 불러오지 못했어요"
+      : reasoningFailed
+        ? "AI 판단 근거와 공고 라벨을 불러오지 못했어요"
+        : "재접촉 기록과 공고 라벨을 불러오지 못했어요";
+  }
+  return {
+    title,
+    detail: "대화 내용은 계속 볼 수 있지만, 누락된 맥락이 있으니 현재 화면만으로 판단하지 마세요.",
+  };
+}
+
+/** 마지막 성공 스냅샷은 유지하되 현재 대화가 최신이라는 오해를 막는다. */
+export function conversationRefreshWarning(
+  input: { stale: boolean },
+): { title: string; detail: string } | null {
+  if (!input.stale) return null;
+  return {
+    title: "대화 내역을 최신 상태로 갱신하지 못했어요",
+    detail: "아래 내용과 발송 확인 상태는 마지막으로 불러온 기록입니다. 새 답장이 누락될 수 있으니 같은 문자를 다시 보내지 말고 다시 확인해 주세요.",
+  };
+}
+
 export type ConversationJobContext =
   | { state: "loading" }
   | { state: "error" }

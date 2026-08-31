@@ -16,6 +16,11 @@ import {
   validateManualMessageIdempotencyKey,
 } from "@/lib/manual-message-send";
 import { retryManualMessagePostprocess } from "@/lib/manual-message-recovery";
+import {
+  fetchPhoneMessageIdentityIndex,
+  type PhoneMessageIdentityIndex,
+} from "@/lib/admin/phone-message-identity";
+import { normalizePhone } from "@/lib/ongmanaging";
 
 export async function POST(req: NextRequest) {
   let deliveryAtFailure: "not_attempted" | "sent" = "not_attempted";
@@ -287,6 +292,35 @@ export async function POST(req: NextRequest) {
               : recipientEligibility.reason === "lookup_failed"
                 ? "지원자 연락처를 확인하지 못해 문자를 보내지 않았습니다. 잠시 뒤 다시 시도해주세요."
                 : "지원자 정보를 확인할 수 없어 문자를 보내지 않았습니다. 대화를 새로고침해주세요.",
+          };
+        }
+        let phoneIdentityIndex: PhoneMessageIdentityIndex;
+        try {
+          phoneIdentityIndex = await fetchPhoneMessageIdentityIndex(supabase);
+        } catch (identityError) {
+          console.error("[manual message phone identity validation error]", identityError);
+          return {
+            success: false as const,
+            failureKind: "declared" as const,
+            failureCode: "recipient_unavailable" as const,
+            error: "전화번호별 문자 수신 상태를 확인하지 못해 문자를 보내지 않았습니다. 잠시 뒤 다시 시도해주세요.",
+          };
+        }
+        const phoneIdentity = phoneIdentityIndex.byPhone.get(normalizePhone(targetPhone));
+        if (!phoneIdentity) {
+          return {
+            success: false as const,
+            failureKind: "declared" as const,
+            failureCode: "recipient_unavailable" as const,
+            error: "지원자 연락처의 문자 수신 상태를 확인하지 못해 보내지 않았습니다. 잠시 뒤 다시 시도해주세요.",
+          };
+        }
+        if (phoneIdentity.hasActiveSmsOptOut) {
+          return {
+            success: false as const,
+            failureKind: "declared" as const,
+            failureCode: "marketing_consent_required" as const,
+            error: "문자 수신거부 상태라 보내지 않았습니다. 필요하면 유선 연락을 이용해주세요.",
           };
         }
         if (!draftId && jobId !== null) {

@@ -58,6 +58,19 @@ import {
 } from "@/lib/admin/pipeline-navigation";
 import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 import { CURRENT_JOB_WAITLIST_SMS_BODY } from "@/lib/sms-consent-policy";
+import {
+  fetchActiveSignalBatches,
+  fetchSummarySignalBatches,
+  pipelineApplicantActionsBlocked,
+  pipelineActiveCheckBlocksSend,
+  pipelineNeedsSummary,
+  pipelineShowsNormalEmptyState,
+  pipelineSummaryRowStatus,
+  pipelineSignalsBlockResults,
+  type PipelineActiveCheck,
+  type PipelinePoolEventSummary,
+  type PipelineSignalLookupState,
+} from "@/lib/admin/pipeline-signal-batches";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
 function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number; bytes: number } {
@@ -110,12 +123,8 @@ type VehicleClass = "확정" | "도보" | "미확인";
 
 // pool_events 반응 요약 — /api/admin/pool-events/summary 응답의 지원자별 항목.
 // 반응 배지(열람/관심/답장)·'마지막 연락 N일 전' 배지·'반응 있음' 필터·'반응 최신순' 정렬의 근거.
-interface PoolEventSummary {
-  last_ping_at: string | null;
-  last_link_view_at: string | null;
-  last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
-  last_reply_at: string | null;
-}
+type PoolEventSummary = PipelinePoolEventSummary;
+type SignalLookupState = PipelineSignalLookupState;
 
 // 반응 시각 max — '반응 최신순' 정렬 키. 반응(열람/관심/답장) 없으면 null(정렬 시 뒤).
 function lastReactionAt(s: PoolEventSummary | undefined): number | null {
@@ -512,6 +521,7 @@ export function Pipeline() {
   // 칸반 컬럼은 드래그로 낙관적 변경되는 로컬 상태라, SWR 데이터가 갱신될 때만 동기화한다.
   const { data: applicantsData, error: applicantsError, mutate: mutateApplicants } = useSWR<{ data?: Applicant[] }>("/api/admin/applicants", { refreshInterval: 60_000 }); // 살아있는 갱신
   const applicantsState = remoteCollectionState({ items: applicantsData?.data, error: applicantsError });
+  const applicantActionsBlocked = pipelineApplicantActionsBlocked(applicantsState);
   const loading = applicantsState === "loading" && rawApplicants.length === 0;
   const hasApplicantSnapshot = applicantsData?.data !== undefined || rawApplicants.length > 0;
   const listSurfaceReady = pipelineListSurfaceReady(view, applicantsState, hasApplicantSnapshot);
@@ -561,6 +571,11 @@ export function Pipeline() {
   }, [applicantsData]);
   // 변경 후 목록 갱신(낙관적 변경 롤백/상세 패널 변경 반영)은 SWR 재검증으로 처리.
   const loadApplicants = () => { void mutateApplicants(); };
+  const requireFreshApplicants = () => {
+    if (!applicantActionsBlocked) return true;
+    toast.error("최신 지원자 목록을 다시 불러온 뒤 작업해 주세요.");
+    return false;
+  };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
   const { data: jobsData, mutate: mutateJobs } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null; distance_basis?: string | null }> }>("/api/admin/jobs?status=active");
@@ -661,8 +676,13 @@ export function Pipeline() {
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
   const [activeSet, setActiveSet] = useState<Set<number>>(new Set());
+  const [activeSignalState, setActiveSignalState] = useState<SignalLookupState>("idle");
+  const [activeSignalKey, setActiveSignalKey] = useState<string | null>(null);
   // 지원자별 pool_events 반응 요약 — 반응 배지·'마지막 연락 N일 전' 배지·반응 필터/정렬의 근거 (디바운스 배치 조회)
   const [summaryById, setSummaryById] = useState<Record<number, PoolEventSummary>>({});
+  const [summarySignalState, setSummarySignalState] = useState<SignalLookupState>("idle");
+  const [summarySignalKey, setSummarySignalKey] = useState<string | null>(null);
+  const [signalLookupVersion, setSignalLookupVersion] = useState(0);
   // 벌크 발송 성공 후 요약 재조회 트리거 — 방금 나간 ping_sent가 '14일 제외' 필터에 바로 반영되게.
   const [summaryVersion, setSummaryVersion] = useState(0);
   // '공고 관심자 선택'으로 고른 공고 id — 대기 안내 프리셋 발송 시 purpose='waitlist'와 함께 서버로 전달.
@@ -776,29 +796,53 @@ export function Pipeline() {
 
   // 옹매니징 '현재 활동 중' 대조 — 벌크 문자 모달이 열릴 때 선택 인원을 1회 조회.
   // configured=false면 미연동(대조 불가, 발송은 허용), active[]는 현재 활동 중인 인원.
-  type ActiveCheck = { configured: boolean; checked: number; active: { id: number; name: string; reasons: string[] }[]; unchecked?: number };
+  type ActiveCheck = PipelineActiveCheck;
   const [activeCheck, setActiveCheck] = useState<ActiveCheck | null>(null);
-  const [activeCheckLoading, setActiveCheckLoading] = useState(false);
+  const [activeCheckState, setActiveCheckState] = useState<SignalLookupState>("idle");
+  const [activeCheckCoveredIds, setActiveCheckCoveredIds] = useState<Set<string>>(new Set());
+  const [activeCheckVersion, setActiveCheckVersion] = useState(0);
+  const activeCheckLoading = activeCheckState === "loading";
+  const activeCheckBlocking = pipelineActiveCheckBlocksSend({
+    modalOpen: bulkMsgModalOpen,
+    selectedIds: [...selectedRows],
+    state: activeCheckState,
+    coveredIds: activeCheckCoveredIds,
+  });
   useEffect(() => {
-    if (!bulkMsgModalOpen) { setActiveCheck(null); return; }
-    const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n)).slice(0, 500);
-    if (ids.length === 0) { setActiveCheck(null); return; }
+    if (!bulkMsgModalOpen) {
+      setActiveCheck(null);
+      setActiveCheckState("idle");
+      setActiveCheckCoveredIds(new Set());
+      return;
+    }
+    const ids = Array.from(selectedRows);
+    if (ids.length === 0) {
+      setActiveCheck(null);
+      setActiveCheckState("idle");
+      setActiveCheckCoveredIds(new Set());
+      return;
+    }
     let cancelled = false;
-    setActiveCheckLoading(true);
+    setActiveCheckState("loading");
     setActiveCheck(null);
-    fetch("/api/admin/ongmanaging/active-check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ applicantIds: ids }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((json: ActiveCheck) => { if (!cancelled) setActiveCheck(json); })
-      .catch(() => { /* 대조 실패는 발송을 막지 않음 — 서버가 최종 가드 */ })
-      .finally(() => { if (!cancelled) setActiveCheckLoading(false); });
+    setActiveCheckCoveredIds(new Set());
+    fetchActiveSignalBatches(ids)
+      .then((json) => {
+        if (cancelled) return;
+        setActiveCheck(json);
+        setActiveCheckCoveredIds(new Set(ids));
+        setActiveCheckState("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActiveCheck(null);
+        setActiveCheckCoveredIds(new Set());
+        setActiveCheckState("error");
+      });
     return () => { cancelled = true; };
     // 모달이 열리는 시점의 선택 인원으로 1회만 조회 (열린 뒤 선택 변경은 없음)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bulkMsgModalOpen]);
+  }, [bulkMsgModalOpen, activeCheckVersion]);
 
   // 활동 중 인원 전원을 발송 대상(selectedRows)에서 제거 — 자동 아님, 매니저 판단으로 실행.
   const excludeActiveFromSelection = () => {
@@ -918,6 +962,7 @@ export function Pipeline() {
   if (query.trim()) conditionLabels.push(`검색 "${query.trim()}"`);
 
   const assignExposure = async () => {
+    if (!requireFreshApplicants()) return;
     const applicantIds = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     const jobIds = Array.from(exposureJobIds);
     if (applicantIds.length === 0 || jobIds.length === 0 || exposureSaving) return;
@@ -1072,6 +1117,7 @@ export function Pipeline() {
   };
 
   const addSelectedToJob = async (jobId: number) => {
+    if (!requireFreshApplicants()) return;
     const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     if (ids.length === 0) return;
     setAddingJobId(jobId);
@@ -1179,8 +1225,9 @@ export function Pipeline() {
   // (옹매니징 외부 DB 호출이라 필요 없을 때는 돌리지 않는다. 단계별 현황 뷰는 별도 API라 제외.)
   // 활동중 조회(옹매니징 외부 DB)는 '이미 일하는 분 제외'를 켠 때만 — 행 배지가 없어져 다른 소비처가 없다.
   const needsActiveCheck = view !== "funnel" && excludeActive;
-  // 반응 요약은 리스트 배지(반응 신호)에 상시 쓰고, 다른 뷰에서는 관련 조건을 켰을 때만.
-  const needsSummary = view === "list" || (view !== "funnel" && (excludeRecentPing || reactionOnly));
+  // 반응 요약은 리스트 배지에 상시 쓰고, 다른 뷰에서도 관련 조건·정렬이 유지되면 계속 조회한다.
+  // 조회 필요 조건과 결과 차단 조건이 달라지면 summary가 idle인데 결과가 영구 0명이 될 수 있다.
+  const needsSummary = pipelineNeedsSummary({ view, excludeRecentPing, reactionOnly, sortMode });
 
   const q = query.trim().toLowerCase();
   const sixMonthsAgo = Date.now() - SIX_MONTHS_MS;
@@ -1210,12 +1257,32 @@ export function Pipeline() {
     if (optOutOnly && !c.smsOptOutAt) return false;
     return true;
   });
-  // active-check·last-ping 입력 — 활동중/재컨택 제외 필터와 무관한 기준 집합으로 잡아 순환(무한 재조회)을 방지.
-  const visibleIdsKey = baseFilteredCards.slice(0, 500).map((c) => c.id).join(",");
+  // active-check·반응 요약 입력 — 활동중/재컨택 제외 필터와 무관한 기준 집합 전원을 잡아
+  // 순환(무한 재조회)을 피한다. API 500명 상한은 조회 helper가 여러 요청으로 나눈다.
+  const visibleIdsKey = baseFilteredCards.map((c) => c.id).join(",");
   // 활동중 제외 + 최근 14일 재컨택 제외 + 반응 있음을 순차 적용 — 셋 다 조회 결과(activeSet/summaryById)에
   // 의존하므로 baseFilteredCards 이후 단계여야 조회 입력(visibleIdsKey) 순환이 없다.
+  // 필요한 조회가 아직 완전하지 않으면 0명으로 막는다. 일부 배치만 성공한 값을 정상 필터 결과로
+  // 보여주면 뒤쪽 인원이 발송 대상으로 섞일 수 있기 때문이다.
+  const activeSignalsComplete = activeSignalState === "ready" && activeSignalKey === visibleIdsKey;
+  const summarySignalsComplete = summarySignalState === "ready" && summarySignalKey === visibleIdsKey;
+  const summaryRowLookupStatus = pipelineSummaryRowStatus({
+    state: summarySignalState,
+    currentKey: summarySignalKey,
+    expectedKey: visibleIdsKey,
+  });
+  const signalDependentResultsBlocked = pipelineSignalsBlockResults({
+    excludeActive,
+    summaryDependent: excludeRecentPing || reactionOnly || sortMode === "reaction_recent",
+    activeComplete: activeSignalsComplete,
+    summaryComplete: summarySignalsComplete,
+  });
+  const signalLookupHasError =
+    (needsActiveCheck && activeSignalState === "error") ||
+    (needsSummary && summarySignalState === "error");
+  const signalLookupPending = signalDependentResultsBlocked && !signalLookupHasError;
   const pingCutoff = Date.now() - FOURTEEN_DAYS_MS;
-  const postFilteredCards = baseFilteredCards.filter((c) => {
+  const postFilteredCards = signalDependentResultsBlocked ? [] : baseFilteredCards.filter((c) => {
     if (excludeActive && activeSet.has(Number(c.id))) return false;
     const summary = summaryById[Number(c.id)];
     if (excludeRecentPing) {
@@ -1420,54 +1487,85 @@ export function Pipeline() {
       ).length;
   const modalExcludedCount = selectedRows.size - modalRecipientCount;
 
-  // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
-  // 발송 모달 로직과 별개(중복 조회 허용). 실패는 조용히 무시(서버가 최종 가드).
+  // 리스트 레벨 옹매니징 활동중 조회 — 기준 집합 전원을 API 상한(500명) 단위로 나눠 병렬 조회.
+  // 발송 모달 로직과 별개(중복 조회 허용). 어느 배치든 실패하면 기존/부분 결과를 폐기한다.
   useEffect(() => {
-    if (!needsActiveCheck) { setActiveSet(new Set()); return; }
+    if (!needsActiveCheck) {
+      setActiveSet(new Set());
+      setActiveSignalState("idle");
+      setActiveSignalKey(null);
+      return;
+    }
     const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
-    if (ids.length === 0) { setActiveSet(new Set()); return; }
+    if (ids.length === 0) {
+      setActiveSet(new Set());
+      setActiveSignalState("ready");
+      setActiveSignalKey(visibleIdsKey);
+      return;
+    }
     let cancelled = false;
+    setActiveSet(new Set());
+    setActiveSignalState("loading");
+    setActiveSignalKey(null);
     const timer = setTimeout(() => {
-      fetch("/api/admin/ongmanaging/active-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicantIds: ids }),
-      })
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
+      fetchActiveSignalBatches(ids)
         .then((json: ActiveCheck) => {
           if (cancelled) return;
           if (json.configured) setActiveSet(new Set(json.active.map((a) => a.id)));
           else setActiveSet(new Set());
+          setActiveSignalState("ready");
+          setActiveSignalKey(visibleIdsKey);
         })
-        .catch(() => { /* 대조 실패는 표시/발송을 막지 않음 */ });
+        .catch(() => {
+          if (cancelled) return;
+          setActiveSet(new Set());
+          setActiveSignalState("error");
+          setActiveSignalKey(null);
+        });
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, needsActiveCheck]);
+  }, [visibleIdsKey, needsActiveCheck, signalLookupVersion]);
 
-  // 리스트 레벨 pool_events 반응 요약 조회 — 기준 집합 id(최대 500)로 디바운스(~400ms) 1회 조회.
+  // 리스트 레벨 pool_events 반응 요약 조회 — 기준 집합 전원을 API 상한(500명) 단위로 나눠 병렬 조회.
   // '마지막 연락 N일 전'·반응 배지와 '최근 14일 다시 연락 제외'·'반응 있음' 필터, '반응 최신순' 정렬의 근거.
-  // 실패는 조용히 무시(배지/필터는 부가정보). summaryVersion은 벌크 발송 직후 재조회 트리거.
+  // 어느 배치든 실패하면 기존/부분 결과를 폐기한다. summaryVersion은 벌크 발송 직후 재조회 트리거.
   useEffect(() => {
-    if (!needsSummary) return;
+    if (!needsSummary) {
+      setSummaryById({});
+      setSummarySignalState("idle");
+      setSummarySignalKey(null);
+      return;
+    }
     const ids = visibleIdsKey ? visibleIdsKey.split(",").map(Number).filter((n) => Number.isFinite(n)) : [];
-    if (ids.length === 0) { setSummaryById({}); return; }
+    if (ids.length === 0) {
+      setSummaryById({});
+      setSummarySignalState("ready");
+      setSummarySignalKey(visibleIdsKey);
+      return;
+    }
     let cancelled = false;
+    setSummaryById({});
+    setSummarySignalState("loading");
+    setSummarySignalKey(null);
     const timer = setTimeout(() => {
-      fetch("/api/admin/pool-events/summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicantIds: ids }),
-      })
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((json: { summaryById?: Record<number, PoolEventSummary> }) => {
-          if (!cancelled) setSummaryById(json.summaryById ?? {});
+      fetchSummarySignalBatches(ids)
+        .then((summary) => {
+          if (cancelled) return;
+          setSummaryById(summary);
+          setSummarySignalState("ready");
+          setSummarySignalKey(visibleIdsKey);
         })
-        .catch(() => { /* 배지/제외는 부가정보 — 실패해도 리스트는 보여준다 */ });
+        .catch(() => {
+          if (cancelled) return;
+          setSummaryById({});
+          setSummarySignalState("error");
+          setSummarySignalKey(null);
+        })
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, needsSummary, summaryVersion]);
+  }, [visibleIdsKey, needsSummary, summaryVersion, signalLookupVersion]);
 
   // 지도 뷰용 — 리스트와 **같은 조건 결과**를 쓴다(예전엔 지점 스코프·검색만 걸려, 조건을 걸어도 지도는 그대로였다).
   const mapApplicants: MapApplicant[] = rawApplicants
@@ -1506,6 +1604,7 @@ export function Pipeline() {
   const handleColumnExport = (column: ColumnData) => exportCardsCsv(column.cards, () => column.title, column.title);
 
   const handleColumnBulkMessage = (column: ColumnData) => {
+    if (!requireFreshApplicants()) return;
     if (column.cards.length === 0) return toast.error("이 단계에 지원자가 없어요.");
     setSelectedRows(new Set(column.cards.map((c) => c.id)));
     setWaitlistJobId(null);
@@ -1514,6 +1613,7 @@ export function Pipeline() {
   };
 
   const moveCard = (cardId: string, sourceColId: string, destColId: string) => {
+    if (!requireFreshApplicants()) return;
     if (sourceColId === destColId) return;
 
     // 확정은 드래그로 처리하지 않는다 — status만 바뀌면 공고 미결속·AI 미정지의 '반쪽 확정'이 된다.
@@ -1573,6 +1673,7 @@ export function Pipeline() {
   };
 
   const toggleRow = (id: string) => {
+    if (!requireFreshApplicants()) return;
     const newSet = new Set(selectedRows);
     const removing = newSet.has(id);
     if (removing) newSet.delete(id);
@@ -1584,6 +1685,7 @@ export function Pipeline() {
   };
 
   const toggleAll = () => {
+    if (!requireFreshApplicants()) return;
     if (selectedRows.size === filteredCards.length) setSelectedRows(new Set());
     else setSelectedRows(new Set(filteredCards.map(c => c.id)));
     setWaitlistJobId(null);
@@ -1591,6 +1693,7 @@ export function Pipeline() {
 
   // 현재 정렬 순서 상단에서 '발송 가능한' N명만 골라 선택 — 재컨택 배치 발송 진입 단축.
   const selectTopN = () => {
+    if (!requireFreshApplicants()) return;
     const n = Math.max(1, Math.floor(topN) || 0);
     const ids = filteredCards.filter((c) => sendableOf(c).sendable).slice(0, n).map((c) => c.id);
     if (ids.length === 0) return toast.error("발송 가능한 인원이 없어요.");
@@ -1602,6 +1705,7 @@ export function Pipeline() {
   // 공고 관심자 원클릭 선택 — 해당 공고에 interest_click을 남긴 지원자 중 확정인력을 제외하고
   // 현재 화면(filteredCards)에 있는 인원만 선택. '관심 대기 안내' 사후관리 발송의 진입 동선.
   const selectJobInterested = async (jobId: number) => {
+    if (!requireFreshApplicants()) return;
     if (interestPickLoading) return;
     setInterestPickLoading(true);
     try {
@@ -1633,6 +1737,7 @@ export function Pipeline() {
   };
 
   const handleBulkStageChange = async (stageName: string) => {
+    if (!requireFreshApplicants()) return;
     setBulkStageModalOpen(false);
     const status = BULK_LABEL_TO_STATUS[stageName];
     const ids = Array.from(selectedRows);
@@ -1681,7 +1786,11 @@ export function Pipeline() {
   };
 
   const handleBulkSend = async () => {
+    if (!requireFreshApplicants()) return;
     if (bulkSending) return;
+    if (activeCheckBlocking) {
+      return toast.error("선택 인원의 활동 여부를 모두 확인한 뒤 발송할 수 있어요.");
+    }
     const text = bulkMsgBody.trim();
     if (!text) return toast.error("메시지 내용을 입력해주세요.");
 
@@ -2042,12 +2151,6 @@ export function Pipeline() {
                     onCheckedChange={() => setRecentAppliedOnly((v) => !v)} title="원지원일이 6개월 이내인 분만 봅니다 — 지원일을 모르는 분은 함께 빠집니다." className="text-[13px] font-semibold text-gray-700">
                   6개월 안에 지원한 분만
                 </DropdownMenuCheckboxItem>
-                {/* 앞 500명만 조회하는 상한 — '이미 일하는 분'·'캠페인 문자' 판정이 그 뒤 인원에는 걸리지 않는다는 사실을 밝힌다. */}
-                {baseFilteredCards.length > 500 && (
-                  <div className="px-2 py-1.5 text-[12px] leading-relaxed text-warning-strong bg-yellow-50">
-                    지금 조건에 {baseFilteredCards.length}명이라 <b>앞 500명만 확인</b>해요. 뒤쪽 인원에는 위 두 조건이 걸리지 않으니, 진행 단계·지역으로 먼저 좁혀 주세요.
-                  </div>
-                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -2230,6 +2333,27 @@ export function Pipeline() {
           )}
         </AnimatePresence>
 
+        {signalLookupPending && view !== "funnel" && (
+          <div role="status" aria-live="polite" className="flex shrink-0 items-center gap-2 border-b border-warning/35 bg-warning-soft px-5 py-2 text-[12px] font-bold text-warning-strong">
+            <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> 조건에 맞는 전원의 활동·반응 이력을 확인하고 있어요. 확인이 끝날 때까지 대상 선택은 잠시 비워둡니다.
+          </div>
+        )}
+        {signalLookupHasError && (
+          <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-error/30 bg-error-soft px-5 py-2 text-[12px] font-semibold text-error-strong">
+            <span>
+              활동·반응 이력을 끝까지 확인하지 못했어요. 일부 결과는 사용하지 않았으며, 해당 이력에 의존하는 제외 조건·정렬은 안전하게 비워뒀어요.
+            </span>
+            <Button
+              variant="ghost"
+              size="chip"
+              onClick={() => setSignalLookupVersion((version) => version + 1)}
+              className="min-h-11 border border-error/30 bg-card text-error-strong hover:bg-error-soft"
+            >
+              <RefreshCw size={14} /> 다시 시도
+            </Button>
+          </div>
+        )}
+
         {/* Main Content Area */}
         <div className="flex-1 overflow-hidden relative">
           {loading && view !== "funnel" && <PipelineSkeleton />}
@@ -2237,8 +2361,12 @@ export function Pipeline() {
             <div className="absolute inset-x-8 top-6 z-30 rounded-2xl border border-error/30 bg-error-soft p-4 shadow-sm" role="alert">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-[14px] font-bold text-error-strong">지원자 목록을 불러오지 못했어요</div>
-                  <div className="mt-0.5 text-[12px] text-error-strong">빈 인재풀이 아닙니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.</div>
+                  <div className="text-[14px] font-bold text-error-strong">지원자 목록을 최신 상태로 확인하지 못했어요</div>
+                  <div className="mt-0.5 text-[12px] text-error-strong">
+                    {hasApplicantSnapshot
+                      ? "아래 기존 목록은 읽기 전용입니다. 다시 불러오기 전에는 상태 변경·후보 등록·노출 지정·문자 발송을 할 수 없어요."
+                      : "빈 인재풀이 아닙니다. 연결 상태를 확인한 뒤 다시 시도해 주세요."}
+                  </div>
                 </div>
                 <Button variant="ghost" size="chip" onClick={() => void mutateApplicants()} className="border border-error/30 bg-card text-error-strong hover:bg-error-soft">
                   <RefreshCw size={14} /> 다시 시도
@@ -2251,7 +2379,7 @@ export function Pipeline() {
               {/* 컬럼은 드래그 낙관 갱신용 원본(columns)을 유지하고, 표시만 조건 결과로 좁힌다 —
                   예전엔 조건·검색이 칸반에 전혀 걸리지 않아 검색창을 쳐도 아무 반응이 없었다. */}
               {kanbanColumns.map((column, idx) => (
-                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => openApplicant(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} />
+                <KanbanColumn key={column.id} column={column} moveCard={moveCard} onCardClick={(id) => openApplicant(Number(id))} columnIndex={idx} onExport={handleColumnExport} onBulkMessage={handleColumnBulkMessage} actionsBlocked={applicantActionsBlocked} />
               ))}
             </div>
           )}
@@ -2292,18 +2420,18 @@ export function Pipeline() {
                         );
                         setBulkFailures([]);
                         setBulkMsgModalOpen(true);
-                      }} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
+                      }} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 문자를 보낼 수 있어요" : undefined} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="text-[12px] font-bold text-white/55">공고 연결</span>
-                      <Button variant="ghost" onClick={() => setJobPickerOpen(true)} title="이 분들을 공고의 지원자(후보)로 등록해 AI 스크리닝 대상에 넣습니다 — 문자는 나가지 않아요" className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Briefcase size={16} /> 후보로 등록</Button>
-                      <Button variant="ghost" onClick={() => setExposurePickerOpen(true)} title="이 분들에게만 공고가 보이도록 지정합니다(맞춤 공고 링크 노출 명단). 전체 노출 공고는 '지정 노출'로 전환까지 한 번에 — 후보 등록·문자 발송과 별개예요." className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Eye size={16} /> 노출 명단 지정</Button>
+                      <Button variant="ghost" onClick={() => setJobPickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 후보로 등록할 수 있어요" : "이 분들을 공고의 지원자(후보)로 등록해 AI 스크리닝 대상에 넣습니다 — 문자는 나가지 않아요"} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Briefcase size={16} /> 후보로 등록</Button>
+                      <Button variant="ghost" onClick={() => setExposurePickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 노출 명단을 지정할 수 있어요" : "이 분들에게만 공고가 보이도록 지정합니다(맞춤 공고 링크 노출 명단). 전체 노출 공고는 '지정 노출'로 전환까지 한 번에 — 후보 등록·문자 발송과 별개예요."} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Eye size={16} /> 노출 명단 지정</Button>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="text-[12px] font-bold text-white/55">기타</span>
-                      <Button variant="ghost" onClick={() => setBulkStageModalOpen(true)} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Columns size={16} /> 진행 단계 변경</Button>
+                      <Button variant="ghost" onClick={() => setBulkStageModalOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 진행 단계를 바꿀 수 있어요" : undefined} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Columns size={16} /> 진행 단계 변경</Button>
                     </div>
 
                     <div className="flex-1" />
@@ -2368,7 +2496,7 @@ export function Pipeline() {
                 <select
                   value=""
                   onChange={(e) => { if (e.target.value) void selectJobInterested(Number(e.target.value)); }}
-                  disabled={interestPickLoading || activeJobs.length === 0}
+                  disabled={applicantActionsBlocked || interestPickLoading || activeJobs.length === 0}
                   aria-label="공고 관심자 선택"
                   className="h-8 w-[170px] shrink-0 rounded-lg border border-border-strong bg-white px-2 pr-7 text-[12px] font-semibold text-gray-700 outline-none cursor-pointer focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   title="공고를 고르면 그 공고에 '관심 있음'을 누른 인원(확정인력 제외)이 선택됩니다"
@@ -2384,11 +2512,12 @@ export function Pipeline() {
                     min={1}
                     value={topN}
                     onChange={(e) => setTopN(Number(e.target.value))}
+                    disabled={applicantActionsBlocked}
                     aria-label="선택할 상위 인원 수"
                     className="h-8 w-[48px] rounded-lg border border-border-strong bg-card px-2 text-[12px] font-semibold text-gray-700 outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                     title="선택할 상위 인원 수"
                   />
-                  <Button variant="secondary" size="toolbar" className="shadow-none" onClick={selectTopN} title={`현재 정렬 기준 상위 ${Math.max(1, Math.floor(topN) || 0)}명 선택`}><Check size={14} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명</Button>
+                  <Button variant="secondary" size="toolbar" className="shadow-none" onClick={selectTopN} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 선택할 수 있어요" : `현재 정렬 기준 상위 ${Math.max(1, Math.floor(topN) || 0)}명 선택`}><Check size={14} /> 상위 {Math.max(1, Math.floor(topN) || 0)}명</Button>
                 </div>
                 </div>
               </div>
@@ -2412,7 +2541,7 @@ export function Pipeline() {
                   <thead>
                     <tr className="bg-background border-b border-border-strong">
                       <th className="w-[44px] px-3 py-3">
-                        <button aria-checked={selectedRows.size === filteredCards.length && filteredCards.length > 0} role="checkbox" onClick={toggleAll} aria-label={selectedRows.size === filteredCards.length && filteredCards.length > 0 ? "전체 선택 해제" : "표시된 지원자 전체 선택"} aria-pressed={selectedRows.size === filteredCards.length && filteredCards.length > 0} className={`after:absolute after:-inset-3 after:content-[''] relative w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${selectedRows.size === filteredCards.length && filteredCards.length > 0 ? 'bg-brand-yellow border-brand-yellow' : 'border-gray-300 bg-white'}`}>
+                        <button aria-checked={selectedRows.size === filteredCards.length && filteredCards.length > 0} role="checkbox" onClick={toggleAll} disabled={applicantActionsBlocked} aria-label={selectedRows.size === filteredCards.length && filteredCards.length > 0 ? "전체 선택 해제" : "표시된 지원자 전체 선택"} aria-pressed={selectedRows.size === filteredCards.length && filteredCards.length > 0} className={`after:absolute after:-inset-3 after:content-[''] relative w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${selectedRows.size === filteredCards.length && filteredCards.length > 0 ? 'bg-brand-yellow border-brand-yellow' : 'border-gray-300 bg-white'}`}>
                           {selectedRows.size === filteredCards.length && filteredCards.length > 0 && <Check size={14} strokeWidth={4} className="text-foreground" />}
                         </button>
                       </th>
@@ -2431,7 +2560,12 @@ export function Pipeline() {
                       const appliedLabel = appliedMonth(c.appliedAtIso);
                       const summary = summaryById[Number(c.id)] as PoolEventSummary | undefined;
                       const availabilityMeta = pipelineAvailabilityMeta(c.availability, c.availabilityUpdatedAt);
-                      const contactMeta = pipelineContactMeta(summary?.last_reply_at ?? null, summary?.last_ping_at ?? null);
+                      const contactMeta = summaryRowLookupStatus === "ready"
+                        ? pipelineContactMeta(summary?.last_reply_at ?? null, summary?.last_ping_at ?? null)
+                        : {
+                            primary: summaryRowLookupStatus === "error" ? "반응 이력 확인 실패" : "반응 이력 확인 중",
+                            campaign: null,
+                          };
                       // 반응 배지 — 과밀 방지: 가장 강한 신호 1개만 (관심 > 답장 > 열람).
                       let reactionBadge: { label: string; cls: string; title: string } | null = null;
                       if (summary?.last_interest) {
@@ -2480,7 +2614,7 @@ export function Pipeline() {
                           className={`border-b border-muted last:border-0 transition-colors hover:bg-background cursor-pointer group ${isSelected ? 'bg-yellow-50 hover:bg-yellow-50' : 'bg-card'} ${Number(c.id) === selectedApplicantId ? 'shadow-[inset_3px_0_0_0_var(--foreground)]' : ''}`}
                         >
                           <td className="px-3 py-3">
-                            <button aria-label={`${c.name} 선택`} aria-checked={isSelected} role="checkbox" onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }} className={`after:absolute after:-inset-3 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-brand-yellow border-brand-yellow' : 'border-gray-300 bg-white'}`}>
+                            <button aria-label={`${c.name} 선택`} aria-checked={isSelected} role="checkbox" onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }} disabled={applicantActionsBlocked} className={`after:absolute after:-inset-3 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isSelected ? 'bg-brand-yellow border-brand-yellow' : 'border-gray-300 bg-white'}`}>
                               {isSelected && <Check size={14} strokeWidth={4} className="text-foreground" />}
                             </button>
                           </td>
@@ -2641,7 +2775,7 @@ export function Pipeline() {
                           </td>}
                           {tableLayout.showCoreColumns && <td className="px-3 py-3">
                             <div className="flex flex-col gap-0.5">
-                              <span className={`text-[13px] font-semibold ${contactMeta.primary.endsWith("없음") ? "text-muted-foreground" : "text-gray-700"}`}>
+                              <span className={`text-[13px] font-semibold ${summaryRowLookupStatus === "error" ? "text-error-strong" : summaryRowLookupStatus === "checking" || contactMeta.primary.endsWith("없음") ? "text-muted-foreground" : "text-gray-700"}`}>
                                 {contactMeta.primary}
                               </span>
                               {(contactMeta.campaign || appliedLabel) && (
@@ -2678,7 +2812,11 @@ export function Pipeline() {
                         </td>
                       </tr>
                     )}
-                    {(applicantsState === "empty" || applicantsState === "ready") && filteredCards.length === 0 && (
+                    {pipelineShowsNormalEmptyState({
+                      applicantsState,
+                      resultCount: filteredCards.length,
+                      signalsBlocked: signalDependentResultsBlocked,
+                    }) && (
                       <tr>
                         <td colSpan={tableLayout.columnCount} className="px-4 py-12 text-center text-[13px] text-muted-foreground">
                           {query
@@ -2710,12 +2848,18 @@ export function Pipeline() {
               <button aria-label="공고 선택 창 닫기" onClick={() => setJobPickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-muted-foreground"><X size={18} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {applicantActionsBlocked && (
+                <PipelineActionsBlockedNotice
+                  state={applicantsState === "error" ? "error" : "loading"}
+                  onRetry={() => void mutateApplicants()}
+                />
+              )}
               {activeJobs.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">진행 중인 공고가 없어요</div>}
               {activeJobs.map((j) => (
                 <button
                   key={j.id}
                   onClick={() => addSelectedToJob(j.id)}
-                  disabled={addingJobId !== null}
+                  disabled={applicantActionsBlocked || addingJobId !== null}
                   className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-center justify-between gap-3 p-3.5 rounded-2xl border border-border-strong hover:border-brand-yellow hover:bg-yellow-50 disabled:opacity-50 transition-all"
                 >
                   <div className="min-w-0">
@@ -2752,6 +2896,14 @@ export function Pipeline() {
               </div>
               <button aria-label="노출 지정 창 닫기" onClick={() => setExposurePickerOpen(false)} className="after:absolute after:-inset-2 after:content-[''] relative outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-1.5 hover:bg-muted rounded-lg text-muted-foreground shrink-0"><X size={18} /></button>
             </div>
+            {applicantActionsBlocked && (
+              <div className="px-5 pt-3">
+                <PipelineActionsBlockedNotice
+                  state={applicantsState === "error" ? "error" : "loading"}
+                  onRetry={() => void mutateApplicants()}
+                />
+              </div>
+            )}
             <div className="px-6 py-3 border-b border-muted flex items-center gap-2">
               {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
                 <button aria-pressed={exposureMode === m}
@@ -2892,6 +3044,7 @@ export function Pipeline() {
                 <br />명단 확인·개별 제외는 공고 수정 → &lsquo;노출 대상 명단&rsquo;에서 할 수 있어요.
               </span>
               <Button variant="primary" size="chip" className="px-4 py-2 text-[13px] rounded-2xl" onClick={assignExposure} isLoading={exposureSaving} disabled={
+                      applicantActionsBlocked ||
                       exposureJobIds.size === 0 ||
                       // 규칙 2택을 고르지 않으면 진행 불가 — 기본값으로 조용히 정하지 않는다.
                       (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) ||
@@ -2956,7 +3109,7 @@ export function Pipeline() {
                title="일괄 상태 변경"
                className="max-w-[500px] sm:max-w-[500px]"
         >
-            <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center">
+            <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center shrink-0">
               <div>
                 <h2 className="text-[16px] font-bold text-foreground">일괄 상태(파이프라인) 변경</h2>
                 <div className="text-[13px] text-muted-foreground mt-0.5">선택된 {selectedRows.size}명의 지원자를 어떤 단계로 이동시킬까요?</div>
@@ -2966,6 +3119,14 @@ export function Pipeline() {
               </Button>
             </div>
             <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {applicantActionsBlocked && (
+                <div className="sm:col-span-2">
+                  <PipelineActionsBlockedNotice
+                    state={applicantsState === "error" ? "error" : "loading"}
+                    onRetry={() => void mutateApplicants()}
+                  />
+                </div>
+              )}
               {[
                 { id: "applied", label: "지원 접수 / 대기", desc: "스크리닝 전" },
                 { id: "screening", label: "AI 스크리닝 중", desc: "체크리스트 진행" },
@@ -2974,7 +3135,7 @@ export function Pipeline() {
                 // 상세 확정 모달로만 한다(일괄 원클릭 오확정·통계 오염 방지).
                 { id: "rejected", label: "부적합", desc: "인력풀 제외 · 전체 공고에서 빠짐" }
               ].map(stage => (
-                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} className="p-4 border border-border-strong rounded-2xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <button key={stage.id} onClick={() => handleBulkStageChange(stage.label)} disabled={applicantActionsBlocked} className="p-4 border border-border-strong rounded-2xl text-left hover:border-brand-yellow hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50">
                   <div className="text-[14px] font-bold text-foreground mb-1">{stage.label}</div>
                   <div className="text-[12px] text-muted-foreground">{stage.desc}</div>
                 </button>
@@ -2990,7 +3151,7 @@ export function Pipeline() {
                closeOnOutside={false}
                className="max-w-[600px] sm:max-w-[600px]"
         >
-            <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center">
+            <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center shrink-0">
               <div>
                 <h2 className="text-[16px] font-bold text-foreground">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
                 <div className="text-[13px] text-muted-foreground mt-0.5">실제 발송 대상 {modalRecipientCount}명에게 일괄 발송됩니다.</div>
@@ -2999,7 +3160,13 @@ export function Pipeline() {
                 <X aria-hidden="true" size={20} />
               </Button>
             </div>
-            <div className="p-6 space-y-5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-5">
+              {applicantActionsBlocked && (
+                <PipelineActionsBlockedNotice
+                  state={applicantsState === "error" ? "error" : "loading"}
+                  onRetry={() => void mutateApplicants()}
+                />
+              )}
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
               {modalExcludedCount > 0 && (
                 <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-warning/35 text-[13px] font-bold text-warning-strong">
@@ -3039,9 +3206,27 @@ export function Pipeline() {
               )}
 
               {/* 옹매니징 현재 활동 중 대조 */}
+              {activeCheckBlocking && activeCheckState === "idle" && (
+                <div id="pipeline-bulk-active-check-status" role="status" aria-live="polite" className="sr-only">
+                  선택 인원의 활동 여부 확인을 준비하고 있어요.
+                </div>
+              )}
               {activeCheckLoading && (
-                <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-background border border-border-strong text-[13px] font-bold text-muted-foreground">
-                  <Loader2 size={14} className="animate-spin" /> 현재 활동 중인 인원을 확인하고 있어요...
+                <div id="pipeline-bulk-active-check-status" role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-background border border-border-strong text-[13px] font-bold text-muted-foreground">
+                  <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> 선택한 {selectedRows.size}명 전원의 활동 여부를 확인하고 있어요...
+                </div>
+              )}
+              {activeCheckState === "error" && (
+                <div id="pipeline-bulk-active-check-status" role="alert" aria-busy="false" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-error/30 bg-error-soft px-4 py-3 text-[13px] font-bold text-error-strong">
+                  <span>활동 여부를 끝까지 확인하지 못해 발송을 잠시 막았어요. 일부 배치 결과는 사용하지 않았습니다.</span>
+                  <Button
+                    variant="ghost"
+                    size="chip"
+                    onClick={() => setActiveCheckVersion((version) => version + 1)}
+                    className="min-h-11 border border-error/30 bg-card text-error-strong hover:bg-error-soft"
+                  >
+                    <RefreshCw size={14} /> 다시 확인
+                  </Button>
                 </div>
               )}
               {!activeCheckLoading && activeCheck && !activeCheck.configured && (
@@ -3085,19 +3270,13 @@ export function Pipeline() {
                   </p>
                 </div>
               )}
-              {/* 미확인(TMS 동기 전) / 확인 상한 초과 — '대조했고 0명'이라는 거짓 안심 방지(NULL≠비활동) */}
+              {/* 미확인(TMS 동기 전) — '대조했고 0명'이라는 거짓 안심 방지(NULL≠비활동) */}
               {!activeCheckLoading && activeCheck && activeCheck.configured && (() => {
                 const unchecked = activeCheck.unchecked ?? 0;
-                const truncated = selectedRows.size > 500 ? selectedRows.size - 500 : 0;
-                if (unchecked === 0 && truncated === 0) return null;
+                if (unchecked === 0) return null;
                 return (
                   <div className="px-4 py-2.5 rounded-2xl bg-error-soft border border-error/30 text-[12px] font-semibold text-error-strong leading-relaxed space-y-1">
-                    {unchecked > 0 && (
-                      <div>· 활동 미확인 {unchecked}명 — TMS 동기화 전이라 아직 대조되지 않았어요. 실제 활동 중일 수 있으니 발송 전 확인하세요.</div>
-                    )}
-                    {truncated > 0 && (
-                      <div>· 선택 {selectedRows.size}명 중 앞 500명만 활동 확인했어요. 나머지 {truncated}명은 미확인이에요.</div>
-                    )}
+                    <div>· 활동 미확인 {unchecked}명 — TMS 동기화 전이라 아직 대조되지 않았어요. 실제 활동 중일 수 있으니 발송 전 확인하세요.</div>
                   </div>
                 );
               })()}
@@ -3132,12 +3311,46 @@ export function Pipeline() {
                 <p className="mt-1.5 text-[12px] text-muted-foreground">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
             </div>
-            <div className="p-5 border-t border-border-strong bg-white flex justify-between items-center">
+            <div className="border-t border-border-strong bg-white shrink-0">
+              {/* 발송 실패 명단은 버튼 행 안에 넣지 않는다. 600px 모달에서 가로 폭을 밀어
+                  액션이 잘리는 것을 막고, 명단만 별도로 스크롤한다. */}
+              {bulkFailures.length > 0 && (
+                <div className="border-b border-error/20 bg-error-soft p-4">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <div className="text-[13px] font-bold text-error-strong">
+                      못 보낸 {bulkFailures.length}명 — 사유를 확인하고 필요하면 다시 보내세요
+                    </div>
+                    <Button
+                      size="chip"
+                      variant="secondary"
+                      className="min-h-11 shrink-0 rounded-xl border-error/30 px-3 text-[12px] text-error-strong hover:bg-error-soft"
+                      onClick={() => {
+                        // 실패한 사람만 선택으로 되돌린다 — 서버 10분 중복 가드가 이미 나간 인원의 재발송을 막는다.
+                        setSelectedRows(new Set(bulkFailures.map((f) => String(f.applicantId)).filter((v) => v !== "0")));
+                        setBulkFailures([]);
+                        toast.info(`실패한 ${bulkFailures.length}명만 선택했어요 — 문구를 확인하고 다시 발송하세요.`);
+                      }}
+                    >
+                      이 {bulkFailures.length}명만 다시 보내기
+                    </Button>
+                  </div>
+                  <div className="flex max-h-[120px] flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
+                    {bulkFailures.map((f, i) => (
+                      <div key={`${f.phone}-${i}`} className="flex items-center gap-2 text-[12px] text-error-strong">
+                        <span className="shrink-0 font-bold">{f.name}</span>
+                        <span className="shrink-0 text-muted-foreground">{f.phone}</span>
+                        <span className="truncate">{f.error}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
               {/* 비용은 대표 샘플(이름 3자·실제 길이 더미 링크) 치환 후 기준 × 실제 수신자 수 */}
               {(() => {
                 const est = estimateSmsCost(fillSampleVars(bulkMsgBody));
                 return (
-                  <div className="flex flex-col gap-0.5">
+                  <div className="min-w-0 flex flex-col gap-0.5">
                     <span className="text-[13px] font-bold text-muted-foreground">예상 비용: {est.sms_type} · 약 {(est.cost_krw * modalRecipientCount).toLocaleString()}원 (1인 {est.cost_krw}원 × {modalRecipientCount}명)</span>
                     {Math.abs(est.bytes - 90) <= 10 && (
                       <span className="text-[12px] font-semibold text-warning-strong">문자 길이가 단문 한도(90바이트)에 걸쳐 있어요 — 수신자 이름 길이에 따라 장문(LMS) 요금으로 나갈 수 있어요.</span>
@@ -3145,43 +3358,19 @@ export function Pipeline() {
                   </div>
                 );
               })()}
-              <div className="flex gap-2">
+              <div className="flex shrink-0 justify-end gap-2">
                 <Button variant="secondary" size="lg" onClick={() => setBulkMsgModalOpen(false)}>취소</Button>
-                {/* **발송 실패 명단** — 창을 닫기 전까지 남는다. 사유가 사람마다 다르므로 그대로 보여준다. */}
-                {bulkFailures.length > 0 && (
-                  <div className="w-full mb-3 rounded-2xl border border-error/30 bg-error-soft p-3">
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="text-[13px] font-bold text-error-strong">
-                        못 보낸 {bulkFailures.length}명 — 사유를 확인하고 필요하면 다시 보내세요
-                      </div>
-                      <Button
-                        size="chip"
-                        variant="secondary"
-                        className="shrink-0 px-3 py-1.5 text-[12px] rounded-lg border-error/30 text-error-strong hover:bg-error-soft"
-                        onClick={() => {
-                          // 실패한 사람만 선택으로 되돌린다 — 서버 10분 중복 가드가 이미 나간 인원의 재발송을 막는다.
-                          setSelectedRows(new Set(bulkFailures.map((f) => String(f.applicantId)).filter((v) => v !== "0")));
-                          setBulkFailures([]);
-                          toast.info(`실패한 ${bulkFailures.length}명만 선택했어요 — 문구를 확인하고 다시 발송하세요.`);
-                        }}
-                      >
-                        이 {bulkFailures.length}명만 다시 보내기
-                      </Button>
-                    </div>
-                    <div className="max-h-[140px] overflow-y-auto flex flex-col gap-0.5 [&>*]:shrink-0">
-                      {bulkFailures.map((f, i) => (
-                        <div key={`${f.phone}-${i}`} className="text-[12px] text-error-strong flex items-center gap-2">
-                          <span className="font-bold shrink-0">{f.name}</span>
-                          <span className="text-muted-foreground shrink-0">{f.phone}</span>
-                          <span className="truncate">{f.error}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <Button variant="primary" size="lg" onClick={handleBulkSend} isLoading={bulkSending} disabled={waitlistContextMissing}>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={handleBulkSend}
+                  isLoading={bulkSending}
+                  disabled={applicantActionsBlocked || waitlistContextMissing || activeCheckBlocking}
+                  aria-describedby={activeCheckBlocking ? "pipeline-bulk-active-check-status" : undefined}
+                >
                   {!bulkSending && <Mail size={16} />} {bulkSending ? "발송 중..." : "캠페인 발송"}
                 </Button>
+              </div>
               </div>
             </div>
         </Modal>
@@ -3370,6 +3559,30 @@ function PipelineSkeleton() {
   );
 }
 
+function PipelineActionsBlockedNotice({
+  state,
+  onRetry,
+}: {
+  state: "loading" | "error";
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[12px] font-semibold text-error-strong"
+      role={state === "error" ? "alert" : "status"}
+    >
+      {state === "error"
+        ? "최신 지원자 목록 확인에 실패해 이 작업을 잠갔어요."
+        : "최신 지원자 목록을 확인하는 동안 이 작업을 잠갔어요."}
+      {state === "error" && (
+        <button type="button" onClick={onRetry} className="ml-1 rounded font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          다시 시도
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Kanban Column Component
 interface KanbanColumnProps {
   column: ColumnData;
@@ -3378,6 +3591,7 @@ interface KanbanColumnProps {
   columnIndex: number;
   onExport: (column: ColumnData) => void;
   onBulkMessage: (column: ColumnData) => void;
+  actionsBlocked: boolean;
 }
 
 /** 적용 중 조건 알약 — 조건 바가 "무엇으로 좁혔나"를 숫자로만 말하던 것을 문장으로. */
@@ -3397,17 +3611,18 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
   );
 }
 
-function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, onBulkMessage }: KanbanColumnProps) {
+function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, onBulkMessage, actionsBlocked }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ITEM_TYPE,
+    canDrop: () => !actionsBlocked,
     drop: (item: { id: string; sourceColId: string }) => {
       moveCard(item.id, item.sourceColId, column.id);
     },
     collect: (monitor) => ({
-      isOver: !!monitor.isOver()
+      isOver: !!monitor.isOver() && monitor.canDrop()
     })
-  }));
+  }), [actionsBlocked, column.id, moveCard]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: columnIndex * 0.05 }} ref={drop as any} className={`flex flex-col w-[320px] shrink-0 bg-muted rounded-lg p-4 transition-colors duration-200 border border-border-strong shadow-sm ${isOver ? 'ring-2 ring-brand-yellow bg-yellow-50/50' : ''}`}>
@@ -3439,7 +3654,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
                 </button>
                 <button
                   onClick={() => { setMenuOpen(false); onBulkMessage(column); }}
-                  disabled={column.count === 0}
+                  disabled={actionsBlocked || column.count === 0}
                   className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-2.5 px-3.5 py-2 text-[13px] font-bold text-gray-700 hover:bg-background text-left disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Mail size={15} className="text-muted-foreground" /> 이 단계 일괄 문자
@@ -3452,7 +3667,7 @@ function KanbanColumn({ column, moveCard, onCardClick, columnIndex, onExport, on
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2 scrollbar-custom">
         {column.cards.map((card, idx) => (
-          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card.id)} cardIndex={idx} />
+          <KanbanCard key={card.id} card={card} columnId={column.id} onClick={() => onCardClick(card.id)} cardIndex={idx} actionsBlocked={actionsBlocked} />
         ))}
         {column.cards.length === 0 && (
           <div className="h-[120px] bg-white/40 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center text-muted-foreground gap-2">
@@ -3470,17 +3685,19 @@ interface KanbanCardProps {
   columnId: string;
   onClick: () => void;
   cardIndex: number;
+  actionsBlocked: boolean;
 }
 
-function KanbanCard({ card, columnId, onClick, cardIndex }: KanbanCardProps) {
+function KanbanCard({ card, columnId, onClick, cardIndex, actionsBlocked }: KanbanCardProps) {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: ITEM_TYPE,
     item: { id: card.id, sourceColId: columnId },
+    canDrag: !actionsBlocked,
     collect: (monitor) => ({ isDragging: !!monitor.isDragging() })
-  }));
+  }), [actionsBlocked, card.id, columnId]);
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-card border border-border-strong rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-brand-yellow hover:shadow-md transition-all ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
+    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, delay: Math.min(cardIndex * 0.05, 0.5) + 0.1 }} ref={drag as any} onClick={onClick} className={`bg-card border border-border-strong rounded-2xl p-4 hover:border-brand-yellow hover:shadow-md transition-all ${actionsBlocked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${isDragging ? 'opacity-50 ring-2 ring-brand-yellow' : 'shadow-sm'}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-[14px] font-bold text-foreground">{card.name} <span className="text-[12px] text-muted-foreground font-medium ml-1">{card.age}세</span></div>
         <div className="text-[12px] font-bold px-2 py-0.5 rounded-full bg-muted text-gray-700">{card.channel}</div>

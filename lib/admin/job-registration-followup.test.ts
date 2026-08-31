@@ -34,6 +34,31 @@ test("a successful registration exposes a durable follow-up while announcement t
   );
 });
 
+test("an external-only registration starts with an explicit non-applicable announcement state", () => {
+  assert.deepEqual(
+    beginJobRegistrationFollowup<Announcement, DuplicateSource>({
+      jobId: 45,
+      title: "외부 채널 전용 공고",
+      note: null,
+      duplicateSource,
+      announcement: {
+        status: "empty",
+        description: "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
+      },
+    }),
+    {
+      jobId: 45,
+      title: "외부 채널 전용 공고",
+      note: null,
+      duplicateSource,
+      announcement: {
+        status: "empty",
+        description: "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
+      },
+    },
+  );
+});
+
 test("a late announcement lookup cannot revive a dismissed or newer registration follow-up", () => {
   const current = beginJobRegistrationFollowup<Announcement, DuplicateSource>({
     jobId: 43,
@@ -78,6 +103,22 @@ test("announcement lookup cannot keep the core registration request pending", ()
 
   assert.match(registrationSource, /void fetchAnnounceTargets\(newJobId\)/);
   assert.doesNotMatch(registrationSource, /await fetchAnnounceTargets\(newJobId\)/);
+});
+
+test("external-only registration never opens an announcement lookup whose pull link cannot show the job", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const registrationStart = jobsSource.indexOf("const handleRegisterJob = async () => {");
+  const registrationEnd = jobsSource.indexOf("const q = query.trim()", registrationStart);
+  const registrationSource = jobsSource.slice(registrationStart, registrationEnd);
+
+  assert.match(registrationSource, /newJobRow\?\.recruitMode === "external"[\s\S]*외부 채널 모집 전용/);
+  assert.match(
+    registrationSource,
+    /newJobId !== null && !sosSnapshot\.id && newJobRow\?\.recruitMode !== "external"/,
+  );
 });
 
 test("same-conditions completion action reuses the successful POST snapshot without another GET", () => {

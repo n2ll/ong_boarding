@@ -11,6 +11,10 @@ import { loadManualMessageAttention } from "@/lib/admin/manual-message-attention
 import { requiredRowsQueryState } from "@/lib/admin/required-rows-query-state";
 import { applicationBranchName, applicationUsesLegacyBmartFlow } from "@/lib/application-branch";
 import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
+import {
+  fetchCompleteApplicantCandidateRows,
+  fetchCompleteApplicantRows,
+} from "@/lib/admin/applicant-list";
 
 export const dynamic = "force-dynamic";
 
@@ -183,20 +187,24 @@ export async function GET(req: NextRequest) {
     ? loadManualMessageAttention(supabase)
     : null;
 
-  let q = supabase
-    .from("applicants")
-    .select(
-      rollupScope ? ROLLUP_COLUMNS : dashboardScope ? DASHBOARD_COLUMNS : liveScope ? LIVE_COLUMNS : LIST_COLUMNS
-    )
-    .order("created_at", { ascending: false });
-
-  if (source) q = q.eq("source", source);
-
-  // LIST_COLUMNS는 런타임 문자열이라 select 타입 추론이 안 되므로 결과 타입을 명시한다.
-  const { data, error } = await q.returns<({ id: number } & Record<string, unknown>)[]>();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  let data;
+  try {
+    data = await fetchCompleteApplicantRows(supabase, {
+      columns: rollupScope
+        ? ROLLUP_COLUMNS
+        : dashboardScope
+          ? DASHBOARD_COLUMNS
+          : liveScope
+            ? LIVE_COLUMNS
+            : LIST_COLUMNS,
+      source,
+    });
+  } catch (error) {
+    console.error("[applicants] list query failed", error);
+    return NextResponse.json(
+      { error: "지원자 목록을 불러오지 못했습니다." },
+      { status: 500 },
+    );
   }
 
   // 각 applicant의 latest job_candidates.agent_stage를 함께 내려준다.
@@ -215,26 +223,33 @@ export async function GET(req: NextRequest) {
 
     // 아래 세 조회는 서로 의존하지 않는다(모두 위에서 얻은 ids/jobIds만 필요) —
     // 순차로 await하면 Supabase 왕복 지연이 그대로 더해져 목록이 1초 가까이 걸렸다.
-    const [jcRes, linkRes, jobRes] = await Promise.all([
-      supabase
-        .from("job_candidates")
-        .select("id, applicant_id, agent_stage, created_at, updated_at, jobs:job_id ( title, client:clients ( client_type ) )")
-        .in("applicant_id", ids)
-        .order("created_at", { ascending: false }),
-      // dashboard 스코프는 job_links를 아무도 안 읽는다 — 별도 페이징 조회 1개를 건너뛴다.
-      dashboardScope
-        ? Promise.resolve({ links: new Map<number, never[]>(), error: null })
-        : gatherLiveJobLinks(supabase, ids),
-      jobIds.length > 0
-        ? supabase.from("jobs").select("id, title, client:clients ( client_type )").in("id", jobIds)
-        : Promise.resolve({ data: [] as { id: number; title: string; client: unknown }[], error: null }),
-    ]);
+    let jcRes;
+    let linkRes;
+    let jobRes;
+    try {
+      [jcRes, linkRes, jobRes] = await Promise.all([
+        fetchCompleteApplicantCandidateRows(supabase, ids),
+        // dashboard 스코프는 job_links를 아무도 안 읽는다 — 별도 페이징 조회 1개를 건너뛴다.
+        dashboardScope
+          ? Promise.resolve({ links: new Map<number, never[]>(), error: null })
+          : gatherLiveJobLinks(supabase, ids),
+        jobIds.length > 0
+          ? supabase.from("jobs").select("id, title, client:clients ( client_type )").in("id", jobIds)
+          : Promise.resolve({ data: [] as { id: number; title: string; client: unknown }[], error: null }),
+      ]);
+    } catch (error) {
+      console.error("[applicants] enrichment query failed", error);
+      return NextResponse.json(
+        { error: "지원자 정보를 불러오지 못했습니다." },
+        { status: 500 },
+      );
+    }
 
-    let candidateRows = jcRes.data ?? [];
+    let candidateRows = jcRes;
     let jobRows = jobRes.data ?? [];
     if (dashboardScope) {
       const queryState = requiredRowsQueryState({
-        jobCandidates: jcRes,
+        jobCandidates: { data: jcRes, error: null },
         jobs: jobRes,
       });
       if (!queryState.ok) {
@@ -280,17 +295,14 @@ export async function GET(req: NextRequest) {
     // 배지에 쓰는 집합은 응대 화면 탭·상세 포커스와 **같은 함수**여야 해서 여기서 따로 계산한다
     // (목록에 3건이라 적혀 있으면 열었을 때 탭도 3개 — lib/candidate-links.ts).
     const { links, error: linkErr } = linkRes;
-    if (linkErr && liveScope) {
+    if (linkErr) {
       console.error("[applicants] job_links 조회 실패", linkErr);
-      // 실시간 응대에서는 이 값을 []로 축약하면 실제 공고 0건과 조회 실패를 구분할 수 없고,
-      // 매니저 문자가 job_id 없이 저장될 수 있다. 목록 전체를 재시도 상태로 올려 fail-closed한다.
+      // job_links를 읽는 기본 파이프라인·실시간 응대 모두 []로 축약하면 실제 공고 0건과
+      // 조회 실패를 구분할 수 없다. 목록 전체를 재시도 상태로 올려 fail-closed한다.
       return NextResponse.json(
         { error: "공고 연결 정보를 확인하지 못했어요." },
         { status: 503 },
       );
-    }
-    if (linkErr) {
-      console.error("[applicants] job_links 조회 실패", linkErr);
     }
     if (!dashboardScope) {
       withStage = withStage.map((a) => ({ ...a, job_links: links.get(a.id) ?? [] }));

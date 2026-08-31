@@ -37,6 +37,7 @@ import {
   isExplicitSmsOptOutText,
   shouldApplyExplicitSmsOptOut,
 } from "../sms-consent-policy";
+import { fetchPhoneMessageIdentityIndex } from "../admin/phone-message-identity";
 import type {
   AgentState,
   ApplicantContext,
@@ -529,24 +530,45 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   }
   const effectiveMarketingConsent = (() => {
     const patch = applicantPatchPersisted ? result.applicant_patch : undefined;
-    const consent = patch && "marketing_consent" in patch
+    return patch && "marketing_consent" in patch
       ? patch.marketing_consent === true
       : applicant.marketing_consent === true;
-    const optOut = patch && "sms_opt_out_at" in patch
-      ? typeof patch.sms_opt_out_at === "string" && patch.sms_opt_out_at.length > 0
-      : Boolean(applicant.sms_opt_out_at);
-    return consent && !optOut;
   })();
-  const marketingSafetyHit = Boolean(
-    result.reply_text
-    && hasFutureJobPromotion(result.reply_text)
-    && !effectiveMarketingConsent,
+  const futureJobPromotion = Boolean(
+    result.reply_text && hasFutureJobPromotion(result.reply_text),
   );
+  let marketingSafetyReason: "consent_required" | "opt_out" | "identity_unavailable" | null = null;
+  if (futureJobPromotion) {
+    try {
+      const identityIndex = await fetchPhoneMessageIdentityIndex(supabase);
+      const normalizedPhone = identityIndex.phoneByApplicantId.get(applicant.id);
+      const phoneIdentity = normalizedPhone
+        ? identityIndex.byPhone.get(normalizedPhone)
+        : null;
+      if (!phoneIdentity) {
+        marketingSafetyReason = "identity_unavailable";
+      } else if (phoneIdentity.hasActiveSmsOptOut) {
+        marketingSafetyReason = "opt_out";
+      }
+    } catch (identityError) {
+      console.error("[router] phone identity lookup failed", identityError);
+      marketingSafetyReason = "identity_unavailable";
+    }
+    if (!marketingSafetyReason && !effectiveMarketingConsent) {
+      marketingSafetyReason = "consent_required";
+    }
+  }
+  const marketingSafetyHit = marketingSafetyReason !== null;
   if (marketingSafetyHit) {
-    console.warn("[router] 새 일자리 홍보·약속을 동의 없이 생성해 발송 보류");
+    const reason = marketingSafetyReason === "opt_out"
+      ? "전화번호 기준 문자 수신거부 상태라 새 일자리 자동 응답 발송 보류"
+      : marketingSafetyReason === "identity_unavailable"
+        ? "전화번호별 문자 수신 상태를 확인하지 못해 새 일자리 자동 응답 발송 보류"
+        : "새 일자리 문자 동의가 확인되지 않아 자동 응답 발송 보류";
+    console.warn(`[router] ${reason}`);
     result.transition = {
       kind: "pause",
-      reason: "새 일자리 문자 동의가 확인되지 않아 자동 응답 발송 보류",
+      reason,
       suggestedAction: "지원자의 새 일자리 문자 동의와 수신거부 상태를 확인한 뒤 매니저가 직접 응대하세요.",
     };
   }

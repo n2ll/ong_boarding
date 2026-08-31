@@ -32,9 +32,14 @@ import {
 } from "@/lib/admin/job-create-validation";
 import { hasJobCreateDraft, jobCreateDraftBody } from "@/lib/admin/job-create-draft";
 import {
+  jobCreateDraftStorageKey,
   loadJobCreateDraft,
+  removeLegacyJobCreateDraft,
   removeJobCreateDraft,
   saveJobCreateDraft,
+  type JobCreateDraftDeleteToken,
+  type JobCreateDraftIdentity,
+  type JobCreateDraftSnapshot,
   type JobCreateStoredDraft,
 } from "@/lib/admin/job-create-draft-storage";
 import { hasJobEditDraftChanges } from "@/lib/admin/job-edit-draft";
@@ -77,6 +82,16 @@ import {
   type JobListTab,
 } from "@/lib/admin/job-list-visibility";
 import { currentJobClosedSmsBody } from "@/lib/sms-consent-policy";
+import { fetchApplicantPool } from "@/lib/admin/applicant-pool-request";
+
+const JOB_CREATE_DRAFT_CONFLICT_TOAST_ID = "job-create-draft-conflict";
+
+function notifyJobCreateDraftConflict() {
+  toast.error("다른 탭에서 공고 초안이 변경됐어요.", {
+    id: JOB_CREATE_DRAFT_CONFLICT_TOAST_ID,
+    description: "상단의 저장 초안을 이어 쓰거나 삭제하기 전까지 현재 입력은 자동 저장되지 않아요.",
+  });
+}
 
 interface JobRow {
   id: string;
@@ -802,7 +817,13 @@ export function Jobs() {
   const [newJobSosRegion, setNewJobSosRegion] = useState<string | null>(null);
   const [newJobSosVehicle, setNewJobSosVehicle] = useState<string | null>(null);
   const [draftStorageReady, setDraftStorageReady] = useState(false);
-  const [recoverableNewJobDraft, setRecoverableNewJobDraft] = useState<JobCreateStoredDraft | null>(null);
+  const [recoverableNewJobDraft, setRecoverableNewJobDraft] = useState<JobCreateDraftSnapshot | null>(null);
+  const jobCreateDraftIdentityRef = useRef<JobCreateDraftIdentity | null>(null);
+  // 다른 탭이 저장한 snapshot은 '이어쓰기'를 명시적으로 누른 직후 한 번만 인계할 수 있다.
+  const jobCreateDraftClaimTokenRef = useRef<JobCreateDraftDeleteToken | null>(null);
+  // 현재 폼이 실제로 이어받거나 저장한 snapshot만 삭제한다. 다른 탭의 후속 revision은 보존한다.
+  const jobCreateDraftOwnedDeleteTokenRef = useRef<JobCreateDraftDeleteToken | null>(null);
+  const jobCreateDraftHasUnsavedRef = useRef(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditJobForm | null>(null);
   const [editBaseline, setEditBaseline] = useState<EditJobForm | null>(null);
@@ -884,6 +905,7 @@ export function Jobs() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pool, setPool] = useState<PoolApplicant[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
+  const [poolError, setPoolError] = useState<string | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
@@ -1071,26 +1093,30 @@ export function Jobs() {
     loadJobs();
   };
 
-  // 인재풀에서 후보 추가 — 피커 열기(전체 인재풀 로드)
-  const openPicker = async () => {
-    setPickerOpen(true);
+  const loadPool = async () => {
+    setPool([]);
     setPicked(new Set());
-    setPickerQuery("");
+    setPoolError(null);
     setPoolLoading(true);
     try {
-      const res = await fetch("/api/admin/applicants");
-      const json = await res.json();
-      setPool((json.data ?? []) as PoolApplicant[]);
-    } catch {
-      toast.error("인재풀을 불러오지 못했어요");
+      setPool(await fetchApplicantPool() as PoolApplicant[]);
+    } catch (error) {
+      setPoolError(error instanceof Error ? error.message : "인재풀을 불러오지 못했어요");
     } finally {
       setPoolLoading(false);
     }
   };
 
+  // 인재풀에서 후보 추가 — 피커 열기(전체 인재풀 로드)
+  const openPicker = () => {
+    setPickerOpen(true);
+    setPickerQuery("");
+    void loadPool();
+  };
+
   // 선택한 인재풀 후보를 공고에 추가 — '미발송' 상태로만 들어가고, 발송은 별도(컨택은 매니저 판단)
   const addFromPool = async () => {
-    if (!candPanel || picked.size === 0) return;
+    if (!candPanel || picked.size === 0 || poolLoading || poolError) return;
     setAdding(true);
     try {
       const res = await fetch(`/api/admin/jobs/${candPanel.jobId}/candidates`, {
@@ -1514,6 +1540,7 @@ export function Jobs() {
     hasCustomExposure: newJobExposure.exposure !== "all" || draftToRule(newJobExposure.rule) !== null,
     sosId: newJobSosId,
   });
+  jobCreateDraftHasUnsavedRef.current = hasUnsavedNewJobDraft;
 
   const storedNewJobDraft = useMemo<JobCreateStoredDraft>(() => ({
     prompt: aiPrompt,
@@ -1586,31 +1613,121 @@ export function Jobs() {
   ]);
 
   useEffect(() => {
-    setRecoverableNewJobDraft(loadJobCreateDraft(window.localStorage));
-    setDraftStorageReady(true);
+    let active = true;
+    let removeStorageListener: (() => void) | null = null;
+
+    const initializeJobDraftStorage = async () => {
+      try {
+        // v1은 계정 구분 없이 주소·급여를 저장했다. 복구하지 않고 인증 결과와 무관하게 명시 삭제한다.
+        removeLegacyJobCreateDraft(window.localStorage);
+        // 미들웨어가 검증하는 것과 같은 Supabase Auth 사용자 UUID만 초안 owner로 쓴다.
+        // 조회가 실패하면 공용 브라우저의 다른 계정 초안을 추측해 복구하지 않고 저장 기능만 fail-closed 한다.
+        const { getAuthBrowserClient } = await import("@/lib/supabase");
+        const { data: { user }, error } = await getAuthBrowserClient().auth.getUser();
+        if (!active || error || !user?.id || typeof window.crypto.randomUUID !== "function") return;
+
+        const identity: JobCreateDraftIdentity = {
+          ownerId: user.id,
+          // 페이지 인스턴스마다 새 writer를 부여한다. 새로고침·복제 탭은 기존 초안을 자동 인계하지 않고
+          // 반드시 화면의 '이어쓰기'를 눌러 해당 revision을 명시적으로 claim해야 한다.
+          writerId: window.crypto.randomUUID(),
+        };
+        jobCreateDraftIdentityRef.current = identity;
+        setRecoverableNewJobDraft(loadJobCreateDraft(window.localStorage, identity.ownerId));
+
+        const storageKey = jobCreateDraftStorageKey(identity.ownerId);
+        const handleStorage = (event: StorageEvent) => {
+          if (event.storageArea !== window.localStorage || event.key !== storageKey) return;
+          const snapshot = loadJobCreateDraft(window.localStorage, identity.ownerId);
+          if (!snapshot || snapshot.writerId !== identity.writerId) {
+            jobCreateDraftClaimTokenRef.current = null;
+            jobCreateDraftOwnedDeleteTokenRef.current = null;
+            setRecoverableNewJobDraft(snapshot);
+            if (snapshot && aiModalOpenRef.current && jobCreateDraftHasUnsavedRef.current) {
+              notifyJobCreateDraftConflict();
+            }
+          }
+        };
+        window.addEventListener("storage", handleStorage);
+        removeStorageListener = () => window.removeEventListener("storage", handleStorage);
+      } catch {
+        // 인증/브라우저 저장소 접근 실패는 공고 작성 자체를 막지 않는다.
+      } finally {
+        if (active) setDraftStorageReady(true);
+      }
+    };
+
+    void initializeJobDraftStorage();
+    return () => {
+      active = false;
+      removeStorageListener?.();
+    };
   }, []);
 
   useEffect(() => {
     if (!draftStorageReady || !aiModalOpen || !hasUnsavedNewJobDraft) return;
-    // 저장된 이전 초안이 있으면 새 입력·복제·SOS 프리필이 같은 단일 슬롯을 조용히 덮지 않는다.
-    // 매니저가 '삭제' 또는 '이어쓰기'를 명시적으로 고른 뒤에만 현재 폼이 저장 슬롯을 소유한다.
+    const identity = jobCreateDraftIdentityRef.current;
+    if (!identity) return;
+    // 저장된 다른 탭 초안이 있으면 새 입력·복제·SOS 프리필이 조용히 덮지 않는다.
+    // 매니저가 '삭제' 또는 '이어쓰기'를 명시적으로 고른 뒤에만 현재 탭이 저장 revision을 소유한다.
     if (recoverableNewJobDraft) return;
     const timer = window.setTimeout(() => {
-      if (saveJobCreateDraft(window.localStorage, storedNewJobDraft)) {
-        setRecoverableNewJobDraft(null);
+      const result = saveJobCreateDraft(
+        window.localStorage,
+        storedNewJobDraft,
+        identity,
+        jobCreateDraftClaimTokenRef.current,
+      );
+      if (result.status === "saved") {
+        jobCreateDraftOwnedDeleteTokenRef.current = {
+          writerId: identity.writerId,
+          generationId: result.generationId,
+          revision: result.revision,
+        };
+        jobCreateDraftClaimTokenRef.current = null;
+      } else if (result.status === "conflict") {
+        jobCreateDraftClaimTokenRef.current = null;
+        jobCreateDraftOwnedDeleteTokenRef.current = null;
+        setRecoverableNewJobDraft(result.snapshot);
+        notifyJobCreateDraftConflict();
       }
     }, 500);
     return () => window.clearTimeout(timer);
   }, [aiModalOpen, draftStorageReady, hasUnsavedNewJobDraft, recoverableNewJobDraft, storedNewJobDraft]);
 
-  const clearStoredNewJobDraft = () => {
-    removeJobCreateDraft(window.localStorage);
-    setRecoverableNewJobDraft(null);
+  const removeStoredNewJobDraft = (deleteToken: JobCreateDraftDeleteToken) => {
+    const identity = jobCreateDraftIdentityRef.current;
+    if (!identity) return null;
+    const result = removeJobCreateDraft(window.localStorage, identity.ownerId, deleteToken);
+    if (result.status === "conflict") {
+      setRecoverableNewJobDraft(result.snapshot);
+    } else if (result.status === "removed" || result.status === "missing") {
+      setRecoverableNewJobDraft(null);
+    }
+    return result;
   };
 
-  const restoreNewJobDraft = () => {
+  const clearStoredNewJobDraft = () => {
+    const deleteToken = jobCreateDraftOwnedDeleteTokenRef.current;
+    jobCreateDraftOwnedDeleteTokenRef.current = null;
+    jobCreateDraftClaimTokenRef.current = null;
+    if (!deleteToken) return null;
+    return removeStoredNewJobDraft(deleteToken);
+  };
+
+  const restoreNewJobDraft = async () => {
     if (!recoverableNewJobDraft || draftRestoreMetadataUnavailable) return;
-    const draft = recoverableNewJobDraft;
+    if (hasUnsavedNewJobDraft) {
+      const ok = await confirm({
+        title: "현재 내용을 저장 초안으로 교체할까요?",
+        description: "지금 입력한 내용은 사라지고, 다른 탭에서 마지막으로 저장한 초안을 불러옵니다.",
+        confirmText: "저장 초안으로 교체",
+        cancelText: "현재 내용 유지",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    const { draft, generationId, revision, writerId } = recoverableNewJobDraft;
     const restoredClientId = draft.clientId !== "" && newJobClients.some((client) => client.id === draft.clientId)
       ? draft.clientId
       : "";
@@ -1666,6 +1783,8 @@ export function Jobs() {
     setNewJobSosRegion(draft.sosRegion);
     setNewJobSosVehicle(draft.sosVehicle);
     setNewJobValidationIssue(null);
+    jobCreateDraftClaimTokenRef.current = { writerId, generationId, revision };
+    jobCreateDraftOwnedDeleteTokenRef.current = { writerId, generationId, revision };
     setRecoverableNewJobDraft(null);
     if (
       restoredClientId !== draft.clientId
@@ -1678,8 +1797,25 @@ export function Jobs() {
     }
   };
 
-  const discardRecoverableNewJobDraft = () => {
-    clearStoredNewJobDraft();
+  const discardRecoverableNewJobDraft = async () => {
+    if (!recoverableNewJobDraft) return;
+    const ok = await confirm({
+      title: "저장된 공고 초안을 삭제할까요?",
+      description: "다른 탭에서 저장된 초안을 영구 삭제합니다. 현재 화면에서 입력 중인 내용은 그대로 유지됩니다.",
+      confirmText: "저장 초안 삭제",
+      cancelText: "취소",
+      destructive: true,
+    });
+    if (!ok) return;
+    const result = removeStoredNewJobDraft(recoverableNewJobDraft);
+    if (!result || result.status === "unavailable") {
+      toast.error("저장된 공고 초안을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    if (result.status === "conflict") {
+      toast.error("다른 탭에서 초안이 변경됐어요. 최신 초안을 확인한 뒤 다시 삭제해 주세요.");
+      return;
+    }
     toast.success("저장된 공고 초안을 삭제했어요.");
   };
 
@@ -1693,9 +1829,14 @@ export function Jobs() {
     if (hasUnsavedNewJobDraft) {
       closeRegisterConfirmPendingRef.current = true;
       try {
+        const discardsOwnedStoredDraft = Boolean(
+          jobCreateDraftOwnedDeleteTokenRef.current && !recoverableNewJobDraft,
+        );
         const ok = await confirm({
           title: "작성 중인 공고를 버릴까요?",
-          description: "공고 초안은 이 브라우저에 24시간 보관돼요. 지금 '버리고 닫기'를 누르면 저장된 초안까지 삭제됩니다.",
+          description: discardsOwnedStoredDraft
+            ? "현재 폼과 이 탭이 마지막으로 저장한 초안을 삭제합니다. 다른 탭에서 더 새로 저장한 초안은 보존됩니다."
+            : "현재 폼만 버립니다. 다른 탭에서 저장한 초안은 삭제하지 않고 보존합니다.",
           confirmText: "버리고 닫기",
           cancelText: "계속 작성",
           destructive: true,
@@ -1947,10 +2088,30 @@ export function Jobs() {
     jobCreateAttemptRef.current = createAttempt;
     // POST 성공 뒤 응답이 유실되고 새로고침돼도 같은 UUID로 재조회·재생해야 중복 공고가 생기지 않는다.
     // ref 갱신은 렌더를 일으키지 않으므로 네트워크 호출 직전에 시도 정보가 든 스냅샷을 명시 저장한다.
-    saveJobCreateDraft(window.localStorage, {
-      ...storedNewJobDraft,
-      createAttempt,
-    });
+    const draftIdentity = jobCreateDraftIdentityRef.current;
+    if (draftIdentity) {
+      const saveResult = saveJobCreateDraft(
+        window.localStorage,
+        { ...storedNewJobDraft, createAttempt },
+        draftIdentity,
+        jobCreateDraftClaimTokenRef.current,
+      );
+      if (saveResult.status === "conflict") {
+        jobCreateDraftClaimTokenRef.current = null;
+        jobCreateDraftOwnedDeleteTokenRef.current = null;
+        setRecoverableNewJobDraft(saveResult.snapshot);
+        notifyJobCreateDraftConflict();
+        return;
+      }
+      if (saveResult.status === "saved") {
+        jobCreateDraftOwnedDeleteTokenRef.current = {
+          writerId: draftIdentity.writerId,
+          generationId: saveResult.generationId,
+          revision: saveResult.revision,
+        };
+        jobCreateDraftClaimTokenRef.current = null;
+      }
+    }
     setRegistering(true);
     try {
       const res = await fetch("/api/admin/jobs", {
@@ -1998,6 +2159,14 @@ export function Jobs() {
             title,
             note: geoNote ?? null,
             duplicateSource,
+            ...(newJobRow?.recruitMode === "external"
+              ? {
+                  announcement: {
+                    status: "empty" as const,
+                    description: "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
+                  },
+                }
+              : {}),
           }));
         }
       }
@@ -2010,7 +2179,7 @@ export function Jobs() {
 
       // 선택적 후속 조회는 완료 창의 상태만 갱신한다. 사용자가 완료 창을 닫거나 다음 공고를 시작했다면
       // settleJobRegistrationFollowup이 null/다른 jobId를 보존해 늦은 응답으로 창을 되살리지 않는다.
-      if (newJobId !== null && !sosSnapshot.id) {
+      if (newJobId !== null && !sosSnapshot.id && newJobRow?.recruitMode !== "external") {
         void fetchAnnounceTargets(newJobId)
           .then((at) => {
             if (at.targets.length > 0) {
@@ -3089,24 +3258,24 @@ export function Jobs() {
                 대시보드 히어로 352px 잘림과 같은 원인 — Dashboard.tsx:281 주석 참고. */}
             <div className={`min-w-0 flex-1 overflow-y-auto bg-background p-5 sm:p-7 flex flex-col gap-4 sm:gap-6 [&>*]:min-w-0 [&>*]:shrink-0 ${(isGenerating || channelDrafts) ? "xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start" : ""}`}>
               {recoverableNewJobDraft && (
-                <div role="status" className="flex flex-col gap-3 rounded-2xl border border-info/25 bg-info-soft px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between xl:col-span-2">
+                <div role="status" className="sticky top-0 z-20 flex flex-col gap-3 rounded-2xl border border-warning/35 bg-warning-soft px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between xl:col-span-2">
                   <div className="flex min-w-0 items-start gap-3">
-                    <span aria-hidden className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white/70 text-info-strong">
+                    <span aria-hidden className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white/70 text-warning-strong">
                       <RefreshCw size={16} />
                     </span>
                     <div>
                       <p className="text-[13px] font-extrabold text-foreground">24시간 안에 작성하던 공고 초안이 있어요</p>
                       <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
                         {hasUnsavedNewJobDraft
-                          ? "현재 내용과 별도로 보관 중이에요. 이어쓰기를 누르면 현재 폼을 저장된 초안으로 교체합니다."
+                          ? "현재 내용과 별도로 보관 중이에요. 해결하기 전까지 현재 입력은 자동 저장되지 않아요. 이어쓰기를 누르면 현재 폼을 저장된 초안으로 교체합니다."
                           : "이 브라우저에만 저장된 초안입니다. 이어 쓰거나 삭제할 수 있어요."}
                       </p>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2 pl-11 sm:pl-0">
-                    <Button variant="ghost" size="sm" onClick={discardRecoverableNewJobDraft}>삭제</Button>
+                    <Button variant="ghost" size="sm" onClick={discardRecoverableNewJobDraft}>저장 초안 삭제</Button>
                     <Button variant="primary" size="sm" onClick={restoreNewJobDraft} disabled={draftRestoreMetadataUnavailable}>
-                      {hasUnsavedNewJobDraft ? "이전 초안으로 교체" : "이어쓰기"}
+                      {hasUnsavedNewJobDraft ? "저장 초안으로 교체" : "이어쓰기"}
                     </Button>
                   </div>
                 </div>
@@ -4470,8 +4639,17 @@ export function Jobs() {
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
               {poolLoading && <div className="text-[13px] text-muted-foreground text-center py-10">불러오는 중…</div>}
-              {!poolLoading && pickablePool.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-10">추가할 수 있는 인재풀 후보가 없어요</div>}
-              {!poolLoading && pickablePool.map((p) => {
+              {!poolLoading && poolError && (
+                <div className="mx-1 rounded-2xl border border-error/30 bg-error-soft p-4 text-center" role="alert">
+                  <div className="text-[13px] font-bold text-error-strong">{poolError}</div>
+                  <div className="mt-1 text-[12px] text-error-strong">빈 인재풀이 아닙니다. 다시 불러온 뒤 후보를 선택해 주세요.</div>
+                  <Button variant="secondary" size="chip" className="mt-3 border-error/30 text-error-strong hover:bg-error-soft" onClick={() => void loadPool()}>
+                    <RefreshCw size={14} /> 다시 시도
+                  </Button>
+                </div>
+              )}
+              {!poolLoading && !poolError && pickablePool.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-10">추가할 수 있는 인재풀 후보가 없어요</div>}
+              {!poolLoading && !poolError && pickablePool.map((p) => {
                 const sel = picked.has(p.id);
                 const conflict = p.current_job_id != null && p.current_job_id !== candPanel?.jobId;
                 return (
@@ -4498,7 +4676,7 @@ export function Jobs() {
               <div className="text-[13px] font-bold text-gray-700">{picked.size}명 선택</div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="lg" disabled={adding} onClick={() => setPickerOpen(false)}>취소</Button>
-                <Button variant="primary" size="lg" onClick={addFromPool} disabled={picked.size === 0} isLoading={adding}>
+                <Button variant="primary" size="lg" onClick={addFromPool} disabled={picked.size === 0 || poolLoading || Boolean(poolError)} isLoading={adding}>
                 {!adding && <UserPlus size={16} />} 후보로 추가
               </Button>
               </div>

@@ -9,11 +9,19 @@ import {
   smsRecipientBlockReason,
 } from "@/lib/sms-consent-policy";
 import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
+import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+import {
+  fetchPhoneMessageIdentityIndex,
+  type PhoneMessageIdentityIndex,
+} from "@/lib/admin/phone-message-identity";
+import { normalizePhone } from "@/lib/ongmanaging";
 
 export const dynamic = "force-dynamic";
 // 한 요청이 최대 50명에게 순차 발송한다 — 기본 제한(10s/60s)으로는 중간에 끊겨
 // '일부만 나갔는데 실패로 보이는' 상태가 된다. 발송 루프에 맞춰 넉넉히 잡는다.
 export const maxDuration = 300;
+const APPLICANT_ID_BATCH_SIZE = 250;
 
 interface Recipient {
   phone: string;
@@ -63,6 +71,35 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient();
     const results: Array<{ phone: string; success: boolean; error?: string }> = [];
 
+    // 새 공고 안내 대상 모달을 오래 열어둔 사이 공고가 마감되거나 모집 채널이 바뀔 수 있다.
+    // 클라이언트가 산정한 대상을 신뢰하지 않고 실제 발송 직전에 pull(/p) 노출 가능 상태를 재확인한다.
+    if (purpose === "new_job") {
+      if (purposeJobId === null || !Number.isSafeInteger(purposeJobId) || purposeJobId <= 0) {
+        return NextResponse.json({ error: "안내할 공고를 확인할 수 없습니다." }, { status: 400 });
+      }
+      const { data: announcementJob, error: announcementJobError } = await supabase
+        .from("jobs")
+        .select("status, closes_at, recruit_mode")
+        .eq("id", purposeJobId)
+        .maybeSingle();
+      if (announcementJobError) {
+        console.error("[bulk-send] new-job lookup failed", announcementJobError);
+        return NextResponse.json({ error: "안내할 공고 상태를 확인하지 못했습니다." }, { status: 503 });
+      }
+      if (!announcementJob) {
+        return NextResponse.json({ error: "안내할 공고를 찾을 수 없습니다." }, { status: 404 });
+      }
+      if (announcementJob.recruit_mode !== "internal" && announcementJob.recruit_mode !== "both") {
+        return NextResponse.json(
+          { error: "인력풀에 노출되지 않는 공고는 안내할 수 없습니다." },
+          { status: 409 },
+        );
+      }
+      if (isJobEffectivelyClosed(announcementJob.status, announcementJob.closes_at)) {
+        return NextResponse.json({ error: "마감된 공고는 안내할 수 없습니다." }, { status: 409 });
+      }
+    }
+
     // 수신자별 치환 — #{이름}, #{맞춤링크}(무로그인 pull 페이지 /p/[token]).
     // 기존엔 치환 없이 원문 그대로 발송돼 '#{이름}님' 문자가 나갔다.
     // 지원자 정보는 치환 여부와 무관하게 항상 로드 — 수신거부(sms_opt_out_at) 가드용.
@@ -100,6 +137,50 @@ export async function POST(req: NextRequest) {
             status: (row.status as string | null) ?? null,
           });
         }
+      }
+    }
+    let phoneIdentityIndex: PhoneMessageIdentityIndex;
+    try {
+      phoneIdentityIndex = await fetchPhoneMessageIdentityIndex(supabase);
+    } catch (identityError) {
+      console.error("[bulk-send] phone identity lookup failed", identityError);
+      return NextResponse.json(
+        { error: "전화번호별 문자 수신 상태를 확인하지 못했습니다." },
+        { status: 503 },
+      );
+    }
+    const requestedPhones = new Set(
+      recipients.map((recipient) => normalizePhone(recipient.phone ?? "")).filter(Boolean),
+    );
+    const recipientIdentityApplicantIds = [...new Set([...requestedPhones].flatMap(
+      (phone) => phoneIdentityIndex.byPhone.get(phone)?.applicantIds ?? [],
+    ))];
+    const newJobCandidateApplicantIds = new Set<number>();
+    if (purpose === "new_job" && purposeJobId !== null) {
+      try {
+        for (let offset = 0; offset < recipientIdentityApplicantIds.length; offset += APPLICANT_ID_BATCH_SIZE) {
+          const batch = recipientIdentityApplicantIds.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
+          const candidateRows = await fetchAllPostgrestRows(async (from, to) => {
+            const result = await supabase
+              .from("job_candidates")
+              .select("id, applicant_id")
+              .eq("job_id", purposeJobId)
+              .in("applicant_id", batch)
+              .order("id", { ascending: true })
+              .range(from, to);
+            return {
+              data: result.data as Array<{ id: number; applicant_id: number }> | null,
+              error: result.error,
+            };
+          }, "현재 공고 후보");
+          for (const row of candidateRows) newJobCandidateApplicantIds.add(row.applicant_id);
+        }
+      } catch (candidateError) {
+        console.error("[bulk-send] new-job candidates lookup failed", candidateError);
+        return NextResponse.json(
+          { error: "현재 공고 후보를 확인하지 못했습니다." },
+          { status: 503 },
+        );
       }
     }
     // 현재 지원 건의 운영 안내는 목적 태그만 신뢰하지 않는다. 공고 후보 또는 해당 공고에
@@ -169,26 +250,46 @@ export async function POST(req: NextRequest) {
     }
     // 인력풀 제외자는 캠페인 발송 대상이 아니다 — 방어선(선택 UI가 걸러도 백엔드에서 재차 차단).
     const EXCLUDED_POOL_STATUS = new Set(["부적합", "이탈"]);
+    const NEW_JOB_EXCLUDED_STATUS = new Set(["부적합", "이탈", "확정인력"]);
 
     // 중복 발송 가드 — 최근 10분 내 캠페인(system-bulk) 발송된 지원자는 재발송 스킵.
     // LMS 도달 지연에 매니저가 "안 왔다"고 재클릭해 같은 사람에게 두 번 나가는 것을 막는다.
     const DEDUP_WINDOW_MIN = 10;
-    const recentlySent = new Set<number>();
+    const recentlySentPhones = new Set<string>();
     {
-      const ids = recipients
-        .map((r) => r.applicant_id)
-        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      const ids = recipientIdentityApplicantIds;
       if (ids.length > 0) {
         const since = new Date(Date.now() - DEDUP_WINDOW_MIN * 60 * 1000).toISOString();
-        const { data: recent } = await supabase
-          .from("messages")
-          .select("applicant_id")
-          .in("applicant_id", ids)
-          .eq("direction", "outbound")
-          .eq("sent_by", "system-bulk")
-          .gt("created_at", since);
-        for (const m of recent ?? []) {
-          if (typeof m.applicant_id === "number") recentlySent.add(m.applicant_id);
+        try {
+          for (let offset = 0; offset < ids.length; offset += APPLICANT_ID_BATCH_SIZE) {
+            const batch = ids.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
+            const recent = await fetchAllPostgrestRows(async (from, to) => {
+              const result = await supabase
+                .from("messages")
+                .select("id, applicant_id, created_at")
+                .in("applicant_id", batch)
+                .eq("direction", "outbound")
+                .eq("sent_by", "system-bulk")
+                .gt("created_at", since)
+                .order("created_at", { ascending: false })
+                .order("id", { ascending: false })
+                .range(from, to);
+              return {
+                data: result.data as Array<{ id: number; applicant_id: number; created_at: string }> | null,
+                error: result.error,
+              };
+            }, "최근 일괄 문자 발송 이력");
+            for (const message of recent) {
+              const phone = phoneIdentityIndex.phoneByApplicantId.get(message.applicant_id);
+              if (phone) recentlySentPhones.add(phone);
+            }
+          }
+        } catch (recentMessageError) {
+          console.error("[bulk-send] recent message lookup failed", recentMessageError);
+          return NextResponse.json(
+            { error: "최근 문자 발송 이력을 확인하지 못했습니다." },
+            { status: 503 },
+          );
         }
       }
     }
@@ -207,24 +308,84 @@ export async function POST(req: NextRequest) {
     // '근무 시작 안내'·'추가 정보 확인 요청'처럼 링크 없는 발송까지 24시간 묶으면 정당한 발송이 막힌다.
     const looksLikeJobNotice = text.includes("#{맞춤링크}");
     const effectivePurpose = purpose || (looksLikeJobNotice ? "campaign" : "");
-    const recentNoticed = new Set<number>();
+    // 새 공고 안내는 대상 산정 화면의 7일 피로도 규칙을 발송 시점에도 다시 적용한다.
+    // 두 모달을 오래 열어둔 뒤 차례로 보내도 두 번째 요청이 첫 번째 발송 이력을 반드시 보게 한다.
+    const NEW_JOB_FATIGUE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+    const recentlyReceivedNewJobNoticePhones = new Set<string>();
+    if (purpose === "new_job") {
+      const ids = recipientIdentityApplicantIds;
+      if (ids.length > 0) {
+        const since = new Date(Date.now() - NEW_JOB_FATIGUE_WINDOW_MS).toISOString();
+        try {
+          for (let offset = 0; offset < ids.length; offset += APPLICANT_ID_BATCH_SIZE) {
+            const batch = ids.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
+            const recent = await fetchAllPostgrestRows(async (from, to) => {
+              const result = await supabase
+                .from("pool_events")
+                .select("id, applicant_id, created_at")
+                .in("applicant_id", batch)
+                .eq("event_type", "ping_sent")
+                .eq("meta->>purpose", "new_job")
+                .gt("created_at", since)
+                .order("created_at", { ascending: false })
+                .order("id", { ascending: false })
+                .range(from, to);
+              return {
+                data: result.data as Array<{ id: number; applicant_id: number; created_at: string }> | null,
+                error: result.error,
+              };
+            }, "최근 새 공고 안내 이력");
+            for (const event of recent) {
+              const phone = phoneIdentityIndex.phoneByApplicantId.get(event.applicant_id);
+              if (phone) recentlyReceivedNewJobNoticePhones.add(phone);
+            }
+          }
+        } catch (fatigueError) {
+          console.error("[bulk-send] new-job fatigue lookup failed", fatigueError);
+          return NextResponse.json(
+            { error: "최근 새 공고 안내 이력을 확인하지 못했습니다." },
+            { status: 503 },
+          );
+        }
+      }
+    }
+    const recentNoticedPhones = new Set<string>();
     if (CROSS_NOTICE_PURPOSES.has(effectivePurpose)) {
-      const ids = recipients
-        .map((r) => r.applicant_id)
-        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      const ids = recipientIdentityApplicantIds;
       if (ids.length > 0) {
         const since = new Date(Date.now() - CROSS_NOTICE_WINDOW_MS).toISOString();
-        const { data: recent } = await supabase
-          .from("pool_events")
-          .select("applicant_id, meta")
-          .in("applicant_id", ids)
-          .eq("event_type", "ping_sent")
-          .gt("created_at", since);
-        for (const ev of recent ?? []) {
-          const p = (ev.meta as { purpose?: string } | null)?.purpose;
-          if (p && CROSS_NOTICE_PURPOSES.has(p) && typeof ev.applicant_id === "number") {
-            recentNoticed.add(ev.applicant_id);
+        try {
+          for (let offset = 0; offset < ids.length; offset += APPLICANT_ID_BATCH_SIZE) {
+            const batch = ids.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
+            const recent = await fetchAllPostgrestRows(async (from, to) => {
+              const result = await supabase
+                .from("pool_events")
+                .select("id, applicant_id, meta, created_at")
+                .in("applicant_id", batch)
+                .eq("event_type", "ping_sent")
+                .gt("created_at", since)
+                .order("created_at", { ascending: false })
+                .order("id", { ascending: false })
+                .range(from, to);
+              return {
+                data: result.data as Array<{ id: number; applicant_id: number; meta: unknown; created_at: string }> | null,
+                error: result.error,
+              };
+            }, "최근 공고 안내 이력");
+            for (const event of recent) {
+              const eventPurpose = (event.meta as { purpose?: string } | null)?.purpose;
+              if (eventPurpose && CROSS_NOTICE_PURPOSES.has(eventPurpose)) {
+                const phone = phoneIdentityIndex.phoneByApplicantId.get(event.applicant_id);
+                if (phone) recentNoticedPhones.add(phone);
+              }
+            }
           }
+        } catch (crossNoticeError) {
+          console.error("[bulk-send] cross-notice lookup failed", crossNoticeError);
+          return NextResponse.json(
+            { error: "최근 공고 안내 이력을 확인하지 못했습니다." },
+            { status: 503 },
+          );
         }
       }
     }
@@ -243,7 +404,7 @@ export async function POST(req: NextRequest) {
     const sentPhones = new Set<string>();
 
     for (const r of recipients) {
-      const phone = (r.phone || "").replace(/\D/g, "");
+      const phone = normalizePhone(r.phone || "");
       if (!/^\d{10,11}$/.test(phone)) {
         results.push({ phone, success: false, error: "잘못된 번호" });
         continue;
@@ -272,6 +433,23 @@ export async function POST(req: NextRequest) {
         hasVerifiedCurrentJobContext,
         hasApprovedCurrentJobBody,
       });
+
+      const phoneIdentity = phoneIdentityIndex.byPhone.get(phone);
+      if (!phoneIdentity) {
+        results.push({ phone, success: false, error: "지원자 정보 확인 불가(발송 제외)" });
+        continue;
+      }
+      if (phoneIdentity.hasActiveSmsOptOut) {
+        results.push({ phone, success: false, error: "수신거부(발송 제외)" });
+        continue;
+      }
+      if (
+        purpose === "new_job"
+        && phoneIdentity.applicantIds.some((applicantId) => newJobCandidateApplicantIds.has(applicantId))
+      ) {
+        results.push({ phone, success: false, error: "이미 현재 공고 후보(발송 제외)" });
+        continue;
+      }
 
       // 신규 일자리·캠페인은 applicant_id와 전화번호가 실제 지원자 행에 일치하고,
       // marketing_consent=true인 경우만 발송한다. ID 누락·조회 실패·행 누락도 동의 없음으로 차단한다.
@@ -307,17 +485,30 @@ export async function POST(req: NextRequest) {
         continue;
       }
       // 인력풀 제외(부적합/이탈) 하드 가드 — 풀에서 뺀 지원자에겐 캠페인이 나가지 않는다.
-      if (info?.status && EXCLUDED_POOL_STATUS.has(info.status)) {
-        results.push({ phone, success: false, error: `인력풀 제외(${info.status})` });
+      const excludedStatus = phoneIdentity.applicantStatuses.find((status) => (
+        purpose === "new_job"
+          ? NEW_JOB_EXCLUDED_STATUS.has(status)
+          : EXCLUDED_POOL_STATUS.has(status)
+      ));
+      if (excludedStatus) {
+        results.push({ phone, success: false, error: `인력풀 제외(${excludedStatus})` });
         continue;
       }
       // 중복 발송 가드 — 최근 10분 내 캠페인 발송된 지원자는 스킵.
-      if (typeof r.applicant_id === "number" && recentlySent.has(r.applicant_id)) {
+      if (recentlySentPhones.has(phone)) {
         results.push({ phone, success: false, error: "최근 발송됨(중복 방지)" });
         continue;
       }
+      // 새 공고 안내 피로도 최종 가드 — 대상 목록을 연 시각이 아니라 실제 발송 시각 기준.
+      if (
+        purpose === "new_job"
+        && recentlyReceivedNewJobNoticePhones.has(phone)
+      ) {
+        results.push({ phone, success: false, error: "최근 7일 내 새 공고 안내 수신(중복 방지)" });
+        continue;
+      }
       // 공고 안내 교차 가드 — 24시간 내 마감/새 공고 안내를 이미 받은 지원자는 스킵.
-      if (typeof r.applicant_id === "number" && recentNoticed.has(r.applicant_id)) {
+      if (recentNoticedPhones.has(phone)) {
         results.push({ phone, success: false, error: "24시간 내 공고 안내 수신(중복 방지)" });
         continue;
       }

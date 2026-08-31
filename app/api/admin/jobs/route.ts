@@ -44,6 +44,28 @@ type JobInterestRow = {
   job_id: number | null;
 };
 
+const JOB_AGGREGATE_ID_CHUNK_SIZE = 250;
+
+async function fetchJobAggregateRows<T>(
+  jobIds: number[],
+  label: string,
+  fetchPage: (jobIdChunk: number[], from: number, to: number) => Promise<{
+    data: T[] | null;
+    error: { message?: string } | null;
+  }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let index = 0; index < jobIds.length; index += JOB_AGGREGATE_ID_CHUNK_SIZE) {
+    const chunk = jobIds.slice(index, index + JOB_AGGREGATE_ID_CHUNK_SIZE);
+    const chunkRows = await fetchAllPostgrestRows(
+      (from, to) => fetchPage(chunk, from, to),
+      label,
+    );
+    rows.push(...chunkRows);
+  }
+  return rows;
+}
+
 export async function GET(req: NextRequest) {
   const supabase = createServiceClient();
   const url = new URL(req.url);
@@ -51,24 +73,30 @@ export async function GET(req: NextRequest) {
   const clientFilter = url.searchParams.get("client_id");
   const branchFilter = url.searchParams.get("branch_id");
 
-  let query = supabase
-    .from("jobs")
-    .select("id, title, body, branch, branch_id, client_id, slot, slot_keys, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule, distance_basis, client:clients ( client_type, uses_slots )")
-    .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
-    .order("created_at", { ascending: false });
+  let jobs;
+  try {
+    jobs = await fetchAllPostgrestRows(async (from, to) => {
+      let query = supabase
+        .from("jobs")
+        .select("id, title, body, branch, branch_id, client_id, slot, slot_keys, start_date, vehicle_required, pickup_address, pickup_lat, pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, pay_info, policy_notes, pay_type, pay_amount, ai_facts, capacity, status, recruit_mode, site_manager_id, created_at, updated_at, closed_at, work_period, closes_at, exposure, exposure_rule, distance_basis, client:clients ( client_type, uses_slots )")
+        .neq("title", DANGGEUN_SYSTEM_JOB_TITLE) // 시스템 더미 공고는 칸반에서 숨김
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
-  if (statusFilter && statusFilter !== "all") {
-    query = query.eq("status", statusFilter);
-  }
-  if (clientFilter && /^\d+$/.test(clientFilter)) {
-    query = query.eq("client_id", Number(clientFilter));
-  }
-  if (branchFilter && /^\d+$/.test(branchFilter)) {
-    query = query.eq("branch_id", Number(branchFilter));
-  }
+      if (statusFilter && statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+      if (clientFilter && /^\d+$/.test(clientFilter)) {
+        query = query.eq("client_id", Number(clientFilter));
+      }
+      if (branchFilter && /^\d+$/.test(branchFilter)) {
+        query = query.eq("branch_id", Number(branchFilter));
+      }
 
-  const { data: jobs, error } = await query;
-  if (error) {
+      const result = await query.range(from, to);
+      return { data: result.data, error: result.error };
+    }, "공고 목록");
+  } catch (error) {
     console.error("[jobs GET]", error);
     return NextResponse.json({ error: "조회 실패" }, { status: 500 });
   }
@@ -93,31 +121,31 @@ export async function GET(req: NextRequest) {
     let interestRows: JobInterestRow[];
     try {
       [candidateRows, interestRows] = await Promise.all([
-        fetchAllPostgrestRows(async (from, to) => {
+        fetchJobAggregateRows(jobIds, "공고 후보 집계", async (jobIdChunk, from, to) => {
           const result = await supabase
             .from("job_candidates")
             .select("id, job_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
-            .in("job_id", jobIds)
+            .in("job_id", jobIdChunk)
             .order("id", { ascending: true })
             .range(from, to);
           return {
             data: result.data as unknown as JobAggregateCandidateRow[] | null,
             error: result.error,
           };
-        }, "공고 후보 집계"),
-        fetchAllPostgrestRows(async (from, to) => {
+        }),
+        fetchJobAggregateRows(jobIds, "공고 관심 집계", async (jobIdChunk, from, to) => {
           const result = await supabase
             .from("pool_events")
             .select("id, applicant_id, job_id")
             .eq("event_type", "interest_click")
-            .in("job_id", jobIds)
+            .in("job_id", jobIdChunk)
             .order("id", { ascending: true })
             .range(from, to);
           return {
             data: result.data as unknown as JobInterestRow[] | null,
             error: result.error,
           };
-        }, "공고 관심 집계"),
+        }),
       ]);
     } catch (aggregateError) {
       console.error("[jobs GET] aggregate load failed", aggregateError);

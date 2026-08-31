@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 type ConversationThreadViewModule = {
+  conversationRefreshWarning?: (input: { stale: boolean }) => null | {
+    title: string;
+    detail: string;
+  };
+  conversationContextStatus?: (input: unknown) => {
+    reasoning: "ready" | "error";
+    poolEvents: "ready" | "error";
+    jobLabels: "ready" | "error";
+  };
+  conversationContextWarning?: (input: {
+    reasoning: "ready" | "error";
+    poolEvents: "ready" | "error";
+    jobLabels: "ready" | "error";
+  }) => null | {
+    title: string;
+    detail: string;
+  };
   conversationMessagesView?: (input: {
     loading: boolean;
     error: boolean;
@@ -87,6 +105,127 @@ async function loadModule(): Promise<ConversationThreadViewModule> {
     return {};
   }
 }
+
+test("auxiliary context errors parse from the real API shape without hiding the conversation", async () => {
+  const { conversationContextStatus, conversationContextWarning } = await loadModule();
+  assert.equal(typeof conversationContextStatus, "function");
+  assert.equal(typeof conversationContextWarning, "function");
+  if (!conversationContextStatus || !conversationContextWarning) return;
+
+  const reasoningFailure = conversationContextStatus({
+    reasoning: "error",
+    pool_events: "ready",
+    job_labels: "ready",
+  });
+  assert.deepEqual(reasoningFailure, { reasoning: "error", poolEvents: "ready", jobLabels: "ready" });
+  assert.deepEqual(conversationContextWarning(reasoningFailure), {
+    title: "AI 판단 근거를 불러오지 못했어요",
+    detail: "대화 내용은 계속 볼 수 있지만, 누락된 맥락이 있으니 현재 화면만으로 판단하지 마세요.",
+  });
+
+  const poolFailure = conversationContextStatus({
+    reasoning: "ready",
+    pool_events: "error",
+    job_labels: "ready",
+  });
+  assert.deepEqual(conversationContextWarning(poolFailure), {
+    title: "재접촉 기록을 불러오지 못했어요",
+    detail: "대화 내용은 계속 볼 수 있지만, 누락된 맥락이 있으니 현재 화면만으로 판단하지 마세요.",
+  });
+});
+
+test("a failed warm refresh identifies the retained conversation as stale", async () => {
+  const { conversationRefreshWarning } = await loadModule();
+  assert.equal(typeof conversationRefreshWarning, "function");
+  if (!conversationRefreshWarning) return;
+
+  assert.deepEqual(conversationRefreshWarning({ stale: true }), {
+    title: "대화 내역을 최신 상태로 갱신하지 못했어요",
+    detail: "아래 내용과 발송 확인 상태는 마지막으로 불러온 기록입니다. 새 답장이 누락될 수 있으니 같은 문자를 다시 보내지 말고 다시 확인해 주세요.",
+  });
+  assert.equal(conversationRefreshWarning({ stale: false }), null);
+});
+
+test("missing or malformed auxiliary context status fails visible instead of looking complete", async () => {
+  const { conversationContextStatus, conversationContextWarning } = await loadModule();
+  assert.equal(typeof conversationContextStatus, "function");
+  assert.equal(typeof conversationContextWarning, "function");
+  if (!conversationContextStatus || !conversationContextWarning) return;
+
+  const missing = conversationContextStatus(undefined);
+  assert.deepEqual(missing, { reasoning: "error", poolEvents: "error", jobLabels: "error" });
+  assert.deepEqual(conversationContextWarning(missing), {
+    title: "AI 판단 근거와 재접촉 기록, 공고 라벨을 불러오지 못했어요",
+    detail: "대화 내용은 계속 볼 수 있지만, 누락된 맥락이 있으니 현재 화면만으로 판단하지 마세요.",
+  });
+
+  const ready = conversationContextStatus({ reasoning: "ready", pool_events: "ready", job_labels: "ready" });
+  assert.equal(conversationContextWarning(ready), null);
+});
+
+test("a failed job-label lookup names the missing public-job chips", async () => {
+  const { conversationContextStatus, conversationContextWarning } = await loadModule();
+  assert.equal(typeof conversationContextStatus, "function");
+  assert.equal(typeof conversationContextWarning, "function");
+  if (!conversationContextStatus || !conversationContextWarning) return;
+
+  const labelFailure = conversationContextStatus({
+    reasoning: "ready",
+    pool_events: "ready",
+    job_labels: "error",
+  });
+  assert.deepEqual(labelFailure, {
+    reasoning: "ready",
+    poolEvents: "ready",
+    jobLabels: "error",
+  });
+  assert.deepEqual(conversationContextWarning(labelFailure), {
+    title: "공고 라벨을 불러오지 못했어요",
+    detail: "대화 내용은 계속 볼 수 있지만, 공고 칩이 누락될 수 있으니 현재 화면만으로 판단하지 마세요.",
+  });
+});
+
+test("conversation responses wire auxiliary context into a persistent non-blocking warning band", () => {
+  const thread = readFileSync(
+    new URL("../components/ConversationThread.tsx", import.meta.url),
+    "utf8",
+  );
+  const loadStart = thread.indexOf("const loadMessages = useCallback");
+  const messageArea = thread.indexOf("{/* 메시지 영역 */}");
+  const timeline = thread.indexOf('messagesView === "ready" && timeline.map', messageArea);
+
+  assert.match(
+    thread.slice(loadStart, messageArea),
+    /setContextStatus\(conversationContextStatus\(json\.context_status\)\)/,
+  );
+  assert.match(
+    thread.slice(messageArea, timeline),
+    /contextWarning[\s\S]*?role=\{refreshWarning \? "alert" : "status"\}[\s\S]*?다시 확인/,
+  );
+});
+
+test("warm refresh failures are scoped and override the narrower auxiliary-context warning", () => {
+  const thread = readFileSync(
+    new URL("../components/ConversationThread.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(thread, /const \[messagesRefreshErrorIdentity, setMessagesRefreshErrorIdentity\]/);
+  assert.match(thread, /setMessagesRefreshErrorIdentity\(null\)/);
+  assert.match(
+    thread,
+    /setMessagesRefreshErrorIdentity\([\s\S]*?requestedScopeKey[\s\S]*?requestedScopeRevision/,
+  );
+  assert.match(
+    thread,
+    /scopeReady[\s\S]*?messagesRefreshErrorIdentity\?\.key === threadScopeKey[\s\S]*?conversationRefreshWarning/,
+  );
+  assert.match(thread, /refreshWarning \?\? auxiliaryContextWarning/);
+  assert.match(
+    thread,
+    /currentManualMessageAttention\?\.state === "error"\s*&& !messagesRefreshFailed/,
+  );
+});
 
 test("a failed cold fetch is an error instead of an empty conversation", async () => {
   const { conversationMessagesView } = await loadModule();
