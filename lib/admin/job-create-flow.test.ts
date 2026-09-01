@@ -45,6 +45,10 @@ test("posting generation gives the current job locations precedence over reusabl
   assert.match(routeSource, /buildCurrentJobPostingLocationContext\(currentLocation\)/);
   assert.match(routeSource, /\[masterContext, currentLocationContext\]/);
   assert.match(routeSource, /buildMockPosting\(prompt, formatCurrentJobPostingLocation\(currentLocation\)\)/);
+  assert.match(routeSource, /resolveJobAnnouncementBody\(\{ jobTitle: ai\.title, smsDraft: ai\.sms\.body \}\)/);
+  assert.doesNotMatch(routeSource, /\["초보 가능", "주급 지급"\]/);
+  assert.doesNotMatch(routeSource, /f\.pay \|\| "협의"/);
+  assert.doesNotMatch(routeSource, /f\.schedule \|\| "협의"/);
 });
 
 test("new-job close protects meaningful work and cannot race an in-flight registration", () => {
@@ -118,6 +122,9 @@ test("the latest new-job entry owns the form and query prefills start from empty
   assert.match(blankOpenSource, /duplicateRequestIdRef\.current \+= 1/);
   assert.match(blankOpenSource, /resetNewJobForm\(\)/);
 
+  assert.match(querySource, /const capacity = searchParams\.get\("capacity"\)/);
+  assert.match(querySource, /setNewJobCapacity\(parsedCapacity\)/);
+
   assert.equal(
     jobsSource.match(/onClick=\{openBlankNewJobForm\}/g)?.length,
     2,
@@ -143,4 +150,110 @@ test("a delayed duplicate action cannot replace an already-open new-job draft", 
     "duplicate should refuse the action before claiming a request when a new-job draft is open",
   );
   assert.match(duplicateSource, /작성 중인 공고를 먼저 등록하거나 닫아 주세요/);
+});
+
+test("recruitment route cards use a roving radio group with arrow-key selection", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const fieldStart = jobsSource.indexOf("function RecruitModeField");
+  const fieldEnd = jobsSource.indexOf("// 단가 형태 옵션", fieldStart);
+  const fieldSource = jobsSource.slice(fieldStart, fieldEnd);
+
+  assert.match(jobsSource, /import \* as RadioGroupPrimitive from "@radix-ui\/react-radio-group"/);
+  assert.match(fieldSource, /<RadioGroupPrimitive\.Root/);
+  assert.match(fieldSource, /<RadioGroupPrimitive\.Item/);
+  assert.doesNotMatch(fieldSource, /role="radiogroup"/);
+  assert.doesNotMatch(fieldSource, /role="radio"/);
+});
+
+test("new-job modal starts from the existing pool without expanding external recruitment choices", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const modalStart = jobsSource.indexOf("{/* AI JD Generator Modal */}");
+  const modalEnd = jobsSource.indexOf("{/* 공고 수정 모달", modalStart);
+  const modalSource = jobsSource.slice(modalStart, modalEnd);
+  const recruitFieldStart = modalSource.indexOf("<RecruitModeField");
+  const recruitFieldEnd = modalSource.indexOf("/>", recruitFieldStart);
+  const recruitFieldSource = modalSource.slice(recruitFieldStart, recruitFieldEnd);
+
+  assert.match(jobsSource, /const DEFAULT_RECRUIT_MODE: RecruitMode = "internal"/);
+  assert.match(modalSource, /initialFocusRef=\{newJobClientRef\}/);
+  assert.doesNotMatch(recruitFieldSource, /defaultOpen/);
+  assert.doesNotMatch(recruitFieldSource, /initialFocusRef/);
+});
+
+test("recruitment mode offers external sourcing as a later supplement to the existing pool", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const modeStart = jobsSource.indexOf("const RECRUIT_MODE_META");
+  const modeEnd = jobsSource.indexOf("function asRecruitMode", modeStart);
+  const modeSource = jobsSource.slice(modeStart, modeEnd);
+  const fieldStart = jobsSource.indexOf("function RecruitModeField");
+  const fieldEnd = jobsSource.indexOf("// 단가 형태 옵션", fieldStart);
+  const fieldSource = jobsSource.slice(fieldStart, fieldEnd);
+
+  assert.match(jobsSource, /const DEFAULT_RECRUIT_MODE: RecruitMode = "internal"/);
+  assert.match(modeSource, /both:\s*\{\s*label: "외부 모집도 추가"/);
+  assert.match(modeSource, /우리 인력에게 먼저 안내하고 부족한 인원은 외부 지원 링크로 모집해요/);
+  assert.doesNotMatch(fieldSource, /HIDDEN_RECRUIT_MODE/);
+});
+
+test("external-only job drafting keeps the editor on the posting body without a pool-SMS promise", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const modalStart = jobsSource.indexOf("{/* AI JD Generator Modal */}");
+  const modalEnd = jobsSource.indexOf("{/* 공고 수정 모달", modalStart);
+  const modalSource = jobsSource.slice(modalStart, modalEnd);
+
+  assert.match(jobsSource, /const visibleDraftChannel = newJobMode === "external" \? "albamon" : activeChannel/);
+  assert.match(jobsSource, /const showPoolSmsDraft = newJobMode !== "external"/);
+  assert.match(modalSource, /filter\(\(ch\) => newJobMode !== "external" \|\| ch\.id !== "sms"\)/);
+  assert.match(modalSource, /channelDrafts\[visibleDraftChannel\]/);
+  assert.match(
+    jobsSource,
+    /showPoolSmsDraft\s*\? "AI가 공고 원문과 문자 안내를 완성했어요\."\s*: "AI가 공고 원문을 완성했어요\."/,
+  );
+  assert.match(
+    modalSource,
+    /showPoolSmsDraft\s*\? "조건을 입력하면 AI가 공고 원문과 문자 안내를 다시 써줍니다"\s*: "조건을 입력하면 AI가 공고 원문을 다시 써줍니다"/,
+  );
+  assert.match(
+    modalSource,
+    /showPoolSmsDraft\s*\? "AI 옹봇이 공고 원문과 안내 문자를 작성하고 있습니다\.\.\."\s*: "AI 옹봇이 공고 원문을 작성하고 있습니다\.\.\."/,
+  );
+  assert.match(
+    modalSource,
+    /showPoolSmsDraft\s*\? "공고 원문 · 문자 안내"\s*: "공고 원문"/,
+  );
+  assert.doesNotMatch(jobsSource, /채널별 초안/);
+  assert.match(jobsSource, /공고 원문과 안내 문구/);
+});
+
+test("a recoverable draft banner never overlaps the generated-copy editor", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const modalStart = jobsSource.indexOf("{/* AI JD Generator Modal */}");
+  const modalEnd = jobsSource.indexOf("{/* 공고 수정 모달", modalStart);
+  const modalSource = jobsSource.slice(modalStart, modalEnd);
+
+  assert.match(
+    modalSource,
+    /recoverableNewJobDraft \? "xl:row-start-3" : "xl:row-start-2"/,
+    "the copy editor must move below both the recovery banner and context card",
+  );
+  assert.equal(
+    modalSource.match(/htmlFor="new-job-branch" className=/g)?.length,
+    1,
+    "the branch field must render one visible label",
+  );
 });

@@ -1,7 +1,7 @@
 export const SOURCE_LABELS: Record<string, string> = {
   danggeun: "당근",
   baemin: "배민",
-  facebook: "페이스북",
+  facebook: "Meta 광고",
   naver: "네이버 검색",
   homepage: "홈페이지",
   albamon: "알바몬",

@@ -9,6 +9,7 @@ export interface ApplicationFormDraftScope {
   source: string;
   job: string | number | null;
   branch: string | null;
+  trackingRef?: string | null;
 }
 
 export interface ApplicationFormDraftSnapshot {
@@ -65,7 +66,10 @@ function normalizedJob(
 export function applicationFormDraftStorageKey(scope: ApplicationFormDraftScope): string {
   const source = normalizedText(scope.source).toLowerCase() || "direct";
   const branch = scope.branch ? normalizedText(scope.branch) || null : null;
-  return `${STORAGE_PREFIX}:${encodeURIComponent(JSON.stringify([source, normalizedJob(scope.job), branch]))}`;
+  const baseScope: unknown[] = [source, normalizedJob(scope.job), branch];
+  const trackingRef = scope.trackingRef?.trim();
+  if (trackingRef) baseScope.push(trackingRef);
+  return `${STORAGE_PREFIX}:${encodeURIComponent(JSON.stringify(baseScope))}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

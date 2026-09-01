@@ -4,7 +4,10 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, BriefcaseBusiness, Check, CheckCircle2, ChevronDown, FileText, Loader2, MapPin, RefreshCw, Search, X } from "lucide-react";
 import Image from "next/image";
-import { SOURCE_LABELS } from "@/lib/applicant-source";
+import {
+  normalizeDeclaredAcquisitionSource,
+  normalizePublicTrackingRef,
+} from "@/lib/acquisition-attribution";
 import {
   APPLICATION_WORK_HOUR_OPTIONS,
   applicationFixedWorkHours,
@@ -159,12 +162,6 @@ const APPLICATION_ERROR_FIELDS = new Set<ApplyFormIssue["field"]>([
   "marketingConsent",
 ]);
 
-// SOURCE_LABELS에 정의된 소스만 허용하고, 알 수 없는 값은 'direct'로 처리한다.
-function normalizeSource(raw: string | null): string {
-  if (raw && Object.prototype.hasOwnProperty.call(SOURCE_LABELS, raw)) return raw;
-  return "direct";
-}
-
 function digits(raw: string, max: number): string {
   return raw.replace(/\D/g, "").slice(0, max);
 }
@@ -232,12 +229,13 @@ interface JobContext {
 
 interface ApplyFormProps {
   source: string;
+  trackingRef: string | null;
   prefillBranch: string | null;
   jobParam: string | null;
   draftScope: ApplicationFormDraftScope;
 }
 
-function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormProps) {
+function ApplyForm({ source, trackingRef, prefillBranch, jobParam, draftScope }: ApplyFormProps) {
   const jobIntent = applyJobIntent(jobParam);
   const jobId = jobIntent.kind === "job" ? jobIntent.id : null;
 
@@ -514,7 +512,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
       ));
     }
     setDraftReady(true);
-  }, [draftScope.branch, draftScope.job, draftScope.source, prefillBranch]);
+  }, [draftScope.branch, draftScope.job, draftScope.source, draftScope.trackingRef, prefillBranch]);
 
   useEffect(() => {
     if (!draftReady || pendingSubmissionReplay || !branchContextReady) return;
@@ -609,6 +607,7 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     draftScope.branch,
     draftScope.job,
     draftScope.source,
+    draftScope.trackingRef,
     form,
     fixedWorkHourValue,
     generalOptIn,
@@ -998,7 +997,12 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
     try {
       const prepared = prepareApplicationSubmission(
         submissionAttemptRef.current,
-        { ...applicationForm, source, jobId: currentSubmissionJobId },
+        {
+          ...applicationForm,
+          source,
+          jobId: currentSubmissionJobId,
+          trackingRef,
+        },
         currentVehicleRequired,
         () => crypto.randomUUID(),
       );
@@ -2026,13 +2030,15 @@ function ApplyForm({ source, prefillBranch, jobParam, draftScope }: ApplyFormPro
 
 function ApplyFormRoute() {
   const searchParams = useSearchParams();
-  const source = normalizeSource(searchParams.get("source"));
+  const source = normalizeDeclaredAcquisitionSource(searchParams.get("source")).source;
+  const trackingRef = normalizePublicTrackingRef(searchParams.get("ref"));
   const prefillBranch = searchParams.get("branch");
   const jobParam = searchParams.get("job");
   const draftScope: ApplicationFormDraftScope = {
     source,
     job: jobParam,
     branch: prefillBranch,
+    trackingRef,
   };
   const scopeKey = applicationFormDraftStorageKey(draftScope);
 
@@ -2040,6 +2046,7 @@ function ApplyFormRoute() {
     <ApplyForm
       key={scopeKey}
       source={source}
+      trackingRef={trackingRef}
       prefillBranch={prefillBranch}
       jobParam={jobParam}
       draftScope={draftScope}

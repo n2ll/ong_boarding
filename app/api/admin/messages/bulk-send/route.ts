@@ -16,6 +16,22 @@ import {
   type PhoneMessageIdentityIndex,
 } from "@/lib/admin/phone-message-identity";
 import { normalizePhone } from "@/lib/ongmanaging";
+import {
+  isExposed,
+  normalizeRule,
+  type ExposureApplicant,
+  type ExposureMode,
+} from "@/lib/exposure";
+import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
+import { detectConfirmationNuance } from "@/lib/agent/outbound-safety";
+import {
+  bulkBatchRequestFingerprint,
+  bulkMessageRequestFingerprint,
+  bulkRecipientIdempotencyKey,
+  deliverBulkMessage,
+  validateBulkRequestId,
+  type BulkMessageOutboxStatus,
+} from "@/lib/bulk-message-send";
 
 export const dynamic = "force-dynamic";
 // 한 요청이 최대 50명에게 순차 발송한다 — 기본 제한(10s/60s)으로는 중간에 끊겨
@@ -32,10 +48,54 @@ interface BulkSendBody {
   recipients: Recipient[];
   body: string;
   subject?: string;
+  bulk_request_id?: unknown;
   // 발송 목적 태그(선택) — ping_sent meta에 기록해 발송 이력을 추적 (예: 'waitlist' 대기 안내).
   purpose?: string;
   // purpose와 연관된 공고 id(선택) — 예: '공고 관심자 선택'으로 고른 대기 안내 대상의 공고.
   job_id?: number;
+}
+
+interface MessageApplicant extends ExposureApplicant {
+  name: string | null;
+  phone: string | null;
+  access_token: string | null;
+  sms_opt_out_at: string | null;
+  marketing_consent: boolean | null;
+  status: string | null;
+}
+
+type NewJobAnnouncement = {
+  exposure_rule?: unknown;
+} & GeoJob;
+
+type BulkSendResult = {
+  applicant_id?: number | null;
+  phone: string;
+  success: boolean;
+  error?: string;
+  delivery?: "sent" | "unknown" | "not_sent";
+  state?: "recorded" | "sent_unrecorded" | "unknown" | "failed" | "blocked" | "conflict";
+  recorded?: boolean;
+  deduplicated?: boolean;
+  recovery_pending?: boolean;
+};
+
+const BULK_OUTBOX_STATUSES = new Set<BulkMessageOutboxStatus>([
+  "sending",
+  "unknown",
+  "failed",
+  "sent",
+  "recorded",
+]);
+const BULK_SMS_PROVIDER_TIMEOUT_MS = 5_000;
+
+function bulkGuardReasonMessage(reason: unknown): string {
+  if (reason === "recent_new_job") return "최근 7일 내 새 공고 안내 수신(중복 방지)";
+  if (reason === "recent_job_notice") return "24시간 내 공고 안내 수신(중복 방지)";
+  if (reason === "recent_bulk") return "최근 발송됨(중복 방지)";
+  if (reason === "same_intent_active") return "동일한 발송 요청이 처리 중입니다(재발송 제외)";
+  if (reason === "concurrent_claim") return "동시 발송 요청 감지(중복 방지)";
+  return "발송 간격 보호로 문자를 보내지 않았습니다.";
 }
 
 export async function POST(req: NextRequest) {
@@ -62,14 +122,43 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const validatedRequestId = validateBulkRequestId(data.bulk_request_id);
+    if (!validatedRequestId.ok) {
+      return NextResponse.json(
+        {
+          error: validatedRequestId.reason === "required"
+            ? "발송 요청 키가 필요합니다. 화면을 새로고침한 뒤 다시 시도해주세요."
+            : "유효하지 않은 발송 요청 키입니다.",
+        },
+        { status: 400 },
+      );
+    }
+    const bulkRequestId = validatedRequestId.key;
 
     const requestedCategory = classifyBulkSmsCategory({ purpose, body: text });
     if (requestedCategory === "unknown") {
       return NextResponse.json({ error: "알 수 없는 발송 목적입니다." }, { status: 400 });
     }
+    // 새 공고 안내는 지원자가 링크에서 조건을 직접 확인하는 흐름이다. 직접 API 호출도
+    // 맞춤 링크를 빼거나 배정·확정처럼 오해할 문구를 우회 발송하지 못하게 서버에서 막는다.
+    if (purpose === "new_job" && !text.includes("#{맞춤링크}")) {
+      return NextResponse.json(
+        { error: "새 공고 안내에는 #{맞춤링크} 치환자가 필요합니다." },
+        { status: 400 },
+      );
+    }
+    if (purpose === "new_job" && detectConfirmationNuance(text)) {
+      return NextResponse.json(
+        { error: "새 공고 안내에는 배정·근무 확정으로 오해할 문구를 사용할 수 없습니다." },
+        { status: 400 },
+      );
+    }
 
     const supabase = createServiceClient();
-    const results: Array<{ phone: string; success: boolean; error?: string }> = [];
+    const results: BulkSendResult[] = [];
+    let newJobIsTargeted = false;
+    let newJobAnnouncement: NewJobAnnouncement | null = null;
+    const newJobExposureOverrides = new Map<number, ExposureMode>();
 
     // 새 공고 안내 대상 모달을 오래 열어둔 사이 공고가 마감되거나 모집 채널이 바뀔 수 있다.
     // 클라이언트가 산정한 대상을 신뢰하지 않고 실제 발송 직전에 pull(/p) 노출 가능 상태를 재확인한다.
@@ -79,7 +168,7 @@ export async function POST(req: NextRequest) {
       }
       const { data: announcementJob, error: announcementJobError } = await supabase
         .from("jobs")
-        .select("status, closes_at, recruit_mode")
+        .select(`status, closes_at, recruit_mode, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
         .eq("id", purposeJobId)
         .maybeSingle();
       if (announcementJobError) {
@@ -98,23 +187,39 @@ export async function POST(req: NextRequest) {
       if (isJobEffectivelyClosed(announcementJob.status, announcementJob.closes_at)) {
         return NextResponse.json({ error: "마감된 공고는 안내할 수 없습니다." }, { status: 409 });
       }
+      newJobIsTargeted = announcementJob.exposure === "targeted";
+      newJobAnnouncement = announcementJob as unknown as NewJobAnnouncement;
+      if (newJobIsTargeted) {
+        const recipientIds = [...new Set(recipients
+          .map((recipient) => recipient.applicant_id)
+          .filter((id): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0))];
+        if (recipientIds.length > 0) {
+          const { data: exposureRows, error: exposureError } = await supabase
+            .from("job_exposure_targets")
+            .select("applicant_id, mode")
+            .eq("job_id", purposeJobId)
+            .in("applicant_id", recipientIds);
+          if (exposureError) {
+            console.error("[bulk-send] new-job exposure lookup failed", exposureError);
+            return NextResponse.json(
+              { error: "공고 노출 대상을 확인하지 못했습니다." },
+              { status: 503 },
+            );
+          }
+          for (const row of exposureRows ?? []) {
+            if (row.mode === "include" || row.mode === "exclude") {
+              newJobExposureOverrides.set(row.applicant_id as number, row.mode);
+            }
+          }
+        }
+      }
     }
 
     // 수신자별 치환 — #{이름}, #{맞춤링크}(무로그인 pull 페이지 /p/[token]).
     // 기존엔 치환 없이 원문 그대로 발송돼 '#{이름}님' 문자가 나갔다.
     // 지원자 정보는 치환 여부와 무관하게 항상 로드 — 수신거부(sms_opt_out_at) 가드용.
     const needsFill = text.includes("#{이름}") || text.includes("#{맞춤링크}");
-    const infoById = new Map<
-      number,
-      {
-        name: string | null;
-        phone: string | null;
-        access_token: string | null;
-        sms_opt_out_at: string | null;
-        marketing_consent: boolean | null;
-        status: string | null;
-      }
-    >();
+    const infoById = new Map<number, MessageApplicant>();
     {
       const ids = recipients
         .map((r) => r.applicant_id)
@@ -122,20 +227,79 @@ export async function POST(req: NextRequest) {
       if (ids.length > 0) {
         const { data: rows, error: applicantError } = await supabase
           .from("applicants")
-          .select("id, name, phone, access_token, sms_opt_out_at, marketing_consent, status")
+          .select("id, name, phone, access_token, sms_opt_out_at, marketing_consent, status, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
           .in("id", ids);
         if (applicantError) {
           console.error("[bulk-send] applicants lookup failed", applicantError);
+          if (newJobIsTargeted) {
+            return NextResponse.json(
+              { error: "공고 노출 대상 지원자를 확인하지 못했습니다." },
+              { status: 503 },
+            );
+          }
         }
         for (const row of rows ?? []) {
           infoById.set(row.id as number, {
+            id: row.id as number,
             name: (row.name as string | null) ?? null,
             phone: (row.phone as string | null) ?? null,
             access_token: (row.access_token as string | null) ?? null,
             sms_opt_out_at: (row.sms_opt_out_at as string | null) ?? null,
             marketing_consent: (row.marketing_consent as boolean | null) ?? null,
             status: (row.status as string | null) ?? null,
+            sido: (row.sido as string | null) ?? null,
+            sigungu: (row.sigungu as string | null) ?? null,
+            availability: (row.availability as string | null) ?? null,
+            own_vehicle: (row.own_vehicle as string | null) ?? null,
+            work_hours: (row.work_hours as string | null) ?? null,
+            available_slots: (row.available_slots as string[] | null) ?? null,
+            lat: (row.lat as number | null) ?? null,
+            lng: (row.lng as number | null) ?? null,
+            applied_at: (row.applied_at as string | null) ?? null,
+            created_at: (row.created_at as string | null) ?? null,
+            suntopDone: false,
           });
+        }
+      }
+    }
+    const newJobExposureRule = newJobIsTargeted && newJobAnnouncement
+      ? normalizeRule(newJobAnnouncement.exposure_rule)
+      : null;
+    const newJobSuntopDoneApplicantIds = new Set<number>();
+    if (newJobIsTargeted && newJobExposureRule?.suntopDone && infoById.size > 0) {
+      try {
+        const suntopRows = await fetchAllPostgrestRows(async (from, to) => {
+          const result = await supabase
+            .from("pool_events")
+            .select("id, applicant_id")
+            .eq("event_type", "suntop_done")
+            .in("applicant_id", [...infoById.keys()])
+            .order("id", { ascending: true })
+            .range(from, to);
+          return {
+            data: result.data as Array<{ id: number; applicant_id: number }> | null,
+            error: result.error,
+          };
+        }, "새 공고 안내 선탑 완료 이력");
+        for (const row of suntopRows) newJobSuntopDoneApplicantIds.add(row.applicant_id);
+      } catch (suntopError) {
+        console.error("[bulk-send] new-job suntop lookup failed", suntopError);
+        return NextResponse.json(
+          { error: "공고 노출 조건을 확인하지 못했습니다." },
+          { status: 503 },
+        );
+      }
+    }
+    const newJobExposedApplicantIds = new Set<number>();
+    if (newJobIsTargeted && newJobAnnouncement) {
+      for (const [applicantId, info] of infoById) {
+        if (isExposed(
+          { ...info, suntopDone: newJobSuntopDoneApplicantIds.has(applicantId) },
+          newJobExposureRule,
+          newJobExposureOverrides.get(applicantId),
+          { job: newJobAnnouncement },
+        )) {
+          newJobExposedApplicantIds.add(applicantId);
         }
       }
     }
@@ -308,6 +472,55 @@ export async function POST(req: NextRequest) {
     // '근무 시작 안내'·'추가 정보 확인 요청'처럼 링크 없는 발송까지 24시간 묶으면 정당한 발송이 막힌다.
     const looksLikeJobNotice = text.includes("#{맞춤링크}");
     const effectivePurpose = purpose || (looksLikeJobNotice ? "campaign" : "");
+    const batchFingerprint = bulkBatchRequestFingerprint({
+      body: text,
+      subject,
+      purpose: effectivePurpose,
+      jobId: purposeJobId,
+    });
+    let batchClaimData: unknown;
+    try {
+      const batchClaim = await supabase.rpc("claim_bulk_message_batch", {
+        p_request_id: bulkRequestId,
+        p_request_fingerprint: batchFingerprint,
+        p_body: text,
+        p_subject: subject,
+        p_effective_purpose: effectivePurpose,
+        p_job_id: purposeJobId,
+      });
+      if (batchClaim.error) {
+        console.error("[bulk-send] batch outbox claim failed", batchClaim.error);
+        return NextResponse.json(
+          { error: "발송 요청을 안전하게 저장하지 못해 문자를 보내지 않았습니다." },
+          { status: 503 },
+        );
+      }
+      batchClaimData = batchClaim.data;
+    } catch (batchClaimError) {
+      console.error("[bulk-send] batch outbox claim exception", batchClaimError);
+      return NextResponse.json(
+        { error: "발송 요청을 안전하게 저장하지 못해 문자를 보내지 않았습니다." },
+        { status: 503 },
+      );
+    }
+    const batchClaimOutcome = (
+      batchClaimData && typeof batchClaimData === "object"
+        ? (batchClaimData as { outcome?: unknown; reason?: unknown }).outcome
+        : null
+    );
+    if (batchClaimOutcome === "conflict") {
+      return NextResponse.json(
+        { error: "같은 발송 요청 키를 다른 내용에 사용할 수 없습니다." },
+        { status: 409 },
+      );
+    }
+    if (batchClaimOutcome !== "claimed" && batchClaimOutcome !== "existing") {
+      console.error("[bulk-send] unexpected batch outbox claim outcome", batchClaimData);
+      return NextResponse.json(
+        { error: "발송 요청 상태를 확인하지 못해 문자를 보내지 않았습니다." },
+        { status: 503 },
+      );
+    }
     // 새 공고 안내는 대상 산정 화면의 7일 피로도 규칙을 발송 시점에도 다시 적용한다.
     // 두 모달을 오래 열어둔 뒤 차례로 보내도 두 번째 요청이 첫 번째 발송 이력을 반드시 보게 한다.
     const NEW_JOB_FATIGUE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -419,10 +632,18 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const info = typeof r.applicant_id === "number" ? infoById.get(r.applicant_id) : undefined;
+      const applicantId = typeof r.applicant_id === "number"
+        && Number.isSafeInteger(r.applicant_id)
+        && r.applicant_id > 0
+        ? r.applicant_id
+        : null;
+      if (applicantId === null) {
+        results.push({ phone, success: false, error: "지원자 정보 확인 불가(발송 제외)" });
+        continue;
+      }
+      const info = infoById.get(applicantId);
       const hasVerifiedCurrentJobContext =
-        typeof r.applicant_id === "number"
-        && verifiedCurrentJobApplicantIds.has(r.applicant_id);
+        verifiedCurrentJobApplicantIds.has(applicantId);
       if ((purpose === "waitlist" || purpose === "job_closed") && !hasVerifiedCurrentJobContext) {
         results.push({ phone, success: false, error: "현재 공고 관계 확인 불가(발송 제외)" });
         continue;
@@ -448,6 +669,17 @@ export async function POST(req: NextRequest) {
         && phoneIdentity.applicantIds.some((applicantId) => newJobCandidateApplicantIds.has(applicantId))
       ) {
         results.push({ phone, success: false, error: "이미 현재 공고 후보(발송 제외)" });
+        continue;
+      }
+      if (
+        purpose === "new_job"
+        && newJobIsTargeted
+        && (
+          typeof r.applicant_id !== "number"
+          || !newJobExposedApplicantIds.has(r.applicant_id)
+        )
+      ) {
+        results.push({ phone, success: false, error: "공고 노출 대상 아님(발송 제외)" });
         continue;
       }
 
@@ -527,64 +759,186 @@ export async function POST(req: NextRequest) {
       }
 
       sentPhones.add(phone);
-      const sent = await sendSms(phone, personalText, subject);
-      results.push({
+      const recipientKey = bulkRecipientIdempotencyKey(bulkRequestId, phone);
+      const recipientFingerprint = bulkMessageRequestFingerprint({
+        applicantId,
         phone,
-        success: sent.success,
-        error: sent.error,
+        body: personalText,
+        subject,
+        purpose: effectivePurpose,
+        jobId: purposeJobId,
       });
-
-      if (sent.success) {
-        await supabase.from("messages").insert({
-          applicant_id: r.applicant_id ?? null,
-          applicant_phone: phone,
-          direction: "outbound",
-          body: personalText,
-          status: "sent",
-          sent_by: "system-bulk",
-          solapi_msg_id: sent.messageId || null,
-          message_type: "sms",
-        });
-
-        // ping 발송 이벤트 — 응답률(ping_reply/ping_sent)·응답속도의 분모. 지원자 연결 발송만.
-        // purpose/job_id가 오면 meta에 함께 기록 — 대기 안내(waitlist) 등 발송 이력 추적.
-        if (typeof r.applicant_id === "number") {
-          const { error: evErr } = await supabase.from("pool_events").insert({
-            applicant_id: r.applicant_id,
-            event_type: "ping_sent",
-            meta: {
-              source: "bulk",
-              has_link: personalText.includes("/p/"),
-              // 가드가 다음 발송에서 이 이력을 알아보게 태그를 남긴다(공고 안내 성격만 'campaign').
-              ...(effectivePurpose ? { purpose: effectivePurpose } : {}),
-              ...(purposeJobId !== null ? { job_id: purposeJobId } : {}),
-            },
+      const delivery = await deliverBulkMessage({
+        claim: async () => {
+          const claim = await supabase.rpc("claim_bulk_message_recipient", {
+            p_batch_id: bulkRequestId,
+            p_applicant_id: applicantId,
+            p_applicant_phone: phone,
+            p_personal_body: personalText,
+            p_recipient_fingerprint: recipientFingerprint,
           });
-          if (evErr) console.error("[bulk-send] pool_events ping_sent failed", evErr);
-
-          // 현재 공고의 마감 안내를 실제로 보낸 이력. 새 일자리 문자 동의와는 별개이며,
-          // announce-targets가 재안내 시점에 동의·수신거부를 다시 확인한다.
-          if (purpose === "job_closed" && purposeJobId !== null) {
-            const { error: wlErr } = await supabase.from("pool_events").insert({
-              applicant_id: r.applicant_id,
-              job_id: purposeJobId,
-              event_type: "waitlist_notice",
-              meta: { trigger: "job_closed" },
-            });
-            if (wlErr) console.error("[bulk-send] pool_events waitlist_notice failed", wlErr);
+          if (claim.error) {
+            console.error("[bulk-send] recipient outbox claim failed", claim.error);
+            return { kind: "error" as const, error: "발송을 안전하게 선점하지 못했습니다." };
           }
-
-        }
-      }
+          if (!claim.data || typeof claim.data !== "object") {
+            console.error("[bulk-send] malformed recipient outbox claim", claim.data);
+            return { kind: "error" as const, error: "발송 요청 상태를 확인하지 못했습니다." };
+          }
+          const payload = claim.data as {
+            outcome?: unknown;
+            recipient_key?: unknown;
+            status?: unknown;
+            provider_message_id?: unknown;
+            reason?: unknown;
+          };
+          if (payload.outcome === "blocked") {
+            return {
+              kind: "blocked" as const,
+              reason: bulkGuardReasonMessage(payload.reason),
+            };
+          }
+          if (payload.outcome === "conflict") return { kind: "conflict" as const };
+          if (
+            typeof payload.recipient_key !== "string"
+            || payload.recipient_key !== recipientKey
+          ) {
+            console.error("[bulk-send] recipient outbox key mismatch", payload);
+            return { kind: "error" as const, error: "발송 요청 식별자를 확인하지 못했습니다." };
+          }
+          if (payload.outcome === "claimed") return { kind: "claimed" as const };
+          if (payload.outcome === "existing") {
+            if (
+              typeof payload.status !== "string"
+              || !BULK_OUTBOX_STATUSES.has(payload.status as BulkMessageOutboxStatus)
+            ) {
+              console.error("[bulk-send] invalid existing outbox status", payload);
+              return { kind: "error" as const, error: "기존 발송 요청 상태를 확인하지 못했습니다." };
+            }
+            return {
+              kind: "existing" as const,
+              request: {
+                status: payload.status as BulkMessageOutboxStatus,
+                providerMessageId: typeof payload.provider_message_id === "string"
+                  ? payload.provider_message_id
+                  : null,
+              },
+            };
+          }
+          console.error("[bulk-send] unexpected recipient outbox claim", payload);
+          return { kind: "error" as const, error: "발송 요청 상태를 확인하지 못했습니다." };
+        },
+        send: () => sendSms(
+          phone,
+          personalText,
+          subject,
+          {
+            clientRequestId: recipientKey,
+            timeoutMs: BULK_SMS_PROVIDER_TIMEOUT_MS,
+          },
+        ),
+        markUnknown: async (error) => {
+          const marked = await supabase.rpc("record_bulk_message_provider_result", {
+            p_recipient_key: recipientKey,
+            p_result: "unknown",
+            p_provider_message_id: null,
+            p_error: error,
+          });
+          if (
+            marked.error
+            || (marked.data !== "recorded" && marked.data !== "deduped")
+          ) {
+            console.error("[bulk-send] unknown provider result record failed", marked);
+            throw new Error("발송 불명 상태를 기록하지 못했습니다.");
+          }
+        },
+        markFailed: async (error) => {
+          const marked = await supabase.rpc("record_bulk_message_provider_result", {
+            p_recipient_key: recipientKey,
+            p_result: "failed",
+            p_provider_message_id: null,
+            p_error: error,
+          });
+          if (marked.error) console.error("[bulk-send] provider failure record failed", marked.error);
+          return !marked.error && (marked.data === "recorded" || marked.data === "deduped");
+        },
+        markSent: async (providerMessageId) => {
+          const marked = await supabase.rpc("record_bulk_message_provider_result", {
+            p_recipient_key: recipientKey,
+            p_result: "sent",
+            p_provider_message_id: providerMessageId,
+            p_error: null,
+          });
+          if (marked.error) console.error("[bulk-send] provider success record failed", marked.error);
+          return !marked.error && (marked.data === "recorded" || marked.data === "deduped");
+        },
+        record: async () => {
+          const finalized = await supabase.rpc("finalize_bulk_message_send", {
+            p_recipient_key: recipientKey,
+          });
+          if (finalized.error) console.error("[bulk-send] history finalize failed", finalized.error);
+          return !finalized.error
+            && (finalized.data === "recorded" || finalized.data === "deduped");
+        },
+      });
+      results.push({
+        applicant_id: applicantId,
+        phone,
+        success: delivery.success,
+        ...(delivery.error ? { error: delivery.error } : {}),
+        delivery: delivery.state === "recorded" || delivery.state === "sent_unrecorded"
+          ? "sent"
+          : delivery.state === "unknown"
+            ? "unknown"
+            : "not_sent",
+        state: delivery.state,
+        recorded: delivery.state === "recorded",
+        deduplicated: delivery.deduplicated,
+        recovery_pending: delivery.recoveryPending === true,
+      });
 
       await new Promise((r) => setTimeout(r, 150));
     }
 
+    const normalizedResults = results.map((result, index) => ({
+      applicant_id: result.applicant_id
+        ?? (typeof recipients[index]?.applicant_id === "number" ? recipients[index].applicant_id : null),
+      phone: result.phone,
+      success: result.success,
+      ...(result.error ? { error: result.error } : {}),
+      delivery: result.delivery ?? (result.success ? "sent" : "not_sent"),
+      state: result.state ?? (result.success ? "recorded" : "blocked"),
+      recorded: result.recorded ?? result.success,
+      deduplicated: result.deduplicated ?? false,
+      recovery_pending: result.recovery_pending ?? false,
+    }));
+    const deliverySummary = {
+      sent: 0,
+      already_sent: 0,
+      sent_recovery_pending: 0,
+      unknown: 0,
+      failed: 0,
+      guarded: 0,
+    };
+    for (const result of normalizedResults) {
+      if (result.state === "recorded") {
+        if (result.deduplicated) deliverySummary.already_sent += 1;
+        else deliverySummary.sent += 1;
+      } else if (result.state === "sent_unrecorded") {
+        deliverySummary.sent_recovery_pending += 1;
+      } else if (result.state === "unknown") {
+        deliverySummary.unknown += 1;
+      } else if (result.state === "failed") {
+        deliverySummary.failed += 1;
+      } else {
+        deliverySummary.guarded += 1;
+      }
+    }
     return NextResponse.json({
       success: true,
-      sent: results.filter((r) => r.success).length,
-      failed: results.filter((r) => !r.success).length,
-      results,
+      ...deliverySummary,
+      recovery_pending: normalizedResults.filter((result) => result.recovery_pending).length,
+      results: normalizedResults,
     });
   } catch (err) {
     console.error("[bulk-send] exception", err);

@@ -26,6 +26,61 @@ const emptyDraft = () => ({
   sosId: null as string | null,
 });
 
+test("new and duplicated job drafts keep only supported channels while reading legacy Danggeun copy", async () => {
+  const draftModule = await import("./job-create-draft.ts");
+  const normalize = draftModule.normalizeJobCreateChannelDrafts;
+  const persisted = draftModule.jobCreatePersistedChannelBodies;
+
+  assert.equal(typeof normalize, "function");
+  assert.equal(typeof persisted, "function");
+  if (typeof normalize !== "function" || typeof persisted !== "function") return;
+
+  assert.deepEqual(
+    normalize({ danggeun: "레거시 당근 본문", albamon: "", sms: "" }),
+    { danggeun: "", albamon: "레거시 당근 본문", sms: "레거시 당근 본문" },
+    "old copy remains readable but is migrated into the supported canonical and SMS editors",
+  );
+  assert.deepEqual(
+    normalize({ danggeun: "예전 당근", albamon: "최신 공고 원문", sms: "문자 안내" }),
+    { danggeun: "", albamon: "최신 공고 원문", sms: "문자 안내" },
+    "current canonical copy wins over stale legacy channel data",
+  );
+  assert.deepEqual(
+    persisted({ danggeun: "저장하면 안 되는 레거시 초안", albamon: "공고 원문", sms: "문자 안내" }),
+    { albamon: "공고 원문", sms: "문자 안내" },
+    "new job rows never write a Danggeun recruitment draft",
+  );
+  assert.equal("danggeun" in persisted({ danggeun: "레거시", albamon: "원문", sms: "문자" }), false);
+
+  const { readFile } = await import("node:fs/promises");
+  const createRouteSource = await readFile(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(createRouteSource, /jobCreatePersistedChannelBodies\(channel_bodies\)/);
+});
+
+test("malformed channel body payloads normalize without throwing", async () => {
+  const {
+    normalizeJobCreateChannelDrafts,
+    jobCreatePersistedChannelBodies,
+  } = await import("./job-create-draft.ts");
+
+  assert.deepEqual(normalizeJobCreateChannelDrafts([]), {
+    danggeun: "",
+    albamon: "",
+    sms: "",
+  });
+  assert.deepEqual(
+    normalizeJobCreateChannelDrafts({ danggeun: 42, albamon: ["잘못된 값"], sms: { body: "잘못된 값" } }),
+    { danggeun: "", albamon: "", sms: "" },
+  );
+  assert.deepEqual(
+    jobCreatePersistedChannelBodies({ albamon: ["잘못된 값"], sms: " 문자 안내 " }),
+    { albamon: "", sms: "문자 안내" },
+  );
+});
+
 test("an untouched or visually opened job form is not an unsaved draft", async () => {
   const draftModule = await import("./job-create-draft.ts").catch(() => null);
   const hasDraft = draftModule?.hasJobCreateDraft;

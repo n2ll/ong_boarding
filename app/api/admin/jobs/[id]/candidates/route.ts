@@ -10,6 +10,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { distanceToJobKm, EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { ensureExposureIncludeForLinked } from "@/lib/exposure";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+import type { JobAcquisitionPerformanceRow } from "@/lib/admin/job-acquisition-view";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = createServiceClient();
   let rows: CandidateBoardRow[];
   let job: GeoJob | null;
-  const [candidateResult, jobResult] = await Promise.allSettled([
+  const [candidateResult, jobResult, acquisitionResult] = await Promise.allSettled([
     fetchAllPostgrestRows(async (from, to) => {
       const result = await supabase
         .from("job_candidates")
@@ -60,6 +61,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .select(EXPOSURE_JOB_GEO_COLUMNS)
       .eq("id", jobId)
       .maybeSingle(),
+    fetchAllPostgrestRows(async (from, to) => {
+      const result = await supabase
+        .from("application_submission_attribution_performance")
+        .select("submission_id, source, attribution_method, candidate_link_outcome, submitted_at")
+        .eq("job_id", jobId)
+        .order("submitted_at", { ascending: false })
+        .order("submission_id", { ascending: false })
+        .range(from, to);
+      return {
+        data: result.data as unknown as JobAcquisitionPerformanceRow[] | null,
+        error: result.error,
+      };
+    }, "공고 외부 유입 귀속"),
   ]);
 
   if (candidateResult.status === "rejected") {
@@ -76,6 +90,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     job = null;
   } else {
     job = (jobResult.value.data as unknown as GeoJob | null) ?? null;
+  }
+
+  const acquisition = acquisitionResult.status === "fulfilled"
+    ? { status: "ready" as const, rows: acquisitionResult.value }
+    : { status: "error" as const };
+  if (acquisitionResult.status === "rejected") {
+    // 후보 운영은 계속 가능하게 두되, 귀속 실패를 0건으로 위장하지 않는다.
+    console.error("[candidates GET] optional acquisition attribution", acquisitionResult.reason);
   }
 
   // 후보↔공고 거리(km) — 상차지·마지막 경유지 중 가까운 쪽 기준(파이프라인 거리 정렬과 동일 원칙).
@@ -95,7 +117,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return { ...r, distance_km };
   });
 
-  return NextResponse.json({ candidates });
+  return NextResponse.json({ candidates, acquisition });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

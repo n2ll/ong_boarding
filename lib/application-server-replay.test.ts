@@ -31,7 +31,7 @@ type ApplicationServerReplayModule = {
     candidateCreatedAt: string | null;
     submissionMappedAt: string | null;
     sameAttemptApplicant: boolean;
-  }) => "already_linked" | "unchanged_closed" | null;
+  }) => "linked" | "already_linked" | "unchanged_closed" | null;
 };
 
 async function loadModule(): Promise<ApplicationServerReplayModule> {
@@ -110,7 +110,7 @@ test("a replay mapped to an applicant now owned by a newer attempt does not inve
   });
 });
 
-test("an accepted replay preserves its existing active candidate link after the job closes", async () => {
+test("an accepted replay preserves linked when the same submission created the candidate", async () => {
   const { applicationReplayCandidateOutcome } = await loadModule();
 
   assert.equal(typeof applicationReplayCandidateOutcome, "function");
@@ -122,10 +122,10 @@ test("an accepted replay preserves its existing active candidate link after the 
     candidateCreatedAt: "2026-08-25T00:00:01.000Z",
     submissionMappedAt: "2026-08-25T00:00:00.000Z",
     sameAttemptApplicant: true,
-  }), "already_linked");
+  }), "linked");
 });
 
-test("an accepted replay preserves its original auto-filtered candidate as a successful link", async () => {
+test("an accepted replay keeps linked after the same submission candidate is later closed", async () => {
   const { applicationReplayCandidateOutcome } = await loadModule();
 
   assert.equal(typeof applicationReplayCandidateOutcome, "function");
@@ -137,7 +137,7 @@ test("an accepted replay preserves its original auto-filtered candidate as a suc
     candidateCreatedAt: "2026-08-25T00:00:01.000Z",
     submissionMappedAt: "2026-08-25T00:00:00.000Z",
     sameAttemptApplicant: true,
-  }), "already_linked");
+  }), "linked");
   assert.equal(applicationReplayCandidateOutcome!({
     found: true,
     agentStage: "abort",
@@ -146,7 +146,7 @@ test("an accepted replay preserves its original auto-filtered candidate as a suc
     candidateCreatedAt: "2026-08-25T00:00:01.000Z",
     submissionMappedAt: "2026-08-25T00:00:00.000Z",
     sameAttemptApplicant: true,
-  }), "unchanged_closed");
+  }), "linked");
   assert.equal(applicationReplayCandidateOutcome!({
     found: true,
     agentStage: "abort",

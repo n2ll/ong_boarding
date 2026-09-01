@@ -31,6 +31,8 @@ test("indirect hiring, selection, deployment, and attendance instructions are bl
     "최종 확정입니다.",
     "이번 일자리로 확정했어요.",
     "내일부터 나와 주세요.",
+    "최종 합격을 축하드립니다.",
+    "이번 업무 담당자로 선발했습니다.",
   ]) {
     assert.equal(detect!(text)?.kind, "confirmation", text);
   }
@@ -51,6 +53,7 @@ test("negative and manager-review explanations are not mistaken for confirmation
     "투입 예정이 아닙니다.",
     "채용 여부와 출근 일정은 담당 매니저가 검토 후 안내합니다.",
     "선정되면 담당 매니저가 별도로 연락드립니다.",
+    "관심 있으면 링크에서 조건을 확인해 주세요. 관심 표시는 배정·근무 확정이 아닙니다.",
   ]) {
     assert.equal(detect!(text), null, text);
   }

@@ -180,7 +180,7 @@ function shortJobTitle(title: string | null, jobId: number): string {
 
 const SOURCE_LABEL: Record<string, string> = {
   danggeun: "당근", baemin: "배민", danggeun_practice: "당근(연습)",
-  manual: "수기", direct: "직접지원", facebook: "페이스북", naver: "네이버",
+  manual: "수기", direct: "직접지원", facebook: "Meta 광고", naver: "네이버",
 };
 
 const SCREENING_LABELS: Record<string, string> = {

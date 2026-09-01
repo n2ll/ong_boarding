@@ -8,6 +8,7 @@ interface ApplicationFormDraftScope {
   source: string;
   job: string | number | null;
   branch: string | null;
+  trackingRef?: string | null;
 }
 
 interface ApplicationFormDraftSnapshot {
@@ -133,6 +134,44 @@ test("draft scope normalizes source and branch while isolating job context", asy
   assert.notEqual(normalized, applicationFormDraftStorageKey!({ ...scope, job: 32 }));
   assert.notEqual(normalized, applicationFormDraftStorageKey!({ ...scope, branch: "서초점" }));
   assert.notEqual(normalized, applicationFormDraftStorageKey!({ ...scope, branch: null }));
+});
+
+test("opaque tracking refs isolate drafts while an untracked URL keeps its existing scope", async () => {
+  const { applicationFormDraftStorageKey } = await loadModule();
+  assert.equal(typeof applicationFormDraftStorageKey, "function");
+
+  const untracked = applicationFormDraftStorageKey!(scope);
+  assert.equal(
+    untracked,
+    applicationFormDraftStorageKey!({ ...scope, trackingRef: null }),
+  );
+  assert.equal(
+    applicationFormDraftStorageKey!({
+      ...scope,
+      trackingRef: "91e65ed2-aa20-4f2a-8442-14d11c788ca2",
+    }),
+    applicationFormDraftStorageKey!({
+      ...scope,
+      trackingRef: " 91e65ed2-aa20-4f2a-8442-14d11c788ca2 ",
+    }),
+  );
+  assert.notEqual(
+    untracked,
+    applicationFormDraftStorageKey!({
+      ...scope,
+      trackingRef: "91e65ed2-aa20-4f2a-8442-14d11c788ca2",
+    }),
+  );
+  assert.notEqual(
+    applicationFormDraftStorageKey!({
+      ...scope,
+      trackingRef: "91e65ed2-aa20-4f2a-8442-14d11c788ca2",
+    }),
+    applicationFormDraftStorageKey!({
+      ...scope,
+      trackingRef: "1dfaf018-1f6b-4bc5-b2a8-c600da11cb7e",
+    }),
+  );
 });
 
 test("general applications and invalid job links never share a draft", async () => {

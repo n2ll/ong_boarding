@@ -10,6 +10,7 @@ import { TextField, TextareaField, SelectField } from "./ui/field";
 import { useConfirm } from "./ConfirmDialog";
 import { SOS_RESOLUTIONS, COST_CATEGORIES, kstMonth, type SosResolution, type CostCategory } from "@/lib/sos";
 import {
+  sosJobCreateHref,
   sosLedgerCardView,
   type SosLedgerCostData as LedgerRes,
   type SosLedgerCostRow as LedgerRow,
@@ -137,10 +138,7 @@ export function SosLedgerCard() {
 
   // 긴급 건을 공고 등록으로 넘긴다 — 라인·권역·차종을 프리필해 재입력을 없앤다.
   const handleMakeJob = (r: SosRow) => {
-    const params = new URLSearchParams({ new: "1", sos_id: String(r.id), line: r.line_label, period: "하루" });
-    if (r.region) params.set("region", r.region);
-    if (r.vehicle) params.set("vehicle", r.vehicle);
-    router.push(`/jobs?${params.toString()}`);
+    router.push(sosJobCreateHref(r));
   };
 
   const handleResolve = async () => {

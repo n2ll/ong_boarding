@@ -1,7 +1,7 @@
 /**
  * POST /api/admin/jobs/generate-posting
  *
- * 매니저의 거친 채용 메모 → 당근알바 / 알바몬 / 문자(SMS) 3개 채널 형식 공고를 자동 작성.
+ * 매니저의 거친 채용 메모 → 구인광고 원문 / 지원자 안내 문자 형식으로 자동 작성.
  * 하이브리드 전략:
  *   1) Claude(generateMultiPlatformPosting) 우선 호출
  *   2) 실패(키 없음/타임아웃/파싱 실패)하면 메모를 휴리스틱 파싱해 목업 템플릿으로 폴백
@@ -18,6 +18,7 @@ import {
   buildCurrentJobPostingLocationContext,
   formatCurrentJobPostingLocation,
 } from "@/lib/admin/job-posting-context";
+import { resolveJobAnnouncementBody } from "@/lib/admin/job-announcement-copy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -53,8 +54,18 @@ export async function POST(req: NextRequest) {
   // 1) Claude 우선
   try {
     const ai = await generateMultiPlatformPosting(prompt, supabase, generationContext);
-    if (ai && ai.danggeun?.body && ai.albamon?.body && ai.sms?.body) {
-      return NextResponse.json({ ok: true, source: "ai", posting: ai });
+    if (ai && ai.albamon?.body && ai.sms?.body) {
+      return NextResponse.json({
+        ok: true,
+        source: "ai",
+        posting: {
+          ...ai,
+          sms: {
+            ...ai.sms,
+            body: resolveJobAnnouncementBody({ jobTitle: ai.title, smsDraft: ai.sms.body }),
+          },
+        },
+      });
     }
   } catch (err) {
     console.error("[generate-posting] claude exception", err);
@@ -99,66 +110,47 @@ async function buildMasterContext(
 function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPosting {
   const f = parseRough(prompt);
 
-  const company = f.company || "옹고잉";
+  const company = f.company;
   const location = currentLocation || f.location || "";
-  const pay = f.pay || "협의";
-  const schedule = f.schedule || "협의";
-  const role = f.role || "배송";
-  const tags = f.tags.length ? f.tags : ["초보 가능", "주급 지급"];
+  const pay = f.pay;
+  const schedule = f.schedule;
+  const role = f.role || "업무";
+  const tags = f.tags;
 
-  const title = `[${shortLoc(location)}] ${role} 모집`;
+  const shortLocation = shortLoc(location);
+  const title = `${shortLocation ? `[${shortLocation}] ` : ""}${role} 모집`;
 
-  const danggeun = {
-    title: `${shortLoc(location)} ${role} / ${shortSchedule(schedule)} / ${pay}`,
-    body: [
-      `안녕하세요! ${shortLoc(location)} 동네에서 ${role} 도와주실 이웃 구해요 🙌`,
-      ``,
-      `⏰ ${schedule}`,
-      `💰 ${pay}`,
-      `📍 ${location}`,
-      ``,
-      `60대 이상 시니어 분들 대환영이에요. 처음이셔도 차근차근 알려드려요.`,
-      `편하게 채팅 주세요 :)`,
-    ].join("\n"),
-  };
+  const workConditionLines = [
+    schedule ? `- 근무시간: ${schedule}` : null,
+    pay ? `- 급여: ${pay}` : null,
+    location ? `- 근무지: ${location}` : null,
+  ].filter((line): line is string => Boolean(line));
 
   const albamon = {
-    title: `${company} ${role} 채용 (${shortLoc(location)})`,
+    title: [company, role, "모집", shortLocation ? `(${shortLocation})` : null].filter(Boolean).join(" "),
     body: [
       `[모집부문]`,
       `- ${role}`,
       ``,
       `[근무조건]`,
-      `- 근무시간: ${schedule}`,
-      `- 급여: ${pay}`,
-      `- 근무지: ${location}`,
+      ...(workConditionLines.length ? workConditionLines : [`- 입력된 근무조건을 확인해 주세요`]),
       ``,
       `[자격요건]`,
-      `- 성실하고 책임감 있으신 분`,
-      `- 경력 무관 / 초보 가능`,
+      `- 입력된 자격요건을 확인해 주세요`,
       ``,
       `[우대사항]`,
-      ...tags.map((t) => `- ${t}`),
+      ...(tags.length ? tags.map((t) => `- ${t}`) : [`- 입력된 우대조건 없음`]),
     ].join("\n"),
   };
 
   const sms = {
     title: `${role} 모집 안내`,
-    body: [
-      `📦 업무: ${role}`,
-      `⏰ 시간: ${schedule}`,
-      `📍 근무지: ${location}`,
-      `💰 급여: ${pay}`,
-      ``,
-      `🙋 시니어 우대, 초보 가능합니다.`,
-      `📩 관심 있으시면 이 문자에 '지원'이라고 답장 주세요.`,
-    ].join("\n"),
+    body: resolveJobAnnouncementBody({ jobTitle: title }),
   };
 
   return {
     title,
     fields: { company, location, pay, schedule, role, tags },
-    danggeun,
     albamon,
     sms,
   };

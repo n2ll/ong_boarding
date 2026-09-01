@@ -164,22 +164,22 @@ test("untrusted forwarding headers never become the only network identity", asyn
   }, false), "203.0.113.7");
 });
 
-test("the public route admits durably before applicant, geocode, or provider work", async () => {
+test("the public route claims attribution durably before applicant, geocode, or provider work", async () => {
   const [route, tally, page] = await Promise.all([
     readFile(new URL("../app/api/apply/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/webhooks/tally/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/apply/page.tsx", import.meta.url), "utf8"),
   ]);
 
-  const admission = route.indexOf("claimApplicationSubmissionAdmission");
-  assert.ok(admission >= 0);
+  const attributionClaim = route.indexOf('"claim_application_submission_with_attribution"');
+  assert.ok(attributionClaim >= 0);
   for (const work of [
     '.from("applicants")',
     "geocodeAddress(",
     "sendSms(",
     "sendNotification(",
   ]) {
-    assert.ok(admission < route.indexOf(work), `${work} must follow durable admission`);
+    assert.ok(attributionClaim < route.indexOf(work), `${work} must follow durable attribution claim`);
   }
   assert.match(route, /status:\s*429[\s\S]*Retry-After/);
   assert.match(tally, /applicationInternalSignature/);

@@ -56,18 +56,17 @@ export function applicationReplayCandidateOutcome(input: {
   candidateCreatedAt: string | null;
   submissionMappedAt: string | null;
   sameAttemptApplicant: boolean;
-}): "already_linked" | "unchanged_closed" | null {
+}): "linked" | "already_linked" | "unchanged_closed" | null {
   if (!input.found) return null;
-  if (input.sameAttemptApplicant && input.closedReason === "auto: 자동 필터 부적합") {
-    const candidateCreatedAt = Date.parse(input.candidateCreatedAt ?? "");
-    const submissionMappedAt = Date.parse(input.submissionMappedAt ?? "");
-    if (
-      Number.isFinite(candidateCreatedAt)
-      && Number.isFinite(submissionMappedAt)
-      && candidateCreatedAt >= submissionMappedAt
-    ) {
-      return "already_linked";
-    }
+  const candidateCreatedAt = Date.parse(input.candidateCreatedAt ?? "");
+  const submissionMappedAt = Date.parse(input.submissionMappedAt ?? "");
+  if (
+    input.sameAttemptApplicant
+    && Number.isFinite(candidateCreatedAt)
+    && Number.isFinite(submissionMappedAt)
+    && candidateCreatedAt >= submissionMappedAt
+  ) {
+    return "linked";
   }
   if (
     input.closedAt === null

@@ -161,6 +161,34 @@ test("a manual SMS carries its pre-persisted request id in provider custom field
   });
 });
 
+test("an SMS provider timeout is opt-in for durable outbox callers", async () => {
+  await withLiveSmsEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    const requestSignals: unknown[] = [];
+    globalThis.fetch = async (_input, init) => {
+      requestSignals.push(init?.signal instanceof AbortSignal ? init.signal : null);
+      return new Response(JSON.stringify({
+        groupInfo: { groupId: "provider-group-1", count: { registeredFailed: 0 } },
+        failedMessageList: [],
+        messageList: [{ messageId: "provider-message-1", statusCode: "2000" }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    try {
+      await sendSms("01012345678", "기존 경로 검증");
+      await sendSms(
+        "01012345678",
+        "outbox 경로 검증",
+        undefined,
+        { timeoutMs: 5_000 },
+      );
+      assert.equal(requestSignals[0], null);
+      assert.ok(requestSignals[1] instanceof AbortSignal);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 test("provider reconciliation accepts only the exact custom-field correlation", async () => {
   await withLiveSmsEnvironment(async () => {
     const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
@@ -195,6 +223,28 @@ test("provider reconciliation accepts only the exact custom-field correlation", 
       fetchImpl,
     });
     assert.deepEqual(result, { kind: "found", messageId: "exact-correlation" });
+  });
+});
+
+test("provider reconciliation carries one bounded abort signal across its lookup", async () => {
+  await withLiveSmsEnvironment(async () => {
+    let requestSignal: unknown = null;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      requestSignal = init?.signal instanceof AbortSignal ? init.signal : null;
+      return new Response(JSON.stringify({ messageList: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await findSmsByClientRequestId({
+      phone: "01012345678",
+      clientRequestId: "41f82761-a37a-4f6f-8ad5-8b6b93acb8c1",
+      createdAt: "2026-08-20T01:00:00.000Z",
+      fetchImpl,
+    });
+
+    assert.ok(requestSignal instanceof AbortSignal);
   });
 });
 

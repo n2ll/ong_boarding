@@ -22,6 +22,12 @@ export interface ApplicationSubmissionAttempt {
   vehicleRequired: boolean;
 }
 
+export type ApplicationSubmissionRequest = ApplicantFormData & {
+  source: string;
+  jobId: number | null;
+  trackingRef?: string | null;
+};
+
 export interface ApplicationSubmissionContext {
   jobId: number | null;
   vehicleRequired: boolean;
@@ -121,7 +127,7 @@ export function validateApplicationSubmissionId(
 }
 
 export function applicationSubmissionPayloadFingerprint(
-  request: ApplicantFormData & { source: string; jobId: number | null },
+  request: ApplicationSubmissionRequest,
 ): string {
   // Tally가 이 질문을 보내지 않던 기존 제출은 false로 지문화됐다. 저장 의미는
   // null(미확인)로 바로잡되, 지연 재전송이 충돌하지 않도록 homepage 지문만 호환한다.
@@ -150,7 +156,7 @@ export function applicationSubmissionPayloadFingerprint(
 }
 
 export async function applicationSubmissionPayloadDigest(
-  request: ApplicantFormData & { source: string; jobId: number | null },
+  request: ApplicationSubmissionRequest,
 ): Promise<string> {
   const bytes = new TextEncoder().encode(applicationSubmissionPayloadFingerprint(request));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -159,7 +165,7 @@ export async function applicationSubmissionPayloadDigest(
 
 export function resolveApplicationSubmissionContext(
   current: ApplicationSubmissionAttempt | null,
-  request: ApplicantFormData & { source: string; jobId: number | null },
+  request: ApplicationSubmissionRequest,
   vehicleRequired: boolean,
 ): ApplicationSubmissionContext {
   const reusesAttempt = current !== null
@@ -178,7 +184,7 @@ export function resolveApplicationSubmissionContext(
 
 export function nextApplicationSubmissionAttempt(
   current: ApplicationSubmissionAttempt | null,
-  request: ApplicantFormData & { source: string; jobId: number | null },
+  request: ApplicationSubmissionRequest,
   vehicleRequired: boolean,
   createId: () => string,
 ): ApplicationSubmissionAttempt {
@@ -194,13 +200,13 @@ export function nextApplicationSubmissionAttempt(
 
 export function prepareApplicationSubmission(
   current: ApplicationSubmissionAttempt | null,
-  request: ApplicantFormData & { source: string; jobId: number | null },
+  request: ApplicationSubmissionRequest,
   vehicleRequired: boolean,
   createId: () => string,
 ): {
   attempt: ApplicationSubmissionAttempt;
   context: ApplicationSubmissionContext;
-  payload: ApplicantFormData & { source: string; jobId: number | null; submissionId: string };
+  payload: ApplicationSubmissionRequest & { submissionId: string };
 } {
   const attempt = nextApplicationSubmissionAttempt(current, request, vehicleRequired, createId);
   return {

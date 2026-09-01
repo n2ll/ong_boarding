@@ -6,10 +6,19 @@ import ts from "typescript";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 import { fetchPhoneMessageIdentityIndex } from "./phone-message-identity.ts";
 import { normalizePhone } from "../ongmanaging.ts";
+import { detectConfirmationNuance } from "../agent/outbound-safety.ts";
+import {
+  bulkBatchRequestFingerprint,
+  bulkMessageRequestFingerprint,
+  bulkRecipientIdempotencyKey,
+  deliverBulkMessage,
+  validateBulkRequestId,
+} from "../bulk-message-send.ts";
 
 type Row = Record<string, unknown>;
 
 const NOW = "2026-08-31T12:00:00.000Z";
+const BULK_REQUEST_ID = "11111111-1111-4111-8111-111111111111";
 
 class FixedDate extends Date {
   static override now(): number {
@@ -29,6 +38,15 @@ type QueryCall = {
 
 type FakeOptions = {
   fail?: (call: QueryCall) => string | null;
+  rpc?: (call: RpcCall) => { data?: unknown; error?: string } | null;
+  smsResult?:
+    | { success: true; messageId?: string }
+    | { success: false; failureKind: "declared" | "unknown"; error?: string };
+};
+
+type RpcCall = {
+  name: string;
+  args: Record<string, unknown>;
 };
 
 function valueForColumn(row: Row, column: string): unknown {
@@ -42,6 +60,7 @@ function createSupabaseStub(
   database: Record<string, Row[]>,
   calls: QueryCall[],
   inserted: Array<{ table: string; row: Row }>,
+  rpcCalls: RpcCall[],
   options: FakeOptions = {},
 ) {
   class QueryBuilder {
@@ -144,6 +163,41 @@ function createSupabaseStub(
     from(table: string) {
       return new QueryBuilder(table);
     },
+    async rpc(name: string, args: Record<string, unknown>) {
+      const call = { name, args };
+      rpcCalls.push(call);
+      const override = options.rpc?.(call);
+      if (override) {
+        return {
+          data: override.data ?? null,
+          error: override.error ? { message: override.error } : null,
+        };
+      }
+      if (name === "claim_bulk_message_batch") {
+        return { data: { outcome: "claimed" }, error: null };
+      }
+      if (name === "claim_bulk_message_recipient") {
+        const batchId = String(args.p_batch_id ?? "");
+        const phone = String(args.p_applicant_phone ?? "");
+        return {
+          data: {
+            outcome: "claimed",
+            recipient_key: bulkRecipientIdempotencyKey(batchId, phone),
+            status: "sending",
+            provider_message_id: null,
+            reason: null,
+          },
+          error: null,
+        };
+      }
+      if (name === "record_bulk_message_provider_result") {
+        return { data: "recorded", error: null };
+      }
+      if (name === "finalize_bulk_message_send") {
+        return { data: "recorded", error: null };
+      }
+      return { data: null, error: { message: `unexpected RPC: ${name}` } };
+    },
   };
 }
 
@@ -155,9 +209,15 @@ function loadRoute(args: {
   options?: FakeOptions;
 }) {
   const calls: QueryCall[] = [];
+  const rpcCalls: RpcCall[] = [];
   const inserted: Array<{ table: string; row: Row }> = [];
-  const smsCalls: Array<{ phone: string; body: string; subject: string }> = [];
-  const supabase = createSupabaseStub(args.database, calls, inserted, args.options);
+  const smsCalls: Array<{
+    phone: string;
+    body: string;
+    subject: string;
+    options?: { clientRequestId?: string };
+  }> = [];
+  const supabase = createSupabaseStub(args.database, calls, inserted, rpcCalls, args.options);
   const route = new URL("../../app/api/admin/messages/bulk-send/route.ts", import.meta.url);
   const output = ts.transpileModule(readFileSync(route, "utf8"), {
     compilerOptions: {
@@ -176,9 +236,14 @@ function loadRoute(args: {
     "next/server": { NextResponse: nextResponse },
     "@/lib/supabase": { createServiceClient: () => supabase },
     "@/lib/solapi": {
-      sendSms: async (phone: string, body: string, subject: string) => {
-        smsCalls.push({ phone, body, subject });
-        return { success: true, messageId: "sms-1" };
+      sendSms: async (
+        phone: string,
+        body: string,
+        subject: string,
+        options?: { clientRequestId?: string },
+      ) => {
+        smsCalls.push({ phone, body, subject, options });
+        return args.options?.smsResult ?? { success: true, messageId: "sms-1" };
       },
     },
     "@/lib/blacklist": { fetchBlacklistedPhones: async () => new Set<string>() },
@@ -204,6 +269,34 @@ function loadRoute(args: {
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
     "@/lib/admin/phone-message-identity": { fetchPhoneMessageIdentityIndex },
     "@/lib/ongmanaging": { normalizePhone },
+    "@/lib/agent/outbound-safety": { detectConfirmationNuance },
+    "@/lib/exposure": {
+      normalizeRule: (raw: unknown) => raw,
+      isExposed: (
+        exposureApplicant: { sido?: string | null; suntopDone?: boolean },
+        exposureRule: { sido?: string[]; suntopDone?: boolean } | null,
+        override: "include" | "exclude" | undefined,
+      ) => {
+        if (override === "exclude") return false;
+        if (override === "include") return true;
+        if (!exposureRule) return false;
+        if (exposureRule.sido?.length && !exposureRule.sido.includes(exposureApplicant.sido ?? "")) {
+          return false;
+        }
+        if (exposureRule.suntopDone && !exposureApplicant.suntopDone) return false;
+        return Boolean(exposureRule.sido?.length || exposureRule.suntopDone);
+      },
+    },
+    "@/lib/geo": {
+      EXPOSURE_JOB_GEO_COLUMNS: "pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, distance_basis",
+    },
+    "@/lib/bulk-message-send": {
+      bulkBatchRequestFingerprint,
+      bulkMessageRequestFingerprint,
+      bulkRecipientIdempotencyKey,
+      deliverBulkMessage,
+      validateBulkRequestId,
+    },
   };
 
   runInNewContext(output, {
@@ -223,6 +316,7 @@ function loadRoute(args: {
   return {
     route: compiledModule.exports as RouteModule,
     calls,
+    rpcCalls,
     inserted,
     smsCalls,
   };
@@ -257,13 +351,16 @@ function request(
   recipients: Array<{ applicant_id: number; phone: string }> = [
     { applicant_id: 1, phone: "01012345678" },
   ],
+  body = "#{이름}님, 새 공고를 확인해 주세요. #{맞춤링크}",
+  bulkRequestId: unknown = BULK_REQUEST_ID,
 ) {
   return {
     async json() {
       return {
         recipients,
-        body: "#{이름}님, 새 공고를 확인해 주세요. #{맞춤링크}",
+        body,
         purpose: "new_job",
+        bulk_request_id: bulkRequestId,
         ...(jobId === null ? {} : { job_id: jobId }),
       };
     },
@@ -277,6 +374,7 @@ function campaignRequest() {
         recipients: [{ applicant_id: 1, phone: "01012345678" }],
         body: "새 일자리 안내입니다.",
         purpose: "campaign",
+        bulk_request_id: BULK_REQUEST_ID,
       };
     },
   };
@@ -290,6 +388,328 @@ test("new-job send rejects a missing job id before sending SMS", async () => {
   assert.equal(response.status, 400);
   assert.match(String(response.body.error), /공고/);
   assert.equal(harness.smsCalls.length, 0);
+});
+
+test("bulk send requires a valid request UUID before any database or provider work", async () => {
+  for (const invalidKey of [null, "not-a-uuid"]) {
+    const harness = loadRoute({ database: { jobs: [activeJob()], applicants: [applicant()] } });
+
+    const response = await harness.route.POST(request(7, undefined, undefined, invalidKey));
+
+    assert.equal(response.status, 400);
+    assert.match(String(response.body.error), /발송 요청 키/);
+    assert.equal(harness.calls.length, 0);
+    assert.equal(harness.rpcCalls.length, 0);
+    assert.equal(harness.smsCalls.length, 0);
+  }
+});
+
+test("bulk send claims the batch and recipient, correlates the provider, and finalizes atomically", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 1);
+  assert.equal(response.body.already_sent, 0);
+  assert.equal(response.body.sent_recovery_pending, 0);
+  assert.equal(response.body.failed, 0);
+  assert.equal(response.body.guarded, 0);
+  assert.equal(response.body.unknown, 0);
+  assert.equal(response.body.recovery_pending, 0);
+  assert.equal(harness.smsCalls.length, 1);
+  const recipientKey = bulkRecipientIdempotencyKey(BULK_REQUEST_ID, "01012345678");
+  assert.equal(harness.smsCalls[0]?.options?.clientRequestId, recipientKey);
+  assert.deepEqual(
+    harness.rpcCalls.map((call) => call.name),
+    [
+      "claim_bulk_message_batch",
+      "claim_bulk_message_recipient",
+      "record_bulk_message_provider_result",
+      "finalize_bulk_message_send",
+    ],
+  );
+  const batchClaim = harness.rpcCalls[0];
+  assert.equal(batchClaim?.args.p_request_id, BULK_REQUEST_ID);
+  assert.equal(batchClaim?.args.p_request_fingerprint, bulkBatchRequestFingerprint({
+    body: "#{이름}님, 새 공고를 확인해 주세요. #{맞춤링크}",
+    subject: "옹고잉 채용 안내",
+    purpose: "new_job",
+    jobId: 7,
+  }));
+  const recipientClaim = harness.rpcCalls[1];
+  assert.equal(recipientClaim?.args.p_recipient_fingerprint, bulkMessageRequestFingerprint({
+    applicantId: 1,
+    phone: "01012345678",
+    body: harness.smsCalls[0]?.body ?? "",
+    subject: "옹고잉 채용 안내",
+    purpose: "new_job",
+    jobId: 7,
+  }));
+  assert.equal(harness.inserted.length, 0, "history must be recorded only by finalize RPC");
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    applicant_id: 1,
+    phone: "01012345678",
+    success: true,
+    delivery: "sent",
+    state: "recorded",
+    recorded: true,
+    deduplicated: false,
+    recovery_pending: false,
+  });
+});
+
+test("an existing sent recipient is finalized without calling the provider again", async () => {
+  const recipientKey = bulkRecipientIdempotencyKey(BULK_REQUEST_ID, "01012345678");
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_recipient"
+        ? {
+            data: {
+              outcome: "existing",
+              recipient_key: recipientKey,
+              status: "sent",
+              provider_message_id: "sms-existing",
+              reason: null,
+            },
+          }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.already_sent, 1);
+  assert.equal(response.body.sent_recovery_pending, 0);
+  assert.equal(harness.smsCalls.length, 0);
+  assert.equal(
+    harness.rpcCalls.some((call) => call.name === "record_bulk_message_provider_result"),
+    false,
+  );
+  assert.equal(
+    harness.rpcCalls.some((call) => call.name === "finalize_bulk_message_send"),
+    true,
+  );
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.state, "recorded");
+  assert.equal(result?.deduplicated, true);
+  assert.equal(result?.recorded, true);
+});
+
+test("an existing unknown recipient is never resent and is reported for recovery", async () => {
+  const recipientKey = bulkRecipientIdempotencyKey(BULK_REQUEST_ID, "01012345678");
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_recipient"
+        ? {
+            data: {
+              outcome: "existing",
+              recipient_key: recipientKey,
+              status: "unknown",
+              provider_message_id: null,
+              reason: "provider response missing",
+            },
+          }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.already_sent, 0);
+  assert.equal(response.body.sent_recovery_pending, 0);
+  assert.equal(response.body.unknown, 1);
+  assert.equal(response.body.failed, 0);
+  assert.equal(response.body.guarded, 0);
+  assert.equal(response.body.recovery_pending, 1);
+  assert.equal(harness.smsCalls.length, 0);
+  assert.equal(
+    harness.rpcCalls.some((call) => call.name === "finalize_bulk_message_send"),
+    false,
+  );
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.delivery, "unknown");
+  assert.equal(result?.state, "unknown");
+  assert.equal(result?.deduplicated, true);
+});
+
+test("batch claim conflict fails closed before any recipient claim or provider call", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_batch"
+        ? { data: { outcome: "conflict", reason: "fingerprint mismatch" } }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 409);
+  assert.match(String(response.body.error), /요청 키|내용/);
+  assert.deepEqual(harness.rpcCalls.map((call) => call.name), ["claim_bulk_message_batch"]);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("batch claim RPC failure fails closed before any recipient claim or provider call", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_batch"
+        ? { error: "outbox unavailable" }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 503);
+  assert.match(String(response.body.error), /안전하게 저장/);
+  assert.deepEqual(harness.rpcCalls.map((call) => call.name), ["claim_bulk_message_batch"]);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("recipient claim RPC failure blocks that recipient without calling the provider", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_recipient"
+        ? { error: "outbox unavailable" }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.failed, 0);
+  assert.equal(response.body.guarded, 1);
+  assert.equal(harness.smsCalls.length, 0);
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.delivery, "not_sent");
+  assert.equal(result?.state, "blocked");
+});
+
+test("an atomic phone guard owned by another batch blocks without a key mismatch or provider call", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "claim_bulk_message_recipient"
+        ? {
+            data: {
+              outcome: "blocked",
+              recipient_key: "22222222-2222-4222-8222-222222222222",
+              status: "sent",
+              provider_message_id: "sms-other-batch",
+              reason: "recent_new_job",
+            },
+          }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(harness.smsCalls.length, 0);
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.state, "blocked");
+  assert.equal(result?.deduplicated, true);
+  assert.match(String(result?.error), /7일/);
+});
+
+test("provider success with unavailable atomic finalization is truthful and recovery-pending", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      rpc: (call) => call.name === "finalize_bulk_message_send"
+        ? { data: "unavailable" }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.already_sent, 0);
+  assert.equal(response.body.sent_recovery_pending, 1);
+  assert.equal(response.body.failed, 0);
+  assert.equal(response.body.unknown, 0);
+  assert.equal(response.body.recovery_pending, 1);
+  assert.equal(harness.smsCalls.length, 1);
+  assert.equal(
+    harness.rpcCalls.some((call) => call.name === "finalize_bulk_message_send"),
+    true,
+  );
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.delivery, "sent");
+  assert.equal(result?.state, "sent_unrecorded");
+  assert.equal(result?.recorded, false);
+  assert.equal(result?.recovery_pending, true);
+});
+
+test("a declared provider failure is unknown when the outbox release cannot be persisted", async () => {
+  const harness = loadRoute({
+    database: { jobs: [activeJob()], applicants: [applicant()], messages: [], pool_events: [] },
+    options: {
+      smsResult: { success: false, failureKind: "declared", error: "잔액 부족" },
+      rpc: (call) => call.name === "record_bulk_message_provider_result"
+        ? { error: "database unavailable" }
+        : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.already_sent, 0);
+  assert.equal(response.body.sent_recovery_pending, 0);
+  assert.equal(response.body.unknown, 1);
+  assert.equal(response.body.failed, 0);
+  assert.equal(response.body.guarded, 0);
+  assert.equal(response.body.recovery_pending, 1);
+  const result = (response.body.results as Array<Record<string, unknown>>)[0];
+  assert.equal(result?.state, "unknown");
+  assert.equal(result?.recovery_pending, true);
+  assert.match(String(result?.error), /재발송하지 않/);
+});
+
+test("direct new-job API rejects an announcement without the personal job link", async () => {
+  const harness = loadRoute({ database: { jobs: [activeJob()], applicants: [applicant()] } });
+
+  const response = await harness.route.POST(request(7, undefined, "#{이름}님, 새 공고가 있어요."));
+
+  assert.equal(response.status, 400);
+  assert.match(String(response.body.error), /맞춤링크/);
+  assert.equal(harness.smsCalls.length, 0);
+  assert.equal(harness.calls.length, 0, "invalid copy should fail before database work");
+});
+
+test("direct new-job API rejects copy that implies assignment or confirmation", async () => {
+  const harness = loadRoute({ database: { jobs: [activeJob()], applicants: [applicant()] } });
+
+  const response = await harness.route.POST(request(
+    7,
+    undefined,
+    "#{이름}님, 근무 확정됐어요. #{맞춤링크}",
+  ));
+
+  assert.equal(response.status, 400);
+  assert.match(String(response.body.error), /확정|배정/);
+  assert.equal(harness.smsCalls.length, 0);
+  assert.equal(harness.calls.length, 0, "unsafe copy should fail before database work");
 });
 
 test("new-job send rejects jobs that are not visible in the applicant pull page", async () => {
@@ -341,7 +761,7 @@ test("new-job send skips a recipient who received another new-job notice within 
 
   assert.equal(response.status, 200);
   assert.equal(response.body.sent, 0);
-  assert.equal(response.body.failed, 1);
+  assert.equal(response.body.guarded, 1);
   assert.match(String((response.body.results as Array<{ error?: string }>)[0]?.error), /7일/);
   assert.equal(harness.smsCalls.length, 0);
 });
@@ -417,7 +837,7 @@ test("new-job fatigue reads past the PostgREST 1000-row boundary before sending"
 
   assert.equal(response.status, 200);
   assert.equal(response.body.sent, 0);
-  assert.equal(response.body.failed, 2);
+  assert.equal(response.body.guarded, 2);
   assert.equal(harness.smsCalls.length, 0);
   assert.equal(harness.calls.some((call) => call.table === "pool_events" && call.from === 1_000), true);
 });
@@ -479,6 +899,198 @@ test("new-job send still sends for an active pull-visible job without recent fat
   assert.equal(response.status, 200);
   assert.equal(response.body.sent, 1);
   assert.equal(harness.smsCalls.length, 1);
+});
+
+test("direct new-job API cannot bypass a targeted job's empty exposure", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({ exposure: "targeted", exposure_rule: null })],
+      applicants: [applicant()],
+      job_exposure_targets: [],
+      messages: [],
+      pool_events: [],
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.guarded, 1);
+  assert.match(String((response.body.results as Array<{ error?: string }>)[0]?.error), /노출 대상/);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("targeted new-job send allows an explicitly included recipient", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({ exposure: "targeted", exposure_rule: null })],
+      applicants: [applicant()],
+      job_exposure_targets: [{ job_id: 7, applicant_id: 1, mode: "include" }],
+      messages: [],
+      pool_events: [],
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 1);
+  assert.equal(response.body.failed, 0);
+  assert.equal(harness.smsCalls.length, 1);
+});
+
+test("targeted new-job send applies the shared exposure rule per recipient", async () => {
+  const matchingApplicant = { ...applicant(), sido: "서울특별시" };
+  const nonMatchingApplicant = {
+    ...applicant(),
+    id: 2,
+    name: "비대상 지원자",
+    phone: "01087654321",
+    access_token: "token-2",
+    sido: "부산광역시",
+  };
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({
+        exposure: "targeted",
+        exposure_rule: { sido: ["서울특별시"] },
+      })],
+      applicants: [matchingApplicant, nonMatchingApplicant],
+      job_exposure_targets: [],
+      messages: [],
+      pool_events: [],
+    },
+  });
+
+  const response = await harness.route.POST(request(7, [
+    { applicant_id: 1, phone: "010-1234-5678" },
+    { applicant_id: 2, phone: "01087654321" },
+  ]));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 1);
+  assert.equal(response.body.guarded, 1);
+  assert.equal(harness.smsCalls.length, 1);
+  assert.equal(harness.smsCalls[0]?.phone, "01012345678");
+  assert.match(String((response.body.results as Array<{ error?: string }>)[1]?.error), /노출 대상/);
+});
+
+test("targeted new-job send supplies current suntop completion to exposure rules", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({
+        exposure: "targeted",
+        exposure_rule: { suntopDone: true },
+      })],
+      applicants: [applicant()],
+      job_exposure_targets: [],
+      messages: [],
+      pool_events: [{
+        id: 21,
+        applicant_id: 1,
+        event_type: "suntop_done",
+        created_at: "2026-08-20T00:00:00.000Z",
+      }],
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 1);
+  assert.equal(response.body.failed, 0);
+  assert.equal(harness.smsCalls.length, 1);
+});
+
+test("targeted new-job send gives an explicit exclude precedence over a matching rule", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({
+        exposure: "targeted",
+        exposure_rule: { sido: ["서울특별시"] },
+      })],
+      applicants: [{ ...applicant(), sido: "서울특별시" }],
+      job_exposure_targets: [{ job_id: 7, applicant_id: 1, mode: "exclude" }],
+      messages: [],
+      pool_events: [],
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.guarded, 1);
+  assert.match(String((response.body.results as Array<{ error?: string }>)[0]?.error), /노출 대상/);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("targeted exposure is bound to the applicant token, not borrowed from a duplicate phone row", async () => {
+  const duplicate = {
+    ...applicant(),
+    id: 2,
+    phone: "010-1234-5678",
+    access_token: "token-2",
+  };
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({ exposure: "targeted", exposure_rule: null })],
+      applicants: [applicant(), duplicate],
+      job_exposure_targets: [{ job_id: 7, applicant_id: 2, mode: "include" }],
+      messages: [],
+      pool_events: [],
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 0);
+  assert.equal(response.body.guarded, 1);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("targeted exposure lookup failure stops direct new-job API sends", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({ exposure: "targeted", exposure_rule: null })],
+      applicants: [applicant()],
+      job_exposure_targets: [],
+    },
+    options: {
+      fail: (call) => call.table === "job_exposure_targets" ? "exposure ledger unavailable" : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 503);
+  assert.match(String(response.body.error), /노출 대상/);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("targeted suntop-rule lookup failure stops direct new-job API sends", async () => {
+  const harness = loadRoute({
+    database: {
+      jobs: [activeJob({ exposure: "targeted", exposure_rule: { suntopDone: true } })],
+      applicants: [applicant()],
+      job_exposure_targets: [],
+      pool_events: [],
+    },
+    options: {
+      fail: (call) => (
+        call.table === "pool_events"
+        && call.equals.some(([column, value]) => column === "event_type" && value === "suntop_done")
+      ) ? "suntop ledger unavailable" : null,
+    },
+  });
+
+  const response = await harness.route.POST(request());
+
+  assert.equal(response.status, 503);
+  assert.match(String(response.body.error), /노출 조건/);
+  assert.equal(harness.smsCalls.length, 0);
 });
 
 test("new-job send excludes a phone when a duplicate row is already a candidate for the job", async () => {
@@ -656,7 +1268,7 @@ test("an unknown recipient phone produces one failed result instead of duplicate
 
   assert.equal(response.status, 200);
   assert.equal(response.body.sent, 0);
-  assert.equal(response.body.failed, 1);
+  assert.equal(response.body.guarded, 1);
   assert.equal((response.body.results as unknown[]).length, 1);
   assert.equal(harness.smsCalls.length, 0);
 });

@@ -6,7 +6,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { recordUsage } from "./agent/usage";
+import { recordUsage } from "./agent/usage.ts";
 
 export interface ExtractedJobInfo {
   address: string;
@@ -127,7 +127,7 @@ export async function generateJobPosting(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// 멀티 채널 공고 자동작성 — 당근알바 / 알바몬 / 문자(SMS) 형식
+// 공고 원문·지원자 안내 자동작성 — 구인광고 원문 / 문자(SMS) 형식
 // ──────────────────────────────────────────────────────────────────────────
 
 export interface MultiPlatformPosting {
@@ -142,24 +142,22 @@ export interface MultiPlatformPosting {
     role: string;
     tags: string[];
   };
-  /** 채널별 본문 */
-  danggeun: { title: string; body: string };
+  /** 사용처별 본문 */
   albamon: { title: string; body: string };
   sms: { title: string; body: string };
 }
 
 const MULTI_PLATFORM_SYSTEM_PROMPT = `너는 시니어(50~70대) 긱워커 채용에 특화된 인력 공급 회사 '옹보딩'의 채용 공고 카피라이터다.
-매니저가 짧고 거친 채용 메모를 던지면, 동일한 일자리를 3개 채널(당근알바 / 알바몬 / 문자SMS) 각각의 형식과 톤에 딱 맞게 다시 써라.
+매니저가 짧고 거친 채용 메모를 던지면, 동일한 일자리를 구인광고 원문과 지원자 안내 문자 각각의 형식과 톤에 맞게 다시 써라.
 
 ## 공통 규칙
 - 한국어. 시니어 지원자가 읽기 쉽게 쉬운 단어, 짧은 문장.
-- 메모에 없는 정보를 멋대로 지어내지 마라(회사명/연락처/링크 X). 비면 자연스럽게 생략하거나 "협의" 로 둬라.
+- 메모에 없는 정보를 멋대로 지어내지 마라(회사명/연락처/급여/조건 X). 비면 자연스럽게 생략하라.
 - 급여/근무지/시간/업무는 메모에서 최대한 뽑아내라.
 
-## 채널별 형식
-1) danggeun (당근알바): 동네 이웃에게 말 걸듯 친근하고 짧게. 이모지 1~2개 OK. 제목은 동네+조건 강조(예: "성수동 카페 청소 / 오전 4시간 / 시급 11,000원"). 본문 4~6줄, 군더더기 없이.
-2) albamon (알바몬): 정형화된 채용 공고. 본문은 반드시 [모집부문] / [근무조건] / [자격요건] / [우대사항] / [근무지] 섹션 라벨을 대괄호로 쓰고 각 항목은 '- ' 불릿. 정중하고 사무적인 톤.
-3) sms (문자): 후보에게 바로 보내는 SMS. 유니코드 이모지로 섹션 구분(📦 업무 / ⏰ 시간 / 📍 근무지 / 💰 급여 / 🙋 지원). 짧고 핵심만. 마지막 줄 "📩 관심 있으시면 이 문자에 '지원'이라고 답장 주세요."
+## 사용처별 형식
+1) albamon (구인광고 원문): 정형화된 채용 공고. 본문은 반드시 [모집부문] / [근무조건] / [자격요건] / [우대사항] / [근무지] 섹션 라벨을 대괄호로 쓰고 각 항목은 '- ' 불릿. 정중하고 사무적인 톤. 특정 외부 플랫폼을 전제로 쓰지 마라.
+2) sms (기존 인력풀 안내 문자): 후보에게 바로 보내는 SMS. 첫 줄에 #{이름}, 별도 줄에 #{맞춤링크}를 반드시 그대로 넣어라. 메모에 있는 사실만 짧게 정리하고, 링크에서 조건을 확인한 뒤 '관심 있음'을 누르도록 안내하라. "관심 표시는 배정·근무 확정이 아니며, 매니저가 확인 후 연락드립니다."를 반드시 포함하라. 문자 답장 방식으로 지원을 요구하지 마라.
 
 ## 출력
 generate_multi_posting 도구로만 응답해라. 줄바꿈은 실제 개행(\\n).`;
@@ -185,14 +183,14 @@ export async function generateMultiPlatformPosting(
       {
         name: "generate_multi_posting",
         description:
-          "거친 채용 메모를 당근알바/알바몬/문자SMS 3개 채널 형식으로 각각 작성해 반환합니다.",
+          "거친 채용 메모를 구인광고 원문과 지원자 안내 문자 형식으로 각각 작성해 반환합니다.",
         input_schema: {
           type: "object",
           properties: {
             title: { type: "string", description: "공통 한 줄 제목 (예: '성수동 카페 오전 청소 모집')" },
             fields: {
               type: "object",
-              description: "미리보기 카드용 구조화 필드. 메모에 없으면 빈 문자열 또는 '협의'.",
+              description: "미리보기 카드용 구조화 필드. 메모에 없으면 빈 문자열.",
               properties: {
                 company: { type: "string", description: "회사/매장명. 없으면 빈 문자열." },
                 location: { type: "string", description: "근무지 (예: '서울 성동구 성수동')." },
@@ -206,14 +204,6 @@ export async function generateMultiPlatformPosting(
                 },
               },
               required: ["company", "location", "pay", "schedule", "role", "tags"],
-            },
-            danggeun: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                body: { type: "string" },
-              },
-              required: ["title", "body"],
             },
             albamon: {
               type: "object",
@@ -232,7 +222,7 @@ export async function generateMultiPlatformPosting(
               required: ["title", "body"],
             },
           },
-          required: ["title", "fields", "danggeun", "albamon", "sms"],
+          required: ["title", "fields", "albamon", "sms"],
         },
       },
     ],

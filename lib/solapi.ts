@@ -5,6 +5,7 @@ const SOLAPI_LIST_URL = "https://api.solapi.com/messages/v4/list";
 const FROM_NUMBER = "01035037252";
 const MANUAL_MESSAGE_CORRELATION_FIELD = "ongboardingRequestId";
 const PROVIDER_RECONCILIATION_MAX_PAGES = 2;
+const PROVIDER_RECONCILIATION_TIMEOUT_MS = 1_500;
 
 export type SmsSendResult =
   | {
@@ -24,6 +25,8 @@ export type SmsSendResult =
 export interface SmsSendOptions {
   /** 공급자 성공 뒤 DB 응답 유실을 read-only 조회로 복구하기 위한 caller UUID. */
   clientRequestId?: string;
+  /** durable outbox가 결과 불명을 보존할 수 있는 호출만 공급자 대기 상한을 지정한다. */
+  timeoutMs?: number;
 }
 
 export type SmsProviderLookupResult =
@@ -74,6 +77,7 @@ export async function sendSms(
       Authorization: getAuthHeader(),
       "Content-Type": "application/json",
     },
+    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
     body: JSON.stringify({
       messages: [{
         to,
@@ -152,6 +156,7 @@ export async function findSmsByClientRequestId({
   const startDate = new Date(createdAtMs - 10 * 60 * 1000).toISOString();
   const endDate = new Date(createdAtMs + 30 * 60 * 1000).toISOString();
   let startKey: string | null = null;
+  const signal = AbortSignal.timeout(PROVIDER_RECONCILIATION_TIMEOUT_MS);
 
   try {
     for (let page = 0; page < PROVIDER_RECONCILIATION_MAX_PAGES; page += 1) {
@@ -167,6 +172,7 @@ export async function findSmsByClientRequestId({
       const response = await fetchImpl(`${SOLAPI_LIST_URL}?${params.toString()}`, {
         method: "GET",
         headers: { Authorization: getAuthHeader() },
+        signal,
       });
       if (!response.ok) {
         return {

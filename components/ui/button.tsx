@@ -44,9 +44,9 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground hover:bg-error-strong shadow-xs focus-visible:ring-destructive",
       },
       size: {
-        sm: "min-h-11 px-3.5 text-xs rounded-2xl",
-        default: "min-h-11 px-4 py-2 text-sm rounded-2xl",
-        lg: "min-h-12 px-6 text-base rounded-2xl",
+        sm: "min-h-11 px-3.5 text-xs rounded-md",
+        default: "min-h-11 px-4 py-2 text-sm rounded-md",
+        lg: "min-h-12 px-6 text-base rounded-md",
         icon: "h-11 w-11 rounded-full",
         /**
          * 44px 규칙의 명시적 예외. 목록 행 안에 여러 개가 나란히 붙는
@@ -56,7 +56,7 @@ const buttonVariants = cva(
          */
         chip: "min-h-7 px-2 py-1 text-[12px] rounded-md gap-1 [&_svg:not([class*='size-'])]:size-3",
         /** 도구 모음의 아이콘+글자 버튼. chip과 같은 취지의 예외. */
-        toolbar: "min-h-8 px-2 py-2 text-[12px] rounded-lg gap-1",
+        toolbar: "min-h-8 px-2 py-2 text-[12px] rounded-md gap-1",
       },
     },
     defaultVariants: {

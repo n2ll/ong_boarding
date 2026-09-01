@@ -16,6 +16,17 @@ import {
   resolveApplicationBranchSubmission,
   type ApplicationBranchContext,
 } from "@/lib/application-branch";
+import {
+  normalizeDeclaredAcquisitionSource,
+  normalizePublicTrackingRef,
+  parseAcquisitionClaimResult,
+  type AcquisitionClaimResult,
+} from "@/lib/acquisition-attribution";
+import {
+  applicationCandidateFinalizationPlan,
+  applicationReplayAttributionPlan,
+  parseAcquisitionAttributionResult,
+} from "@/lib/acquisition-attribution-outcome";
 import { normalizeApplicantRoadAddress } from "@/lib/applicant-form";
 import {
   normalizeTallySelfOwnership,
@@ -47,7 +58,6 @@ import { publicJobAvailability } from "@/lib/public-job";
 import {
   APPLICATION_INTERNAL_HEADER,
   applicationRateLimitHash,
-  claimApplicationSubmissionAdmission,
   isTrustedApplicationInternalRequest,
   trustedApplicationClientIp,
 } from "@/lib/application-rate-limit";
@@ -129,6 +139,7 @@ export async function POST(req: NextRequest) {
       selfOwnership,
       marketingConsent,
       jobId,
+      trackingRef: rawTrackingRef,
       submissionId: rawSubmissionId,
     } = body;
 
@@ -146,16 +157,10 @@ export async function POST(req: NextRequest) {
     const submissionId = validatedSubmissionId.id;
 
     const supabase = createServiceClient();
-    const realJobId = Number(jobId);
-    const jobRequested = Number.isInteger(realJobId) && realJobId > 0;
-    let publicJobOpen: boolean | null = jobRequested ? null : false;
-    let jobVehicleRequired: boolean | null = null;
-    let vehicleRequired = true;
-    let branchContext: ApplicationBranchContext = { mode: "none" };
-    let resolvedBranch = {
-      branch1: APPLICATION_BRANCH_UNASSIGNED,
-      branch2: null as string | null,
-    };
+    const declaredSource = normalizeDeclaredAcquisitionSource(source);
+    const trackingRef = normalizePublicTrackingRef(rawTrackingRef);
+    const declaredRealJobId = Number(jobId);
+    const declaredJobRequested = Number.isInteger(declaredRealJobId) && declaredRealJobId > 0;
     const submittedForm = {
       name: typeof name === "string" ? name : "",
       birthDate: typeof birthDate === "string" ? birthDate : "",
@@ -175,12 +180,12 @@ export async function POST(req: NextRequest) {
     };
     const submissionFingerprint = await applicationSubmissionPayloadDigest({
       ...submittedForm,
-      source: typeof source === "string" ? source : "direct",
-      jobId: jobRequested ? realJobId : null,
+      source: declaredSource.source,
+      jobId: declaredJobRequested ? declaredRealJobId : null,
     });
     const normalizedLocation = normalizeApplicantRoadAddress(submittedForm.location);
     const trustedInternal = isTrustedApplicationInternalRequest({
-      source,
+      source: declaredSource.source,
       submissionId,
       requestFingerprint: submissionFingerprint,
       providedSignature: req.headers.get(APPLICATION_INTERNAL_HEADER),
@@ -196,6 +201,107 @@ export async function POST(req: NextRequest) {
           selfOwnership: normalizeTallySelfOwnership(submittedForm.selfOwnership),
         }
       : submittedForm;
+
+    const rateLimitSecret = process.env.APPLY_RATE_LIMIT_SECRET?.trim()
+      || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    if (!rateLimitSecret) {
+      console.error("[apply] admission hash secret missing");
+      return NextResponse.json(
+        {
+          error: "제출 보호 기능을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          code: "APPLICATION_ADMISSION_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+
+    const clientIp = trustedApplicationClientIp(
+      req as NextRequest & { ip?: unknown },
+      process.env.VERCEL === "1",
+    ) ?? "unavailable";
+    let attributionClaim: AcquisitionClaimResult;
+    try {
+      const response = await supabase.rpc(
+        "claim_application_submission_with_attribution",
+        {
+          p_submission_id: submissionId,
+          p_request_fingerprint: submissionFingerprint,
+          p_phone_hash: applicationRateLimitHash("phone", submittedForm.phone, rateLimitSecret),
+          p_ip_hash: applicationRateLimitHash("ip", clientIp, rateLimitSecret),
+          p_trusted_internal: trustedInternal,
+          p_tracking_ref: trackingRef,
+          p_declared_source: declaredSource.isRecognized ? declaredSource.source : null,
+          p_declared_job_id: declaredJobRequested ? declaredRealJobId : null,
+        },
+      );
+      attributionClaim = parseAcquisitionClaimResult(response);
+    } catch (claimError) {
+      console.error("[apply] durable attribution claim failed", claimError);
+      return NextResponse.json(
+        {
+          error: "제출 보호 기능을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          code: "APPLICATION_ADMISSION_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+    if (attributionClaim.kind === "error") {
+      if (attributionClaim.reason === "conflict") {
+        return NextResponse.json(
+          {
+            error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다.",
+            code: "APPLICATION_SUBMISSION_CONFLICT",
+          },
+          { status: 409 },
+        );
+      }
+      if (attributionClaim.reason === "context_mismatch") {
+        return NextResponse.json(
+          {
+            error: "지원 링크의 공고 또는 유입 정보가 변경되었습니다. 링크를 다시 확인해주세요.",
+            code: "APPLICATION_CONTEXT_CHANGED",
+          },
+          { status: 409 },
+        );
+      }
+      if (attributionClaim.reason === "rate_limited") {
+        return NextResponse.json(
+          {
+            error: "짧은 시간에 제출 요청이 여러 번 확인되어 잠시 보호 중입니다.",
+            retryable: true,
+            retryAfterSeconds: attributionClaim.retryAfterSeconds,
+            code: "APPLICATION_RATE_LIMITED",
+          },
+          {
+            status: 429,
+            headers: { "Retry-After": String(attributionClaim.retryAfterSeconds) },
+          },
+        );
+      }
+      console.error("[apply] durable attribution claim malformed");
+      return NextResponse.json(
+        {
+          error: "제출 보호 기능을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          code: "APPLICATION_ADMISSION_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+
+    const effectiveSource = attributionClaim.attribution.source;
+    const realJobId = attributionClaim.attribution.jobId ?? 0;
+    const jobRequested = attributionClaim.attribution.jobId !== null;
+    let publicJobOpen: boolean | null = jobRequested ? null : false;
+    let jobVehicleRequired: boolean | null = null;
+    let vehicleRequired = true;
+    let branchContext: ApplicationBranchContext = { mode: "none" };
+    let resolvedBranch = {
+      branch1: APPLICATION_BRANCH_UNASSIGNED,
+      branch2: null as string | null,
+    };
 
     // 현재 공고를 다시 심사하기 전에 submission key의 영구 매핑부터 해석한다.
     // 이미 저장된 같은 payload replay는 공고가 이후 변경·삭제되어도 최초 접수를 되돌리지 않는다.
@@ -435,7 +541,7 @@ export async function POST(req: NextRequest) {
         }
       } else {
         const sourceRequiresBranchChoice = applicationSourceRequiresBranchChoice(
-          typeof source === "string" ? source : "direct",
+          effectiveSource,
         );
         if (sourceRequiresBranchChoice) {
           const { data: branchClients, error: branchClientsError } = await supabase
@@ -527,71 +633,6 @@ export async function POST(req: NextRequest) {
     } else if (jobRequested) {
       // 후보 연결 복구는 아래 원자 RPC가 현재 공고 상태를 다시 잠가 판단한다.
       publicJobOpen = true;
-    }
-
-    // 유효한 새 제출과 동일 payload replay만 durable admission을 통과한다.
-    // 이후 applicant 조회·지오코딩·외부 발송보다 앞서며 전화/IP 원문은 저장하지 않는다.
-    const rateLimitSecret = process.env.APPLY_RATE_LIMIT_SECRET?.trim()
-      || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-    if (!rateLimitSecret) {
-      console.error("[apply] admission hash secret missing");
-      return NextResponse.json(
-        {
-          error: "제출 보호 기능을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
-          retryable: true,
-          code: "APPLICATION_ADMISSION_UNAVAILABLE",
-        },
-        { status: 503 },
-      );
-    }
-
-    const clientIp = trustedApplicationClientIp(
-      req as NextRequest & { ip?: unknown },
-      process.env.VERCEL === "1",
-    ) ?? "unavailable";
-    const admission = await claimApplicationSubmissionAdmission(() => supabase.rpc(
-      "claim_application_submission_admission",
-      {
-        p_submission_id: submissionId,
-        p_request_fingerprint: submissionFingerprint,
-        p_phone_hash: applicationRateLimitHash("phone", submittedForm.phone, rateLimitSecret),
-        p_ip_hash: applicationRateLimitHash("ip", clientIp, rateLimitSecret),
-        p_trusted_internal: trustedInternal,
-      },
-    ));
-    if (admission.kind === "conflict") {
-      return NextResponse.json(
-        {
-          error: "같은 제출 요청 키를 다른 지원 내용에 사용할 수 없습니다.",
-          code: "APPLICATION_SUBMISSION_CONFLICT",
-        },
-        { status: 409 },
-      );
-    }
-    if (admission.kind === "rate_limited") {
-      return NextResponse.json(
-        {
-          error: "짧은 시간에 제출 요청이 여러 번 확인되어 잠시 보호 중입니다.",
-          retryable: true,
-          retryAfterSeconds: admission.retryAfterSeconds,
-          code: "APPLICATION_RATE_LIMITED",
-        },
-        {
-          status: 429,
-          headers: { "Retry-After": String(admission.retryAfterSeconds) },
-        },
-      );
-    }
-    if (admission.kind === "error") {
-      console.error("[apply] durable admission failed");
-      return NextResponse.json(
-        {
-          error: "제출 보호 기능을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
-          retryable: true,
-          code: "APPLICATION_ADMISSION_UNAVAILABLE",
-        },
-        { status: 503 },
-      );
     }
 
     let mappedApplicant: ApplicationReplayApplicant | null = null;
@@ -697,14 +738,14 @@ export async function POST(req: NextRequest) {
 
     // source는 유입 채널이다. 화주사 근거가 있는 레거시 배민 비마트 흐름만 자동 스크리닝한다.
     const legacyBmartIntake = !jobRequested && applicationUsesLegacyBmartFlow({
-      source: typeof source === "string" ? source : "direct",
+      source: effectiveSource,
       branch: resolvedBranch.branch1,
     });
     const autoStatus = !filterPass ? "부적합" : (legacyBmartIntake ? "스크리닝 중" : "스크리닝 전");
     const operationalFields = applicationOperationalFieldsForSubmission({
       updateMode,
       isDuplicate,
-      submittedSource: typeof source === "string" ? source : null,
+      submittedSource: effectiveSource,
       nextFilterPass: filterPass ? "Y" : "N",
       existing: existingRow
         ? {
@@ -860,7 +901,7 @@ export async function POST(req: NextRequest) {
     const startAutoEngagement = autoEngagementRequired && replayPlan.repairsMissingSideEffects;
     const insertedBranchName = applicationBranchName(inserted.branch);
     const insertedLegacyBmartIntake = !jobRequested && applicationUsesLegacyBmartFlow({
-      source: inserted.source ?? "direct",
+      source: effectiveSource,
       branch: insertedBranchName,
     });
     const initialMessagePlan = applicationInitialMessagePlan({
@@ -909,7 +950,7 @@ export async function POST(req: NextRequest) {
         // 편집 가능한 과거 baemin_start는 미동의자에게 재동의를 묻거나 미래 안내를 약속할 수 있어 쓰지 않는다.
         // 플래그가 꺼져 있으면(=재개) 배민도 평시대로 danggeun_start를 공유한다.
         const baeminSuspended =
-          inserted.source === "baemin" &&
+          effectiveSource === "baemin" &&
           !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
         if (baeminSuspended) {
           const effectiveMarketingConsent =
@@ -1212,13 +1253,58 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let persistedAttributionOutcome: unknown = null;
+    if (replayPlan.kind === "accepted_replay") {
+      const persistedAttributionLookup = await supabase
+        .from("application_submission_attribution_outcomes")
+        .select("request_fingerprint, applicant_id, candidate_link_outcome")
+        .eq("submission_id", submissionId)
+        .maybeSingle();
+      if (persistedAttributionLookup.error) {
+        console.error("[apply] persisted attribution outcome lookup failed", persistedAttributionLookup.error);
+        return NextResponse.json(
+          {
+            error: "기존 지원 경로 기록을 안전하게 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            retryable: true,
+            code: "APPLICATION_ATTRIBUTION_UNAVAILABLE",
+          },
+          { status: 503 },
+        );
+      }
+      persistedAttributionOutcome = persistedAttributionLookup.data;
+    }
+    const attributionReplayPlan = applicationReplayAttributionPlan({
+      acceptedReplay: replayPlan.kind === "accepted_replay",
+      persisted: persistedAttributionOutcome,
+      requestFingerprint: submissionFingerprint,
+      applicantId: inserted.id,
+      jobRequested,
+    });
+    if (attributionReplayPlan.kind === "invalid") {
+      console.error("[apply] persisted attribution outcome mismatch", { submissionId });
+      return NextResponse.json(
+        {
+          error: "기존 지원 경로 기록이 현재 제출과 일치하지 않습니다.",
+          retryable: true,
+          code: "APPLICATION_ATTRIBUTION_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+
     // ── 실제 공고 지원 링크(?job=ID)로 들어온 경우 → 해당 공고 후보로 연결 ──
     // 외부 채널 게시물의 "지원하기"가 이 흐름을 타며, 매니저는 공고별 후보 보드에서 바로 확인/스크리닝한다.
     // (당근/배민 시스템 흐름은 위에서 별도 처리되므로 여기선 실공고만 처리)
-    let candidateLinkOutcome: CandidateLinkOutcome = jobRequested && publicJobOpen === false
-      ? "unavailable"
-      : null;
-    if (jobRequested && publicJobOpen === true) {
+    let candidateLinkOutcome: CandidateLinkOutcome = attributionReplayPlan.kind === "reuse"
+      ? attributionReplayPlan.candidateLinkOutcome
+      : jobRequested && publicJobOpen === false
+        ? "unavailable"
+        : null;
+    if (
+      attributionReplayPlan.kind === "repair"
+      && jobRequested
+      && publicJobOpen === true
+    ) {
       try {
         let candidateReplayLookupComplete = replayPlan.kind !== "accepted_replay";
         // 영구 매핑된 replay는 최초 후보 연결을 먼저 보존한다. 공고가 이후 닫혀도
@@ -1301,6 +1387,61 @@ export async function POST(req: NextRequest) {
       } catch (linkErr) {
         console.error("[apply] real job link failed", linkErr);
       }
+    }
+
+    const candidateFinalizationPlan = attributionReplayPlan.kind === "reuse"
+      ? {
+          kind: "finalize" as const,
+          outcome: attributionReplayPlan.finalCandidateOutcome,
+        }
+      : applicationCandidateFinalizationPlan(jobRequested, candidateLinkOutcome);
+    if (candidateFinalizationPlan.kind === "retry") {
+      return NextResponse.json(
+        {
+          error: "공고 지원 연결을 완료하지 못했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          code: "APPLICATION_JOB_LINK_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
+    }
+
+    let attributionFinalizationRecorded = false;
+    let attributionFinalizationError: unknown = null;
+    try {
+      const attributionFinalization = await supabase.rpc(
+        "finalize_application_submission_attribution",
+        {
+          p_submission_id: submissionId,
+          p_request_fingerprint: submissionFingerprint,
+          p_applicant_id: inserted.id,
+          p_candidate_link_outcome: candidateFinalizationPlan.outcome,
+        },
+      );
+      const attributionFinalizationRow = Array.isArray(attributionFinalization.data)
+        ? attributionFinalization.data.length === 1
+          ? attributionFinalization.data[0]
+          : null
+        : attributionFinalization.data;
+      attributionFinalizationError = attributionFinalization.error;
+      attributionFinalizationRecorded = !attributionFinalization.error
+        && parseAcquisitionAttributionResult(
+          attributionFinalizationRow,
+          submissionFingerprint,
+        ) !== "failed";
+    } catch (finalizationError) {
+      attributionFinalizationError = finalizationError;
+    }
+    if (!attributionFinalizationRecorded) {
+      console.error("[apply] attribution finalization failed", attributionFinalizationError);
+      return NextResponse.json(
+        {
+          error: "지원 경로 기록을 안전하게 완료하지 못했습니다. 잠시 후 다시 시도해주세요.",
+          retryable: true,
+          code: "APPLICATION_ATTRIBUTION_UNAVAILABLE",
+        },
+        { status: 503 },
+      );
     }
 
     const result = {

@@ -6,6 +6,7 @@ import ts from "typescript";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 import { fetchPhoneMessageIdentityIndex } from "./phone-message-identity.ts";
 import { normalizePhone } from "../ongmanaging.ts";
+import { resolveJobAnnouncementBody } from "./job-announcement-copy.ts";
 
 type Row = Record<string, unknown>;
 
@@ -194,6 +195,7 @@ function loadRouteModule(supabase: ReturnType<typeof createSupabaseStub>): Route
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
     "@/lib/admin/phone-message-identity": { fetchPhoneMessageIdentityIndex },
     "@/lib/ongmanaging": { normalizePhone },
+    "@/lib/admin/job-announcement-copy": { resolveJobAnnouncementBody },
     "@/lib/jobs": {
       isJobEffectivelyClosed: (status: string | null, closesAt: string | null) => (
         status !== "active" || Boolean(closesAt && Date.parse(closesAt) <= FixedDate.now())
@@ -319,6 +321,7 @@ test("reads every targeting ledger so rows after 1000 still affect inclusion and
   assert.equal(response.status, 200);
   assert.deepEqual(Array.from(targets, (target) => target.id), [1, 3, 5, 8, 7]);
   assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), { suntop: 1, promised: 1, requested: 1, matched: 2 });
+  assert.match(String(response.body.sms_body), /#\{맞춤링크\}/);
 
   const secondPages = calls.filter((call) => call.method === "range" && call.from === 1_000);
   assert.equal(secondPages.some((call) => call.table === "pool_events" && equals(call, "event_type", "suntop_done")), true);
@@ -328,6 +331,26 @@ test("reads every targeting ledger so rows after 1000 still affect inclusion and
   assert.equal(secondPages.some((call) => call.table === "pool_events" && equals(call, "meta->>purpose", "new_job")), true);
   assert.equal(secondPages.some((call) => call.table === "job_candidates"), true);
   assert.equal(secondPages.some((call) => call.table === "job_exposure_targets"), true);
+});
+
+test("returns the manager-reviewed SMS draft as the exact announcement body", async () => {
+  const reviewedBody = "#{이름}님, 성수 배송 조건을 확인해 주세요.\n#{맞춤링크}";
+  const database: FakeDatabase = {
+    jobs: [{ ...job(), channel_bodies: { sms: reviewedBody } }],
+    pool_events: [],
+    job_candidates: [],
+    applicants: [],
+    job_exposure_targets: [],
+  };
+  const route = loadRouteModule(createSupabaseStub(database, []));
+
+  const response = await route.GET(
+    { url: "http://localhost/api/admin/jobs/7/announce-targets" },
+    { params: Promise.resolve({ id: "7" }) },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sms_body, reviewedBody);
 });
 
 test("returns 500 when a later targeting-ledger page fails instead of returning partial targets", async () => {

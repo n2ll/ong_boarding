@@ -17,10 +17,10 @@
  *   · 이미 이 공고 후보(job_candidates) · 최근 7일 purpose='new_job' 수신자(주 1회 피로도 상한)
  *
  * 응답: { groups: { suntop, promised, requested, matched }, targets: [{id,name,phone,access_token,group}],
- *         night, sms_title }
+ *         night, sms_title, sms_body }
  *   targets 상한 200(S>A>B>C 순으로 절단). groups는 절단 후 기준 — 모달 표시 수 = 실제 발송 수.
  *   night = isNightKst() — 야간(KST 21~08)엔 클라이언트가 발송 버튼을 비활성화한다.
- *   sms_title = smsJobTitle(제목) — 문자 문구용 단가 괄호 제거본(클라이언트가 {공고명} 치환).
+ *   sms_title = smsJobTitle(제목), sms_body = 등록 때 검토한 문자 초안(과거 초안에 맞춤 링크가 없으면 안전 문구).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -37,6 +37,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isJobEffectivelyClosed } from "@/lib/jobs";
 import { normalizePhone } from "@/lib/ongmanaging";
+import { resolveJobAnnouncementBody } from "@/lib/admin/job-announcement-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -136,7 +137,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = createServiceClient();
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select(`id, title, status, closes_at, recruit_mode, vehicle_required, exposure, exposure_rule, ${EXPOSURE_JOB_GEO_COLUMNS}`)
+    .select(`id, title, status, closes_at, recruit_mode, vehicle_required, exposure, exposure_rule, channel_bodies, ${EXPOSURE_JOB_GEO_COLUMNS}`)
     .eq("id", jobId)
     .maybeSingle();
   if (jobErr) {
@@ -195,6 +196,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const night = isNightKst();
   const smsTitle = smsJobTitle(job.title as string);
+  const channelBodies = job.channel_bodies && typeof job.channel_bodies === "object" && !Array.isArray(job.channel_bodies)
+    ? job.channel_bodies as Record<string, unknown>
+    : null;
+  const smsBody = resolveJobAnnouncementBody({
+    jobTitle: smsTitle,
+    smsDraft: typeof channelBodies?.sms === "string" ? channelBodies.sms : null,
+  });
   const unionIds = [...new Set([...suntopIds, ...promisedIds, ...requestedIds, ...pingedIds])];
   if (unionIds.length === 0) {
     return NextResponse.json({
@@ -202,6 +210,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       targets: [],
       night,
       sms_title: smsTitle,
+      sms_body: smsBody,
       dropped_by_consent: { total: 0, promised: 0 },
     });
   }
@@ -411,6 +420,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     targets: capped,
     night,
     sms_title: smsTitle,
+    sms_body: smsBody,
     // 지정 노출 여부와 '명단 때문에 빠진 수' — 0명일 때 이유를 이력 부족으로 잘못 안내하지 않기 위해.
     exposure: targetedJob ? "targeted" : "all",
     dropped_by_exposure: droppedByExposure,

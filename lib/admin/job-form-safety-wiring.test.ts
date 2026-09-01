@@ -138,3 +138,38 @@ test("the shared modal can focus a task-specific first field instead of its clos
   assert.match(jobsSource, /initialFocusRef=\{newJobClientRef\}/);
   assert.match(jobsSource, /initialFocusRef=\{editTitleRef\}/);
 });
+
+test("raw controls in the job edit form use the control radius instead of the card radius", () => {
+  const modalStart = jobsSource.indexOf("{/* 공고 수정 모달");
+  const modalEnd = jobsSource.indexOf("{/* 공고 마감 확인 모달", modalStart);
+  const modal = jobsSource.slice(modalStart, modalEnd);
+  const slotFieldStart = jobsSource.indexOf("function SlotKeysField");
+  const slotFieldEnd = jobsSource.indexOf("// 단계 그룹 표시 순서", slotFieldStart);
+  const slotField = jobsSource.slice(slotFieldStart, slotFieldEnd);
+  const controls = [
+    ...modal.matchAll(/<input\b[\s\S]*?\/>/g),
+    ...modal.matchAll(/<textarea\b[\s\S]*?\/>/g),
+    ...modal.matchAll(/<select\b[\s\S]*?<\/select>/g),
+    ...slotField.matchAll(/<input\b[\s\S]*?\/>/g),
+  ].map((match) => match[0]);
+
+  assert.ok(controls.length >= 10, "the edit form control audit should cover the full form");
+  for (const control of controls) {
+    assert.doesNotMatch(control, /rounded-2xl/);
+    assert.match(control, /rounded-md/);
+  }
+});
+
+test("bare close and announcement modals expose one aligned accessible heading", () => {
+  const closeStart = jobsSource.indexOf("{/* 공고 마감 확인 모달");
+  const closeEnd = jobsSource.indexOf("{/* 등록 완료 후속 단계", closeStart);
+  const closeModal = jobsSource.slice(closeStart, closeEnd);
+  const announceStart = jobsSource.indexOf("{/* 새 공고 안내 확인 모달");
+  const announceEnd = jobsSource.indexOf("{/* 공고별 지원자 보드", announceStart);
+  const announceModal = jobsSource.slice(announceStart, announceEnd);
+
+  assert.match(closeModal, /title="공고를 마감할까요\?"/);
+  assert.match(closeModal, /<h2 aria-hidden="true"[^>]*>공고를 마감할까요\?<\/h2>/);
+  assert.match(announceModal, /title="새 공고 안내 대상에게 보낼까요\?"/);
+  assert.match(announceModal, /<h2 aria-hidden="true"[^>]*>새 공고 안내 대상에게 보낼까요\?<\/h2>/);
+});

@@ -420,7 +420,7 @@
    * 반경 스케일 — 라이브러리(src/index.css)와 같은 값이어야 한다.
    * 전엔 shadcn 공식(calc(--radius ± Npx))을 그대로 둬서 8/10/12/16px이 나왔고,
    * 라이브러리에서 옮겨온 컴포넌트가 의도보다 8px 덜 둥글게 렌더됐다
-   * (Button이 rounded-xl로 24px을 기대하는데 16px이 나왔다).
+   * 공용 Button·Field·Tabs는 rounded-md(12px), 카드·모달은 lg~xl을 쓴다.
    * MASTER.md §2: Control 12px · Card 16–24px · 셸/히어로/모달 24–32px.
    */
   --radius-sm: 8px;

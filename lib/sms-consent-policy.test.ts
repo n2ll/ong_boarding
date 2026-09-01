@@ -428,12 +428,13 @@ test("agent context distinguishes refusal from an unanswered marketing choice", 
 });
 
 test("closed-job, suspended B mart, and manual paths persist or enforce explicit consent", async () => {
-  const [policy, screening, router, manualSend, bulkSend] = await Promise.all([
+  const [policy, screening, router, manualSend, bulkSend, bulkOutboxMigration] = await Promise.all([
     readFile(new URL("./sms-consent-policy.ts", import.meta.url), "utf8"),
     readFile(new URL("./agent/stages/screening.ts", import.meta.url), "utf8"),
     readFile(new URL("./agent/router.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/messages/send/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/messages/bulk-send/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/migrations/2026-09-bulk-message-outbox.sql", import.meta.url), "utf8"),
   ]);
   const closedNoticeStart = policy.indexOf("CURRENT_JOB_CLOSED_SMS_TEMPLATE");
   const suntopStart = policy.indexOf("CURRENT_JOB_CLOSED_SUNTOP_LINE", closedNoticeStart);
@@ -451,7 +452,12 @@ test("closed-job, suspended B mart, and manual paths persist or enforce explicit
   const closureHistory = router.slice(closureHistoryStart, closureHistoryEnd);
   assert.match(closureHistory, /event_type:\s*"waitlist_notice"/);
   assert.doesNotMatch(closureHistory, /marketing_consent\s*===\s*true/);
-  assert.match(bulkSend, /purpose === "job_closed"[\s\S]*?event_type:\s*"waitlist_notice"/);
+  assert.match(bulkSend, /finalize_bulk_message_send/);
+  assert.doesNotMatch(bulkSend, /from\("pool_events"\)\.insert/);
+  assert.match(
+    bulkOutboxMigration,
+    /v_request\.effective_purpose = 'job_closed'[\s\S]*?'waitlist_notice'/,
+  );
   assert.match(manualSend, /classifyManualSmsCategory/);
   assert.match(manualSend, /body:\s*messageBody/);
   assert.match(manualSend, /marketing_consent/);

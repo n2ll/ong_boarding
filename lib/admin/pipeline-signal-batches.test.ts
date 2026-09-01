@@ -355,7 +355,7 @@ test("Pipeline wires the complete filtered and selected cohorts into fail-safe b
     /Array\.from\(selectedRows\)[\s\S]{0,120}?\.slice\(0,\s*500\)/,
   );
   assert.match(source, /activeCheckState === "error"/);
-  assert.match(source, /disabled=\{applicantActionsBlocked \|\| waitlistContextMissing \|\| activeCheckBlocking\}/);
+  assert.match(source, /disabled=\{modalRecipientCount === 0 \|\| applicantActionsBlocked \|\| focusedJobActionsBlocked \|\| waitlistContextMissing \|\| activeCheckBlocking/);
   assert.match(source, /id="pipeline-bulk-active-check-status"[\s\S]*?role="status"/);
   assert.match(
     source,
@@ -376,6 +376,73 @@ test("the bulk message modal keeps its actions visible while dense safety notice
   assert.match(modal, /border-b border-border-strong bg-background[^\n]*shrink-0/);
   assert.match(modal, /min-h-0 flex-1 overflow-y-auto p-6 space-y-5/);
   assert.match(modal, /border-t border-border-strong bg-white[^\n]*shrink-0/);
+});
+
+test("Pipeline gives every confirmed bulk-send chunk one shared outbox batch key and quarantines uncertain results", () => {
+  const source = readFileSync(
+    new URL("../../components/Pipeline.tsx", import.meta.url),
+    "utf8",
+  );
+  const sendStart = source.indexOf("const handleBulkSend = async () => {");
+  const sendEnd = source.indexOf("\n\n  return (", sendStart);
+  const sendSource = source.slice(sendStart, sendEnd);
+  const confirmIntent = sendSource.indexOf("if (!(await confirm({");
+  const batchKey = sendSource.indexOf("const bulkRequestId = crypto.randomUUID()");
+  const chunkLoop = sendSource.indexOf("for (let i = 0; i < recipients.length; i += 50)");
+
+  assert.ok(confirmIntent >= 0 && confirmIntent < batchKey, "the batch key must only exist after final confirmation");
+  assert.ok(batchKey < chunkLoop, "one batch key must be created before all 50-recipient chunks");
+  assert.match(sendSource, /bulk_request_id: bulkRequestId/);
+  assert.match(sendSource, /bulkSendChunkResults\(json, chunk\.length\)/);
+  assert.match(sendSource, /httpBulkFailureKind\(res\.status, json\)/);
+  assert.match(sendSource, /recordRecoveryCount \+= 1/);
+  assert.match(sendSource, /기록 복구 중 \$\{recordRecoveryCount\}명/);
+  assert.match(
+    sendSource,
+    /catch \{[\s\S]{0,420}?kind: "attention"/,
+    "a lost HTTP response must stay in the no-resend attention path",
+  );
+  assert.match(sendSource, /발송 결과 확인 필요 — 중복 방지를 위해 재발송하지 않음/);
+  assert.match(
+    sendSource,
+    /if \(!chunkResults\)[\s\S]{0,520}?kind: "attention"/,
+    "an empty or malformed successful response must stay uncertain",
+  );
+  assert.match(
+    sendSource,
+    /failureKind === "retryable"[\s\S]{0,420}?kind: "retryable"[\s\S]{0,520}?kind: "attention"/,
+    "only an explicitly retryable pre-provider failure may enter the retry list",
+  );
+
+  const issuesStart = source.indexOf("const retryableBulkFailures =");
+  const issuesEnd = source.indexOf("const handleBulkSend = async () => {", issuesStart);
+  const issuesSource = source.slice(issuesStart, issuesEnd);
+  const modalStart = source.indexOf("{/* 2. Bulk Message/Campaign Modal */}");
+  const modalEnd = source.indexOf("</Modal>", modalStart);
+  const modalSource = source.slice(modalStart, modalEnd);
+
+  assert.match(issuesSource, /failure\.kind === "retryable"/);
+  assert.match(issuesSource, /failure\.kind === "attention"/);
+  assert.match(modalSource, /결과 확인 중 \{attentionBulkFailures\.length\}명/);
+  assert.match(modalSource, /재발송하지 마세요/);
+  assert.match(modalSource, /retryableBulkFailures\.map/);
+  assert.doesNotMatch(modalSource, /bulkFailures\.map\(\(f\) => String\(f\.applicantId\)/);
+});
+
+test("Pipeline treats a 504 and malformed 2xx as no-resend ambiguity", () => {
+  const source = readFileSync(
+    new URL("../../components/Pipeline.tsx", import.meta.url),
+    "utf8",
+  );
+  const classifierStart = source.indexOf("function httpBulkFailureKind(");
+  const classifierEnd = source.indexOf("\n}\n", classifierStart) + 3;
+  const classifier = source.slice(classifierStart, classifierEnd);
+
+  assert.match(classifier, /status === 503/);
+  assert.match(classifier, /status === 504/);
+  assert.match(classifier, /return "attention"/);
+  assert.match(source, /function bulkSendChunkResults\(/);
+  assert.match(source, /results\.length !== expectedCount/);
 });
 
 type PoolEvent = {

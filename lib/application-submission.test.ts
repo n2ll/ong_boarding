@@ -6,6 +6,11 @@ import type { ApplicantFormData } from "./applicant-form.ts";
 
 type JobApplicationOutcome = "linked" | "unchanged" | "unavailable" | "failed" | "not_requested";
 type CandidateLinkOutcome = "linked" | "already_linked" | "unchanged_closed" | "unavailable" | null;
+type ApplicationSubmissionRequest = ApplicantFormData & {
+  source: string;
+  jobId: number | null;
+  trackingRef?: string | null;
+};
 
 interface ApplicationMessageRequest {
   requestFingerprint: string;
@@ -49,24 +54,24 @@ type ApplicationSubmissionModule = {
   ) => { ok: true; id: string } | { ok: false; reason: "required" | "invalid" };
   nextApplicationSubmissionAttempt?: (
     current: ApplicationSubmissionAttempt | null,
-    request: ApplicantFormData & { source: string; jobId: number | null },
+    request: ApplicationSubmissionRequest,
     vehicleRequired: boolean,
     createId: () => string,
   ) => ApplicationSubmissionAttempt;
   resolveApplicationSubmissionContext?: (
     current: ApplicationSubmissionAttempt | null,
-    request: ApplicantFormData & { source: string; jobId: number | null },
+    request: ApplicationSubmissionRequest,
     vehicleRequired: boolean,
   ) => ApplicationSubmissionContext;
   prepareApplicationSubmission?: (
     current: ApplicationSubmissionAttempt | null,
-    request: ApplicantFormData & { source: string; jobId: number | null },
+    request: ApplicationSubmissionRequest,
     vehicleRequired: boolean,
     createId: () => string,
   ) => {
     attempt: ApplicationSubmissionAttempt;
     context: ApplicationSubmissionContext;
-    payload: ApplicantFormData & { source: string; jobId: number | null; submissionId: string };
+    payload: ApplicationSubmissionRequest & { submissionId: string };
   };
   applicationSubmissionPayloadFingerprint?: (
     request: ApplicantFormData & { source: string; jobId: number | null },
@@ -331,6 +336,35 @@ test("the browser-ready payload carries the durable UUID and rotates it with any
   assert.equal(retry.payload.submissionId, "submission-1");
   assert.equal(edited.payload.submissionId, "submission-2");
   assert.deepEqual(first.payload, { ...request, submissionId: "submission-1" });
+});
+
+test("tracked first attempts and response-loss replays send the same opaque ref", async () => {
+  const { prepareApplicationSubmission } = await loadApplicationSubmissionModule();
+
+  assert.equal(typeof prepareApplicationSubmission, "function");
+  let sequence = 0;
+  const request = {
+    ...completeForm,
+    source: "facebook",
+    jobId: 31,
+    trackingRef: "91e65ed2-aa20-4f2a-8442-14d11c788ca2",
+  };
+  const first = prepareApplicationSubmission!(
+    null,
+    request,
+    false,
+    () => `submission-${++sequence}`,
+  );
+  const replay = prepareApplicationSubmission!(
+    first.attempt,
+    { ...request },
+    false,
+    () => `submission-${++sequence}`,
+  );
+
+  assert.equal(first.payload.trackingRef, request.trackingRef);
+  assert.equal(replay.payload.trackingRef, request.trackingRef);
+  assert.equal(replay.payload.submissionId, first.payload.submissionId);
 });
 
 test("an unchanged retry keeps the original job and validation context when the current job becomes unavailable", async () => {

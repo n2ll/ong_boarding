@@ -204,7 +204,7 @@ const SOURCE_LABEL: Record<string, string> = {
   danggeun_practice: "당근(연습)",
   manual: "수기",
   direct: "직접지원",
-  facebook: "페이스북",
+  facebook: "Meta 광고",
   naver: "네이버",
 };
 

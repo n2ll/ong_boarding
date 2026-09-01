@@ -18,6 +18,13 @@ type SourceView<T> =
   | { state: "ready" | "stale"; data: T };
 
 type SosLedgerCardViewModule = {
+  sosJobCreateHref?: (row: {
+    id: number;
+    line_label: string;
+    region: string | null;
+    vehicle: string | null;
+    needed_count: number;
+  }) => string;
   sosLedgerCardView?: (input: {
     sosData?: SosData;
     sosError?: unknown;
@@ -25,6 +32,31 @@ type SosLedgerCardViewModule = {
     ledgerError?: unknown;
   }) => { sos: SourceView<SosData>; ledger: SourceView<LedgerData> };
 };
+
+test("SOS job handoff preserves needed headcount as job capacity", async () => {
+  const { sosJobCreateHref } = await loadModule();
+
+  assert.equal(typeof sosJobCreateHref, "function");
+  const href = sosJobCreateHref!({
+    id: 42,
+    line_label: "배송원",
+    region: "서울",
+    vehicle: "1톤 탑차",
+    needed_count: 3,
+  });
+  const url = new URL(href, "http://localhost");
+
+  assert.equal(url.pathname, "/jobs");
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    new: "1",
+    sos_id: "42",
+    line: "배송원",
+    period: "하루",
+    capacity: "3",
+    region: "서울",
+    vehicle: "1톤 탑차",
+  });
+});
 
 async function loadModule(): Promise<SosLedgerCardViewModule> {
   try {

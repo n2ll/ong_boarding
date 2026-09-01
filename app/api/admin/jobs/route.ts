@@ -24,6 +24,7 @@ import {
   jobCreateReplayDecision,
   validateJobCreateRequestId,
 } from "@/lib/admin/job-create-idempotency";
+import { jobCreatePersistedChannelBodies } from "@/lib/admin/job-create-draft";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 
 export const dynamic = "force-dynamic";
@@ -270,7 +271,7 @@ export async function POST(req: NextRequest) {
     work_period?: string | null;
     closes_at?: string | null;
     sos_request_id?: number | null;
-    channel_bodies?: { danggeun?: string; albamon?: string; sms?: string } | null;
+    channel_bodies?: unknown;
   };
 
   const validatedCreateRequestId = validateJobCreateRequestId(body.client_request_id);
@@ -483,8 +484,10 @@ export async function POST(req: NextRequest) {
       closes_at: closes_at ?? null,
       // 긴급 건(SOS)에서 파생된 공고면 그 id를 보관 — 파생 관계 영속(자동 해결 연동은 범위 밖).
       sos_request_id: typeof sos_request_id === "number" ? sos_request_id : null,
-      // 채널별 초안 본문(당근/알바몬/SMS) 부가 저장 — body는 캐논 유지(D1 반자동 초안 인프라).
-      channel_bodies: channel_bodies && typeof channel_bodies === "object" ? channel_bodies : null,
+      // 신규 저장은 지원하는 공고 원문·문자 안내만 유지한다. 과거 채널 키는 읽기 호환만 한다.
+      channel_bodies: channel_bodies && typeof channel_bodies === "object"
+        ? jobCreatePersistedChannelBodies(channel_bodies)
+        : null,
       client_request_id: createRequestId,
       creation_request_fingerprint: createRequestFingerprint,
     })

@@ -11,7 +11,7 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   Applicant,
   calcAge,
@@ -20,7 +20,6 @@ import {
   SLOT_UNKNOWN,
   applicantAvailableSlots,
   campaignSmsSendability,
-  pipelineBulkPurpose,
   pipelineBulkSendability,
   pipelineWaitlistJobAfterAction,
   type SlotKey,
@@ -51,6 +50,18 @@ import {
   pipelineTableLayout,
   showPipelineJobsShortcut,
 } from "@/lib/admin/pipeline-row";
+import {
+  pipelineBulkMessageContext,
+  pipelineExposureJobIdsOnOpen,
+  pipelineFillMissionSteps,
+  pipelineFocusedActiveJob,
+  pipelineFocusedJobHandoffState,
+  pipelineFocusedJobInitialSortMode,
+  pipelineFocusedJobMessageBody,
+  pipelineFocusedJobRecipientStatusAllowed,
+  pipelineFocusedJobMessageReviewIssue,
+  pipelineFocusedJobProjection,
+} from "@/lib/admin/pipeline-job-context";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import {
@@ -204,6 +215,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   baemin: "배민",
   manual: "수기 등록",
   direct: "직접 지원",
+  facebook: "Meta 광고",
   danggeun_practice: "연습",
 };
 
@@ -232,6 +244,58 @@ const RECONTACT_B_BODY = `[옹고잉] #{이름}님, 안녕하세요. 얼마 전 
 // 관심 대기 안내 (사후관리) — '관심 있음'을 눌렀지만 자리가 부족해 바로 배정 안내를 못 하는 인원용.
 // 확정 뉘앙스 금지 — '먼저 연락드릴게요'까지만, 배정·확정을 약속하지 않는다.
 const WAITLIST_BODY = CURRENT_JOB_WAITLIST_SMS_BODY;
+
+type BulkSendResultState = "recorded" | "sent_unrecorded" | "unknown" | "failed" | "blocked" | "conflict";
+type BulkSendResultRow = {
+  applicant_id: number | null;
+  phone: string;
+  success: boolean;
+  error?: string;
+  state: BulkSendResultState;
+  deduplicated: boolean;
+  recovery_pending?: boolean;
+};
+type BulkFailureKind = "retryable" | "attention" | "blocked";
+type BulkFailureRow = {
+  applicantId: number;
+  name: string;
+  phone: string;
+  error: string;
+  kind: BulkFailureKind;
+};
+
+function bulkSendChunkResults(value: unknown, expectedCount: number): BulkSendResultRow[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const results = (value as { results?: unknown }).results;
+  if (!Array.isArray(results) || results.length !== expectedCount) return null;
+  const allowedStates = new Set<BulkSendResultState>([
+    "recorded", "sent_unrecorded", "unknown", "failed", "blocked", "conflict",
+  ]);
+  if (!results.every((result) => (
+    result !== null
+    && typeof result === "object"
+    && !Array.isArray(result)
+    && typeof (result as { phone?: unknown }).phone === "string"
+    && typeof (result as { success?: unknown }).success === "boolean"
+    && typeof (result as { deduplicated?: unknown }).deduplicated === "boolean"
+    && typeof (result as { state?: unknown }).state === "string"
+    && allowedStates.has((result as { state: BulkSendResultState }).state)
+  ))) return null;
+  return results as BulkSendResultRow[];
+}
+
+function httpBulkFailureKind(status: number, value: unknown): BulkFailureKind {
+  // 이 API의 503 JSON은 outbox 선점 전 fail-closed 응답이다. 504·500·비정형 응답은
+  // 서버가 일부 발송한 뒤 게이트웨이 응답만 잃었을 수 있으므로 절대 재시도 대상으로 만들지 않는다.
+  if (status === 504) return "attention";
+  const declaredError = value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof (value as { error?: unknown }).error === "string";
+  if (status === 503 && declaredError) return "retryable";
+  if (status >= 400 && status < 500 && declaredError) return "blocked";
+  return "attention";
+}
 
 interface ColumnData {
   id: string;
@@ -337,8 +401,12 @@ function sendableOf(c: CardData): { sendable: boolean; reason: string | null } {
   });
 }
 
-function bulkSendableOf(c: CardData, waitlist: boolean): { sendable: boolean; reason: string | null } {
-  return pipelineBulkSendability({
+function bulkSendableOf(
+  c: CardData,
+  waitlist: boolean,
+  newJobNoticeJobId: number | null,
+): { sendable: boolean; reason: string | null } {
+  const sendability = pipelineBulkSendability({
     waitlist,
     phone: c.phone,
     hasCustomLink: c.hasCustomLink,
@@ -346,6 +414,11 @@ function bulkSendableOf(c: CardData, waitlist: boolean): { sendable: boolean; re
     marketingConsent: c.marketingConsent,
     status: c.status,
   });
+  if (!sendability.sendable) return sendability;
+  if (!pipelineFocusedJobRecipientStatusAllowed({ status: c.status, newJobNoticeJobId })) {
+    return { sendable: false, reason: "새 공고 안내 대상에서 제외(확정인력)" };
+  }
+  return sendability;
 }
 
 // 원지원일 표기 — 'YYYY-MM' (연락 이력 relTime과 구분)
@@ -433,6 +506,7 @@ export function Pipeline() {
     COLUMN_DEFS.map((d) => ({ ...d, count: 0, cards: [] }))
   );
   const searchParams = useSearchParams();
+  const prefersReducedMotion = useReducedMotion();
   const { branch: scopeBranch } = useBranchScope();
   // 상세 패널 선택 — **사람과 공고를 한 값으로 묶는다.** 두 state로 두면 사람은 바뀌었는데 공고가
   // 남아 엉뚱한 공고 기준으로 확정·발송이 열릴 수 있다. wantJobId는 '이 공고 기준으로 열어라'는 요청이고,
@@ -578,9 +652,48 @@ export function Pipeline() {
   };
 
   // 활성 공고는 한 번만 호출해 공고 픽커(activeJobs)와 지도 오버레이(mapJobs)에 함께 사용.
-  const { data: jobsData, mutate: mutateJobs } = useSWR<{ jobs?: Array<{ id: number; title: string; branch: string | null; exposure?: string | null; pickup_lat?: number | null; pickup_lng?: number | null; pickup_address?: string | null; dropoff_lat?: number | null; dropoff_lng?: number | null; dropoff_address?: string | null; distance_basis?: string | null }> }>("/api/admin/jobs?status=active");
+  const { data: jobsData, error: jobsError, mutate: mutateJobs } = useSWR<{
+    jobs?: Array<{
+      id: number;
+      title: string;
+      branch: string | null;
+      exposure?: string | null;
+      vehicle_required?: boolean | null;
+      slot_keys?: unknown;
+      pickup_lat?: number | null;
+      pickup_lng?: number | null;
+      pickup_address?: string | null;
+      dropoff_lat?: number | null;
+      dropoff_lng?: number | null;
+      dropoff_address?: string | null;
+      distance_basis?: string | null;
+      recruit_mode?: string | null;
+    }>;
+  }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
-  const activeJobs = useMemo(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, branch: j.branch ?? null, exposure: j.exposure ?? "all" })), [visibleJobs]);
+  const activeJobs = useMemo(() => visibleJobs.map(pipelineFocusedJobProjection), [visibleJobs]);
+  const focusedActiveJob = pipelineFocusedActiveJob(searchParams.toString(), activeJobs);
+  const focusedJobHandoffState = pipelineFocusedJobHandoffState(
+    searchParams.toString(),
+    activeJobs,
+    jobsData?.jobs !== undefined,
+    Boolean(jobsError),
+  );
+  const focusedJobActionsBlocked =
+    focusedJobHandoffState !== "none" && focusedJobHandoffState !== "active";
+  const requireFocusedJobReady = () => {
+    if (focusedJobActionsBlocked) {
+      toast.error(
+        focusedJobHandoffState === "invalid"
+          ? "공고 연결 정보가 올바르지 않습니다. 진행 중인 공고를 다시 선택해 주세요."
+          : focusedJobHandoffState === "unavailable"
+            ? "진행 중인 공고를 다시 선택한 뒤 작업해 주세요."
+            : "공고 정보를 다시 확인한 뒤 작업해 주세요.",
+      );
+      return false;
+    }
+    return true;
+  };
   const mapJobs = useMemo<MapJob[]>(() => visibleJobs.map((j) => ({ id: j.id, title: j.title, pickup_lat: j.pickup_lat ?? null, pickup_lng: j.pickup_lng ?? null, pickup_address: j.pickup_address ?? null })), [visibleJobs]);
 
   // 캠페인 퍼널 보드 — 퍼널 뷰에서만 조회(조건부 key). 기간(7/14/30일)은 캠페인 코호트 윈도우.
@@ -671,6 +784,32 @@ export function Pipeline() {
   const [sortMode, setSortMode] = useState<"recent" | "oldest" | "active" | "neglected" | "applied_recent" | "applied_old" | "distance" | "reaction_recent">("recent");
   // 거리 기준 공고 — 선택 공고의 상차지·마지막경유지 중 가까운 쪽 기준 근거리순 정렬용. null이면 미선택.
   const [distanceJobId, setDistanceJobId] = useState<number | null>(null);
+  const missionPresetKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusedActiveJob) {
+      missionPresetKeyRef.current = null;
+      return;
+    }
+    const presetKey = [
+      focusedActiveJob.id,
+      focusedActiveJob.vehicleRequired,
+      focusedActiveJob.slotKeys.join(","),
+      focusedActiveJob.pickupLat,
+      focusedActiveJob.pickupLng,
+      focusedActiveJob.dropoffLat,
+      focusedActiveJob.dropoffLng,
+      focusedActiveJob.distanceBasis,
+    ].join(":");
+    if (missionPresetKeyRef.current === presetKey) return;
+    missionPresetKeyRef.current = presetKey;
+
+    // 차량·시간은 공고에 저장된 값만 적용한다. 제목·지점·주소를 보고 지역 필터를 추측하지 않는다.
+    setVehicleFilter(focusedActiveJob.vehicleRequired === true ? "vehicle" : "all");
+    setSlotFilter(new Set(focusedActiveJob.slotKeys));
+    const focusedSortMode = pipelineFocusedJobInitialSortMode(focusedActiveJob);
+    setDistanceJobId(focusedSortMode === "distance" ? focusedActiveJob.id : null);
+    if (focusedSortMode) setSortMode(focusedSortMode);
+  }, [focusedActiveJob]);
   // 상위 N명 선택 입력 (기본 50 = bulk-send 1회 상한과 동일)
   const [topN, setTopN] = useState(50);
   // 옹매니징 현재 활동 중 인원 id 집합 — 리스트 레벨 상시 배지/제외 필터용 (디바운스 조회)
@@ -687,6 +826,8 @@ export function Pipeline() {
   // '공고 관심자 선택'으로 고른 공고 id — 대기 안내 프리셋 발송 시 purpose='waitlist'와 함께 서버로 전달.
   // 선택이 통째로 바뀌는 동선(필터 변경·상위 N·전체 토글 등)에서는 초기화(개별 해제는 유지).
   const [waitlistJobId, setWaitlistJobId] = useState<number | null>(null);
+  // 공고 노출 뒤 여는 안내 문자 검토 맥락 — new_job 서버 가드·이력·답장 귀속에 필요하다.
+  const [newJobNoticeJobId, setNewJobNoticeJobId] = useState<number | null>(null);
   const [interestPickLoading, setInterestPickLoading] = useState(false);
 
   // 거리 기준 공고 옵션 — 상차지(pickup) 또는 마지막 경유지(dropoff) 좌표가 있는 활성 공고. 둘 다 없으면 거리 계산 불가라 제외.
@@ -785,13 +926,20 @@ export function Pipeline() {
   // Modals state
   const confirm = useConfirm();
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
-  // **발송 실패 명단** — 예전엔 "실패 N명"이 토스트로 4초 뜨고 사라져, 누가·왜 실패했는지 실무자가
-  // 확인할 방법이 없었다(서버 로그를 열어야 했다). 565명 발송이 15~28분 걸리는데 그 정보가
-  // 발송 순간에 사라지므로 나중에 만들 수 없다. 모달에 남기고 '실패한 N명만 다시 보내기'를 준다.
-  const [bulkFailures, setBulkFailures] = useState<{ applicantId: number; name: string; phone: string; error: string }[]>([]);
+  // 재시도 가능한 확정 실패와 발송 여부 불명 상태를 같은 명단·액션으로 섞지 않는다.
+  const [bulkFailures, setBulkFailures] = useState<BulkFailureRow[]>([]);
+  const retryableBulkFailures = bulkFailures.filter((failure) => failure.kind === "retryable");
+  const attentionBulkFailures = bulkFailures.filter((failure) => failure.kind === "attention");
+  const blockedBulkFailures = bulkFailures.filter((failure) => failure.kind === "blocked");
   const [bulkStageModalOpen, setBulkStageModalOpen] = useState(false);
   const [bulkMsgBody, setBulkMsgBody] = useState(DEFAULT_BULK_BODY);
   const [bulkSending, setBulkSending] = useState(false);
+  const closeBulkMessageModal = () => {
+    if (bulkSending) return;
+    setBulkMsgModalOpen(false);
+    setNewJobNoticeJobId(null);
+    if (newJobNoticeJobId !== null) setBulkMsgBody(DEFAULT_BULK_BODY);
+  };
 
   // 옹매니징 '현재 활동 중' 대조 — 벌크 문자 모달이 열릴 때 선택 인원을 1회 조회.
   // configured=false면 미연동(대조 불가, 발송은 허용), active[]는 현재 활동 중인 인원.
@@ -867,6 +1015,52 @@ export function Pipeline() {
   const [exposureMakeTargeted, setExposureMakeTargeted] = useState(true);
   // 저장된 자동 노출 규칙 처리 — **기본값 없음**(반드시 고르게 한다). 규칙 소거를 조용히 하지 않는다.
   const [exposureRuleAction, setExposureRuleAction] = useState<"keep" | "clear" | null>(null);
+  const [exposureReviewReady, setExposureReviewReady] = useState<{
+    jobId: number;
+    applicantIds: string[];
+  } | null>(null);
+  const selectedRowsSignature = [...selectedRows].sort().join(",");
+  const focusedExposureReviewReady = Boolean(
+    focusedActiveJob &&
+      exposureReviewReady?.jobId === focusedActiveJob.id &&
+      exposureReviewReady.applicantIds.join(",") === selectedRowsSignature,
+  );
+  const fillMissionSteps = pipelineFillMissionSteps({
+    selectedCount: selectedRows.size,
+    exposureReady: focusedExposureReviewReady,
+  });
+  const focusedJobConditionLabels = focusedActiveJob
+    ? [
+        focusedActiveJob.vehicleRequired === true
+          ? "자차 필요"
+          : focusedActiveJob.vehicleRequired === false
+            ? "자차 필수 아님"
+            : null,
+        ...focusedActiveJob.slotKeys.map((key) => SLOT_LABEL[key]),
+        focusedActiveJob.pickupAddress ? `집결지 ${focusedActiveJob.pickupAddress}` : null,
+        focusedActiveJob.dropoffAddress ? `마지막 경유 ${focusedActiveJob.dropoffAddress}` : null,
+      ].filter((label): label is string => Boolean(label))
+    : [];
+  const openExposurePicker = () => {
+    if (!requireFocusedJobReady()) return;
+    // SOS→공고→인재풀로 넘어온 경우 활성 공고만 기본 선택한다. 선택만 도울 뿐
+    // 이 시점에는 노출 저장·후보 등록·문자 발송이 전혀 일어나지 않는다.
+    setExposureJobIds(pipelineExposureJobIdsOnOpen(searchParams.toString(), activeJobs));
+    setExposureMode("include");
+    setExposureMakeTargeted(true);
+    setExposureRuleAction(null);
+    setExposurePickerOpen(true);
+  };
+  const openFocusedJobMessageReview = () => {
+    if (!requireFocusedJobReady()) return;
+    if (!focusedActiveJob || !focusedExposureReviewReady) return;
+    setWaitlistJobId(null);
+    setNewJobNoticeJobId(focusedActiveJob.id);
+    setBulkFailures([]);
+    setBulkMsgBody(pipelineFocusedJobMessageBody(focusedActiveJob.title));
+    // 작성 모달만 연다. 실제 발송은 기존 최종 확인창에서 매니저가 다시 승인해야 한다.
+    setBulkMsgModalOpen(true);
+  };
 
   // 공고별 노출 현황(현재 노출 방식·저장된 규칙·규칙 해당 인원·이미 연결된 인원) — 모달을 열 때 한 번 조회.
   // 특히 전체 노출 공고에 남아 있는 예전 규칙을 보여줘야 한다(전환만 하면 고르지 않은 인원에게도 보인다).
@@ -896,17 +1090,6 @@ export function Pipeline() {
     [exposureImpact]
   );
 
-  // 모달을 열 때마다 공고 선택·선택지를 초기화 — 직전에 고른 공고가 남아 있으면 엉뚱한 공고에 적용된다.
-  useEffect(() => {
-    if (!exposurePickerOpen) return;
-    setExposureJobIds(new Set());
-    // 진입 버튼이 '이 명단에게만 노출'(추가)을 약속한다 — 직전에 쓴 '노출 제외'가 남아 있으면
-    // 고른 명단이 그대로 제외되어 의도의 정반대가 된다(제외는 규칙·명단보다 우선).
-    setExposureMode("include");
-    setExposureMakeTargeted(true);
-    setExposureRuleAction(null);
-  }, [exposurePickerOpen]);
-
   const exposureSelectedJobs = activeJobs.filter((j) => exposureJobIds.has(j.id));
   // 현황을 아직 못 읽은 공고 — 규칙이 있는지 알 수 없으므로 적용을 막는다(서버도 400으로 막는다).
   const exposureUnknownJobs = exposureSelectedJobs.filter((j) => !impactById.has(j.id));
@@ -918,7 +1101,10 @@ export function Pipeline() {
   });
   // 저장된 규칙이 있는 공고 — 규칙을 두면 '규칙 해당 인원 + 이 명단', 지우면 '이 명단만'.
   const exposureRuleJobs = exposureSelectedJobs.filter((j) => (impactById.get(j.id)?.rule_conditions ?? 0) > 0);
-  const exposureWillFlip = exposureMode === "include" && exposureMakeTargeted && exposureFlipJobs.length > 0;
+  const exposureWillFlip =
+    exposureMode === "include" &&
+    (focusedActiveJob ? true : exposureMakeTargeted) &&
+    exposureFlipJobs.length > 0;
   const exposureWillClear = exposureMode === "include" && exposureRuleAction === "clear" && exposureRuleJobs.length > 0;
   // 노출이 좁아지는 공고에서 이미 연결된(관심·후보) 인원 — 이분들은 명단에 자동으로 남는다.
   // 공고별 합계라 한 분이 여러 공고에 연결되면 중복으로 세어진다 → 문구는 '명'이 아니라 '건'으로 쓴다.
@@ -961,6 +1147,7 @@ export function Pipeline() {
   if (query.trim()) conditionLabels.push(`검색 "${query.trim()}"`);
 
   const assignExposure = async () => {
+    if (!requireFocusedJobReady()) return;
     if (!requireFreshApplicants()) return;
     const applicantIds = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     const jobIds = Array.from(exposureJobIds);
@@ -1060,9 +1247,11 @@ export function Pipeline() {
           mode: exposureMode,
           ...(exposureMode === "include"
             ? {
-                make_targeted: exposureMakeTargeted,
+                make_targeted: focusedActiveJob ? true : exposureMakeTargeted,
                 // 화면이 '전체 노출'로 보여주고 확인까지 받은 공고만 전환 — 낡은 화면이 몰래 다른 공고를 좁히지 않게.
-                flip_job_ids: exposureMakeTargeted ? exposureFlipJobs.map((j) => j.id) : [],
+                flip_job_ids: (focusedActiveJob ? true : exposureMakeTargeted)
+                  ? exposureFlipJobs.map((j) => j.id)
+                  : [],
                 ...(exposureRuleJobs.length > 0
                   ? {
                       rule_action: exposureRuleAction ?? "keep",
@@ -1102,9 +1291,21 @@ export function Pipeline() {
             ? ` — ${skippedNoGeo.length}개 공고는 거리 반경 규칙이 있는데 집결지 좌표가 없어 전환하지 않았어요(공고 수정에서 주소를 먼저 저장하세요)`
             : "") +
           (nonTargeted.length > 0
-            ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
-            : "")
+              ? ` — ${nonTargeted.length}개 공고는 아직 '지정 노출'이 아니에요(공고 수정에서 전환 필요)`
+              : "")
       );
+      if (
+        exposureMode === "include" &&
+        focusedActiveJob &&
+        focusedActiveJob.recruitMode !== "external" &&
+        jobIds.includes(focusedActiveJob.id) &&
+        !skippedExternal.includes(focusedActiveJob.id)
+      ) {
+        setExposureReviewReady({
+          jobId: focusedActiveJob.id,
+          applicantIds: applicantIds.map(String).sort(),
+        });
+      }
       setExposurePickerOpen(false);
       setExposureJobIds(new Set());
       // 전환·규칙 삭제로 공고 상태가 바뀌었으니 목록·현황을 다시 읽는다(다음에 열 때 옛 배지가 보이지 않게).
@@ -1116,6 +1317,7 @@ export function Pipeline() {
   };
 
   const addSelectedToJob = async (jobId: number) => {
+    if (!requireFocusedJobReady()) return;
     if (!requireFreshApplicants()) return;
     const ids = Array.from(selectedRows).map(Number).filter((n) => Number.isFinite(n));
     if (ids.length === 0) return;
@@ -1161,6 +1363,10 @@ export function Pipeline() {
   // 선택 인원 중 수신거부(sms_opt_out_at) 수 — 벌크 문자 모달 경고용.
   const selectedOptOutCount = listCards.filter((c) => selectedRows.has(c.id) && c.smsOptOutAt).length;
   const isWaitlistBulk = bulkMsgBody.trim() === WAITLIST_BODY.trim();
+  const newJobMessageReviewIssue = pipelineFocusedJobMessageReviewIssue({
+    body: bulkMsgBody,
+    newJobNoticeJobId,
+  });
   // 수신거부와 별개인 새 일자리 문자 동의 — false/null 모두 캠페인 발송 불가다.
   const selectedNoMarketingConsentCount = listCards.filter(
     (c) => !isWaitlistBulk && selectedRows.has(c.id) && !c.smsOptOutAt && c.marketingConsent !== true,
@@ -1482,7 +1688,7 @@ export function Pipeline() {
   const modalRecipientCount = waitlistContextMissing
     ? 0
     : filteredCards.filter(
-        (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlistBulk).sendable,
+        (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlistBulk, newJobNoticeJobId).sendable,
       ).length;
   const modalExcludedCount = selectedRows.size - modalRecipientCount;
 
@@ -1603,10 +1809,12 @@ export function Pipeline() {
   const handleColumnExport = (column: ColumnData) => exportCardsCsv(column.cards, () => column.title, column.title);
 
   const handleColumnBulkMessage = (column: ColumnData) => {
+    if (!requireFocusedJobReady()) return;
     if (!requireFreshApplicants()) return;
     if (column.cards.length === 0) return toast.error("이 단계에 지원자가 없어요.");
     setSelectedRows(new Set(column.cards.map((c) => c.id)));
     setWaitlistJobId(null);
+    setNewJobNoticeJobId(null);
     setBulkFailures([]);
     setBulkMsgModalOpen(true);
   };
@@ -1785,6 +1993,7 @@ export function Pipeline() {
   };
 
   const handleBulkSend = async () => {
+    if (!requireFocusedJobReady()) return;
     if (!requireFreshApplicants()) return;
     if (bulkSending) return;
     if (activeCheckBlocking) {
@@ -1792,14 +2001,20 @@ export function Pipeline() {
     }
     const text = bulkMsgBody.trim();
     if (!text) return toast.error("메시지 내용을 입력해주세요.");
+    if (newJobMessageReviewIssue) return toast.error(newJobMessageReviewIssue);
 
     // 발송 대상 = 현재 화면 표시분(filteredCards)과 선택의 교집합 — 화면에 없는 인원 오발송 방지.
     const isWaitlist = text === WAITLIST_BODY.trim();
+    const bulkMessageContext = pipelineBulkMessageContext({
+      isWaitlist,
+      waitlistJobId,
+      newJobNoticeJobId,
+    });
     if (isWaitlist && waitlistJobId === null) {
       return toast.error("먼저 상단의 '공고 관심자 선택'에서 안내할 공고를 골라주세요.");
     }
     const selected = filteredCards.filter(
-      (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlist).sendable,
+      (c) => selectedRows.has(c.id) && bulkSendableOf(c, isWaitlist, newJobNoticeJobId).sendable,
     );
     const recipients = selected.map((c) => ({
       phone: c.phone as string,
@@ -1821,14 +2036,14 @@ export function Pipeline() {
       confirmText: `${recipients.length}명 발송`,
     }))) return;
 
+    const bulkRequestId = crypto.randomUUID();
     setBulkSending(true);
     try {
       let sent = 0;
+      let alreadySentCount = 0;
+      let recordRecoveryCount = 0;
       const failErrors: string[] = [];
-      const failedRows: { applicantId: number; name: string; phone: string; error: string }[] = [];
-      // 청크 실패 집계 — 실패한 청크 대상 인원 수(chunkFailed)로 부분 발송을 가시화.
-      let chunkFailed = 0;
-      let chunkErrorMsg: string | null = null;
+      const failedRows: BulkFailureRow[] = bulkFailures.filter((failure) => failure.kind !== "retryable");
       // bulk-send 엔드포인트는 1회 최대 50명 → 50명씩 끊어서 발송.
       // 한 청크가 실패해도 return하지 않고 continue로 나머지 청크를 계속 발송한다
       // (재시도 시 이미 나간 앞 청크의 재발송 위험 회피 — 서버 10분 중복 가드와 별개).
@@ -1842,48 +2057,98 @@ export function Pipeline() {
             body: JSON.stringify({
               recipients: chunk,
               body: text,
-              purpose: pipelineBulkPurpose(isWaitlist),
-              ...(isWaitlist && waitlistJobId !== null ? { job_id: waitlistJobId } : {}),
+              purpose: bulkMessageContext.purpose,
+              bulk_request_id: bulkRequestId,
+              ...(bulkMessageContext.jobId !== null ? { job_id: bulkMessageContext.jobId } : {}),
             }),
           });
         } catch {
-          chunkFailed += chunk.length;
-          chunkErrorMsg = chunkErrorMsg ?? "네트워크 오류";
+          // 응답 유실은 실제 미시도인지 공급자 성공인지 구분할 수 없다. 같은 의도는
+          // outbox가 재발송을 막으므로 확인 필요 상태로 남기고 재시도를 권하지 않는다.
           for (const c of chunk) {
             failedRows.push({
               applicantId: c.applicant_id,
               name: nameByPhone.get(String(c.phone)) || "이름 미상",
               phone: String(c.phone),
-              error: "미시도 — 네트워크 오류",
+              error: "발송 결과 확인 필요 — 중복 방지를 위해 재발송하지 않음",
+              kind: "attention",
             });
           }
           continue;
         }
         const json = await res.json().catch(() => null);
         if (!res.ok) {
-          chunkFailed += chunk.length;
-          const why = json?.error || "발송 실패";
-          chunkErrorMsg = chunkErrorMsg ?? why;
+          const failureKind = httpBulkFailureKind(res.status, json);
+          const why = json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string"
+            ? (json as { error: string }).error
+            : `HTTP ${res.status}`;
+          for (const c of chunk) {
+            if (failureKind === "retryable") {
+              failedRows.push({
+                applicantId: c.applicant_id,
+                name: nameByPhone.get(String(c.phone)) || "이름 미상",
+                phone: String(c.phone),
+                error: `미시도 확인 — ${why}`,
+                kind: "retryable",
+              });
+            } else if (failureKind === "attention") {
+              failedRows.push({
+                applicantId: c.applicant_id,
+                name: nameByPhone.get(String(c.phone)) || "이름 미상",
+                phone: String(c.phone),
+                error: "발송 결과 확인 필요 — 중복 방지를 위해 재발송하지 않음",
+                kind: "attention",
+              });
+            } else {
+              failedRows.push({
+                applicantId: c.applicant_id,
+                name: nameByPhone.get(String(c.phone)) || "이름 미상",
+                phone: String(c.phone),
+                error: `보내지 않음 — ${why}`,
+                kind: "blocked",
+              });
+            }
+          }
+          continue;
+        }
+        const chunkResults = bulkSendChunkResults(json, chunk.length);
+        if (!chunkResults) {
           for (const c of chunk) {
             failedRows.push({
               applicantId: c.applicant_id,
               name: nameByPhone.get(String(c.phone)) || "이름 미상",
               phone: String(c.phone),
-              error: `미시도 — ${why}`,
+              error: "발송 결과 확인 필요 — 중복 방지를 위해 재발송하지 않음",
+              kind: "attention",
             });
           }
           continue;
         }
-        sent += json.sent ?? 0;
-        for (const r of (json.results ?? []) as Array<{ success: boolean; error?: string; phone?: string; applicant_id?: number }>) {
-          if (r.success) continue;
+        for (const [index, r] of chunkResults.entries()) {
+          const recipient = chunk[index];
+          if (r.state === "unknown") {
+            failedRows.push({
+              applicantId: recipient.applicant_id,
+              name: nameByPhone.get(String(recipient.phone)) || "이름 미상",
+              phone: String(recipient.phone),
+              error: r.error || "발송 결과 확인 필요 — 중복 방지를 위해 재발송하지 않음",
+              kind: "attention",
+            });
+            continue;
+          }
+          if (r.success) {
+            if (r.recovery_pending === true) recordRecoveryCount += 1;
+            else if (r.deduplicated) alreadySentCount += 1;
+            else sent += 1;
+            continue;
+          }
           failErrors.push(r.error ?? "");
-          const phone = String(r.phone ?? "");
           failedRows.push({
-            applicantId: typeof r.applicant_id === "number" ? r.applicant_id : 0,
-            name: nameByPhone.get(phone) || "이름 미상",
-            phone,
+            applicantId: recipient.applicant_id,
+            name: nameByPhone.get(String(recipient.phone)) || "이름 미상",
+            phone: String(recipient.phone),
             error: r.error ?? "사유 미기록",
+            kind: r.state === "failed" ? "retryable" : "blocked",
           });
         }
       }
@@ -1895,9 +2160,12 @@ export function Pipeline() {
       const poolExcluded = failErrors.filter((e) => e.includes("인력풀 제외")).length;
       const recentDup = failErrors.filter((e) => e.includes("중복 방지")).length;
       const noToken = failErrors.filter((e) => e.includes("토큰 없음")).length;
-      const failed = failErrors.length - optOut - noConsent - poolExcluded - recentDup - noToken;
+      const failed = failedRows.filter((failure) => failure.kind === "retryable").length;
+      const attentionCount = failedRows.filter((failure) => failure.kind === "attention").length;
       const skipped = selectedRows.size - recipients.length;
-      const parts = [`${sent}명 발송`];
+      const parts = [`신규 발송 ${sent}명`];
+      if (alreadySentCount) parts.push(`이미 처리 ${alreadySentCount}명`);
+      if (recordRecoveryCount) parts.push(`발송 완료 · 기록 복구 중 ${recordRecoveryCount}명`);
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
       if (noConsent) parts.push(`새 일자리 문자 미동의·미확인 ${noConsent}명 제외`);
       if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
@@ -1905,11 +2173,14 @@ export function Pipeline() {
       if (noToken) parts.push(`맞춤 공고 링크 없음 ${noToken}명 제외`);
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
-      // 청크 단위 실패는 개별 결과가 없어 대상 인원 수를 '미시도'로 별도 표기(부분 발송 가시화).
-      if (chunkFailed) parts.push(`미시도 ${chunkFailed}명${chunkErrorMsg ? ` (${chunkErrorMsg})` : ""}`);
+      if (attentionCount) parts.push(`발송 확인 중 ${attentionCount}명 · 중복 방지를 위해 재발송하지 않음`);
       // 하나라도 나갔으면 성공 토스트(부분 발송이라도 진행분을 인지), 전부 실패면 에러 토스트.
-      (sent > 0 ? toast.success : toast.error)(parts.join(" · "));
-      if (sent > 0) {
+      (sent > 0 || recordRecoveryCount > 0
+        ? toast.success
+        : attentionCount > 0 || alreadySentCount > 0 || failed === 0
+          ? toast.info
+          : toast.error)(parts.join(" · "));
+      if (sent > 0 || recordRecoveryCount > 0) {
         // 방금 나간 ping_sent가 배지·'14일 제외' 필터에 바로 반영되게 요약 재조회.
         setSummaryVersion((v) => v + 1);
         // '14일 제외'가 꺼져 있으면 켜기를 제안 — 자동으로 켜지 않고 매니저가 결정(액션 버튼).
@@ -1923,10 +2194,18 @@ export function Pipeline() {
       // 예전엔 전량 실패 시 창이 닫히며 골라둔 명단까지 초기화됐다(가장 있을 법한 대량 실패가
       // 문자 잔액 부족인데, 그때 누구에게 안 갔는지 복구할 방법이 없었다).
       setBulkFailures(failedRows);
-      if (failedRows.length > 0) return;
+      if (failedRows.length > 0) {
+        setSelectedRows(new Set(
+          failedRows
+            .filter((failure) => failure.kind === "retryable")
+            .map((failure) => String(failure.applicantId)),
+        ));
+        return;
+      }
       setBulkMsgModalOpen(false);
       setSelectedRows(new Set());
       setWaitlistJobId(null);
+      setNewJobNoticeJobId(null);
       setBulkMsgBody(DEFAULT_BULK_BODY);
     } catch {
       toast.error("발송에 실패했어요");
@@ -2024,6 +2303,148 @@ export function Pipeline() {
             <FileDown size={15} /> CSV
           </Button>
         </div>
+
+        {focusedJobHandoffState === "loading" && (
+          <section
+            aria-label="공고 인계 확인 중"
+            aria-busy="true"
+            role="status"
+            className="z-10 flex shrink-0 items-center gap-2 border-b border-border-strong bg-background px-5 py-3 text-[13px] font-semibold text-muted-foreground"
+          >
+            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            공고 정보를 확인하고 있어요. 확인 전에는 공고 관련 작업을 시작하지 않습니다.
+          </section>
+        )}
+
+        {focusedJobHandoffState === "error" && (
+          <section
+            aria-label="공고 인계 조회 실패"
+            role="alert"
+            className="z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-error/30 bg-error-soft px-5 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <strong className="block text-[14px] text-error-strong">공고 정보를 확인하지 못했어요.</strong>
+              <span className="text-[12px] text-error-strong">
+                다른 공고나 일반 캠페인으로 잘못 이어지지 않도록 관련 작업을 잠갔습니다.
+              </span>
+            </div>
+            <Button variant="secondary" size="toolbar" className="shrink-0" onClick={() => void mutateJobs()}>
+              <RefreshCw size={13} /> 다시 시도
+            </Button>
+          </section>
+        )}
+
+        {focusedJobHandoffState === "unavailable" && (
+          <section
+            aria-label="공고 인계 복구 안내"
+            className="z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-warning/30 bg-warning-soft px-5 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <strong className="block text-[14px] text-warning-strong">
+                이 공고는 마감되었거나 찾을 수 없어요.
+              </strong>
+              <span className="text-[12px] text-muted-foreground">
+                진행 중인 공고를 다시 골라 인력풀 충원을 시작해 주세요.
+              </span>
+            </div>
+            <Button asChild variant="secondary" size="toolbar" className="shrink-0">
+              <Link href="/jobs">공고 목록으로 돌아가기 <ArrowRight size={13} /></Link>
+            </Button>
+          </section>
+        )}
+
+        {focusedJobHandoffState === "invalid" && (
+          <section
+            aria-label="잘못된 공고 인계 복구 안내"
+            role="alert"
+            className="z-10 flex shrink-0 flex-wrap items-center gap-3 border-b border-error/30 bg-error-soft px-5 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <strong className="block text-[14px] text-error-strong">
+                공고 연결 정보가 올바르지 않아요.
+              </strong>
+              <span className="text-[12px] text-error-strong">
+                일반 캠페인으로 잘못 이어지지 않도록 관련 작업을 잠갔습니다.
+              </span>
+            </div>
+            <Button asChild variant="secondary" size="toolbar" className="shrink-0">
+              <Link href="/jobs">공고 목록으로 돌아가기 <ArrowRight size={13} /></Link>
+            </Button>
+          </section>
+        )}
+
+        {focusedJobHandoffState === "active" && focusedActiveJob && (
+          <section
+            aria-label="공고별 내부 충원 단계"
+            className="z-10 shrink-0 border-b border-brand-yellow/45 bg-brand-muted/30 px-5 py-3"
+          >
+            <span className="sr-only" role="status" aria-live="polite">
+              {focusedExposureReviewReady
+                ? "공고 노출을 저장했습니다. 안내 문자를 검토할 차례입니다."
+                : selectedRows.size > 0
+                  ? `${selectedRows.size}명을 선택했습니다. 공고 노출을 검토할 차례입니다.`
+                  : "공고 조건을 확인하고 노출할 대상을 선택하세요."}
+            </span>
+            <div className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2">
+              <div className="flex min-w-[240px] flex-1 items-start gap-2.5">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-brand-yellow/55 bg-card text-warning-strong shadow-xs">
+                  <Briefcase size={15} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 text-[12px] font-extrabold text-warning-strong">내부 충원</span>
+                    <strong className="truncate text-[14px] text-foreground" title={focusedActiveJob.title}>
+                      {focusedActiveJob.title}
+                    </strong>
+                  </div>
+                  <div className="mt-1 flex max-w-[680px] flex-wrap gap-1">
+                    {focusedJobConditionLabels.length > 0 ? focusedJobConditionLabels.map((label) => (
+                      <span
+                        key={label}
+                        title={label}
+                        className="max-w-[260px] truncate rounded-md border border-border-strong bg-card px-2 py-0.5 text-[12px] font-semibold text-gray-700"
+                      >
+                        {label}
+                      </span>
+                    )) : (
+                      <span className="text-[12px] text-muted-foreground">공고에 저장된 차량·시간·위치 조건이 없습니다.</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[12px] text-muted-foreground">
+                    선택·노출만으로 후보 등록·문자 발송·배정·근무 확정이 이루어지지 않습니다.
+                  </p>
+                </div>
+              </div>
+
+              <ol className="grid w-full flex-[1.1] grid-cols-2 gap-1.5 sm:w-auto sm:min-w-[440px] sm:grid-cols-4" aria-label="충원 작업 순서">
+                {fillMissionSteps.map((step, index) => (
+                  <li
+                    key={step.label}
+                    aria-current={step.state === "current" ? "step" : undefined}
+                    className={`flex min-h-10 items-center gap-2 rounded-lg border px-2.5 transition-colors motion-reduce:transition-none ${
+                      step.state === "done"
+                        ? "border-success/20 bg-success-soft/70 text-success-strong"
+                        : step.state === "current"
+                          ? "border-brand-yellow bg-card text-foreground shadow-xs"
+                          : "border-border bg-card/55 text-muted-foreground"
+                    }`}
+                  >
+                    <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[12px] font-extrabold ${
+                      step.state === "done"
+                        ? "bg-success text-white"
+                        : step.state === "current"
+                          ? "bg-brand-yellow text-foreground"
+                          : "bg-muted text-muted-foreground"
+                    }`}>
+                      {step.state === "done" ? <Check size={12} aria-hidden="true" /> : index + 1}
+                    </span>
+                    <span className="truncate text-[12px] font-bold">{step.label}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </section>
+        )}
 
         {/* 조건 바 — 자주 쓰는 조건(진행 단계·지역·차량)은 여기서 바로, 발송 전 좁히기는 한 묶음, 나머지는 '조건 더보기'.
             예전엔 조건 20여 개가 접이식 패널 한 줄에 쏟아져 무엇이 무슨 축인지 알 수 없었다.
@@ -2315,7 +2736,7 @@ export function Pipeline() {
                       onChange={(e) => setSegNameDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveCurrentSegment(); }}
                       placeholder="지금 조건을 이름 붙여 저장 (예: 강남·자차·즉시가능)"
-                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-2xl text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
+                      className="flex-1 max-w-[340px] px-3 py-1.5 border border-border-strong rounded-md text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
                     />
                     <Button variant="brand" size="chip" className="px-3 py-1.5 text-[13px] rounded-lg shadow-none" onClick={saveCurrentSegment} disabled={!segNameDraft.trim()}>지금 조건 저장</Button>
                   </div>
@@ -2407,33 +2828,94 @@ export function Pipeline() {
               {/* Floating Bulk Actions Toolbar */}
               <AnimatePresence>
                 {selectedRows.size > 0 && (
-                  <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="sticky top-0 z-20 flex items-center gap-4 glass-dark backdrop-blur-xl backdrop-saturate-150 rounded-2xl px-5 py-3 mb-6 shadow-glass-dark">
+                  <motion.div
+                    initial={prefersReducedMotion ? false : { y: -50, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={prefersReducedMotion ? undefined : { y: -50, opacity: 0 }}
+                    className="sticky top-0 z-20 mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl px-5 py-3 glass-dark shadow-glass-dark backdrop-blur-xl backdrop-saturate-150"
+                  >
                     <span className="shrink-0 text-[15px] font-extrabold text-white">
                       <span className="text-brand-yellow text-[18px]">{selectedRows.size}명</span> 선택됨
                     </span>
                     <div className="h-8 w-px shrink-0 bg-white/20" />
 
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-[12px] font-bold text-white/55">연락</span>
-                      <Button variant="brand" onClick={() => {
-                        setWaitlistJobId((current) =>
-                          pipelineWaitlistJobAfterAction(current, "open_composer")
-                        );
-                        setBulkFailures([]);
-                        setBulkMsgModalOpen(true);
-                      }} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 문자를 보낼 수 있어요" : undefined} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
-                    </div>
+                    {focusedJobActionsBlocked ? (
+                      <div
+                        role={focusedJobHandoffState === "error" ? "alert" : "status"}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-[12px] font-bold text-white/80"
+                      >
+                        {focusedJobHandoffState === "loading" && (
+                          <Loader2 size={14} className="shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                        )}
+                        {focusedJobHandoffState === "invalid"
+                          ? "공고 연결이 잘못되어 문자·후보 등록·노출 지정을 시작하지 않아요."
+                          : focusedJobHandoffState === "unavailable"
+                            ? "진행 중인 공고가 아니라 문자·후보 등록·노출 지정을 시작하지 않아요."
+                            : "공고 확인 전에는 문자·후보 등록·노출 지정을 시작하지 않아요."}
+                      </div>
+                    ) : focusedActiveJob ? (
+                      <>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[12px] font-bold text-white/60">다음 작업</span>
+                          {focusedExposureReviewReady ? (
+                            <Button variant="brand" onClick={openFocusedJobMessageReview} className="whitespace-nowrap">
+                              <MessageCircle size={16} aria-hidden="true" /> 안내 문자 검토
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="brand"
+                              onClick={openExposurePicker}
+                              disabled={applicantActionsBlocked}
+                              title={applicantActionsBlocked
+                                ? "최신 지원자 목록을 다시 불러온 뒤 공고를 노출할 수 있어요"
+                                : `${focusedActiveJob.title} 공고를 선택한 분들의 맞춤 링크에 노출합니다. 후보 등록이나 문자 발송은 하지 않습니다.`}
+                              className="whitespace-nowrap"
+                            >
+                              <Eye size={16} aria-hidden="true" /> {selectedRows.size}명에게 공고 노출
+                            </Button>
+                          )}
+                        </div>
 
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-[12px] font-bold text-white/55">공고 연결</span>
-                      <Button variant="ghost" onClick={() => setJobPickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 후보로 등록할 수 있어요" : "이 분들을 공고의 지원자(후보)로 등록해 AI 스크리닝 대상에 넣습니다 — 문자는 나가지 않아요"} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Briefcase size={16} /> 후보로 등록</Button>
-                      <Button variant="ghost" onClick={() => setExposurePickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 노출 명단을 지정할 수 있어요" : "이 분들에게만 공고가 보이도록 지정합니다(맞춤 공고 링크 노출 명단). 전체 노출 공고는 '지정 노출'로 전환까지 한 번에 — 후보 등록·문자 발송과 별개예요."} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Eye size={16} /> 노출 명단 지정</Button>
-                    </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[12px] font-bold text-white/55">다른 작업</span>
+                          <Button variant="ghost" onClick={() => {
+                            setWaitlistJobId((current) =>
+                              pipelineWaitlistJobAfterAction(current, "open_composer")
+                            );
+                            setNewJobNoticeJobId(null);
+                            setBulkFailures([]);
+                            setBulkMsgModalOpen(true);
+                          }} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 문자를 보낼 수 있어요" : undefined} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><MessageCircle size={16} /> 문자 보내기</Button>
+                          <Button variant="ghost" onClick={() => setJobPickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 후보로 등록할 수 있어요" : "선택한 분들을 공고 후보로 등록합니다. 문자 발송은 하지 않아요."} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><Briefcase size={16} /> 후보로 등록</Button>
+                          <Button variant="ghost" onClick={() => setBulkStageModalOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 진행 단계를 바꿀 수 있어요" : undefined} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><Columns size={16} /> 단계 변경</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[12px] font-bold text-white/55">연락</span>
+                          <Button variant="brand" onClick={() => {
+                            setWaitlistJobId((current) =>
+                              pipelineWaitlistJobAfterAction(current, "open_composer")
+                            );
+                            setNewJobNoticeJobId(null);
+                            setBulkFailures([]);
+                            setBulkMsgModalOpen(true);
+                          }} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 문자를 보낼 수 있어요" : undefined} className="whitespace-nowrap"><MessageCircle size={16} /> 문자 보내기</Button>
+                        </div>
 
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-[12px] font-bold text-white/55">기타</span>
-                      <Button variant="ghost" onClick={() => setBulkStageModalOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 진행 단계를 바꿀 수 있어요" : undefined} className="whitespace-nowrap bg-white/10 hover:bg-white/20 text-white border-0 shadow-none"><Columns size={16} /> 진행 단계 변경</Button>
-                    </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[12px] font-bold text-white/55">공고 연결</span>
+                          <Button variant="ghost" onClick={() => setJobPickerOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 후보로 등록할 수 있어요" : "이 분들을 공고의 지원자(후보)로 등록해 AI 스크리닝 대상에 넣습니다 — 문자는 나가지 않아요"} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><Briefcase size={16} /> 후보로 등록</Button>
+                          <Button variant="ghost" onClick={openExposurePicker} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 노출 명단을 지정할 수 있어요" : "이 분들에게만 공고가 보이도록 지정합니다(맞춤 공고 링크 노출 명단). 전체 노출 공고는 '지정 노출'로 전환까지 한 번에 — 후보 등록·문자 발송과 별개예요."} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><Eye size={16} /> 노출 명단 지정</Button>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[12px] font-bold text-white/55">기타</span>
+                          <Button variant="ghost" onClick={() => setBulkStageModalOpen(true)} disabled={applicantActionsBlocked} title={applicantActionsBlocked ? "최신 지원자 목록을 다시 불러온 뒤 진행 단계를 바꿀 수 있어요" : undefined} className="whitespace-nowrap border-0 bg-white/10 text-white shadow-none hover:bg-white/20"><Columns size={16} /> 진행 단계 변경</Button>
+                        </div>
+                      </>
+                    )}
 
                     <div className="flex-1" />
 
@@ -2860,7 +3342,7 @@ export function Pipeline() {
                 <button
                   key={j.id}
                   onClick={() => addSelectedToJob(j.id)}
-                  disabled={applicantActionsBlocked || addingJobId !== null}
+                  disabled={applicantActionsBlocked || focusedJobActionsBlocked || addingJobId !== null}
                   className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full text-left flex items-center justify-between gap-3 p-3.5 rounded-2xl border border-border-strong hover:border-brand-yellow hover:bg-yellow-50 disabled:opacity-50 transition-all"
                 >
                   <div className="min-w-0">
@@ -2886,7 +3368,11 @@ export function Pipeline() {
             <div className="px-6 py-4 border-b border-border-strong flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-[16px] font-bold text-foreground">노출 대상 지정</h2>
-                <div className="text-[13px] text-muted-foreground mt-0.5">선택된 {selectedRows.size}명을 어느 공고의 노출 대상으로 할까요? (여러 공고 선택 가능)</div>
+                <div className="text-[13px] text-muted-foreground mt-0.5">
+                  {focusedActiveJob
+                    ? `선택한 ${selectedRows.size}명에게 '${focusedActiveJob.title}' 공고를 보여줍니다.`
+                    : `선택된 ${selectedRows.size}명을 어느 공고의 노출 대상으로 할까요? (여러 공고 선택 가능)`}
+                </div>
                 {/* 조건 요약 — '어떤 조건으로 고른 명단인지'를 남긴다. 명단만 보면 나중에 근거를 되짚을 수 없다. */}
                 <div className="mt-2 text-[12px] leading-snug text-gray-700 bg-background border border-border-strong rounded-lg px-2.5 py-1.5">
                   <b className="text-muted-foreground">지금 조건</b> {conditionLabels.length > 0 ? conditionLabels.join(" · ") : "조건 없음(인재풀 전체에서 고름)"}
@@ -2905,22 +3391,24 @@ export function Pipeline() {
                 />
               </div>
             )}
-            <div className="px-6 py-3 border-b border-muted flex items-center gap-2">
-              {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
-                <button aria-pressed={exposureMode === m}
-                  key={m}
-                  onClick={() => setExposureMode(m)}
-                  className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold border transition-colors ${
-                    exposureMode === m
-                      ? m === "include" ? "bg-foreground text-white border-foreground" : "bg-error-strong text-white border-error-strong"
-                      : "bg-white text-gray-700 border-border-strong hover:border-gray-300"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-              <span className="text-[12px] text-muted-foreground">제외는 규칙보다 우선해요</span>
-            </div>
+            {!focusedActiveJob && (
+              <div className="px-6 py-3 border-b border-muted flex items-center gap-2">
+                {([["include", "노출 추가"], ["exclude", "노출 제외"]] as ["include" | "exclude", string][]).map(([m, label]) => (
+                  <button aria-pressed={exposureMode === m}
+                    key={m}
+                    onClick={() => setExposureMode(m)}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background px-3 py-1.5 rounded-lg text-[13px] font-bold border transition-colors ${
+                      exposureMode === m
+                        ? m === "include" ? "bg-foreground text-white border-foreground" : "bg-error-strong text-white border-error-strong"
+                        : "bg-white text-gray-700 border-border-strong hover:border-gray-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="text-[12px] text-muted-foreground">제외는 규칙보다 우선해요</span>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
               {/* 현황 조회 실패를 '규칙 없음'으로 위장하지 않는다 — 규칙이 있는데 못 읽으면 서버가 400으로 막고,
                   화면엔 2택이 안 떠서 매니저는 막힌 이유를 알 수 없게 된다. */}
@@ -2939,8 +3427,25 @@ export function Pipeline() {
                   {" "}또는 선택을 해제하고 진행하세요.
                 </div>
               )}
-              {activeJobs.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-8">진행 중인 공고가 없어요</div>}
-              {activeJobs.map((j) => {
+              {focusedActiveJob ? (
+                <div
+                  role="group"
+                  aria-label={`${focusedActiveJob.title} 공고로 고정`}
+                  className="flex items-start gap-3 rounded-2xl border border-foreground bg-background p-3.5 ring-1 ring-foreground"
+                >
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-white">
+                    <Check size={12} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-bold text-foreground">{focusedActiveJob.title}</div>
+                    {focusedActiveJob.branch && <div className="text-[12px] text-muted-foreground">{focusedActiveJob.branch}</div>}
+                    <div className="mt-0.5 text-[12px] text-muted-foreground">이 공고에만 노출 대상을 추가합니다.</div>
+                  </div>
+                  <Badge variant="brand">공고 고정</Badge>
+                </div>
+              ) : activeJobs.length === 0 ? (
+                <div className="text-[13px] text-muted-foreground text-center py-8">진행 중인 공고가 없어요</div>
+              ) : activeJobs.map((j) => {
                 const on = exposureJobIds.has(j.id);
                 const im = impactById.get(j.id);
                 // 노출 방식은 조회한 현황을 우선 — 공고 목록 캐시는 전환 직후 옛 값을 들고 있을 수 있다.
@@ -2992,7 +3497,7 @@ export function Pipeline() {
             {/* 원클릭 전환 + 규칙 2택 — 노출을 좁히는 결정은 여기서 명시적으로 고른다(조용한 소거 금지) */}
             {exposureMode === "include" && exposureJobIds.size > 0 && (
               <div className="px-5 py-3 border-t border-muted bg-surface-raised space-y-3">
-                {exposureFlipJobs.length > 0 && (
+                {!focusedActiveJob && exposureFlipJobs.length > 0 && (
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -3044,8 +3549,9 @@ export function Pipeline() {
                 노출 대상은 후보 등록이 아니에요 — 맞춤 공고 링크에 공고가 보일 뿐, 배정·확정이 아닙니다.
                 <br />명단 확인·개별 제외는 공고 수정 → &lsquo;노출 대상 명단&rsquo;에서 할 수 있어요.
               </span>
-              <Button variant="primary" size="chip" className="px-4 py-2 text-[13px] rounded-2xl" onClick={assignExposure} isLoading={exposureSaving} disabled={
+              <Button variant="primary" size="default" className="min-h-11 rounded-xl px-4 text-[13px]" onClick={assignExposure} isLoading={exposureSaving} disabled={
                       applicantActionsBlocked ||
+                      focusedJobActionsBlocked ||
                       exposureJobIds.size === 0 ||
                       // 규칙 2택을 고르지 않으면 진행 불가 — 기본값으로 조용히 정하지 않는다.
                       (exposureMode === "include" && exposureRuleJobs.length > 0 && exposureRuleAction === null) ||
@@ -3053,7 +3559,9 @@ export function Pipeline() {
                       (exposureMode === "include" && exposureUnknownJobs.length > 0)
                     }>
                       {!exposureSaving && <Eye size={14} />}
-                      {exposureMode === "exclude"
+                      {focusedActiveJob
+                        ? `${selectedRows.size}명에게 공고 노출`
+                        : exposureMode === "exclude"
                         ? "노출 제외"
                         : /* 규칙을 두면 '명단에게만'이 아니다(규칙 해당 인원도 함께 본다) — 버튼이 거짓말하지 않게. */
                           exposureWillFlip && !(exposureRuleAction === "keep" && exposureRuleJobs.length > 0)
@@ -3147,17 +3655,21 @@ export function Pipeline() {
 
       {/* 2. Bulk Message/Campaign Modal */}
       {bulkMsgModalOpen && (
-        <Modal bare open={bulkMsgModalOpen} onClose={() => setBulkMsgModalOpen(false)} size="lg"
-               title="문자 캠페인 발송"
+        <Modal bare open={bulkMsgModalOpen} onClose={closeBulkMessageModal} busy={bulkSending} size="lg"
+               title={newJobNoticeJobId !== null ? "새 공고 안내 문자 검토" : "선택 인원 대상 문자(SMS) 캠페인 발송"}
                closeOnOutside={false}
                className="max-w-[600px] sm:max-w-[600px]"
         >
             <div className="p-5 border-b border-border-strong bg-background flex justify-between items-center shrink-0">
               <div>
-                <h2 className="text-[16px] font-bold text-foreground">선택 인원 대상 문자(SMS) 캠페인 발송</h2>
-                <div className="text-[13px] text-muted-foreground mt-0.5">실제 발송 대상 {modalRecipientCount}명에게 일괄 발송됩니다.</div>
+                <h2 aria-hidden="true" className="text-[16px] font-bold text-foreground">
+                  {newJobNoticeJobId !== null ? "새 공고 안내 문자 검토" : "선택 인원 대상 문자(SMS) 캠페인 발송"}
+                </h2>
+                <div className="text-[13px] text-muted-foreground mt-0.5">
+                  문구와 실제 수신 대상 {modalRecipientCount}명을 확인한 뒤에만 발송됩니다.
+                </div>
               </div>
-              <Button variant="ghost" size="icon" aria-label="문자 보내기 창 닫기" onClick={() => setBulkMsgModalOpen(false)}>
+              <Button variant="ghost" size="icon" aria-label="문자 보내기 창 닫기" onClick={closeBulkMessageModal} disabled={bulkSending}>
                 <X aria-hidden="true" size={20} />
               </Button>
             </div>
@@ -3167,6 +3679,29 @@ export function Pipeline() {
                   state={applicantsState === "error" ? "error" : "loading"}
                   onRetry={() => void mutateApplicants()}
                 />
+              )}
+              {focusedJobActionsBlocked && (
+                <div
+                  role={focusedJobHandoffState === "error" ? "alert" : "status"}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-error/30 bg-error-soft px-3 py-2 text-[12px] font-semibold text-error-strong"
+                >
+                  <span>
+                    {focusedJobHandoffState === "invalid"
+                      ? "공고 연결이 올바르지 않아 이 발송을 잠갔어요."
+                      : focusedJobHandoffState === "unavailable"
+                        ? "이 공고는 진행 중이 아니라 이 발송을 잠갔어요."
+                        : "공고 확인이 끝날 때까지 이 발송을 잠갔어요."}
+                  </span>
+                  {focusedJobHandoffState === "error" && (
+                    <button
+                      type="button"
+                      onClick={() => void mutateJobs()}
+                      className="rounded font-bold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      다시 시도
+                    </button>
+                  )}
+                </div>
               )}
               {/* 선택 대비 실제 수신 차감 경고 — 필터로 화면에서 빠졌거나 연락처가 없는 인원은 발송되지 않는다 */}
               {modalExcludedCount > 0 && (
@@ -3191,11 +3726,13 @@ export function Pipeline() {
                   새 일자리 문자 미동의·미확인 {selectedNoMarketingConsentCount}명은 캠페인에서 제외됩니다.
                 </div>
               )}
-              {/* 확정인력 포함 — 막지 않는다. 운행이 멈춰 대기 중인 확정자에게 다른 라인을 안내하는 건 정당한 발송이다.
-                  다만 '지금 근무 중인 분에게 다른 일 권유'가 되는 경우도 있어 수를 밝혀 의식적으로 고르게 한다. */}
               {selectedConfirmedCount > 0 && (
                 <div className="px-4 py-2.5 rounded-2xl bg-yellow-50 border border-yellow-300 text-[13px] font-bold text-warning-strong">
-                  이미 확정된 분 {selectedConfirmedCount}명이 포함돼 있어요 — 운행이 멈춰 대기 중인 분이라면 보내도 되고, 지금 근무 중인 분이면 진행 단계 조건에서 <b>확정인력</b>을 빼고 보내세요.
+                  {newJobNoticeJobId !== null ? (
+                    <>이미 확정된 분 {selectedConfirmedCount}명은 새 공고 안내 대상에서 제외됩니다.</>
+                  ) : (
+                    <>이미 확정된 분 {selectedConfirmedCount}명이 포함돼 있어요 — 운행이 멈춰 대기 중인 분이라면 보내도 되고, 지금 근무 중인 분이면 진행 단계 조건에서 <b>확정인력</b>을 빼고 보내세요.</>
+                  )}
                 </div>
               )}
 
@@ -3288,62 +3825,88 @@ export function Pipeline() {
                   지금은 심야(21~08시)예요. 시니어 대상 심야 문자는 민원이 되기 쉬워요 — 급하지 않으면 아침 9시 이후 발송을 권합니다.
                 </div>
               )}
-              <div>
-                <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 템플릿</label>
-                <select
-                  onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
-                  className="pr-8 w-full border border-border-strong rounded-2xl px-4 py-3 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
-                >
-                  <option value="">직접 입력하기</option>
-                  <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
-                  <option value={RECONTACT_B_BODY}>다시 연락 B안 (최근 6개월·짧게)</option>
-                  <option value={WAITLIST_BODY}>관심 대기 안내 (사후관리)</option>
-                  <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
-                  <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
-                </select>
-              </div>
+              {newJobNoticeJobId === null && (
+                <div>
+                  <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 템플릿</label>
+                  <select
+                    onChange={(e) => { if (e.target.value) setBulkMsgBody(e.target.value); }}
+                    className="pr-8 w-full border border-border-strong rounded-md px-4 py-3 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring bg-white"
+                  >
+                    <option value="">직접 입력하기</option>
+                    <option value={DEFAULT_BULK_BODY}>다시 연락 A안 (전체 기본)</option>
+                    <option value={RECONTACT_B_BODY}>다시 연락 B안 (최근 6개월·짧게)</option>
+                    <option value={WAITLIST_BODY}>관심 대기 안내 (사후관리)</option>
+                    <option value="안녕하세요, 지원해주셔서 감사합니다! 근무 시작 안내를 위해 본 문자에 답장 부탁드립니다.">근무 시작 안내</option>
+                    <option value="지원해주신 내용 중 일부 확인이 필요합니다. 본 문자에 답장 주시면 안내드리겠습니다.">추가 정보 확인 요청</option>
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-[13px] font-bold text-gray-700 block mb-2">메시지 본문</label>
                 <textarea
                   value={bulkMsgBody}
                   onChange={(e) => setBulkMsgBody(e.target.value)}
-                  className="w-full h-[150px] border border-border-strong rounded-2xl p-4 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed text-gray-800 bg-background"
+                  aria-invalid={Boolean(newJobMessageReviewIssue)}
+                  aria-describedby={newJobMessageReviewIssue ? "pipeline-new-job-message-issue" : undefined}
+                  className={`w-full h-[150px] rounded-md border p-4 text-[14px] outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed text-gray-800 bg-background ${newJobMessageReviewIssue ? "border-error" : "border-border-strong"}`}
                 />
+                {newJobMessageReviewIssue && (
+                  <p id="pipeline-new-job-message-issue" role="alert" className="mt-1.5 text-[12px] font-semibold text-error-strong">
+                    {newJobMessageReviewIssue}
+                  </p>
+                )}
                 <p className="mt-1.5 text-[12px] text-muted-foreground">치환자: <b className="text-muted-foreground">#{"{이름}"}</b> 수신자 이름 · <b className="text-muted-foreground">#{"{맞춤링크}"}</b> 본인 전용 맞춤 공고 링크</p>
               </div>
             </div>
             <div className="border-t border-border-strong bg-white shrink-0">
-              {/* 발송 실패 명단은 버튼 행 안에 넣지 않는다. 600px 모달에서 가로 폭을 밀어
-                  액션이 잘리는 것을 막고, 명단만 별도로 스크롤한다. */}
-              {bulkFailures.length > 0 && (
+              {attentionBulkFailures.length > 0 && (
+                <div className="border-b border-warning/25 bg-warning-soft p-4">
+                  <div className="text-[13px] font-bold text-warning-strong">
+                    결과 확인 중 {attentionBulkFailures.length}명 — 중복될 수 있으니 재발송하지 마세요
+                  </div>
+                  <div className="mt-1.5 flex max-h-[96px] flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
+                    {attentionBulkFailures.map((failure, index) => (
+                      <div key={`${failure.phone}-${index}`} className="flex items-center gap-2 text-[12px] text-warning-strong">
+                        <span className="shrink-0 font-bold">{failure.name}</span>
+                        <span className="shrink-0 text-muted-foreground">{failure.phone}</span>
+                        <span className="truncate">{failure.error}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {retryableBulkFailures.length > 0 && (
                 <div className="border-b border-error/20 bg-error-soft p-4">
                   <div className="mb-1.5 flex items-center justify-between gap-2">
                     <div className="text-[13px] font-bold text-error-strong">
-                      못 보낸 {bulkFailures.length}명 — 사유를 확인하고 필요하면 다시 보내세요
+                      미시도 확인 {retryableBulkFailures.length}명 — 이 대상만 다시 보낼 수 있어요
                     </div>
                     <Button
                       size="chip"
                       variant="secondary"
                       className="min-h-11 shrink-0 rounded-xl border-error/30 px-3 text-[12px] text-error-strong hover:bg-error-soft"
                       onClick={() => {
-                        // 실패한 사람만 선택으로 되돌린다 — 서버 10분 중복 가드가 이미 나간 인원의 재발송을 막는다.
-                        setSelectedRows(new Set(bulkFailures.map((f) => String(f.applicantId)).filter((v) => v !== "0")));
-                        setBulkFailures([]);
-                        toast.info(`실패한 ${bulkFailures.length}명만 선택했어요 — 문구를 확인하고 다시 발송하세요.`);
+                        setSelectedRows(new Set(retryableBulkFailures.map((failure) => String(failure.applicantId))));
+                        toast.info(`미시도 확인 ${retryableBulkFailures.length}명만 선택했어요.`);
                       }}
                     >
-                      이 {bulkFailures.length}명만 다시 보내기
+                      {retryableBulkFailures.length}명만 선택
                     </Button>
                   </div>
-                  <div className="flex max-h-[120px] flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
-                    {bulkFailures.map((f, i) => (
-                      <div key={`${f.phone}-${i}`} className="flex items-center gap-2 text-[12px] text-error-strong">
-                        <span className="shrink-0 font-bold">{f.name}</span>
-                        <span className="shrink-0 text-muted-foreground">{f.phone}</span>
-                        <span className="truncate">{f.error}</span>
+                  <div className="flex max-h-[96px] flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
+                    {retryableBulkFailures.map((failure, index) => (
+                      <div key={`${failure.phone}-${index}`} className="flex items-center gap-2 text-[12px] text-error-strong">
+                        <span className="shrink-0 font-bold">{failure.name}</span>
+                        <span className="shrink-0 text-muted-foreground">{failure.phone}</span>
+                        <span className="truncate">{failure.error}</span>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {blockedBulkFailures.length > 0 && (
+                <div className="border-b border-border-strong bg-background px-4 py-3 text-[12px] font-semibold text-muted-foreground">
+                  보내지 않은 {blockedBulkFailures.length}명 — 수신 동의·공고 상태·연락처 사유로 재시도 대상에서 제외했어요.
                 </div>
               )}
               <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -3360,16 +3923,22 @@ export function Pipeline() {
                 );
               })()}
               <div className="flex shrink-0 justify-end gap-2">
-                <Button variant="secondary" size="lg" onClick={() => setBulkMsgModalOpen(false)}>취소</Button>
+                <Button variant="secondary" size="lg" onClick={closeBulkMessageModal} disabled={bulkSending}>취소</Button>
                 <Button
                   variant="primary"
                   size="lg"
                   onClick={handleBulkSend}
                   isLoading={bulkSending}
-                  disabled={applicantActionsBlocked || waitlistContextMissing || activeCheckBlocking}
+                  disabled={modalRecipientCount === 0 || applicantActionsBlocked || focusedJobActionsBlocked || waitlistContextMissing || activeCheckBlocking || Boolean(newJobMessageReviewIssue)}
                   aria-describedby={activeCheckBlocking ? "pipeline-bulk-active-check-status" : undefined}
                 >
-                  {!bulkSending && <Mail size={16} />} {bulkSending ? "발송 중..." : "캠페인 발송"}
+                  {!bulkSending && <Mail size={16} />} {bulkSending
+                    ? "발송 중..."
+                    : retryableBulkFailures.length > 0
+                      ? `미시도 ${retryableBulkFailures.length}명 다시 발송`
+                      : newJobNoticeJobId !== null
+                      ? "안내 문자 발송"
+                      : "캠페인 발송"}
                 </Button>
               </div>
               </div>

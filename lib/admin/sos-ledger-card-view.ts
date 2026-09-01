@@ -45,6 +45,21 @@ export type SosLedgerCardView = {
   ledger: SosLedgerSourceView<SosLedgerCostData>;
 };
 
+export function sosJobCreateHref(
+  row: Pick<SosLedgerSosRow, "id" | "line_label" | "region" | "vehicle" | "needed_count">,
+): string {
+  const params = new URLSearchParams({
+    new: "1",
+    sos_id: String(row.id),
+    line: row.line_label,
+    period: "하루",
+    capacity: String(row.needed_count),
+  });
+  if (row.region) params.set("region", row.region);
+  if (row.vehicle) params.set("vehicle", row.vehicle);
+  return `/jobs?${params.toString()}`;
+}
+
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
