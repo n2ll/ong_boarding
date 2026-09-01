@@ -1,4 +1,4 @@
-import { ArrowRight, Users, MousePointerClick, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, TrendingUp, ChevronRight, ChevronDown, MapPin, AlertTriangle, RefreshCw, type LucideIcon } from "lucide-react";
+import { ArrowRight, Users, MousePointerClick, CheckCircle2, Activity, PhoneCall, ClipboardCheck, Smartphone, TrendingUp, ChevronRight, ChevronDown, MapPin, AlertTriangle, RefreshCw, MessageSquareWarning, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -27,6 +27,10 @@ import {
   agentModeView,
   type AdminAgentModeResponse,
 } from "@/lib/admin/agent-mode-view";
+import {
+  bulkMessageAttentionPresentation,
+  type BulkMessageAttentionCollection,
+} from "@/lib/admin/bulk-message-attention";
 
 interface UrgentItem {
   id: string;
@@ -38,6 +42,7 @@ interface UrgentItem {
   cta: string;
   path?: string;
   action?: "retry-heartbeat";
+  icon?: LucideIcon;
 }
 
 interface AppRow {
@@ -135,7 +140,10 @@ export function Dashboard() {
   const { data: appsRes, isLoading, isValidating: isAppsValidating, error: appsError, mutate: mutateApps } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
   const { data: inboxRes, error: inboxError, mutate: mutateInbox } = useSWR<{ data?: { created_at?: string | null }[] }>("/api/admin/inbox/pending", { refreshInterval: 60_000 });
   // 헤더 벨·사이드바 배지와 동일 소스 — 사람 확인 필요(paused)·AI 전역 중단 카운트
-  const { data: notiRes, error: notiError, mutate: mutateNoti } = useSWR<{ counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null } }>("/api/admin/notifications");
+  const { data: notiRes, error: notiError, mutate: mutateNoti } = useSWR<{
+    counts?: { inbox: number; interventions: number; aiDisabled: boolean; inbox_oldest_days?: number | null; interventions_oldest_days?: number | null };
+    bulk_message_attention?: BulkMessageAttentionCollection;
+  }>("/api/admin/notifications");
   // 확정 대기 큐(스크리닝 완료·미확정) — 사이드바 배지·LiveConsole '확정 대기' 탭과 동일 소스. '오늘의 할 일'에 합류(주제 C1 발견성).
   const { data: confirmRes, error: confirmError, mutate: mutateConfirm } = useSWR<{ total?: number; pending?: { created_at?: string | null }[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
@@ -351,6 +359,12 @@ export function Dashboard() {
 
   // /notifications counts(사람 확인 필요·AI 중단)와 /sos open(진행 중 긴급 건) 기반
   const notiCounts = notiRes?.counts;
+  const bulkAttentionView = useMemo(
+    () => notiRes?.bulk_message_attention
+      ? bulkMessageAttentionPresentation(notiRes.bulk_message_attention)
+      : null,
+    [notiRes?.bulk_message_attention],
+  );
   const sosOpen = sosRes?.open ?? [];
   // '내가 답할 차례' 건수는 아래 ReplyQueueCard가 계산해 올려준다.
   // (예전엔 여기서 unread_count>0으로 셌다. 그 값은 '스레드를 아직 열지 않았다'는 뜻이라 열람만으로 0이 되고,
@@ -388,6 +402,19 @@ export function Dashboard() {
         desc: gateway.urgent.desc,
         cta: "상태 다시 확인",
         action: "retry-heartbeat",
+      });
+    }
+    if (bulkAttentionView) {
+      u.push({
+        id: "bulk-message-attention",
+        urgency: bulkAttentionView.urgency,
+        ageMinutes: notiRes?.bulk_message_attention?.oldestAgeMinutes ?? null,
+        priorityLabel: bulkAttentionView.priorityLabel,
+        title: bulkAttentionView.title,
+        desc: `계정 전체 기준 · ${bulkAttentionView.description}`,
+        cta: "발송 상태 보기",
+        path: bulkAttentionView.path,
+        icon: MessageSquareWarning,
       });
     }
     if (sosOpen.length > 0) {
@@ -437,7 +464,7 @@ export function Dashboard() {
       u.push({ id: "pool-reply", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
     }
     return orderDashboardUrgentItems(u);
-  }, [notiCounts, gateway, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
+  }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
 
   const openUrgentItem = (item: UrgentItem) => {
     if (item.action === "retry-heartbeat") {
@@ -625,6 +652,7 @@ export function Dashboard() {
                 : "border-border-strong bg-card hover:bg-background";
               const accent = isCritical ? "text-priority-critical-ink" : "text-priority-attention-ink";
               const priorityLabel = dashboardUrgencyLabel(item);
+              const ItemIcon = item.icon ?? (isCritical ? Activity : PhoneCall);
 
               return (
                 <button
@@ -634,7 +662,7 @@ export function Dashboard() {
                   className={`group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-[148px] ${surface}`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-current/15 bg-card/70 ${accent}`}>
-                    {isCritical ? <Activity size={16} /> : <PhoneCall size={16} />}
+                    <ItemIcon aria-hidden="true" size={16} />
                   </span>
                   <span className="min-w-0 flex-1 lg:flex lg:h-full lg:flex-col lg:items-stretch lg:gap-3">
                     <span className="min-w-0 flex-1">

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Search, ChevronDown, ChevronRight, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox, AlertCircle } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Bell, Plus, MapPin, FileText, User, Loader2, RefreshCw, Check, Inbox, AlertCircle, MessageSquareWarning } from "lucide-react";
 import { useBranchScope } from "@/lib/branch-scope";
 import { nextSearchDialogFocusIndex } from "@/lib/admin/search-dialog";
 import { topbarCollectionState } from "@/lib/admin/topbar-state";
@@ -20,7 +20,7 @@ interface TopbarProps {
 
 interface ApplicantHit { id: number; name: string | null; phone: string | null; status: string | null; branch: string | null }
 interface JobHit { id: number; title: string; status: string | null }
-interface Notice { id: string; tone: "red" | "amber" | "slate"; title: string; desc: string; path: string }
+interface Notice { id: string; kind?: "bulk-message" | "bulk-message-error"; tone: "red" | "amber" | "slate"; title: string; desc: string; path: string }
 interface BranchOpt { id: number; name: string; active: boolean }
 
 export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction }: TopbarProps) {
@@ -332,11 +332,15 @@ export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction 
                   <div className="flex flex-col items-center justify-center text-center py-10 px-4 text-muted-foreground">
                     <Check size={26} className="text-success mb-2" />
                     <div className="text-[13px] font-bold text-gray-700">새 알림이 없어요</div>
-                    <div className="text-[12px] mt-0.5">분류가 필요한 문자, 사람 확인이 필요한 대화, AI 중단이 생기면 표시됩니다.</div>
+                    <div className="text-[12px] mt-0.5">분류·사람 확인·대량 문자 발송 확인·AI 중단이 생기면 표시됩니다.</div>
                   </div>
                 ) : (
                   // 한 줄 요약만 — 설명문은 대시보드 '오늘의 할 일' 몫(같은 말을 두 번 하지 않는다)
-                  notices.map((n) => (
+                  notices.map((n) => {
+                    const NoticeIcon = n.kind === "bulk-message" || n.kind === "bulk-message-error"
+                      ? MessageSquareWarning
+                      : Inbox;
+                    return (
                     <button
                       key={n.id}
                       onClick={() => {
@@ -344,13 +348,14 @@ export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction 
                       }}
                       className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full flex items-center gap-3 px-3.5 py-2.5 border-b border-background hover:bg-background transition-colors text-left"
                     >
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${n.tone === "red" ? "bg-error-soft text-error-strong" : n.tone === "amber" ? "bg-yellow-50 text-warning-strong" : "bg-muted text-gray-700"}`}>
-                        <Inbox size={14} />
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${n.kind === "bulk-message-error" ? "bg-error-soft text-error-strong" : n.kind === "bulk-message" && n.tone === "red" ? "bg-priority-critical-soft text-priority-critical-ink" : n.kind === "bulk-message" ? "bg-priority-attention-soft text-priority-attention-ink" : n.tone === "red" ? "bg-error-soft text-error-strong" : n.tone === "amber" ? "bg-warning-soft text-warning-strong" : "bg-muted text-gray-700"}`}>
+                        <NoticeIcon aria-hidden="true" size={14} />
                       </div>
                       <div className="flex-1 min-w-0 truncate text-[13px] font-bold text-gray-800">{n.title}</div>
                       <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
                     </button>
-                  ))
+                    );
+                  })
                 )}
               </div>
               {notices.length > 0 && (

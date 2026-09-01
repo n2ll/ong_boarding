@@ -12,5 +12,8 @@ test("the notification route validates every query before computing queue health
   assert.match(source, /queryState\.inboxCount/);
   assert.match(source, /queryState\.inboxOldestRows/);
   assert.match(source, /queryState\.handoffRows/);
+  assert.match(source, /loadBulkMessageAttention/);
+  assert.match(source, /bulkMessageAttentionPresentation\(bulkAttention\)/);
+  assert.match(source, /bulk_message_attention:\s*bulkAttention/);
   assert.doesNotMatch(source, /isAgentDisabled/);
 });

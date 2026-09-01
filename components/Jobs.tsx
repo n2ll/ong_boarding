@@ -2779,7 +2779,7 @@ export function Jobs() {
     // 결과 구분 보고 — 정책·중복 가드는 실패가 아니라 의도된 제외로 분리한다.
     const parts = [`신규 발송 ${sentCount}명`];
     if (alreadySentCount) parts.push(`이미 처리 ${alreadySentCount}명`);
-    if (recordRecoveryCount) parts.push(`발송 완료 · 기록 복구 중 ${recordRecoveryCount}명`);
+    if (recordRecoveryCount) parts.push(`발송 접수 · 기록 복구 중 ${recordRecoveryCount}명`);
     if (blockedCount) parts.push(`가드 제외 ${blockedCount}명`);
     if (retryableTargets.length) parts.push(`미시도 확인 ${retryableTargets.length}명`);
     if (attentionTargets.length) parts.push(`발송 결과 확인 중 ${attentionTargets.length}명 · 재발송하지 않음`);
@@ -2788,7 +2788,7 @@ export function Jobs() {
         ? zeroSentNote
         : "미시도 대상만 다시 시도할 수 있어요."
       : undefined;
-    (sentCount > 0 || recordRecoveryCount > 0 ? toast.success : attentionTargets.length > 0 ? toast.info : retryableTargets.length > 0 ? toast.error : toast.info)(
+    (sentCount > 0 ? toast.success : recordRecoveryCount > 0 || attentionTargets.length > 0 ? toast.info : retryableTargets.length > 0 ? toast.error : toast.info)(
       `${label}: ${parts.join(" · ")}`,
       retryDescription ? { description: retryDescription } : undefined,
     );
@@ -4619,11 +4619,15 @@ export function Jobs() {
               <p className="mt-1.5 text-[12px] text-muted-foreground">{"#{이름}·#{맞춤링크}는 수신자별로 자동 치환돼요. 확정이 아닌 정보성 안내 문자입니다."}</p>
               {announceSendReport && (
                 <div className="mt-3 space-y-2" role="status" aria-live="polite">
-                  {(announceSendReport.sentCount > 0 || announceSendReport.alreadySentCount > 0 || announceSendReport.recordRecoveryCount > 0) && (
+                  {(announceSendReport.sentCount > 0 || announceSendReport.alreadySentCount > 0) && (
                     <div className="rounded-lg border border-success/25 bg-success-soft px-3 py-2 text-[12px] font-semibold text-success-strong">
                       {announceSendReport.sentCount > 0 && <>신규 발송 {announceSendReport.sentCount}명</>}
                       {announceSendReport.alreadySentCount > 0 && <> · 이미 처리 {announceSendReport.alreadySentCount}명</>}
-                      {announceSendReport.recordRecoveryCount > 0 && <> · 발송 완료 · 기록 복구 중 {announceSendReport.recordRecoveryCount}명</>}
+                    </div>
+                  )}
+                  {announceSendReport.recordRecoveryCount > 0 && (
+                    <div className="rounded-lg border border-priority-attention-ink/20 bg-priority-attention-soft px-3 py-2 text-[12px] font-bold leading-relaxed text-priority-attention-ink">
+                      발송 접수 · 기록 복구 중 {announceSendReport.recordRecoveryCount}명 — 완료 전 같은 문자를 다시 보내지 마세요.
                     </div>
                   )}
                   {announceSendReport.attentionTargets.length > 0 && (

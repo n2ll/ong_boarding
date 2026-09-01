@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, Layers, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye, ChevronDown } from "lucide-react";
+import { Filter, Search, MoreHorizontal, MessageCircle, Calendar, Check, X, UserX, Download, LayoutGrid, Layers, List as ListIcon, Columns, ArrowRight, UserPlus, FileDown, Tags, Mail, Loader2, Briefcase, Map as MapIcon, Funnel, RefreshCw, Zap, Eye, ChevronDown, MessageSquareWarning } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuCheckboxItem } from "./ui/dropdown-menu";
 import { Modal } from "./ui/modal";
 import { PipelineMap, type MapApplicant, type MapJob } from "./PipelineMap";
@@ -83,6 +83,10 @@ import {
   type PipelinePoolEventSummary,
   type PipelineSignalLookupState,
 } from "@/lib/admin/pipeline-signal-batches";
+import {
+  bulkMessageAttentionPresentation,
+  type BulkMessageAttentionCollection,
+} from "@/lib/admin/bulk-message-attention";
 
 // SMS 비용 대략치(SOLAPI): 90바이트 이하 SMS(단문) ~20원, 초과 LMS(장문) ~33원. 한글=2바이트.
 function estimateSmsCost(text: string): { sms_type: "SMS" | "LMS"; cost_krw: number; bytes: number } {
@@ -106,6 +110,21 @@ const SEGMENTS_KEY = "ong_pipeline_segments";
 function isNightKstNow(d: Date = new Date()): boolean {
   const kstHour = (d.getUTCHours() + 9) % 24;
   return kstHour >= 21 || kstHour < 8;
+}
+
+const BULK_ATTENTION_DATE = new Intl.DateTimeFormat("ko-KR", {
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function bulkPurposeLabel(purpose: string | null): string {
+  if (purpose === "new_job") return "신규 공고 안내";
+  if (purpose === "job_closed") return "공고 마감 안내";
+  if (purpose === "waitlist") return "대기 안내";
+  if (purpose === "campaign") return "인재풀 캠페인";
+  return "대량 문자";
 }
 
 interface SavedSegment {
@@ -506,6 +525,31 @@ export function Pipeline() {
     COLUMN_DEFS.map((d) => ({ ...d, count: 0, cards: [] }))
   );
   const searchParams = useSearchParams();
+  const {
+    data: operationsNotices,
+    error: bulkAttentionError,
+    isValidating: bulkAttentionRefreshing,
+    mutate: mutateOperationsNotices,
+  } = useSWR<{
+    bulk_message_attention?: BulkMessageAttentionCollection;
+    bulk_message_job_titles?: Record<string, string>;
+  }>(
+    "/api/admin/notifications",
+    { refreshInterval: 60_000 },
+  );
+  const bulkAttentionView = useMemo(
+    () => operationsNotices?.bulk_message_attention
+      ? bulkMessageAttentionPresentation(operationsNotices.bulk_message_attention)
+      : null,
+    [operationsNotices?.bulk_message_attention],
+  );
+  const bulkAttentionRequested = searchParams.get("bulk_attention") === "1";
+  const [bulkAttentionOpen, setBulkAttentionOpen] = useState(
+    () => bulkAttentionRequested,
+  );
+  useEffect(() => {
+    if (searchParams.get("bulk_attention") === "1") setBulkAttentionOpen(true);
+  }, [searchParams]);
   const prefersReducedMotion = useReducedMotion();
   const { branch: scopeBranch } = useBranchScope();
   // 상세 패널 선택 — **사람과 공고를 한 값으로 묶는다.** 두 state로 두면 사람은 바뀌었는데 공고가
@@ -587,6 +631,10 @@ export function Pipeline() {
   const listViewportRef = useRef<HTMLDivElement | null>(null);
   const [listContentWidth, setListContentWidth] = useState<number | null>(null);
   const [rawApplicants, setRawApplicants] = useState<Applicant[]>([]);
+  const applicantNameById = useMemo(
+    () => new Map(rawApplicants.map((applicant) => [applicant.id, applicant.name])),
+    [rawApplicants],
+  );
   // 스플릿 패널이 실제로 옆에 붙어 있는 상태 — 리스트 뷰에서 상세가 열려 있을 때만.
   const splitPanelActive = splitView && canDockDetail && view === "list" && selectedApplicantId != null;
   const tableLayout = pipelineTableLayout(listContentWidth, splitPanelActive);
@@ -672,6 +720,14 @@ export function Pipeline() {
   }>("/api/admin/jobs?status=active");
   const visibleJobs = useMemo(() => (jobsData?.jobs ?? []).filter((j) => !String(j.title).startsWith("__")), [jobsData]);
   const activeJobs = useMemo(() => visibleJobs.map(pipelineFocusedJobProjection), [visibleJobs]);
+  const jobTitleById = useMemo(() => {
+    const titles = new Map(activeJobs.map((job) => [job.id, job.title]));
+    for (const [jobId, title] of Object.entries(operationsNotices?.bulk_message_job_titles ?? {})) {
+      const parsedId = Number(jobId);
+      if (Number.isSafeInteger(parsedId) && title) titles.set(parsedId, title);
+    }
+    return titles;
+  }, [activeJobs, operationsNotices?.bulk_message_job_titles]);
   const focusedActiveJob = pipelineFocusedActiveJob(searchParams.toString(), activeJobs);
   const focusedJobHandoffState = pipelineFocusedJobHandoffState(
     searchParams.toString(),
@@ -2165,7 +2221,7 @@ export function Pipeline() {
       const skipped = selectedRows.size - recipients.length;
       const parts = [`신규 발송 ${sent}명`];
       if (alreadySentCount) parts.push(`이미 처리 ${alreadySentCount}명`);
-      if (recordRecoveryCount) parts.push(`발송 완료 · 기록 복구 중 ${recordRecoveryCount}명`);
+      if (recordRecoveryCount) parts.push(`발송 접수 · 기록 복구 중 ${recordRecoveryCount}명`);
       if (optOut) parts.push(`수신거부 ${optOut}명 제외`);
       if (noConsent) parts.push(`새 일자리 문자 미동의·미확인 ${noConsent}명 제외`);
       if (poolExcluded) parts.push(`인력풀 제외 ${poolExcluded}명`);
@@ -2174,10 +2230,11 @@ export function Pipeline() {
       if (skipped) parts.push(`연락처 없음 ${skipped}명 제외`);
       if (failed) parts.push(`실패 ${failed}명`);
       if (attentionCount) parts.push(`발송 확인 중 ${attentionCount}명 · 중복 방지를 위해 재발송하지 않음`);
-      // 하나라도 나갔으면 성공 토스트(부분 발송이라도 진행분을 인지), 전부 실패면 에러 토스트.
-      (sent > 0 || recordRecoveryCount > 0
+      // 기록 복구 중은 아직 완료가 아니다. 실제 기록 완료분이 있을 때만 성공으로 알리고,
+      // 공급자 접수 뒤 복구 중인 결과는 확인 상태로 분리한다.
+      (sent > 0
         ? toast.success
-        : attentionCount > 0 || alreadySentCount > 0 || failed === 0
+        : recordRecoveryCount > 0 || attentionCount > 0 || alreadySentCount > 0 || failed === 0
           ? toast.info
           : toast.error)(parts.join(" · "));
       if (sent > 0 || recordRecoveryCount > 0) {
@@ -2213,6 +2270,31 @@ export function Pipeline() {
       setBulkSending(false);
     }
   };
+
+  const bulkAttentionCollection = operationsNotices?.bulk_message_attention;
+  const bulkAttentionLoading = bulkAttentionRequested
+    && operationsNotices === undefined
+    && !bulkAttentionError;
+  const bulkAttentionCleared = bulkAttentionRequested
+    && bulkAttentionCollection?.state === "ready"
+    && bulkAttentionCollection.totalCount === 0;
+  const bulkAttentionUnavailable = Boolean(bulkAttentionError)
+    || bulkAttentionCollection?.state === "error";
+  const bulkAttentionCritical = bulkAttentionView?.urgency === "critical";
+  const visibleBulkAttentionBatches = bulkAttentionCollection?.state === "ready"
+    ? [...bulkAttentionCollection.batches]
+        .sort((left, right) => {
+          const manualPriority = Number(right.manualConfirmationCount > 0)
+            - Number(left.manualConfirmationCount > 0);
+          return manualPriority !== 0
+            ? manualPriority
+            : left.oldestCreatedAt.localeCompare(right.oldestCreatedAt);
+        })
+        .slice(0, 12)
+    : [];
+  const hiddenBulkAttentionBatchCount = bulkAttentionCollection?.state === "ready"
+    ? Math.max(0, bulkAttentionCollection.batches.length - visibleBulkAttentionBatches.length)
+    : 0;
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -2303,6 +2385,183 @@ export function Pipeline() {
             <FileDown size={15} /> CSV
           </Button>
         </div>
+
+        {(bulkAttentionLoading || bulkAttentionCleared || bulkAttentionError || bulkAttentionView) && (
+          <section
+            id="bulk-message-attention"
+            aria-labelledby="bulk-message-attention-title"
+            className={`z-10 shrink-0 border-b px-5 py-3 ${
+              bulkAttentionUnavailable
+                ? "border-error/30 bg-error-soft"
+                : bulkAttentionCleared
+                  ? "border-success/25 bg-success-soft"
+                  : bulkAttentionLoading
+                    ? "border-info/20 bg-info-soft"
+                : bulkAttentionCritical
+                  ? "border-priority-critical/25 bg-priority-critical-soft"
+                  : "border-priority-attention-ink/20 bg-priority-attention-soft"
+            }`}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-card/75 ${
+                bulkAttentionUnavailable
+                  ? "border-error/25 text-error-strong"
+                  : bulkAttentionCleared
+                    ? "border-success/20 text-success-strong"
+                    : bulkAttentionLoading
+                      ? "border-info/20 text-info-strong"
+                  : bulkAttentionCritical
+                    ? "border-priority-critical/20 text-priority-critical-ink"
+                    : "border-priority-attention-ink/20 text-priority-attention-ink"
+              }`}>
+                {bulkAttentionLoading
+                  ? <Loader2 aria-hidden="true" size={16} className="animate-spin motion-reduce:animate-none" />
+                  : bulkAttentionCleared
+                    ? <Check aria-hidden="true" size={16} />
+                    : <MessageSquareWarning aria-hidden="true" size={16} />}
+              </span>
+              <div
+                id="bulk-message-attention-summary"
+                role={bulkAttentionUnavailable ? "alert" : "status"}
+                aria-live={bulkAttentionUnavailable ? "assertive" : "polite"}
+                aria-atomic="true"
+                className="min-w-[240px] flex-1"
+              >
+                <div id="bulk-message-attention-title" className={`text-[13px] font-extrabold ${
+                  bulkAttentionUnavailable
+                    ? "text-error-strong"
+                    : bulkAttentionCleared
+                      ? "text-success-strong"
+                      : bulkAttentionLoading
+                        ? "text-info-strong"
+                    : bulkAttentionCritical
+                      ? "text-priority-critical-ink"
+                      : "text-priority-attention-ink"
+                }`}>
+                  {bulkAttentionLoading
+                    ? "발송 상태를 확인하는 중"
+                    : bulkAttentionCleared
+                      ? "확인이 필요한 발송 건이 없습니다"
+                      : bulkAttentionView?.title ?? "문자 발송 상태 확인 실패"}
+                </div>
+                <p className="mt-0.5 text-[12px] font-semibold leading-5 text-foreground">
+                  {bulkAttentionLoading
+                    ? "확인이 끝날 때까지 같은 문자를 다시 보내지 마세요."
+                    : bulkAttentionCleared
+                      ? "자동 복구가 끝났거나 현재 확인할 발송 건이 없습니다."
+                      : bulkAttentionView?.description
+                        ?? "상태가 확인될 때까지 같은 문자를 다시 보내지 마세요."}
+                </p>
+              </div>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {!bulkAttentionUnavailable && visibleBulkAttentionBatches.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="toolbar"
+                    aria-expanded={bulkAttentionOpen}
+                    aria-controls="bulk-message-attention-ledger"
+                    onClick={() => setBulkAttentionOpen((open) => !open)}
+                  >
+                    {bulkAttentionOpen ? "내역 접기" : "내역 보기"}
+                    <ChevronDown aria-hidden="true" size={14} className={`transition-transform duration-200 motion-reduce:transition-none ${bulkAttentionOpen ? "rotate-180" : ""}`} />
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="toolbar"
+                  isLoading={bulkAttentionLoading || bulkAttentionRefreshing}
+                  onClick={() => void mutateOperationsNotices()}
+                >
+                  {!bulkAttentionLoading && !bulkAttentionRefreshing && (
+                    <RefreshCw aria-hidden="true" size={13} />
+                  )}
+                  상태 새로고침
+                </Button>
+              </div>
+            </div>
+
+            {bulkAttentionOpen && bulkAttentionCollection?.state === "ready" && visibleBulkAttentionBatches.length > 0 && (
+              <div id="bulk-message-attention-ledger" className="mt-3 border-t border-current/10 pt-3">
+                <div className="grid max-h-[34vh] grid-cols-1 gap-2 overflow-y-auto pr-1 xl:grid-cols-2">
+                {visibleBulkAttentionBatches.map((batch) => {
+                  const names = batch.applicantIds
+                    .map((applicantId) => applicantNameById.get(applicantId))
+                    .filter((name): name is string => Boolean(name));
+                  const manualApplicantIds = bulkAttentionCollection.items
+                    .filter((item) => item.batchId === batch.batchId && item.phase === "manual_confirmation")
+                    .map((item) => item.applicantId);
+                  return (
+                    <article key={batch.batchId} className="rounded-xl border border-border-strong bg-card px-3.5 py-3 shadow-xs">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[13px] font-extrabold text-foreground">{bulkPurposeLabel(batch.purpose)}</span>
+                            {batch.jobId !== null && (
+                              <span
+                                className="max-w-[280px] truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-bold text-muted-foreground"
+                                title={jobTitleById.get(batch.jobId) ?? `공고 #${batch.jobId}`}
+                              >
+                                {jobTitleById.get(batch.jobId) ?? `공고 #${batch.jobId}`}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 truncate text-[12px] text-muted-foreground" title={names.join(", ")}>
+                            {names.length > 0
+                              ? `${names.slice(0, 4).join(", ")}${names.length > 4 ? ` 외 ${names.length - 4}명` : ""}`
+                              : "지원자 정보를 연결하는 중"}
+                          </p>
+                        </div>
+                        <time className="shrink-0 text-[11px] font-semibold tabular-nums text-muted-foreground" dateTime={batch.oldestCreatedAt}>
+                          {BULK_ATTENTION_DATE.format(new Date(batch.oldestCreatedAt))}
+                        </time>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-bold tabular-nums">
+                        <span className="rounded-md border border-border-strong bg-background px-1.5 py-0.5 text-foreground">총 {batch.totalCount}명</span>
+                        {batch.manualConfirmationCount > 0 && (
+                          <span className="rounded-md border border-priority-critical/20 bg-priority-critical-soft px-1.5 py-0.5 text-priority-critical-ink">수동 확인 {batch.manualConfirmationCount}</span>
+                        )}
+                        {batch.checkingCount > 0 && (
+                          <span className="rounded-md border border-warning/25 bg-warning-soft px-1.5 py-0.5 text-warning-strong">자동 확인 {batch.checkingCount}</span>
+                        )}
+                        {batch.historyRecoveryCount > 0 && (
+                          <span className="rounded-md border border-info/20 bg-info-soft px-1.5 py-0.5 text-info-strong">기록 복구 {batch.historyRecoveryCount}</span>
+                        )}
+                      </div>
+                      {manualApplicantIds.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-priority-critical/20 bg-priority-critical-soft p-2">
+                          <span className="mr-0.5 text-[11px] font-extrabold text-priority-critical-ink">직접 확인</span>
+                          {manualApplicantIds.slice(0, 4).map((applicantId) => (
+                            <button
+                              key={applicantId}
+                              type="button"
+                              onClick={() => openApplicant(applicantId, batch.jobId)}
+                              className="min-h-7 rounded-md border border-priority-critical/20 bg-card px-2 py-1 text-[11px] font-bold text-priority-critical-ink transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              {applicantNameById.get(applicantId) ?? `지원자 #${applicantId}`}
+                            </button>
+                          ))}
+                          {manualApplicantIds.length > 4 && (
+                            <span className="text-[11px] font-bold text-priority-critical-ink">
+                              외 {manualApplicantIds.length - 4}명
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+                </div>
+                <p className="xl:col-span-2 text-[11px] font-semibold leading-5 text-muted-foreground">
+                  같은 문자는 자동 재발송하지 않습니다. 수동 확인 건은 공급자 발송 내역을 확인하기 전 새로 보내지 마세요.
+                  {hiddenBulkAttentionBatchCount > 0 ? ` 우선순위가 높은 12개 묶음을 표시 중이며 ${hiddenBulkAttentionBatchCount}개가 더 있습니다.` : ""}
+                  {bulkAttentionCollection.truncated ? " 서버 조회 상한 밖의 발송 건도 있을 수 있습니다." : ""}
+                </p>
+              </div>
+            )}
+          </section>
+        )}
 
         {focusedJobHandoffState === "loading" && (
           <section

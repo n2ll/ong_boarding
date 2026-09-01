@@ -15,12 +15,14 @@ import {
   type BulkMessageProviderLookup,
   type BulkMessageRecoveryRow,
 } from "@/lib/bulk-message-recovery";
+import { redactExpiredBulkMessageOutbox } from "@/lib/bulk-message-retention";
 import { findSmsByClientRequestId } from "@/lib/solapi";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const RECOVERY_BATCH_LIMIT = 25;
+const RETENTION_RECIPIENT_LIMIT = 100;
 const PROVIDER_RECONCILIATION_MAX_ATTEMPTS = 3;
 const RECOVERY_GRACE_MS = 5 * 60 * 1000;
 
@@ -130,6 +132,17 @@ export async function GET(req: NextRequest) {
     },
   });
 
+  let retention;
+  try {
+    retention = await redactExpiredBulkMessageOutbox(supabase, {
+      batchLimit: RECOVERY_BATCH_LIMIT,
+      recipientLimit: RETENTION_RECIPIENT_LIMIT,
+    });
+  } catch (error) {
+    console.error("[bulk-message-recovery] retention cleanup failed", error);
+    return NextResponse.json({ error: "bulk message retention failed" }, { status: 500 });
+  }
+
   return NextResponse.json({
     success: true,
     scanned: {
@@ -137,5 +150,6 @@ export async function GET(req: NextRequest) {
       provider: providerRows.length,
     },
     ...counts,
+    retention,
   });
 }

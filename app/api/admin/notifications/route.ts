@@ -5,15 +5,21 @@
  *  - 미분류 인박스 누적
  *  - 사람 확인 필요(AI가 매니저에게 넘긴 대화)
  *  - AI 전역 응답 중단(kill switch) 상태
+ *  - 5분 이상 끝나지 않은 일괄 문자 발송 확인
  */
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { notificationAiDisabled, notificationQueryState } from "@/lib/admin/notification-query-state";
+import {
+  bulkMessageAttentionPresentation,
+  loadBulkMessageAttention,
+} from "@/lib/admin/bulk-message-attention";
 
 export const dynamic = "force-dynamic";
 
 type Notice = {
   id: string;
+  kind?: "bulk-message" | "bulk-message-error";
   tone: "red" | "amber" | "slate";
   title: string;
   desc: string;
@@ -24,7 +30,7 @@ export async function GET() {
   const supabase = createServiceClient();
   const envForced = process.env.AGENT_DISABLED === "1";
 
-  const [inboxRes, inboxOldestRes, handoffRes, killSwitchRes] = await Promise.all([
+  const [inboxRes, inboxOldestRes, handoffRes, killSwitchRes, bulkAttention] = await Promise.all([
     supabase
       .from("messages")
       .select("id", { count: "exact", head: true })
@@ -59,6 +65,7 @@ export async function GET() {
           .eq("category", "system_message")
           .eq("title", "agent_kill_switch")
           .maybeSingle(),
+    loadBulkMessageAttention(supabase),
   ]);
 
   const queryState = notificationQueryState({
@@ -74,7 +81,6 @@ export async function GET() {
     });
     return NextResponse.json({ error: "알림 집계를 불러오지 못했습니다." }, { status: 500 });
   }
-
   const inboxCount = queryState.inboxCount;
   const aiDisabled = notificationAiDisabled(envForced, queryState.killSwitchBody);
   const dayDiff = (iso: string | null | undefined) =>
@@ -88,7 +94,30 @@ export async function GET() {
     ? Math.max(...pausedRows.map((r) => dayDiff(r.agent_state?.meta?.paused_at ?? r.updated_at) ?? 0))
     : null;
 
+  const bulkJobIds = [...new Set(
+    bulkAttention.batches
+      .map((batch) => batch.jobId)
+      .filter((jobId): jobId is number => jobId !== null),
+  )];
+  const bulkMessageJobTitles: Record<string, string> = {};
+  if (bulkJobIds.length > 0) {
+    const { data: titleRows, error: titleError } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .in("id", bulkJobIds);
+    if (titleError) {
+      console.error("[notifications GET] bulk message job title lookup failed", titleError);
+    } else {
+      for (const row of titleRows ?? []) {
+        if (typeof row.id === "number" && typeof row.title === "string") {
+          bulkMessageJobTitles[String(row.id)] = row.title;
+        }
+      }
+    }
+  }
+
   const items: Notice[] = [];
+  const bulkNotice = bulkMessageAttentionPresentation(bulkAttention);
   if (aiDisabled) {
     items.push({
       id: "ai-off",
@@ -116,10 +145,22 @@ export async function GET() {
       path: "/live?tab=intervention",
     });
   }
+  if (bulkNotice) {
+    items.push({
+      id: "bulk-message-attention",
+      kind: bulkNotice.state === "error" ? "bulk-message-error" : "bulk-message",
+      tone: bulkNotice.tone,
+      title: bulkNotice.title,
+      desc: bulkNotice.description,
+      path: bulkNotice.path,
+    });
+  }
 
   return NextResponse.json({
     items,
     count: items.length,
+    bulk_message_attention: bulkAttention,
+    bulk_message_job_titles: bulkMessageJobTitles,
     counts: {
       inbox: inboxCount,
       interventions,
