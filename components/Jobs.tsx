@@ -90,8 +90,10 @@ import {
 } from "@/lib/admin/job-list-visibility";
 import {
   JOB_PUBLISH_CHANNELS,
+  buildExternalPublishingBundle,
   buildExistingPoolSearchAction,
   buildJobApplicationUrl,
+  jobPublicPublishingAvailability,
   type JobPublishSource,
 } from "@/lib/admin/job-publishing";
 import { currentJobClosedSmsBody } from "@/lib/sms-consent-policy";
@@ -113,6 +115,7 @@ function notifyJobCreateDraftConflict() {
 interface JobRow {
   id: string;
   title: string;
+  body: string;
   branch: string;
   branchId: number | null;
   clientId: number | null;
@@ -147,6 +150,7 @@ interface JobRow {
 interface ApiJob {
   id: number;
   title: string;
+  body: string;
   branch: string | null;
   branch_id: number | null;
   client_id: number | null;
@@ -673,6 +677,7 @@ function toJobRow(j: ApiJob): JobRow {
   return {
     id: String(j.id),
     title: j.title,
+    body: j.body,
     branch: j.branch?.trim() ?? "",
     branchId: j.branch_id ?? null,
     clientId: j.client_id ?? null,
@@ -2343,6 +2348,28 @@ export function Jobs() {
     && recentlyCreatedVisibility
     && !recentlyCreatedVisibility.visible,
   );
+  const registrationPublishingJob = registrationFollowup
+    ? {
+        id: String(registrationFollowup.jobId),
+        body: registrationFollowup.duplicateSource.body,
+        branch: recentlyCreatedJob?.id === String(registrationFollowup.jobId)
+          ? recentlyCreatedJob.branch
+          : "",
+      }
+    : null;
+  const registrationPublishingAvailability = registrationFollowup
+    ? jobPublicPublishingAvailability({
+        title: registrationFollowup.title,
+        status: recentlyCreatedJob?.id === String(registrationFollowup.jobId)
+          ? recentlyCreatedJob.status
+          : "active",
+        exposure: registrationFollowup.duplicateSource.exposure,
+        recruitMode: registrationFollowup.duplicateSource.recruitMode,
+        closesAt: recentlyCreatedJob?.id === String(registrationFollowup.jobId)
+          ? recentlyCreatedJob.closesAt
+          : null,
+      })
+    : null;
 
   const revealRecentlyCreatedJob = () => {
     if (!recentlyCreatedJob) return;
@@ -2935,10 +2962,14 @@ export function Jobs() {
     }
   };
 
-  // 채널별 게시 링크 — 서버가 발급한 opaque ref만 검증된 귀속 근거로 사용한다.
-  const copyJobLink = async (job: JobRow, source: JobPublishSource) => {
+  // 채널별 게시 묶음 — 서버가 발급한 opaque ref와 저장된 공고 원문을 한 번에 복사한다.
+  // 외부 광고 게재·비용 집행은 하지 않으며, 사용자가 선택한 채널에 직접 게시한다.
+  const copyJobLink = async (
+    job: Pick<JobRow, "id" | "body" | "branch">,
+    source: JobPublishSource,
+  ) => {
     const key = `${job.id}:${source}`;
-    if (copyingLinkKey === key) return;
+    if (copyingLinkKey !== null) return;
     const label = JOB_PUBLISH_CHANNELS.find((c) => c.source === source)?.label ?? source;
     const toastId = `tracking-link:${key}`;
     let url: string | null = null;
@@ -2961,10 +2992,10 @@ export function Jobs() {
         branch: job.branch,
         trackingRef: json.trackingRef,
       });
-      await navigator.clipboard.writeText(url);
-      toast.success(`${label} 지원 링크를 복사했어요`, {
+      await navigator.clipboard.writeText(buildExternalPublishingBundle({ body: job.body, url }));
+      toast.success(`${label} 게시용 공고문과 지원 링크를 복사했어요`, {
         id: toastId,
-        description: "이 링크로 들어온 새 지원부터 제출 단위로 집계합니다.",
+        description: "채널에 직접 게시해 주세요. 이 링크로 들어온 새 지원부터 제출 단위로 집계합니다.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "링크 복사에 실패했어요.";
@@ -3007,7 +3038,7 @@ export function Jobs() {
               href="/pipeline"
               className="mt-1 inline-flex w-fit items-center gap-1 rounded-md text-[12px] font-bold text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
             >
-              인재풀에서 사람 찾기 <ChevronRight size={13} />
+              전체 인력풀 보기 <ChevronRight size={13} />
             </Link>
           </div>
           {jobListSummary.map((item) => (
@@ -3190,13 +3221,22 @@ export function Jobs() {
               const operation = jobOperationMeta(toJobOperationInput(job));
               const hasBranchConcept = job.usesSlots || job.branchId != null || job.branch !== "" || (job.clientId != null && branches.some((b) => b.client_id === job.clientId));
               const isRecentlyCreated = recentlyCreatedJob?.id === job.id;
+              const needsCandidateSourcing = operation.nextAction.label === "후보 모집 필요";
               const poolSearchAction = buildExistingPoolSearchAction({
                 jobId: job.id,
                 effectivelyClosed: job.effectivelyClosed,
                 recruitMode: job.recruitMode,
                 remaining: operation.remaining,
-                needsCandidateSourcing: operation.nextAction.label === "후보 모집 필요",
+                needsCandidateSourcing,
               });
+              const publishingAvailability = jobPublicPublishingAvailability({
+                title: job.title,
+                status: job.status,
+                exposure: job.targetedExposure ? "targeted" : "all",
+                recruitMode: job.recruitMode,
+                closesAt: job.closesAt,
+              });
+              const hasExternalRecruitment = job.recruitMode === "external" || job.recruitMode === "both";
               return (
               <div
                 key={job.id}
@@ -3336,7 +3376,80 @@ export function Jobs() {
                       {statusBusyId !== job.id && <CheckCircle2 size={12} />} 충원 완료 — 마감하기
                     </Button>
                   )}
-                  {!job.effectivelyClosed && operation.nextAction.tone !== "success" && (
+                  {!job.effectivelyClosed && operation.nextAction.tone !== "success" && needsCandidateSourcing && (
+                    <div
+                      className="w-full max-w-[190px] space-y-1.5"
+                      role="group"
+                      aria-label={`${job.title} 남은 ${operation.remaining ?? job.capacity}명 모집`}
+                    >
+                      <div className="text-[12px] font-extrabold text-foreground">
+                        남은 {operation.remaining ?? job.capacity}명 모집
+                      </div>
+                      {poolSearchAction && (
+                        <Button
+                          type="button"
+                          variant="brand"
+                          size="sm"
+                          onClick={() => router.push(poolSearchAction.href)}
+                          className="w-full justify-between px-3 shadow-none"
+                          title={poolSearchAction.description}
+                        >
+                          <span className="inline-flex items-center gap-1.5"><Users size={14} /> 추천 인력 찾기</span>
+                          <ChevronRight size={13} />
+                        </Button>
+                      )}
+                      {hasExternalRecruitment && publishingAvailability.available && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant={poolSearchAction ? "secondary" : "brand"}
+                              size="sm"
+                              className="w-full justify-between px-3 shadow-none"
+                              title="게시 채널용 공고문과 추적 지원 링크를 복사합니다"
+                            >
+                              <span className="inline-flex items-center gap-1.5"><Link2 size={14} /> 외부 채널 준비</span>
+                              <ChevronRight size={13} />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-[280px] rounded-2xl border-border-strong p-2">
+                            <DropdownMenuLabel className="px-2 py-1 text-[12px] font-extrabold text-foreground">외부 채널에 직접 게시</DropdownMenuLabel>
+                            <p className="px-2 pb-2 text-[12px] font-medium leading-relaxed text-muted-foreground">
+                              공고문과 추적 링크만 준비합니다. 광고 게재나 비용 집행은 자동으로 하지 않아요.
+                            </p>
+                            {JOB_PUBLISH_CHANNELS.map((ch) => (
+                              <DropdownMenuItem
+                                key={ch.source}
+                                onSelect={() => copyJobLink(job, ch.source)}
+                                disabled={copyingLinkKey !== null}
+                                className="min-h-10 rounded-lg text-[13px] font-semibold text-gray-700"
+                              >
+                                {copyingLinkKey === `${job.id}:${ch.source}`
+                                  ? <Loader2 size={13} className="animate-spin motion-reduce:animate-none" />
+                                  : <Copy size={13} />}
+                                {ch.label} — 공고문·링크 복사
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                      {hasExternalRecruitment && !publishingAvailability.available && (
+                        <div className="rounded-xl border border-warning-soft bg-warning-soft p-2">
+                          <p className="text-[12px] font-semibold leading-snug text-warning-strong">{publishingAvailability.description}</p>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => openEdit(job.id)}
+                            className="mt-2 h-auto min-h-11 w-full justify-start whitespace-normal px-3 py-2 text-left text-warning-strong shadow-none"
+                          >
+                            <AlertTriangle size={14} /> 노출 설정 확인
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!job.effectivelyClosed && operation.nextAction.tone !== "success" && !needsCandidateSourcing && (
                     <button
                       type="button"
                       onClick={() => {
@@ -3361,25 +3474,27 @@ export function Jobs() {
                 </div>
 
                 <div className="flex justify-end gap-1">
-                  {!job.effectivelyClosed && job.recruitMode !== "internal" && (
+                  {!needsCandidateSourcing && publishingAvailability.available && (
                     // shadcn(Radix) DropdownMenu — 바깥 클릭·ESC 닫기·충돌 회피 포지셔닝·포털 렌더(행 잘림 방지)를 위임.
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="toolbar" className="whitespace-nowrap" title="채널별 추적 지원 링크 복사 — 새 제출부터 공고·채널에 귀속됩니다">
-                          <Link2 size={14} /> 게시 링크
+                        <Button variant="ghost" size="toolbar" className="whitespace-nowrap" title="채널별 게시용 공고문과 추적 지원 링크 복사 — 직접 게시가 필요합니다">
+                          <Link2 size={14} /> 외부 모집
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-[170px] rounded-2xl border-border-strong">
-                        <DropdownMenuLabel className="text-[12px] font-bold text-muted-foreground">게시 채널 선택</DropdownMenuLabel>
+                        <DropdownMenuLabel className="text-[12px] font-bold text-muted-foreground">외부 채널 · 자동 게재 아님</DropdownMenuLabel>
                         {JOB_PUBLISH_CHANNELS.map((ch) => (
                           <DropdownMenuItem
                             key={ch.source}
                             onSelect={() => copyJobLink(job, ch.source)}
-                            disabled={copyingLinkKey === `${job.id}:${ch.source}`}
+                            disabled={copyingLinkKey !== null}
                             className="text-[13px] font-semibold text-gray-700"
                           >
-                            {copyingLinkKey === `${job.id}:${ch.source}` && <Loader2 size={13} className="animate-spin motion-reduce:animate-none" />}
-                            {ch.label}
+                            {copyingLinkKey === `${job.id}:${ch.source}`
+                              ? <Loader2 size={13} className="animate-spin motion-reduce:animate-none" />
+                              : <Copy size={13} />}
+                            {ch.label} — 복사
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuContent>
@@ -4518,27 +4633,111 @@ export function Jobs() {
                 </div>
               </div>
 
-              {registrationSosContext?.jobId === registrationFollowup.jobId && (
-                <section aria-labelledby="registration-followup-sos-title" className="border-t border-brand-yellow/55 bg-background px-4 py-4">
-                  <div className="flex items-start gap-3">
-                    <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
-                    <div className="min-w-0 flex-1">
-                      <h3 id="registration-followup-sos-title" className="text-[13px] font-extrabold text-foreground">긴급 건에 맞는 인력 선별</h3>
-                      <p className="mt-1 text-[12px] font-medium leading-relaxed text-muted-foreground">권역·차량 조건으로 인력풀을 좁혀 후보를 고르세요. 이동만으로 연락·배정·확정되지는 않습니다.</p>
-                      <Button type="button" variant="brand" size="sm" className="mt-3" onClick={openSosCandidateSelection}>
-                        <Users size={15} /> 이 조건으로 인력 선별
-                      </Button>
+              <section aria-labelledby="registration-followup-recruit-title" className="border-t border-border-strong bg-background px-4 py-4">
+                <div className="flex items-start gap-3">
+                  <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
+                  <div className="min-w-0 flex-1">
+                    <h3 id="registration-followup-recruit-title" className="text-[13px] font-extrabold text-foreground">모집 시작</h3>
+                    <p className="mt-1 text-[12px] font-medium leading-relaxed text-muted-foreground">선택한 모집 방식에 맞는 다음 작업을 바로 이어가세요.</p>
+                    <div className={`mt-3 grid gap-2 ${registrationFollowup.duplicateSource.recruitMode === "both" ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+                      {registrationFollowup.duplicateSource.recruitMode !== "external" && (
+                        <div className="rounded-2xl border border-brand-yellow/55 bg-brand-muted/45 p-3">
+                          <div className="text-[13px] font-extrabold text-foreground">
+                            {registrationSosContext?.jobId === registrationFollowup.jobId
+                              ? "긴급 건에 맞는 인력 선별"
+                              : "기존 인력풀에서 찾기"}
+                          </div>
+                          <p className="mt-1 text-[12px] font-medium leading-relaxed text-muted-foreground">
+                            추천 근거를 확인하고 노출할 대상을 고르세요. 이동·선택만으로 문자·배정·확정되지는 않아요.
+                          </p>
+                          <Button
+                            type="button"
+                            variant="brand"
+                            size="sm"
+                            className="mt-3 w-full"
+                            onClick={() => {
+                              if (registrationSosContext?.jobId === registrationFollowup.jobId) {
+                                openSosCandidateSelection();
+                                return;
+                              }
+                              const jobId = registrationFollowup.jobId;
+                              setRegistrationFollowup(null);
+                              router.push(`/pipeline?job=${encodeURIComponent(String(jobId))}`);
+                            }}
+                          >
+                            <Users size={15} /> 추천 인력 보기
+                          </Button>
+                        </div>
+                      )}
+
+                      {registrationFollowup.duplicateSource.recruitMode !== "internal" && (
+                        <div className={`rounded-2xl border p-3 ${registrationFollowup.duplicateSource.recruitMode === "external" ? "border-brand-yellow/55 bg-brand-muted/45" : "border-border-strong bg-card"}`}>
+                          <div className="text-[13px] font-extrabold text-foreground">외부 채널에 게시하기</div>
+                          <p className="mt-1 text-[12px] font-medium leading-relaxed text-muted-foreground">
+                            공고문과 지원 링크를 복사해 직접 게시하세요. 광고 게재나 비용 집행은 자동으로 하지 않아요.
+                          </p>
+                          {registrationPublishingAvailability?.available && registrationPublishingJob ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant={registrationFollowup.duplicateSource.recruitMode === "external" ? "brand" : "secondary"}
+                                  size="sm"
+                                  className="mt-3 w-full"
+                                >
+                                  <Link2 size={15} /> 채널 선택 · 공고문 복사
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start" className="w-[280px] rounded-2xl border-border-strong p-2">
+                                <DropdownMenuLabel className="px-2 py-1 text-[12px] font-extrabold text-foreground">게시할 외부 채널</DropdownMenuLabel>
+                                <p className="px-2 pb-2 text-[12px] font-medium leading-relaxed text-muted-foreground">선택한 채널의 추적 링크를 공고문 끝에 붙여 복사합니다.</p>
+                                {JOB_PUBLISH_CHANNELS.map((ch) => (
+                                  <DropdownMenuItem
+                                    key={ch.source}
+                                    onSelect={() => copyJobLink(registrationPublishingJob, ch.source)}
+                                    disabled={copyingLinkKey !== null}
+                                    className="min-h-10 rounded-lg text-[13px] font-semibold text-gray-700"
+                                  >
+                                    {copyingLinkKey === `${registrationPublishingJob.id}:${ch.source}`
+                                      ? <Loader2 size={13} className="animate-spin motion-reduce:animate-none" />
+                                      : <Copy size={13} />}
+                                    {ch.label} — 복사
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : (
+                            <div role="alert" className="mt-3 rounded-xl border border-warning-soft bg-warning-soft p-3 text-[12px] font-semibold leading-relaxed text-warning-strong">
+                              {registrationPublishingAvailability && !registrationPublishingAvailability.available
+                                ? registrationPublishingAvailability.description
+                                : "외부 지원 링크를 준비할 수 없어요. 공고 설정을 확인해 주세요."}
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                className="mt-2 w-full"
+                                onClick={() => {
+                                  const jobId = String(registrationFollowup.jobId);
+                                  setRegistrationFollowup(null);
+                                  void openEdit(jobId);
+                                }}
+                              >
+                                <Edit2 size={14} /> 노출 설정 확인
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                </section>
-              )}
+                </div>
+              </section>
 
               {registrationFollowup.duplicateSource.recruitMode !== "external" && (
                 <section aria-labelledby="registration-followup-announce-title" className="border-t border-border-strong bg-background px-4 py-4">
                   <div className="flex items-start gap-3">
                     <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-[12px] font-extrabold text-white">
-                      {2
-                        + (registrationSosContext?.jobId === registrationFollowup.jobId ? 1 : 0)}
+                      3
                     </span>
                     <div className="min-w-0 flex-1">
                       <h3 id="registration-followup-announce-title" className="text-[13px] font-extrabold text-foreground">우리 인력에게 새 공고 안내</h3>
@@ -4785,7 +4984,7 @@ export function Jobs() {
                       <Link2 aria-hidden="true" size={15} className="text-info-strong" /> 모집 링크 유입
                     </div>
                     <p className="mt-2 text-[12px] font-semibold leading-relaxed text-muted-foreground">
-                      추적 링크로 접수된 지원이 아직 없어요. 공고 행의 ‘게시 링크’에서 새로 복사한 링크부터 제출 단위로 집계합니다.
+                      추적 링크로 접수된 지원이 아직 없어요. 공고 행의 ‘외부 모집’에서 새로 복사한 링크부터 제출 단위로 집계합니다.
                     </p>
                   </div>
                 )}

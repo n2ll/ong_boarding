@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { normalizePublicTrackingRef } from "@/lib/acquisition-attribution";
 import { parseAcquisitionLinkRequest } from "@/lib/admin/acquisition-link-request";
+import { jobPublicPublishingAvailability } from "@/lib/admin/job-publishing";
 import { createServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,36 @@ export async function POST(
   }
 
   const supabase = createServiceClient();
+  const { data: job, error: jobError } = await supabase
+    .from("jobs")
+    .select("title, status, closes_at, exposure, recruit_mode")
+    .eq("id", request.jobId)
+    .maybeSingle();
+  if (jobError) {
+    console.error("[tracking-links POST] job lookup failed", jobError);
+    return NextResponse.json(
+      { error: "공고 상태를 확인하지 못했어요. 잠시 후 다시 시도해주세요." },
+      { status: 503 },
+    );
+  }
+  if (!job) {
+    return NextResponse.json({ error: "공고를 찾을 수 없어요." }, { status: 404 });
+  }
+
+  const publishingAvailability = jobPublicPublishingAvailability({
+    title: typeof job.title === "string" ? job.title : null,
+    status: typeof job.status === "string" ? job.status : null,
+    exposure: typeof job.exposure === "string" ? job.exposure : null,
+    recruitMode: typeof job.recruit_mode === "string" ? job.recruit_mode : null,
+    closesAt: typeof job.closes_at === "string" ? job.closes_at : null,
+  });
+  if (!publishingAvailability.available) {
+    return NextResponse.json(
+      { error: publishingAvailability.description },
+      { status: 409 },
+    );
+  }
+
   const { data, error } = await supabase.rpc("get_or_create_acquisition_tracking_link", {
     p_job_id: request.jobId,
     p_source: request.source,

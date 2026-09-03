@@ -1,3 +1,5 @@
+import { publicJobAvailability } from "../public-job.ts";
+
 export const JOB_PUBLISH_CHANNELS = [
   { source: "facebook", label: "Meta 광고" },
   { source: "albamon", label: "알바몬" },
@@ -8,6 +10,48 @@ export const JOB_PUBLISH_CHANNELS = [
 ] as const;
 
 export type JobPublishSource = (typeof JOB_PUBLISH_CHANNELS)[number]["source"];
+
+export type JobPublicPublishingAvailability =
+  | { available: true }
+  | { available: false; reason: "closed" | "hidden"; description: string };
+
+export function jobPublicPublishingAvailability(input: {
+  title: string | null;
+  status: string | null;
+  exposure: string | null;
+  recruitMode: string | null;
+  closesAt?: string | null;
+}): JobPublicPublishingAvailability {
+  const availability = publicJobAvailability(input);
+  if (availability === "open") return { available: true };
+  if (availability === "closed") {
+    return {
+      available: false,
+      reason: "closed",
+      description: "진행 중이고 마감 전인 공고에서만 지원 링크를 만들 수 있어요.",
+    };
+  }
+
+  let description = "공고 상태를 안전하게 확인할 수 없어요.";
+  if (input.title?.startsWith("__")) {
+    description = "시스템 공고는 공개 지원 링크를 만들 수 없어요.";
+  } else if (input.exposure === "targeted") {
+    description = "지정 노출 공고는 공개 지원 링크를 만들 수 없어요.";
+  } else if (input.recruitMode && input.recruitMode !== "external" && input.recruitMode !== "both") {
+    description = "내부 모집 공고는 공개 지원 링크를 만들 수 없어요.";
+  }
+
+  return { available: false, reason: "hidden", description };
+}
+
+export function buildExternalPublishingBundle(input: {
+  body: string | null | undefined;
+  url: string;
+}): string {
+  const body = input.body?.trim();
+  const applicationAction = `지원하기: ${input.url.trim()}`;
+  return body ? `${body}\n\n${applicationAction}` : applicationAction;
+}
 
 export function buildExistingPoolSearchAction(input: {
   jobId: number | string;

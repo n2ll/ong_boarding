@@ -3,9 +3,87 @@ import test from "node:test";
 
 import {
   JOB_PUBLISH_CHANNELS,
+  buildExternalPublishingBundle,
   buildExistingPoolSearchAction,
   buildJobApplicationUrl,
+  jobPublicPublishingAvailability,
 } from "./job-publishing.ts";
+
+test("only a currently open public external job can prepare a publishing link", () => {
+  assert.deepEqual(jobPublicPublishingAvailability({
+    title: "성수 배송",
+    status: "active",
+    exposure: "all",
+    recruitMode: "external",
+    closesAt: "2999-09-04T00:00:00.000Z",
+  }), {
+    available: true,
+  });
+  assert.equal(jobPublicPublishingAvailability({
+    title: "성수 배송",
+    status: "active",
+    exposure: "all",
+    recruitMode: "both",
+    closesAt: null,
+  }).available, true);
+});
+
+test("targeted, internal, system, invalid, and closed jobs fail closed for public publishing", () => {
+  const cases = [
+    {
+      job: { title: "성수 배송", status: "active", exposure: "targeted", recruitMode: "external", closesAt: null },
+      reason: "hidden",
+      description: "지정 노출 공고는 공개 지원 링크를 만들 수 없어요.",
+    },
+    {
+      job: { title: "성수 배송", status: "active", exposure: "all", recruitMode: "internal", closesAt: null },
+      reason: "hidden",
+      description: "내부 모집 공고는 공개 지원 링크를 만들 수 없어요.",
+    },
+    {
+      job: { title: "__시스템 공고", status: "active", exposure: "all", recruitMode: "external", closesAt: null },
+      reason: "hidden",
+      description: "시스템 공고는 공개 지원 링크를 만들 수 없어요.",
+    },
+    {
+      job: { title: " ", status: "active", exposure: "all", recruitMode: "external", closesAt: null },
+      reason: "hidden",
+      description: "공고 상태를 안전하게 확인할 수 없어요.",
+    },
+    {
+      job: { title: "성수 배송", status: "closed", exposure: "all", recruitMode: "external", closesAt: null },
+      reason: "closed",
+      description: "진행 중이고 마감 전인 공고에서만 지원 링크를 만들 수 있어요.",
+    },
+    {
+      job: { title: "성수 배송", status: "active", exposure: "all", recruitMode: "external", closesAt: "2000-09-03T00:00:00.000Z" },
+      reason: "closed",
+      description: "진행 중이고 마감 전인 공고에서만 지원 링크를 만들 수 있어요.",
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    assert.deepEqual(jobPublicPublishingAvailability(fixture.job), {
+      available: false,
+      reason: fixture.reason,
+      description: fixture.description,
+    });
+  }
+});
+
+test("an external publishing bundle trims the body and keeps the application action explicit", () => {
+  assert.equal(buildExternalPublishingBundle({
+    body: "  배송 기사님을 모집합니다.\n근무 조건을 확인해주세요.  ",
+    url: " https://ong.example.com/apply?job=42 ",
+  }), "배송 기사님을 모집합니다.\n근무 조건을 확인해주세요.\n\n지원하기: https://ong.example.com/apply?job=42");
+});
+
+test("an external publishing bundle with no body returns only the labelled application URL", () => {
+  assert.equal(buildExternalPublishingBundle({
+    body: "  ",
+    url: "https://ong.example.com/apply?job=42",
+  }), "지원하기: https://ong.example.com/apply?job=42");
+});
 
 test("manual publishing choices exclude channels that do not allow the attributed application link", () => {
   assert.deepEqual(
