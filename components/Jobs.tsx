@@ -22,7 +22,7 @@ import { ExposureEditor, EMPTY_EXPOSURE, ruleToDraft, draftToRule, type Exposure
 import { DEFAULT_DISTANCE_BASIS, DISTANCE_BASIS_LABEL, normalizeDistanceBasis, type DistanceBasis } from "@/lib/geo";
 import { PageShell } from "@/components/ui/page-shell";
 import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
-import { jobCandidateBoardPolicy, jobOperationMeta, jobOperationsSummary, type JobOperationInput, type JobOperationTone } from "@/lib/admin/job-operations";
+import { isJobCandidateDispatchable, jobCandidateBoardPolicy, jobOperationMeta, jobOperationsSummary, type JobOperationInput, type JobOperationTone } from "@/lib/admin/job-operations";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
@@ -188,6 +188,7 @@ interface JobCand {
   agent_stage: string | null;
   closed_reason: string | null;
   sent_at: string | null;
+  responded_at: string | null;
   // 공고(상차지·마지막 경유지 중 가까운 쪽)와의 거리 — API가 haversine으로 계산해 내려준다.
   distance_km?: number | null;
   applicants: {
@@ -683,7 +684,7 @@ function toJobRow(j: ApiJob): JobRow {
     // 지정 노출 여부 — 카드 배지용. 미지 값은 안전 방향(전체 노출 취급 아님 — 배지만 안 띄움).
     targetedExposure: j.exposure === "targeted",
     candidates: total,
-    // "sent"는 agent_stage NULL의 집계 키(관심 표시·미발송 등 AI 응대 시작 전).
+    // "sent"는 발송 전 후보의 집계 키(관심 표시·공개 지원 등 AI 응대 시작 전).
     // 키를 바꾸면 jobs/[id] GET·Recommendations 등 다른 소비처가 깨져 키는 유지하고 라벨만 정합.
     newCandidates: j.counts?.["sent"] ?? 0,
     pausedCandidates: j.counts?.["paused"] ?? 0,
@@ -1239,7 +1240,9 @@ export function Jobs() {
     }
   };
 
-  const unsentCount = candidates.filter((c) => !c.sent_at).length;
+  const unsentCount = candidates.filter((c) =>
+    isJobCandidateDispatchable(c.agent_stage, c.sent_at, c.responded_at)
+  ).length;
 
   // 피커에 띄울 인재풀 — 이미 이 공고 후보인 사람·부적합·이탈 제외 + 검색어 매칭
   const existingCandIds = new Set(candidates.map((c) => c.applicant_id));
@@ -4924,7 +4927,7 @@ export function Jobs() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[12px] text-muted-foreground truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{!c.sent_at && <span className="ml-1 text-warning-strong font-bold">· 미발송</span>}</div>
+                                  <div className="text-[12px] text-muted-foreground truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{isJobCandidateDispatchable(c.agent_stage, c.sent_at, c.responded_at) && <span className="ml-1 text-warning-strong font-bold">· 미발송</span>}</div>
                                   {metaLine && <div className="text-[12px] text-muted-foreground truncate">{metaLine}</div>}
                                 </div>
                               </div>

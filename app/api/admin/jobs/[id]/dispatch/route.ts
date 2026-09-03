@@ -4,9 +4,9 @@
  * 공고 본문을 후보자들에게 일괄 SMS 발송한다.
  *
  * 흐름:
- *   1) job_candidates 중 sent_at IS NULL 인 row만 대상 (또는 body로 applicant_ids 명시)
+ *   1) 아직 발송·응답 전이고 초기 단계인 job_candidates만 대상 (또는 body로 applicant_ids 범위 제한)
  *   2) 각 후보의 applicant_id로 phone 조회 → SOLAPI sendSms
- *   3) sent_at = now(), agent_stage = 'screening' (응답 시 즉시 agent 발동 가능하게)
+ *   3) sent_at = now(), agent_stage = 'exploration' (지원 의사 확인부터 시작)
  *   4) applicants.current_job_id 갱신 (충돌 시 정책: 기존 진행중이면 매니저 경고)
  *   5) messages 테이블에 outbound 기록 (job_id 포함)
  *
@@ -24,6 +24,7 @@ import {
   type PhoneMessageIdentityIndex,
 } from "@/lib/admin/phone-message-identity";
 import { normalizePhone } from "@/lib/ongmanaging";
+import { isJobCandidateDispatchable } from "@/lib/admin/job-operations";
 
 interface Applicant {
   id: number;
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // 후보 후보군 조회
   let jcQuery = supabase
     .from("job_candidates")
-    .select("id, applicant_id, sent_at, agent_state")
+    .select("id, applicant_id, agent_stage, sent_at, responded_at, agent_state")
     .eq("job_id", jobId);
   if (Array.isArray(payload.applicant_ids) && payload.applicant_ids.length > 0) {
     jcQuery = jcQuery.in("applicant_id", payload.applicant_ids);
@@ -76,12 +77,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!payload.resend) {
     jcQuery = jcQuery.is("sent_at", null);
   }
-  const { data: candidates, error: cErr } = await jcQuery;
+  const { data: candidateRows, error: cErr } = await jcQuery;
   if (cErr) {
     console.error("[dispatch] candidates query", cErr);
     return NextResponse.json({ error: "후보 조회 실패" }, { status: 500 });
   }
-  if (!candidates || candidates.length === 0) {
+  const candidates = (candidateRows ?? []).filter((candidate) =>
+    isJobCandidateDispatchable(
+      candidate.agent_stage as string | null,
+      candidate.sent_at as string | null,
+      candidate.responded_at as string | null,
+      payload.resend === true,
+    )
+  );
+  if (candidates.length === 0) {
     return NextResponse.json({ sent: 0, skipped: 0, conflicts: [] });
   }
 

@@ -12,7 +12,7 @@ import { isSystemJobTitle, isJobEffectivelyClosed, describeDbConstraintError, no
 import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
-import { isReviewReadyCandidate } from "@/lib/admin/job-operations";
+import { isReviewReadyCandidate, jobCandidateAggregateStage } from "@/lib/admin/job-operations";
 import {
   resolveJobCreateRouting,
   validateJobCreateRequiredFields,
@@ -34,6 +34,8 @@ const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 type JobAggregateCandidateRow = {
   job_id: number;
   agent_stage: string | null;
+  sent_at: string | null;
+  responded_at: string | null;
   applicants:
     | { status?: string | null; current_job_id?: number | null }
     | { status?: string | null; current_job_id?: number | null }[]
@@ -125,7 +127,7 @@ export async function GET(req: NextRequest) {
         fetchJobAggregateRows(jobIds, "공고 후보 집계", async (jobIdChunk, from, to) => {
           const result = await supabase
             .from("job_candidates")
-            .select("id, job_id, agent_stage, applicants:applicant_id ( status, current_job_id )")
+            .select("id, job_id, agent_stage, sent_at, responded_at, applicants:applicant_id ( status, current_job_id )")
             .in("job_id", jobIdChunk)
             .order("id", { ascending: true })
             .range(from, to);
@@ -155,7 +157,7 @@ export async function GET(req: NextRequest) {
 
     for (const c of candidateRows) {
       const jid = c.job_id as number;
-      const stage = (c.agent_stage as string | null) ?? "sent";
+      const stage = jobCandidateAggregateStage(c.agent_stage, c.sent_at, c.responded_at);
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.

@@ -99,6 +99,32 @@ test("review-ready counts exclude already confirmed people", async () => {
   assert.equal(isReviewReadyCandidate!("screening", "스크리닝 중"), false);
 });
 
+test("an unsent screening candidate remains waiting instead of appearing as AI progress", async () => {
+  const operations = await loadOperationsModule();
+  const jobCandidateAggregateStage = operations.jobCandidateAggregateStage as
+    | ((stage: string | null, sentAt: string | null, respondedAt: string | null) => string)
+    | undefined;
+  const isJobCandidateDispatchable = operations.isJobCandidateDispatchable as
+    | ((stage: string | null, sentAt: string | null, respondedAt: string | null, resend?: boolean) => boolean)
+    | undefined;
+
+  assert.equal(typeof jobCandidateAggregateStage, "function");
+  assert.equal(typeof isJobCandidateDispatchable, "function");
+  assert.equal(jobCandidateAggregateStage!("screening", null, null), "sent");
+  assert.equal(jobCandidateAggregateStage!("exploration", null, null), "sent");
+  assert.equal(jobCandidateAggregateStage!("screening", null, "2026-09-03T12:05:00.000Z"), "screening");
+  assert.equal(jobCandidateAggregateStage!("screening", "2026-09-03T12:00:00.000Z", null), "screening");
+  for (const stage of ["abort", "paused", "onboarding", "active"]) {
+    assert.equal(jobCandidateAggregateStage!(stage, null, null), stage);
+  }
+  assert.equal(isJobCandidateDispatchable!("screening", null, null), true);
+  assert.equal(isJobCandidateDispatchable!("exploration", null, null), true);
+  assert.equal(isJobCandidateDispatchable!("screening", "2026-09-03T12:00:00.000Z", null), false);
+  assert.equal(isJobCandidateDispatchable!("screening", null, "2026-09-03T12:05:00.000Z"), false);
+  assert.equal(isJobCandidateDispatchable!("abort", null, null), false);
+  assert.equal(isJobCandidateDispatchable!("screening", "2026-09-03T12:00:00.000Z", null, true), true);
+});
+
 test("filled capacity becomes the first operational action", async () => {
   const operations = await loadOperationsModule();
   const jobOperationMeta = operations.jobOperationMeta as

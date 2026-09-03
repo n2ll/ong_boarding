@@ -25,6 +25,27 @@ export function isReviewReadyCandidate(stage: string | null, applicantStatus: st
   return (stage === "onboarding" || stage === "active") && applicantStatus !== "확정인력";
 }
 
+export function isJobCandidateDispatchable(
+  stage: string | null,
+  sentAt: string | null,
+  respondedAt: string | null,
+  resend = false,
+): boolean {
+  const contactableStage = stage === null || stage === "exploration" || stage === "screening";
+  return contactableStage && !respondedAt && (resend || !sentAt);
+}
+
+export function jobCandidateAggregateStage(
+  stage: string | null,
+  sentAt: string | null,
+  respondedAt: string | null,
+): string {
+  if (isJobCandidateDispatchable(stage, sentAt, respondedAt)) {
+    return "sent";
+  }
+  return stage ?? "sent";
+}
+
 export function jobCandidateBoardPolicy(effectivelyClosed: boolean) {
   return effectivelyClosed
     ? {

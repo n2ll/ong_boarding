@@ -9,6 +9,7 @@ import {
   classifyDispatchSmsCategory,
   smsSendBlockReason,
 } from "../sms-consent-policy.ts";
+import { isJobCandidateDispatchable } from "./job-operations.ts";
 
 type Row = Record<string, unknown>;
 
@@ -147,6 +148,7 @@ function loadRoute(input: {
       smsSendBlockReason,
     },
     "@/lib/admin/phone-message-identity": { fetchPhoneMessageIdentityIndex },
+    "@/lib/admin/job-operations": { isJobCandidateDispatchable },
     "@/lib/ongmanaging": { normalizePhone },
   };
 
@@ -174,7 +176,9 @@ function candidate(id: number, applicantId: number): Row {
     id,
     job_id: 7,
     applicant_id: applicantId,
+    agent_stage: null,
     sent_at: null,
+    responded_at: null,
     agent_state: { meta: { entry: "manual" } },
   };
 }
@@ -291,6 +295,27 @@ test("a phone identity lookup failure stops dispatch before the SMS provider", a
   assert.equal(response.status, 503);
   assert.match(String(response.body.error), /수신 상태/);
   assert.equal(harness.smsCalls.length, 0);
+});
+
+test("dispatch excludes replied and closed candidates before the SMS provider", async () => {
+  const harness = loadRoute({
+    candidates: [
+      { ...candidate(11, 1), agent_stage: "abort" },
+      { ...candidate(12, 2), agent_stage: "screening", responded_at: "2026-09-03T12:05:00.000Z" },
+      { ...candidate(13, 3), agent_stage: "screening" },
+    ],
+    applicants: [
+      applicant(1, { phone: "01011111111" }),
+      applicant(2, { phone: "01022222222" }),
+      applicant(3, { phone: "01033333333" }),
+    ],
+  });
+
+  const response = await dispatch(harness.route);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(Array.from(response.body.sent_applicant_ids as number[]), [3]);
+  assert.deepEqual(harness.smsCalls.map((call) => call.phone), ["01033333333"]);
 });
 
 test("a duplicate row bound to another job blocks the shared phone", async () => {

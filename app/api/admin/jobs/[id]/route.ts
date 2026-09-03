@@ -16,6 +16,7 @@ import {
   type JobCreateClientRoutingRow,
 } from "@/lib/admin/job-create-server-validation";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+import { jobCandidateAggregateStage } from "@/lib/admin/job-operations";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "title",
@@ -72,17 +73,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // 후보 stage 카운트
-  let cands: Array<{ id: number; agent_stage: string | null }>;
+  let cands: Array<{ id: number; agent_stage: string | null; sent_at: string | null; responded_at: string | null }>;
   try {
     cands = await fetchAllPostgrestRows(async (from, to) => {
       const result = await supabase
         .from("job_candidates")
-        .select("id, agent_stage")
+        .select("id, agent_stage, sent_at, responded_at")
         .eq("job_id", id)
         .order("id", { ascending: true })
         .range(from, to);
       return {
-        data: result.data as Array<{ id: number; agent_stage: string | null }> | null,
+        data: result.data as Array<{ id: number; agent_stage: string | null; sent_at: string | null; responded_at: string | null }> | null,
         error: result.error,
       };
     }, "공고 후보 집계");
@@ -92,7 +93,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
   const counts: Record<string, number> = {};
   for (const c of cands) {
-    const k = (c.agent_stage as string | null) ?? "sent";
+    const k = jobCandidateAggregateStage(c.agent_stage, c.sent_at, c.responded_at);
     counts[k] = (counts[k] ?? 0) + 1;
   }
 

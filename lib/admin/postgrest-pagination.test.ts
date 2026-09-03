@@ -4,6 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
+import { jobCandidateAggregateStage } from "./job-operations.ts";
 
 type PageResult<T> = {
   data: T[] | null;
@@ -104,7 +105,7 @@ function loadRouteModule(
     "@/lib/supabase": { createServiceClient: () => supabase },
     "@/lib/agent/danggeun-job": { DANGGEUN_SYSTEM_JOB_TITLE: "__system__" },
     "@/lib/jobs": { isJobEffectivelyClosed: () => false },
-    "@/lib/admin/job-operations": { isReviewReadyCandidate: () => false },
+    "@/lib/admin/job-operations": { isReviewReadyCandidate: () => false, jobCandidateAggregateStage },
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
   };
 
@@ -283,6 +284,8 @@ test("single job detail counts candidates after the PostgREST 1000-row boundary"
   const candidates = Array.from({ length: 1_001 }, (_, index) => ({
     id: index + 1,
     agent_stage: index === 1_000 ? null : "screening",
+    sent_at: index === 1_000 ? null : "2026-09-03T12:00:00.000Z",
+    responded_at: null,
   }));
   const supabase = createSupabaseStub((table, operation, from, to) => {
     if (table === "jobs" && operation === "single") {
@@ -311,6 +314,8 @@ test("single job detail rejects a later candidate page error instead of returnin
   const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
     id: index + 1,
     agent_stage: "screening",
+    sent_at: "2026-09-03T12:00:00.000Z",
+    responded_at: null,
   }));
   const supabase = createSupabaseStub((table, operation, from) => {
     if (table === "jobs" && operation === "single") {
