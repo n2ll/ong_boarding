@@ -47,6 +47,11 @@ type JobInterestRow = {
   job_id: number | null;
 };
 
+type JobTrackingSubmissionRow = {
+  submission_id: string;
+  job_id: number | null;
+};
+
 const JOB_AGGREGATE_ID_CHUNK_SIZE = 250;
 
 async function fetchJobAggregateRows<T>(
@@ -119,11 +124,13 @@ export async function GET(req: NextRequest) {
   const confirmedCounts: Record<number, number> = {};
   const reviewReadyCounts: Record<number, number> = {};
   const interestCounts: Record<number, number> = {};
+  const trackingSubmissionCounts: Record<number, number> = {};
+  let trackingSubmissionCountsAvailable = true;
   if (jobIds.length > 0) {
     let candidateRows: JobAggregateCandidateRow[];
     let interestRows: JobInterestRow[];
-    try {
-      [candidateRows, interestRows] = await Promise.all([
+    const [candidateAndInterestResult, trackingSubmissionResult] = await Promise.allSettled([
+      Promise.all([
         fetchJobAggregateRows(jobIds, "공고 후보 집계", async (jobIdChunk, from, to) => {
           const result = await supabase
             .from("job_candidates")
@@ -149,10 +156,36 @@ export async function GET(req: NextRequest) {
             error: result.error,
           };
         }),
-      ]);
-    } catch (aggregateError) {
-      console.error("[jobs GET] aggregate load failed", aggregateError);
+      ]),
+      fetchJobAggregateRows(jobIds, "공고 추적 링크 지원서 집계", async (jobIdChunk, from, to) => {
+        const result = await supabase
+          .from("application_submission_attribution_performance")
+          .select("submission_id, job_id, submitted_at")
+          .eq("attribution_method", "verified_link")
+          .in("job_id", jobIdChunk)
+          .order("submitted_at", { ascending: false })
+          .order("submission_id", { ascending: false })
+          .range(from, to);
+        return {
+          data: result.data as unknown as JobTrackingSubmissionRow[] | null,
+          error: result.error,
+        };
+      }),
+    ]);
+    if (candidateAndInterestResult.status === "rejected") {
+      console.error("[jobs GET] aggregate load failed", candidateAndInterestResult.reason);
       return NextResponse.json({ error: "공고 후보·관심 집계 조회 실패" }, { status: 500 });
+    }
+    [candidateRows, interestRows] = candidateAndInterestResult.value;
+
+    if (trackingSubmissionResult.status === "rejected") {
+      trackingSubmissionCountsAvailable = false;
+      console.error("[jobs GET] optional tracking submission aggregate failed", trackingSubmissionResult.reason);
+    } else {
+      for (const submission of trackingSubmissionResult.value) {
+        if (typeof submission.job_id !== "number") continue;
+        trackingSubmissionCounts[submission.job_id] = (trackingSubmissionCounts[submission.job_id] ?? 0) + 1;
+      }
     }
 
     for (const c of candidateRows) {
@@ -199,6 +232,9 @@ export async function GET(req: NextRequest) {
     confirmed_count: confirmedCounts[j.id] ?? 0,
     review_ready_count: reviewReadyCounts[j.id] ?? 0,
     interest_count: interestCounts[j.id] ?? 0,
+    tracking_submission_count: trackingSubmissionCountsAvailable
+      ? trackingSubmissionCounts[j.id] ?? 0
+      : null,
   }));
 
   return NextResponse.json({ jobs: enriched });

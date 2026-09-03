@@ -102,6 +102,7 @@ import {
   jobAcquisitionView,
   type JobAcquisitionPerformanceRow,
 } from "@/lib/admin/job-acquisition-view";
+import { jobTrackingSubmissionLabel } from "@/lib/admin/job-tracking-submissions";
 
 const JOB_CREATE_DRAFT_CONFLICT_TOAST_ID = "job-create-draft-conflict";
 
@@ -145,6 +146,8 @@ interface JobRow {
   effectivelyClosed: boolean;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
   interestCount: number;
+  // 이 공고의 검증된 추적 링크를 통해 제출된 지원서 수. 집계 실패는 null.
+  trackingSubmissionCount: number | null;
 }
 
 interface ApiJob {
@@ -172,6 +175,8 @@ interface ApiJob {
   review_ready_count?: number;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
   interest_count?: number;
+  // 검증된 추적 링크를 통한 지원서 제출 수. 집계 실패는 null로 내려온다.
+  tracking_submission_count: number | null;
 }
 
 interface ClientOpt { id: number; name: string; client_type?: string | null; uses_slots?: boolean; active?: boolean }
@@ -707,6 +712,9 @@ function toJobRow(j: ApiJob): JobRow {
     closesAt: j.closes_at ?? null,
     effectivelyClosed: isJobEffectivelyClosed(j.status, j.closes_at),
     interestCount: j.interest_count ?? 0,
+    trackingSubmissionCount: typeof j.tracking_submission_count === "number"
+      ? j.tracking_submission_count
+      : null,
   };
 }
 
@@ -1047,13 +1055,13 @@ export function Jobs() {
         setAcquisitionRows(json.acquisition.rows as JobAcquisitionPerformanceRow[]);
         setAcquisitionError(null);
       } else {
-        setAcquisitionError("모집 링크 유입을 불러오지 못했어요");
+        setAcquisitionError("공고 지원서 제출을 불러오지 못했어요");
       }
       setCandLoaded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "지원자 목록을 불러오지 못했어요";
       setCandError(message);
-      setAcquisitionError("모집 링크 유입을 불러오지 못했어요");
+      setAcquisitionError("공고 지원서 제출을 불러오지 못했어요");
       toast.error(message);
     } finally {
       setCandLoading(false);
@@ -3336,6 +3344,14 @@ export function Jobs() {
                     {job.interestCount > 0 && (
                       <Badge variant="priority-attention" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</Badge>
                     )}
+                    <Badge
+                      variant={job.trackingSubmissionCount === null ? "warning" : "info"}
+                      title={job.trackingSubmissionCount === null
+                        ? "검증된 추적 링크의 지원서 제출 수를 확인하지 못했어요"
+                        : "검증된 추적 링크를 통해 제출된 지원서 수"}
+                    >
+                      {jobTrackingSubmissionLabel(job.trackingSubmissionCount)}
+                    </Badge>
                     {job.candidates === 0 && <span className="text-[12px] font-semibold text-muted-foreground">연결된 후보 없음</span>}
                   </div>
                   <div className={`text-[12px] font-semibold ${agentModeCopy.kind === "error" ? "text-error-strong" : agentModeCopy.kind === "stale" ? "text-warning-strong" : "text-muted-foreground"}`}>
@@ -4957,7 +4973,7 @@ export function Jobs() {
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">
                     <div className="flex items-center gap-2 text-[13px] font-extrabold text-foreground">
                       <Loader2 aria-hidden="true" size={15} className="animate-spin text-info-strong motion-reduce:animate-none" />
-                      모집 링크 유입을 확인하고 있어요
+                      공고 지원서 제출을 확인하고 있어요
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2" aria-hidden="true">
                       {[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-muted motion-reduce:animate-none" />)}
@@ -4969,22 +4985,22 @@ export function Jobs() {
                     <div className="flex items-start gap-2">
                       <AlertTriangle aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
                       <div>
-                        <div className="text-[13px] font-extrabold">모집 링크 유입을 불러오지 못했어요</div>
-                        <p className="mt-1 text-[12px] font-semibold leading-relaxed">0건이 아닙니다. 지원자 작업은 계속할 수 있고, 유입 수치만 다시 확인해주세요.</p>
+                        <div className="text-[13px] font-extrabold">공고 지원서 제출을 불러오지 못했어요</div>
+                        <p className="mt-1 text-[12px] font-semibold leading-relaxed">0건이 아닙니다. 지원자 작업은 계속할 수 있고, 지원서 수치만 다시 확인해주세요.</p>
                       </div>
                     </div>
                     <Button variant="ghost" size="chip" onClick={() => void loadCandidates(candPanel.jobId)} isLoading={candLoading} className="mt-3 border border-warning/30 bg-card text-warning-strong hover:bg-warning-soft">
-                      {!candLoading && <RefreshCw aria-hidden="true" size={14} />} 유입 다시 확인
+                      {!candLoading && <RefreshCw aria-hidden="true" size={14} />} 지원서 다시 확인
                     </Button>
                   </div>
                 )}
                 {acquisitionView.state === "empty" && (
                   <div className="rounded-2xl border border-border-strong bg-card p-4">
                     <div className="flex items-center gap-2 text-[13px] font-extrabold text-foreground">
-                      <Link2 aria-hidden="true" size={15} className="text-info-strong" /> 모집 링크 유입
+                      <Link2 aria-hidden="true" size={15} className="text-info-strong" /> 공고 지원서 제출
                     </div>
                     <p className="mt-2 text-[12px] font-semibold leading-relaxed text-muted-foreground">
-                      추적 링크로 접수된 지원이 아직 없어요. 공고 행의 ‘외부 모집’에서 새로 복사한 링크부터 제출 단위로 집계합니다.
+                      검증된 추적 링크로 제출된 지원서가 아직 없어요. 공고 행의 ‘외부 채널 준비’에서 복사한 링크부터 제출 단위로 집계합니다.
                     </p>
                   </div>
                 )}
@@ -4993,7 +5009,7 @@ export function Jobs() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 text-[13px] font-extrabold text-foreground">
-                          <ShieldCheck aria-hidden="true" size={16} className="text-info-strong" /> 모집 링크 유입
+                          <ShieldCheck aria-hidden="true" size={16} className="text-info-strong" /> 공고 지원서 제출
                         </div>
                         <p className="mt-1 text-[12px] font-semibold text-muted-foreground">지원자 최초 유입이 아닌, 이 공고에 제출한 기록 기준입니다.</p>
                       </div>
@@ -5003,9 +5019,9 @@ export function Jobs() {
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       {[
-                        { label: "지원 제출", value: acquisitionView.summary.submissions },
-                        { label: "신규 후보", value: acquisitionView.summary.linked },
-                        { label: "귀속 확인", value: acquisitionView.summary.unverified },
+                        { label: "지원서 제출", value: acquisitionView.summary.submissions },
+                        { label: "새 후보 연결", value: acquisitionView.summary.linked },
+                        { label: "출처 확인 필요", value: acquisitionView.summary.unverified },
                       ].map((metric) => (
                         <div key={metric.label} className="rounded-xl border border-border-strong bg-card px-3 py-2.5">
                           <div className="text-[11px] font-bold text-muted-foreground">{metric.label}</div>
@@ -5021,7 +5037,7 @@ export function Jobs() {
                       ))}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground">
-                      <span>검증 링크 {acquisitionView.summary.verifiedExternal}건</span>
+                      <span>검증된 추적 링크 {acquisitionView.summary.verifiedExternal}건</span>
                       {acquisitionView.summary.repeatInterest > 0 && <span>기존 후보 재지원 {acquisitionView.summary.repeatInterest}건</span>}
                       {acquisitionView.summary.pending > 0 && <span className="text-warning-strong">처리 확인 중 {acquisitionView.summary.pending}건</span>}
                       {acquisitionView.summary.failed > 0 && <span className="text-error-strong">후보 연결 실패 {acquisitionView.summary.failed}건</span>}
