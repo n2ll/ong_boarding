@@ -50,6 +50,7 @@ type QueryResolver = (
 function createSupabaseStub(
   resolve: QueryResolver,
   onIn?: (table: string, column: string, values: unknown[]) => void,
+  onEq?: (table: string, column: string, value: unknown) => void,
 ) {
   class QueryBuilder {
     readonly table: string;
@@ -61,7 +62,10 @@ function createSupabaseStub(
     select() { return this; }
     neq() { return this; }
     order() { return this; }
-    eq() { return this; }
+    eq(column: string, value: unknown) {
+      onEq?.(this.table, column, value);
+      return this;
+    }
     in(column: string, values: unknown[]) {
       onIn?.(this.table, column, values);
       return this;
@@ -234,7 +238,7 @@ test("admin job aggregates chunk accumulated job ids before building PostgREST i
       return { data: [], error: null };
     },
     (table, column, values) => {
-      if ((table === "job_candidates" || table === "pool_events") && column === "job_id") {
+      if ((table === "job_candidates" || table === "pool_events" || table === "application_submission_attribution_performance") && column === "job_id") {
         aggregateFilters.push({ table, ids: values as number[] });
       }
     },
@@ -247,7 +251,7 @@ test("admin job aggregates chunk accumulated job ids before building PostgREST i
   const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
 
   assert.equal(response.status, 200);
-  for (const table of ["job_candidates", "pool_events"]) {
+  for (const table of ["job_candidates", "pool_events", "application_submission_attribution_performance"]) {
     const chunks = aggregateFilters.filter((entry) => entry.table === table);
     assert.ok(chunks.length > 1, `${table} should use more than one id chunk`);
     assert.ok(chunks.every((entry) => entry.ids.length <= 250));
@@ -256,6 +260,119 @@ test("admin job aggregates chunk accumulated job ids before building PostgREST i
       jobs.map((job) => job.id),
     );
   }
+});
+
+test("admin job list counts only submissions from verified tracking links", async () => {
+  const equalityFilters: Array<{ table: string; column: string; value: unknown }> = [];
+  const supabase = createSupabaseStub(
+    (table, operation, from, to) => {
+      assert.equal(operation, "range");
+      if (table === "jobs") {
+        return {
+          data: [
+            { id: 7, status: "active", closes_at: null },
+            { id: 8, status: "active", closes_at: null },
+          ].slice(from, to + 1),
+          error: null,
+        };
+      }
+      if (table === "application_submission_attribution_performance") {
+        return {
+          data: [
+            { submission_id: "submission-1", job_id: 7 },
+            { submission_id: "submission-2", job_id: 7 },
+          ].slice(from, to + 1),
+          error: null,
+        };
+      }
+      return { data: [], error: null };
+    },
+    undefined,
+    (table, column, value) => equalityFilters.push({ table, column, value }),
+  );
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+  const returnedJobs = response.body.jobs as Array<{
+    id: number;
+    tracking_submission_count: number | null;
+  }>;
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    returnedJobs.map(({ id, tracking_submission_count }) => ({ id, tracking_submission_count })),
+    [
+      { id: 7, tracking_submission_count: 2 },
+      { id: 8, tracking_submission_count: 0 },
+    ],
+  );
+  assert.deepEqual(
+    equalityFilters.filter(({ table }) => table === "application_submission_attribution_performance"),
+    [{
+      table: "application_submission_attribution_performance",
+      column: "attribution_method",
+      value: "verified_link",
+    }],
+  );
+});
+
+test("admin job list exposes an unavailable tracking submission count when its aggregate fails", async () => {
+  const supabase = createSupabaseStub((table, operation, from, to) => {
+    assert.equal(operation, "range");
+    if (table === "jobs") {
+      return {
+        data: [{ id: 7, status: "active", closes_at: null }].slice(from, to + 1),
+        error: null,
+      };
+    }
+    if (table === "application_submission_attribution_performance") {
+      return { data: null, error: { message: "database unavailable" } };
+    }
+    return { data: [], error: null };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+  const returnedJobs = response.body.jobs as Array<{ tracking_submission_count: number | null }>;
+
+  assert.equal(response.status, 200);
+  assert.equal(returnedJobs[0].tracking_submission_count, null);
+});
+
+test("admin job list counts verified tracking submissions after the PostgREST 1000-row boundary", async () => {
+  const submissions = Array.from({ length: 1_001 }, (_, index) => ({
+    submission_id: `submission-${index + 1}`,
+    job_id: 7,
+  }));
+  const supabase = createSupabaseStub((table, operation, from, to) => {
+    assert.equal(operation, "range");
+    if (table === "jobs") {
+      return {
+        data: [{ id: 7, status: "active", closes_at: null }].slice(from, to + 1),
+        error: null,
+      };
+    }
+    if (table === "application_submission_attribution_performance") {
+      return { data: submissions.slice(from, to + 1), error: null };
+    }
+    return { data: [], error: null };
+  });
+  const route = loadRouteModule(
+    new URL("../../app/api/admin/jobs/route.ts", import.meta.url),
+    supabase,
+  );
+
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+  const returnedJobs = response.body.jobs as Array<{ tracking_submission_count: number | null }>;
+
+  assert.equal(response.status, 200);
+  assert.equal(returnedJobs[0].tracking_submission_count, 1_001);
 });
 
 test("admin job list rejects a later page error instead of returning a partial list", async () => {
