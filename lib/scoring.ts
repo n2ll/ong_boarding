@@ -7,7 +7,7 @@
  *   - 최신성: 0~10
  */
 
-import { haversineKm } from "./kakao-geocode";
+import { haversineKm } from "./geo.ts";
 
 export interface CandidateForScoring {
   id: number;

@@ -62,6 +62,10 @@ import {
   pipelineFocusedJobMessageReviewIssue,
   pipelineFocusedJobProjection,
 } from "@/lib/admin/pipeline-job-context";
+import {
+  pipelineJobRecommendations,
+  prioritizePipelineRecommendations,
+} from "@/lib/admin/pipeline-recommendation";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
 import { MANAGER_PANEL_DOCK_MIN_WIDTH, shouldDockManagerPanels } from "@/lib/admin/manager-panel-layout";
 import {
@@ -761,6 +765,11 @@ export function Pipeline() {
     isValidating: funnelValidating,
   } = useSWR<CampaignFunnelRes>(view === "funnel" ? `/api/admin/campaign-funnel?days=${funnelDays}` : null, { refreshInterval: 60_000 }); // 살아있는 갱신
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  // 공고 맥락에서는 규칙 추천을 앞에 두되, 추천 밖 인력을 숨기거나 기존 선택을 지우지 않는다.
+  const [recommendationPriority, setRecommendationPriority] = useState(true);
+  useEffect(() => {
+    setRecommendationPriority(true);
+  }, [focusedActiveJob?.id]);
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -1097,6 +1106,9 @@ export function Pipeline() {
         focusedActiveJob.dropoffAddress ? `마지막 경유 ${focusedActiveJob.dropoffAddress}` : null,
       ].filter((label): label is string => Boolean(label))
     : [];
+  const focusedJobHasRecommendationLocation = focusedActiveJob
+    ? pipelineFocusedJobInitialSortMode(focusedActiveJob) === "distance"
+    : false;
   const openExposurePicker = () => {
     if (!requireFocusedJobReady()) return;
     // SOS→공고→인재풀로 넘어온 경우 활성 공고만 기본 선택한다. 선택만 도울 뿐
@@ -1574,7 +1586,18 @@ export function Pipeline() {
       distDetailByCardId[c.id] = { pickup, dropoff };
     }
   }
-  const filteredCards = postFilteredCards.sort((a, b) => {
+  const focusedJobRecommendations = focusedActiveJob
+    ? pipelineJobRecommendations(postFilteredCards, focusedActiveJob)
+    : {
+        rankedApplicantIds: [],
+        matchByApplicantId: {},
+        scoredCount: 0,
+        missingLocationCount: 0,
+      };
+  const recommendationPriorityActive = Boolean(
+    focusedActiveJob && recommendationPriority && focusedJobRecommendations.rankedApplicantIds.length > 0,
+  );
+  const sortedCards = [...postFilteredCards].sort((a, b) => {
     const created = (c: typeof a) => (c.createdAtIso ? new Date(c.createdAtIso).getTime() : 0);
     const lastMsg = (c: typeof a) => (c.lastMessageAtIso ? new Date(c.lastMessageAtIso).getTime() : 0);
     // 원지원일 정렬 — null은 항상 뒤로 밀어 코호트 상단이 유효값으로 채워지게.
@@ -1616,6 +1639,11 @@ export function Pipeline() {
       default: return created(b) - created(a);                       // 최근 등록순 (API 기본 순서와 동일)
     }
   });
+  const filteredCards = prioritizePipelineRecommendations(
+    sortedCards,
+    focusedJobRecommendations.rankedApplicantIds,
+    recommendationPriorityActive,
+  );
   const filteredApplicantIds = filteredCards.map((card) => Number(card.id));
   const filteredApplicantIdsKey = filteredApplicantIds.join(",");
   const applicantNavigation = getPipelineApplicantNavigation(
@@ -1737,6 +1765,9 @@ export function Pipeline() {
   // 선택 인원 중 지금 조건 밖에 있는 수 — 노출 지정 모달이 '조건으로 고른 명단'이라고 말할 때
   // 실제로는 직접 고른 사람이 섞였을 수 있다는 사실을 숨기지 않기 위해.
   const selectedOutsideCondition = [...selectedRows].filter((id) => !filteredIdSet.has(id)).length;
+  const selectedOutsideRecommendations = focusedActiveJob
+    ? [...selectedRows].filter((id) => !focusedJobRecommendations.matchByApplicantId[id]).length
+    : 0;
 
   // 발송 모달 실제 수신 대상 — 화면 표시(filteredCards) ∩ 선택 ∩ 캠페인 발송 가능. handleBulkSend와 동일 기준.
   // selectedRows.size 그대로 쓰면 필터로 화면에서 빠진 인원까지 세어 인원·비용이 부풀려진다.
@@ -2702,6 +2733,61 @@ export function Pipeline() {
                 ))}
               </ol>
             </div>
+
+            <div
+              className="mt-2 flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-brand-yellow/30 pt-2"
+              aria-live="polite"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Zap size={14} className="shrink-0 text-warning-strong" aria-hidden="true" />
+                {focusedJobRecommendations.scoredCount > 0 ? (
+                  <p className="min-w-0 text-[12px] text-gray-700">
+                    <strong className="font-extrabold text-foreground">
+                      추천 {focusedJobRecommendations.rankedApplicantIds.length}명 우선
+                    </strong>
+                    <span className="text-muted-foreground">
+                      {` · 현재 조건 ${postFilteredCards.length}명 중 위치 확인 ${focusedJobRecommendations.scoredCount}명 · 거리 70점${focusedActiveJob.vehicleRequired === true ? " · 차량 20점" : ""} · 최근 활동 10점`}
+                    </span>
+                  </p>
+                ) : focusedJobHasRecommendationLocation ? (
+                  <p className="text-[12px] text-muted-foreground">
+                    현재 조건에서 위치가 확인된 인력이 없어 기본 정렬로 보여드립니다.
+                  </p>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    공고 위치 좌표가 없어 추천 순위를 만들지 않고 기본 정렬로 보여드립니다.
+                  </p>
+                )}
+              </div>
+              {focusedJobRecommendations.missingLocationCount > 0 && focusedJobRecommendations.scoredCount > 0 && (
+                <span
+                  className="text-[12px] font-semibold text-muted-foreground"
+                  title="위치 미확인 인력도 목록에서 숨기지 않고 추천 순위 뒤에 표시합니다."
+                >
+                  위치 미확인 {focusedJobRecommendations.missingLocationCount}명은 순위 없음
+                </span>
+              )}
+              {selectedRows.size > 0 && selectedOutsideRecommendations > 0 && (
+                <span className="text-[12px] font-bold text-warning-strong">
+                  선택 {selectedRows.size}명 중 추천 밖 {selectedOutsideRecommendations}명
+                </span>
+              )}
+              {focusedJobRecommendations.rankedApplicantIds.length > 0 && (
+                <button
+                  type="button"
+                  aria-pressed={recommendationPriority}
+                  onClick={() => setRecommendationPriority((current) => !current)}
+                  className={`min-h-8 shrink-0 rounded-lg border px-2.5 text-[12px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
+                    recommendationPriority
+                      ? "border-foreground bg-foreground text-white"
+                      : "border-border-strong bg-card text-gray-700 hover:bg-background"
+                  }`}
+                  title="추천 밖 인력은 숨기지 않고, 추천 순위를 목록 앞에 둘지만 바꿉니다."
+                >
+                  추천 우선
+                </button>
+              )}
+            </div>
           </section>
         )}
 
@@ -3190,6 +3276,9 @@ export function Pipeline() {
                 <div className="flex min-w-max items-center gap-2">
                 <span className={`shrink-0 text-[12px] font-bold tabular-nums ${optOutOnly ? "text-error" : "text-gray-700"}`}>
                   {optOutOnly ? `수신거부 ${filteredCards.length}명` : <>발송 <span className="text-success-strong">{sendableCount}</span> · 조건 {shownCount}</>}
+                  {recommendationPriorityActive && (
+                    <span className="ml-1 text-warning-strong">· 추천 우선</span>
+                  )}
                   {hiddenCount > 0 && (
                     <span className="ml-1 font-medium text-muted-foreground" title="화면에 그리는 양만 나눠서 보여줍니다. 선택·발송·CSV는 조건에 맞는 전원이 대상이에요.">
                       · 화면 {visibleCards.length}
@@ -3200,9 +3289,13 @@ export function Pipeline() {
                 <select
                   value={sortMode}
                   onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
-                  aria-label="인재풀 정렬"
+                  aria-label={recommendationPriorityActive ? "추천 순위 뒤 인재풀 정렬" : "인재풀 정렬"}
                   className={`h-8 w-[150px] shrink-0 rounded-lg border bg-card px-2 pr-7 text-[12px] font-semibold text-gray-700 outline-none cursor-pointer focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring ${sortMode === "distance" && distanceJobId === null ? "border-warning ring-1 ring-warning" : "border-border-strong"}`}
-                  title={sortMode === "distance" && distanceJobId === null ? "거리순 정렬을 쓰려면 오른쪽에서 거리 기준 공고를 먼저 선택하세요" : "리스트 정렬"}
+                  title={sortMode === "distance" && distanceJobId === null
+                    ? "거리순 정렬을 쓰려면 오른쪽에서 거리 기준 공고를 먼저 선택하세요"
+                    : recommendationPriorityActive
+                      ? "추천 순위 뒤에 이어지는 인력의 정렬 기준"
+                      : "리스트 정렬"}
                 >
                   <option value="recent">최근 등록순</option>
                   <option value="oldest">오래된 등록순</option>
@@ -3213,6 +3306,8 @@ export function Pipeline() {
                   <option value="reaction_recent">반응 최신순(열람·관심·답장)</option>
                   <option value="distance">공고 근거리순(상차지·종료지점)</option>
                 </select>
+                {!focusedActiveJob && (
+                  <>
                 <select
                   value={distanceJobId === null ? "" : String(distanceJobId)}
                   onChange={(e) => setDistanceJobId(e.target.value ? Number(e.target.value) : null)}
@@ -3248,6 +3343,8 @@ export function Pipeline() {
                     <option key={j.id} value={String(j.id)}>#{j.id} {j.title}</option>
                   ))}
                 </select>
+                  </>
+                )}
                 <div className="flex shrink-0 items-center gap-1.5">
                   <input
                     type="number"
@@ -3287,7 +3384,9 @@ export function Pipeline() {
                           {selectedRows.size === filteredCards.length && filteredCards.length > 0 && <Check size={14} strokeWidth={4} className="text-foreground" />}
                         </button>
                       </th>
-                      <th className="w-[210px] whitespace-nowrap px-3 py-3 text-[12px] font-bold text-muted-foreground">인력 · 공고 연결</th>
+                      <th className="w-[240px] whitespace-nowrap px-3 py-3 text-[12px] font-bold text-muted-foreground">
+                        {focusedActiveJob ? "추천 · 인력 · 공고 연결" : "인력 · 공고 연결"}
+                      </th>
                       <th className="w-[190px] whitespace-nowrap px-3 py-3 text-[12px] font-bold text-muted-foreground">현재 상태</th>
                       {tableLayout.showCoreColumns && <th className="w-[165px] whitespace-nowrap px-3 py-3 text-[12px] font-bold text-muted-foreground">지역 · 희망 근무</th>}
                       {tableLayout.showWideColumns && <th className="w-[150px] whitespace-nowrap px-3 py-3 text-[12px] font-bold text-muted-foreground">차량 · 경력</th>}
@@ -3298,6 +3397,7 @@ export function Pipeline() {
                   <tbody>
                     {visibleCards.map(c => {
                       const isSelected = selectedRows.has(c.id);
+                      const recommendationMatch = focusedJobRecommendations.matchByApplicantId[c.id];
                       const send = sendableOf(c);
                       const appliedLabel = appliedMonth(c.appliedAtIso);
                       const summary = summaryById[Number(c.id)] as PoolEventSummary | undefined;
@@ -3365,7 +3465,7 @@ export function Pipeline() {
                               <div data-den="avatar" className="w-10 h-10 rounded-md bg-muted text-gray-700 flex items-center justify-center font-bold text-[16px] shrink-0">
                                 {c.name.charAt(0)}
                               </div>
-                              <div>
+                              <div className="min-w-0">
                                 <button
                                   type="button"
                                   data-applicant-row-trigger={c.id}
@@ -3379,6 +3479,33 @@ export function Pipeline() {
                                   {c.name}
                                   {c.age > 0 && <span className="ml-1 text-[13px] font-medium text-muted-foreground">{c.age}세</span>}
                                 </button>
+                                {recommendationMatch && (
+                                  <div
+                                    className="mt-1 min-w-0"
+                                    aria-label={`추천 ${recommendationMatch.rank}위, 규칙 점수 ${recommendationMatch.total}점`}
+                                    title={`규칙 점수 ${recommendationMatch.total}점 · 거리 ${recommendationMatch.distance}점 · 차량 ${recommendationMatch.vehicle}점 · 최근 활동 ${recommendationMatch.recency}점`}
+                                  >
+                                    <div className="flex items-center gap-1.5 text-[12px]">
+                                      <span className="rounded-md border border-border-strong bg-background px-1.5 py-0.5 font-extrabold text-foreground">
+                                        추천 {recommendationMatch.rank}위
+                                      </span>
+                                      <span className="font-bold tabular-nums text-gray-700">
+                                        규칙 점수 {recommendationMatch.total}점
+                                      </span>
+                                    </div>
+                                    <p data-den="secondary" className="mt-0.5 max-w-[220px] truncate text-[12px] text-muted-foreground">
+                                      {recommendationMatch.distanceKm.toFixed(recommendationMatch.distanceKm < 10 ? 1 : 0)}km
+                                      {` · ${recommendationMatch.vehicleFit === "meets"
+                                        ? "자차 충족"
+                                        : recommendationMatch.vehicleFit === "does_not_meet"
+                                          ? "자차 미충족"
+                                          : recommendationMatch.vehicleFit === "needs_review"
+                                            ? "차량 확인 필요"
+                                            : "차량 조건 없음"}`}
+                                      {` · ${recommendationMatch.activityAt ? `활동 ${relTime(recommendationMatch.activityAt)}` : "활동일 미확인"}`}
+                                    </p>
+                                  </div>
+                                )}
                                 {/* 이름 아래 한 줄 — 공고가 2건 이상이면 공고별 칩으로 바꾼다.
                                     '공고지원 · 스크리닝' 한 개는 가장 최근 공고 하나만 말해줘서, 여러 자리에
                                     붙은 분이 한 자리만 진행 중인 것처럼 보였다. 칩을 누르면 그 공고 기준으로 상세가 열린다.
