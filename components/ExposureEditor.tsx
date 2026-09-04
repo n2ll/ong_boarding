@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { Loader2, Users, UserX, RotateCcw, RefreshCw } from "lucide-react";
+import { Loader2, Users, UserX, RotateCcw, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
 import { useConfirm } from "./ConfirmDialog";
@@ -99,6 +99,8 @@ interface DraftJobAudience {
   pickupAddress: string;
   dropoffAddress: string;
   vehicleRequired: boolean;
+  slotKeys: string[];
+  capacity: number | "";
   distanceBasis?: "pickup" | "nearest";
 }
 
@@ -121,6 +123,13 @@ interface ExposurePreview {
   recommendations?: AudienceRecommendation[];
   radius_unavailable?: boolean;
   geo_unknown?: number;
+  suggested_audience?: {
+    rule: Record<string, unknown>;
+    reasons: string[];
+    visible_count: number;
+    sms_eligible_count: number;
+    contact_target: number;
+  } | null;
 }
 
 const VIA_LABEL: Record<RosterPerson["via"], string> = {
@@ -133,6 +142,7 @@ function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () 
   return (
     <button
       type="button"
+      aria-pressed={on}
       onClick={onClick}
       className={`px-2.5 py-1 rounded-full text-[12px] font-bold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
         on
@@ -184,7 +194,11 @@ export function ExposureEditor({
   const [previewError, setPreviewError] = useState(false);
   const ruleJson = useMemo(() => JSON.stringify(draftToRule(value.rule)), [value.rule]);
   const draftJobJson = useMemo(() => JSON.stringify(draftJob ?? null), [draftJob]);
+  const [appliedSuggestionContext, setAppliedSuggestionContext] = useState<string | null>(null);
   const hasDraftJob = draftJobJson !== "null";
+  const suggestionStale = targeted
+    && appliedSuggestionContext !== null
+    && appliedSuggestionContext !== draftJobJson;
   const previewSeq = useRef(0);
   useEffect(() => {
     // 매 실행마다 seq 증가 — 규칙을 비우거나 targeted를 끄는 early-return 경로도
@@ -222,6 +236,8 @@ export function ExposureEditor({
             pickup_address: draft.pickupAddress,
             dropoff_address: draft.dropoffAddress,
             vehicle_required: draft.vehicleRequired,
+            slot_keys: draft.slotKeys,
+            capacity: draft.capacity || null,
             distance_basis: draft.distanceBasis ?? "nearest",
           } : null,
         }),
@@ -326,6 +342,7 @@ export function ExposureEditor({
               <button
                 key={k}
                 type="button"
+                aria-pressed={sel}
                 onClick={() => onChange({ ...value, exposure: k })}
                 className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${
                   sel
@@ -609,6 +626,49 @@ export function ExposureEditor({
             <p className="mt-2 text-[12px] font-semibold text-error-strong">입력한 위치의 거리를 계산할 수 없어요. 주소를 더 자세히 적거나 반경 조건을 해제해 주세요.</p>
           ) : preview ? (
             <>
+              {(value.exposure === "all" || suggestionStale) && preview.suggested_audience && (
+                <div className="mt-3 rounded-2xl border border-info/30 bg-white p-3.5 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <Sparkles size={16} className="mt-0.5 shrink-0 text-info-strong" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-extrabold text-foreground">
+                        {suggestionStale ? "추천을 적용한 뒤 공고 정보가 바뀌었어요" : "에이전트 추천 조건"}
+                      </div>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                        {suggestionStale
+                          ? "바뀐 공고 내용과 현재 연락 가능한 인원으로 추천 조건을 다시 계산했어요. 확인한 뒤 다시 적용해 주세요."
+                          : "공고 내용과 현재 연락 가능한 인원을 함께 보고, 모집에 필요한 후보가 너무 적어지지 않도록 골랐어요."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {preview.suggested_audience.reasons.map((reason) => (
+                      <span key={reason} className="rounded-full bg-info-soft px-2 py-1 text-[11px] font-bold text-info-strong">
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[12px] font-bold text-foreground">
+                    추천 적용 시 맞춤 링크 {preview.suggested_audience.visible_count}명 · 현재 문자 안내 가능 {preview.suggested_audience.sms_eligible_count}명
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange({ exposure: "targeted", rule: ruleToDraft(preview.suggested_audience?.rule) });
+                      setAppliedSuggestionContext(draftJobJson);
+                      toast.success("추천 조건을 적용했어요. 아래에서 바로 수정할 수 있어요.");
+                    }}
+                    className="mt-3 min-h-11 w-full rounded-xl bg-foreground px-4 py-2.5 text-[13px] font-extrabold text-white transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    {suggestionStale ? "추천 조건 다시 적용" : "추천 조건 적용"}
+                  </button>
+                </div>
+              )}
+              {suggestionStale && !preview.suggested_audience && (
+                <div role="status" className="mt-3 rounded-xl border border-warning/35 bg-warning-soft px-3 py-2.5 text-[12px] font-semibold leading-relaxed text-warning-strong">
+                  추천을 적용한 뒤 공고 정보가 바뀌었어요. 현재 인력풀로는 모집 인원에 맞는 새 추천을 만들기 어려워 전체 노출로 되돌리거나 조건을 직접 넓혀 주세요.
+                </div>
+              )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded-xl border border-info/20 bg-white p-3">
                   <div className="text-[11px] font-bold text-muted-foreground">맞춤 링크 노출</div>

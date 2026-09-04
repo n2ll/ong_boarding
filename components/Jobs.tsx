@@ -4380,6 +4380,8 @@ export function Jobs() {
                       pickupAddress: newJobPickupAddress,
                       dropoffAddress: newJobDropoffAddress,
                       vehicleRequired: newJobVehicleRequired,
+                      slotKeys: newJobSlotKeys,
+                      capacity: newJobCapacity,
                       distanceBasis: "nearest",
                     }}
                   />

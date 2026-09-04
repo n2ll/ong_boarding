@@ -41,6 +41,7 @@ async function fulfillJson(route: Route, value: unknown) {
 async function installControlledNetwork(
   page: Page,
   generatePosting?: (route: Route) => Promise<void>,
+  exposurePreview?: (route: Route) => Promise<void>,
 ) {
   const apiRequests: string[] = [];
   const blockedRequests: string[] = [];
@@ -73,6 +74,10 @@ async function installControlledNetwork(
     apiRequests.push(key);
     if (key === "POST /api/admin/jobs/generate-posting" && generatePosting) {
       await generatePosting(route);
+      return;
+    }
+    if (url.pathname === "/api/admin/exposure" && exposurePreview) {
+      await exposurePreview(route);
       return;
     }
     if (Object.prototype.hasOwnProperty.call(API_FIXTURES, key)) {
@@ -199,5 +204,62 @@ test("AI가 찾지 못한 필수 정보만 묻고 답변을 재생성 요청에 
     dropoff_address: "하남 미사 일대 · 종료 미사역",
     pay_info: "건당 3,500원 · 매주 금요일 정산",
   });
+  expect(network.blockedRequests).toEqual([]);
+});
+
+test("추천 노출 조건을 한 번에 적용하고 관리자가 바로 수정할 수 있다", async ({ page }) => {
+  const network = await installControlledNetwork(page, undefined, async (route) => {
+    if (route.request().method() === "GET") {
+      await fulfillJson(route, {
+        sidos: [],
+        availabilities: [],
+        sigunguGroups: [],
+        slots: [
+          { key: "평일오전", label: "평일 오전", count: 8 },
+          { key: "평일오후", label: "평일 오후", count: 0 },
+          { key: "주말오전", label: "주말 오전", count: 0 },
+          { key: "주말오후", label: "주말 오후", count: 0 },
+        ],
+        unknown: { sido: 0, sigungu: 0, slot: 2, slot_partial: 0 },
+      });
+      return;
+    }
+    await fulfillJson(route, {
+      count: 20,
+      total: 30,
+      sample: [],
+      visible_count: 20,
+      sms_eligible_count: 14,
+      recommendations: [],
+      suggested_audience: {
+        rule: { vehicle: ["있음"], slot: ["평일오전", "미확인"], radiusKm: 10, radiusIncludeUnknown: true },
+        reasons: ["차량 보유자", "희망 시간대 일치·미확인 포함", "근무 위치 10km 이내·주소 미확인 포함"],
+        visible_count: 16,
+        sms_eligible_count: 12,
+        contact_target: 12,
+      },
+    });
+  });
+
+  await page.goto("/jobs");
+  await page.getByRole("button", { name: "새 공고", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "새 공고 등록" });
+  await dialog.getByRole("button", { name: "직접 작성" }).click();
+  const applySuggestion = dialog.getByRole("button", { name: "추천 조건 적용" });
+  await expect(applySuggestion).toBeVisible();
+  await expect(dialog).toContainText("추천 적용 시 맞춤 링크 16명 · 현재 문자 안내 가능 12명");
+  await applySuggestion.click();
+
+  await expect(dialog.getByRole("button", { name: /지정 노출/ })).toHaveAttribute("aria-pressed", "true");
+  for (const label of ["평일 오전 8", "미확인 2", "있음", "10km"]) {
+    await expect(dialog.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(dialog.getByRole("checkbox", { name: /주소를 몰라 거리를 못 재는 분도 포함/ })).toBeChecked();
+  await dialog.getByRole("button", { name: "평일 오전 8", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "평일 오전 8", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await dialog.getByRole("spinbutton", { name: "모집 인원" }).fill("3");
+  await expect(dialog).toContainText("추천을 적용한 뒤 공고 정보가 바뀌었어요");
+  await expect(dialog.getByRole("button", { name: "추천 조건 다시 적용" })).toBeVisible();
   expect(network.blockedRequests).toEqual([]);
 });
