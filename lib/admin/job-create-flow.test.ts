@@ -33,6 +33,8 @@ test("new job flow starts from the operating memo, then reviews routing context"
   );
   assert.match(generationRequest, /pickup_address:\s*requestedContext\.pickupAddress/);
   assert.match(generationRequest, /dropoff_address:\s*requestedContext\.dropoffAddress/);
+  assert.match(generationRequest, /capacity:\s*requestedContext\.capacity/);
+  assert.match(generationRequest, /pay_info:\s*requestedContext\.payInfo/);
 });
 
 test("posting generation gives the current job locations precedence over reusable master data", () => {
@@ -43,9 +45,12 @@ test("posting generation gives the current job locations precedence over reusabl
 
   assert.match(routeSource, /body\?\.pickup_address/);
   assert.match(routeSource, /body\?\.dropoff_address/);
+  assert.match(routeSource, /body\?\.capacity/);
+  assert.match(routeSource, /body\?\.pay_info/);
   assert.match(routeSource, /buildCurrentJobPostingLocationContext\(currentLocation\)/);
-  assert.match(routeSource, /\[masterContext, currentLocationContext\]/);
-  assert.match(routeSource, /buildMockPosting\(prompt, formatCurrentJobPostingLocation\(currentLocation\)\)/);
+  assert.match(routeSource, /buildCurrentJobPostingFactsContext\(currentFacts\)/);
+  assert.match(routeSource, /\[masterContext, currentLocationContext, currentFactsContext\]/);
+  assert.match(routeSource, /buildMockPosting\(prompt, formatCurrentJobPostingLocation\(currentLocation\), currentFacts\)/);
   assert.match(routeSource, /resolveJobAnnouncementBody\(\{ jobTitle: ai\.title, smsDraft: ai\.sms\.body \}\)/);
   assert.doesNotMatch(routeSource, /\["초보 가능", "주급 지급"\]/);
   assert.doesNotMatch(routeSource, /f\.pay \|\| "협의"/);
@@ -74,6 +79,8 @@ test("a pasted operating memo can generate first and autofill structured job fie
   assert.match(generationSource, /p\.fields\?\.slotKeys/);
   assert.match(generationSource, /setGeneratedContext\(createJobGenerationContext\(\{/);
   assert.match(jobsSource, /메모에서 찾지 못한 필수 정보/);
+  assert.match(jobsSource, /AI가 확인할 내용/);
+  assert.match(jobsSource, /답변 반영해 초안 업데이트/);
   assert.match(jobsSource, /비워두면 붙여넣은 메모에서 AI가 찾아 채워요/);
   assert.ok(
     jobsSource.indexOf("AI에 전달할 배송 스케줄·라인 메모")

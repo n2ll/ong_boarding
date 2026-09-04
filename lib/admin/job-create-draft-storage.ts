@@ -10,6 +10,9 @@ type GeneratedContext = {
   branchId: number | null;
   pickupAddress: string;
   dropoffAddress: string;
+  // 이전 v2 저장 초안에는 없을 수 있다. 복원 시 현재 폼 값으로 보완한다.
+  capacity?: number | null;
+  payInfo?: string;
 };
 
 export interface JobCreateStoredDraft {
@@ -128,7 +131,9 @@ function generatedContext(value: unknown): value is GeneratedContext | null {
     && nullableId(item.clientId)
     && nullableId(item.branchId)
     && typeof item.pickupAddress === "string"
-    && typeof item.dropoffAddress === "string",
+    && typeof item.dropoffAddress === "string"
+    && (item.capacity === undefined || item.capacity === null || (Number.isSafeInteger(item.capacity) && Number(item.capacity) > 0))
+    && (item.payInfo === undefined || typeof item.payInfo === "string"),
   );
 }
 

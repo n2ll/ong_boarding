@@ -59,6 +59,10 @@ import {
   type JobGenerationContextField,
 } from "@/lib/admin/job-generation-context";
 import {
+  missingJobCreateFollowupFields,
+  type JobCreateFollowupField,
+} from "@/lib/admin/job-create-followup";
+import {
   agentModePresentation,
   agentModeView,
   fetchFreshAgentMode,
@@ -189,6 +193,8 @@ const JOB_GENERATION_CONTEXT_LABELS: Record<JobGenerationContextField, string> =
   branch: "지점",
   pickupAddress: "상차지·집결지",
   dropoffAddress: "배송 권역·마지막 경유지",
+  capacity: "모집 인원",
+  payInfo: "급여·정산 안내",
 };
 
 interface JobCand {
@@ -827,6 +833,7 @@ export function Jobs() {
   const [channelDrafts, setChannelDrafts] = useState<{ danggeun: string; albamon: string; sms: string } | null>(null);
   const [activeChannel, setActiveChannel] = useState<"albamon" | "sms">("albamon");
   const [aiSource, setAiSource] = useState<"ai" | "mock" | null>(null);
+  const [newJobFollowupFields, setNewJobFollowupFields] = useState<JobCreateFollowupField[]>([]);
   // 성공한 AI/오프라인 템플릿 생성 요청의 입력값. 현재 입력과 달라지면 이전 기준의 초안을 등록하지 못하게 한다.
   // 복제·직접 작성은 이 값이 null이라 새 경고 대상이 아니다.
   const [generatedContext, setGeneratedContext] = useState<JobGenerationContext | null>(null);
@@ -1435,6 +1442,8 @@ export function Jobs() {
     branchId: effectiveNewJobBranchId,
     pickupAddress: newJobPickupAddress,
     dropoffAddress: newJobDropoffAddress,
+    capacity: newJobCapacity,
+    payInfo: newJobPayInfo,
   });
   const changedGenerationFields = changedJobGenerationContextFields(generatedContext, currentGenerationContext);
   const generationContextStale = changedGenerationFields.length > 0;
@@ -1467,6 +1476,8 @@ export function Jobs() {
       branchId: effectiveNewJobBranchId,
       pickupAddress: newJobPickupAddress,
       dropoffAddress: newJobDropoffAddress,
+      capacity: newJobCapacity,
+      payInfo: newJobPayInfo,
     });
     const requestId = ++generationRequestIdRef.current;
     const failureMessage = channelDrafts
@@ -1484,6 +1495,8 @@ export function Jobs() {
           ...(requestedContext.branchId !== null ? { branch_id: requestedContext.branchId } : {}),
           pickup_address: requestedContext.pickupAddress,
           dropoff_address: requestedContext.dropoffAddress,
+          capacity: requestedContext.capacity,
+          pay_info: requestedContext.payInfo,
         }),
       });
       const json = await res.json();
@@ -1536,9 +1549,13 @@ export function Jobs() {
       newJobDropoffAddressValueRef.current = dropoffAutofill.value;
       aiPrefilledDropoffRef.current = dropoffAutofill.generatedValue;
 
-      if (Number.isSafeInteger(p.fields?.capacity) && Number(p.fields?.capacity) > 0) {
-        setNewJobCapacity((current) => current === "" ? Number(p.fields?.capacity) : current);
-      }
+      const generatedCapacity = Number.isSafeInteger(p.fields?.capacity) && Number(p.fields?.capacity) > 0
+        ? Number(p.fields?.capacity)
+        : null;
+      const resolvedCapacity = newJobCapacity === "" && generatedCapacity !== null
+        ? generatedCapacity
+        : newJobCapacity;
+      if (resolvedCapacity !== newJobCapacity) setNewJobCapacity(resolvedCapacity);
       if (p.fields?.workPeriod) {
         setNewJobPeriod((current) => current || p.fields?.workPeriod || "");
       }
@@ -1584,6 +1601,14 @@ export function Jobs() {
         branchId: requestedContext.branchId ?? "",
         pickupAddress: pickupAutofill.value,
         dropoffAddress: dropoffAutofill.value,
+        capacity: resolvedCapacity,
+        payInfo: payAutofill.value,
+      }));
+      setNewJobFollowupFields(missingJobCreateFollowupFields({
+        capacity: resolvedCapacity,
+        pickupAddress: pickupAutofill.value,
+        dropoffAddress: dropoffAutofill.value,
+        payInfo: payAutofill.value,
       }));
       // 복제본을 새 기준으로 다시 생성했다면 더는 원본 저장본이 아니다.
       setDuplicatedFrom(null);
@@ -1621,6 +1646,7 @@ export function Jobs() {
     setPromptOpen(true);
     setChannelDrafts(null);
     setAiSource(null);
+    setNewJobFollowupFields([]);
     setGeneratedContext(null);
     aiPrefilledPayInfoRef.current = null;
     aiPrefilledFactsRef.current = null;
@@ -1901,6 +1927,18 @@ export function Jobs() {
     )
       ? draft.siteManagerId
       : "";
+    const restoredGeneratedContext = draft.generatedContext ? createJobGenerationContext({
+      prompt: draft.generatedContext.prompt,
+      clientId: draft.generatedContext.clientId ?? "",
+      branchId: draft.generatedContext.branchId ?? "",
+      pickupAddress: draft.generatedContext.pickupAddress,
+      dropoffAddress: draft.generatedContext.dropoffAddress,
+      // null은 생성 당시 누락, undefined는 필드 추가 전 저장된 v2 초안이다.
+      capacity: draft.generatedContext.capacity === undefined
+        ? draft.capacity
+        : draft.generatedContext.capacity ?? "",
+      payInfo: draft.generatedContext.payInfo ?? draft.payInfo,
+    }) : null;
 
     jobCreateAttemptRef.current = draft.createAttempt;
     setAiPrompt(draft.prompt);
@@ -1908,7 +1946,13 @@ export function Jobs() {
     setChannelDrafts(draft.channelDrafts ? normalizeJobCreateChannelDrafts(draft.channelDrafts) : null);
     setActiveChannel(draft.activeChannel === "sms" ? "sms" : "albamon");
     setAiSource(draft.aiSource);
-    setGeneratedContext(draft.generatedContext);
+    setGeneratedContext(restoredGeneratedContext);
+    setNewJobFollowupFields(draft.aiSource === null ? [] : missingJobCreateFollowupFields({
+      capacity: restoredGeneratedContext ? restoredGeneratedContext.capacity ?? "" : draft.capacity,
+      pickupAddress: restoredGeneratedContext?.pickupAddress ?? draft.pickupAddress,
+      dropoffAddress: restoredGeneratedContext?.dropoffAddress ?? draft.dropoffAddress,
+      payInfo: restoredGeneratedContext?.payInfo ?? draft.payInfo,
+    }));
     aiPrefilledPayInfoRef.current = null;
     aiPrefilledFactsRef.current = null;
     aiPrefilledPickupRef.current = null;
@@ -3755,6 +3799,7 @@ export function Jobs() {
                         onClick={() => {
                           setChannelDrafts(normalizeJobCreateChannelDrafts({ albamon: "", sms: "" }));
                           setChannelDraftsFromCopy(false);
+                          setNewJobFollowupFields([]);
                           setGeneratedContext(null);
                           setActiveChannel("albamon");
                           setPromptOpen(false);
@@ -3916,10 +3961,100 @@ export function Jobs() {
                 </section>
               </section>
 
-              {channelDrafts && newJobMissingRequiredLabels.length > 0 && (
+              {channelDrafts && newJobFollowupFields.length > 0 && (
+                <section aria-labelledby="new-job-followup-title" className="rounded-2xl border border-warning/35 bg-warning-soft p-4 xl:col-start-1">
+                  <div className="flex items-start gap-3">
+                    <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-warning-strong text-[12px] font-extrabold text-white">3</span>
+                    <div>
+                      <h3 id="new-job-followup-title" className="text-[14px] font-extrabold text-warning-strong">AI가 확인할 내용</h3>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                        메모에서 찾지 못한 필수 정보만 답해 주세요. 답변을 반영해 초안을 다시 맞춰 씁니다.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {newJobFollowupFields.includes("capacity") && (
+                      <TextField
+                        label="모집 인원"
+                        required
+                        type="number"
+                        min={1}
+                        value={newJobCapacity}
+                        disabled={isGenerating}
+                        onChange={(e) => {
+                          setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1));
+                          if (newJobValidationIssue?.field === "capacity") setNewJobValidationIssue(null);
+                        }}
+                        placeholder="예: 3"
+                      />
+                    )}
+                    {newJobFollowupFields.includes("pickupAddress") && (
+                      <TextField
+                        label="상차지·집결지"
+                        required
+                        value={newJobPickupAddress}
+                        disabled={isGenerating}
+                        onChange={(e) => {
+                          setNewJobPickupAddress(e.target.value);
+                          if (newJobValidationIssue?.field === "pickupAddress") setNewJobValidationIssue(null);
+                        }}
+                        placeholder="예: 성수동 물류센터 3번 게이트"
+                      />
+                    )}
+                    {newJobFollowupFields.includes("dropoffAddress") && (
+                      <TextField
+                        label="배송 권역·마지막 경유지"
+                        required
+                        value={newJobDropoffAddress}
+                        disabled={isGenerating}
+                        onChange={(e) => {
+                          setNewJobDropoffAddress(e.target.value);
+                          if (newJobValidationIssue?.field === "dropoffAddress") setNewJobValidationIssue(null);
+                        }}
+                        placeholder="예: 하남 미사 일대 · 종료 미사역"
+                      />
+                    )}
+                    {newJobFollowupFields.includes("payInfo") && (
+                      <TextareaField
+                        label="급여·정산 안내"
+                        required
+                        value={newJobPayInfo}
+                        disabled={isGenerating}
+                        onChange={(e) => {
+                          setNewJobPayInfo(e.target.value);
+                          if (newJobValidationIssue?.field === "payInfo") setNewJobValidationIssue(null);
+                        }}
+                        rows={2}
+                        placeholder="예: 건당 3,500원 · 매주 금요일 정산 · 부가세 포함"
+                        inputClassName="min-h-[84px] resize-none"
+                      />
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p role="status" className="text-[12px] font-semibold text-warning-strong">
+                      {newJobMissingRequiredLabels.length > 0
+                        ? `남은 항목: ${newJobMissingRequiredLabels.join(" · ")}`
+                        : "필수 답변을 모두 입력했어요."}
+                    </p>
+                    <Button
+                      variant="primary"
+                      disabled={isGenerating || newJobMissingRequiredLabels.length > 0}
+                      isLoading={isGenerating}
+                      onClick={() => void handleGenerateJD()}
+                    >
+                      {!isGenerating && <Sparkles size={15} className="text-brand-yellow" />}
+                      답변 반영해 초안 업데이트
+                    </Button>
+                  </div>
+                </section>
+              )}
+
+              {channelDrafts && aiSource === null && newJobMissingRequiredLabels.length > 0 && (
                 <div role="status" className="rounded-2xl border border-warning/35 bg-warning-soft px-4 py-3.5 xl:col-start-1">
                   <p className="text-[13px] font-extrabold text-warning-strong">
-                    메모에서 찾지 못한 필수 정보: {newJobMissingRequiredLabels.join(" · ")}
+                    등록 전에 확인할 필수 정보: {newJobMissingRequiredLabels.join(" · ")}
                   </p>
                   <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                     아래 공고 설정에서 이 항목만 확인하면 등록할 수 있어요.
@@ -4069,6 +4204,7 @@ export function Jobs() {
                     type="number"
                     min={1}
                     value={newJobCapacity}
+                    disabled={isGenerating}
                     placeholder="예: 3"
                     onChange={(e) => {
                       setNewJobCapacity(e.target.value === "" ? "" : Math.max(1, Number(e.target.value) || 1));
@@ -4135,6 +4271,7 @@ export function Jobs() {
                     label="급여·정산 안내"
                     required
                     value={newJobPayInfo}
+                    disabled={isGenerating}
                     onChange={(e) => {
                       setNewJobPayInfo(e.target.value);
                       if (newJobValidationIssue?.field === "payInfo") setNewJobValidationIssue(null);
