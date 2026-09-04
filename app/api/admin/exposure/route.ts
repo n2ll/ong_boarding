@@ -16,6 +16,7 @@ import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizePhone } from "@/lib/ongmanaging";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 import { selectJobAudiencePreview } from "@/lib/admin/job-audience-preview";
+import { suggestJobAudienceRule } from "@/lib/admin/job-audience-suggestion";
 
 export const dynamic = "force-dynamic";
 
@@ -240,6 +241,24 @@ export async function POST(req: NextRequest) {
       blacklistedPhones,
       guardedPhones,
     });
+    const draftJob = body?.draft_job && typeof body.draft_job === "object"
+      ? body.draft_job as Record<string, unknown>
+      : null;
+    const draftCapacity = Number(draftJob?.capacity);
+    const suggestedAudience = draftJob
+      ? suggestJobAudienceRule({
+          applicants,
+          job,
+          vehicleRequired,
+          slotKeys: Array.isArray(draftJob.slot_keys)
+            ? draftJob.slot_keys.filter((value): value is string => typeof value === "string")
+            : [],
+          capacity: Number.isSafeInteger(draftCapacity) && draftCapacity > 0 ? draftCapacity : null,
+          nowMs: now,
+          blacklistedPhones,
+          guardedPhones,
+        })
+      : null;
     return NextResponse.json({
       rule, // 정규화된 규칙(무효 키 제거 결과)을 되돌려줘 UI가 실제 저장될 값을 보여줄 수 있게
       count: matched.length,
@@ -248,6 +267,13 @@ export async function POST(req: NextRequest) {
       visible_count: audience.visibleCount,
       sms_eligible_count: audience.smsEligibleCount,
       recommendations: audience.recommendations,
+      suggested_audience: suggestedAudience ? {
+        rule: suggestedAudience.rule,
+        reasons: suggestedAudience.reasons,
+        visible_count: suggestedAudience.visibleCount,
+        sms_eligible_count: suggestedAudience.smsEligibleCount,
+        contact_target: suggestedAudience.contactTarget,
+      } : null,
       snapshot_at: new Date(now).toISOString(),
       geocode_precision: geocodePrecision,
       // 반경 규칙인데 공고 좌표가 없거나 공고를 못 받았다 → 화면이 '0명'이 아니라 '계산 불가'로 보여야 한다.
