@@ -22,3 +22,15 @@ test("the global AI mode storage key is reserved from generic prompt editing", a
   assert.equal(isReserved?.("conversation", "agent_kill_switch"), false);
   assert.equal(isReserved?.("system_message", "onboarding_reminder"), false);
 });
+
+test("the admin task reset marker cannot be edited as an AI prompt", async () => {
+  const reservedModule = await loadReservedModule();
+  const isReserved = reservedModule.isReservedPromptExampleKey as
+    | ((category: unknown, title: unknown) => boolean)
+    | undefined;
+
+  assert.equal(typeof isReserved, "function");
+  assert.equal(isReserved?.("system_message", "__admin_task_queue_reset__"), true);
+  assert.equal(isReserved?.("system_message", " __admin_task_queue_reset__ "), true);
+  assert.equal(isReserved?.("conversation", "__admin_task_queue_reset__"), false);
+});
