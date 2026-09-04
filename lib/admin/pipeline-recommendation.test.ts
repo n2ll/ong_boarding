@@ -48,6 +48,11 @@ type PipelineRecommendationModule = {
     rankedApplicantIds: readonly string[],
     enabled: boolean,
   ) => T[];
+  pipelineRecommendedSelectionIds?: <T extends { id: string }>(
+    cards: readonly T[],
+    rankedApplicantIds: readonly string[],
+    limit?: number,
+  ) => string[];
 };
 
 async function loadModule(): Promise<PipelineRecommendationModule> {
@@ -154,6 +159,24 @@ test("recommendation priority reorders rows without hiding unranked people", asy
     ["a", "b", "c", "d"],
   );
   assert.deepEqual(rows.map((row) => row.id), ["a", "b", "c", "d"], "source order stays untouched");
+});
+
+test("recommended selection only includes ranked people still visible to the manager", async () => {
+  const { pipelineRecommendedSelectionIds } = await loadModule();
+  assert.equal(typeof pipelineRecommendedSelectionIds, "function");
+
+  const visible = [{ id: "c" }, { id: "a" }, { id: "d" }];
+  assert.deepEqual(
+    pipelineRecommendedSelectionIds!(visible, ["a", "b", "c"], 2),
+    ["a", "c"],
+  );
+  assert.deepEqual(
+    pipelineRecommendedSelectionIds!(visible, ["a"], 50),
+    ["a"],
+    "selection must not spill into unranked rows",
+  );
+  assert.deepEqual(pipelineRecommendedSelectionIds!(visible, ["a", "c"], 0), ["a"]);
+  assert.deepEqual(pipelineRecommendedSelectionIds!(visible, [], 50), []);
 });
 
 test("recommendation limit affects highlighted ranks but keeps the scored pool count", async () => {

@@ -185,7 +185,7 @@ test("bare close and announcement modals expose one aligned accessible heading",
   const closeStart = jobsSource.indexOf("{/* 공고 마감 확인 모달");
   const closeEnd = jobsSource.indexOf("{/* 등록 완료 후속 단계", closeStart);
   const closeModal = jobsSource.slice(closeStart, closeEnd);
-  const announceStart = jobsSource.indexOf("{/* 새 공고 안내 확인 모달");
+  const announceStart = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달");
   const announceEnd = jobsSource.indexOf("{/* 공고별 지원자 보드", announceStart);
   const announceModal = jobsSource.slice(announceStart, announceEnd);
 
