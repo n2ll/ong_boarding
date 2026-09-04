@@ -137,8 +137,14 @@ export interface MultiPlatformPosting {
   fields: {
     company: string;
     location: string;
+    pickupAddress: string;
+    dropoffAddress: string;
     pay: string;
     schedule: string;
+    capacity: number | null;
+    vehicleRequired: boolean | null;
+    workPeriod: "" | "하루" | "단기" | "정기";
+    slotKeys: ("평일오전" | "평일오후" | "주말오전" | "주말오후")[];
     role: string;
     tags: string[];
   };
@@ -154,6 +160,8 @@ const MULTI_PLATFORM_SYSTEM_PROMPT = `너는 시니어(50~70대) 긱워커 채�
 - 한국어. 시니어 지원자가 읽기 쉽게 쉬운 단어, 짧은 문장.
 - 메모에 없는 정보를 멋대로 지어내지 마라(회사명/연락처/급여/조건 X). 비면 자연스럽게 생략하라.
 - 급여/근무지/시간/업무는 메모에서 최대한 뽑아내라.
+- 상차지·집결지와 배송 권역·마지막 경유지를 구분해 구조화하라. 한쪽만 확인되면 다른 쪽은 빈 문자열로 둬라.
+- 모집 인원·차량 필요 여부·근무 기간·시간대도 메모에 명시된 경우만 구조화하라. 추측할 수 없으면 각각 null·빈 값으로 둬라.
 
 ## 사용처별 형식
 1) albamon (구인광고 원문): 정형화된 채용 공고. 본문은 반드시 [모집부문] / [근무조건] / [자격요건] / [우대사항] / [근무지] 섹션 라벨을 대괄호로 쓰고 각 항목은 '- ' 불릿. 정중하고 사무적인 톤. 특정 외부 플랫폼을 전제로 쓰지 마라.
@@ -194,8 +202,18 @@ export async function generateMultiPlatformPosting(
               properties: {
                 company: { type: "string", description: "회사/매장명. 없으면 빈 문자열." },
                 location: { type: "string", description: "근무지 (예: '서울 성동구 성수동')." },
+                pickupAddress: { type: "string", description: "상차지 또는 집결지. 확인되지 않으면 빈 문자열." },
+                dropoffAddress: { type: "string", description: "배송 권역 또는 마지막 경유지. 확인되지 않으면 빈 문자열." },
                 pay: { type: "string", description: "급여 (예: '시급 11,000원')." },
                 schedule: { type: "string", description: "근무 시간/요일 (예: '주 3일 오전 08:00~12:00')." },
+                capacity: { type: ["integer", "null"], minimum: 1, description: "모집 인원. 확인되지 않으면 null." },
+                vehicleRequired: { type: ["boolean", "null"], description: "차량이 필수인지 여부. 확인되지 않으면 null." },
+                workPeriod: { type: "string", enum: ["", "하루", "단기", "정기"], description: "근무 기간 분류. 확인되지 않으면 빈 문자열." },
+                slotKeys: {
+                  type: "array",
+                  items: { type: "string", enum: ["평일오전", "평일오후", "주말오전", "주말오후"] },
+                  description: "명시된 요일과 시간에 해당하는 시간대 키. 확인되지 않으면 빈 배열.",
+                },
                 role: { type: "string", description: "직무 한 줄 (예: '매장 청소 및 정리')." },
                 tags: {
                   type: "array",
@@ -203,7 +221,7 @@ export async function generateMultiPlatformPosting(
                   description: "노출용 짧은 태그 3~5개 (예: ['시니어 우대','4대보험','당일지원']).",
                 },
               },
-              required: ["company", "location", "pay", "schedule", "role", "tags"],
+              required: ["company", "location", "pickupAddress", "dropoffAddress", "pay", "schedule", "capacity", "vehicleRequired", "workPeriod", "slotKeys", "role", "tags"],
             },
             albamon: {
               type: "object",

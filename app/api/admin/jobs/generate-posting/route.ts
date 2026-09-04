@@ -150,7 +150,20 @@ function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPo
 
   return {
     title,
-    fields: { company, location, pay, schedule, role, tags },
+    fields: {
+      company,
+      location,
+      pickupAddress: f.pickupAddress,
+      dropoffAddress: f.dropoffAddress,
+      pay,
+      schedule,
+      capacity: f.capacity,
+      vehicleRequired: f.vehicleRequired,
+      workPeriod: f.workPeriod,
+      slotKeys: f.slotKeys,
+      role,
+      tags,
+    },
     albamon,
     sms,
   };
@@ -159,8 +172,14 @@ function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPo
 interface ParsedRough {
   company: string;
   location: string;
+  pickupAddress: string;
+  dropoffAddress: string;
   pay: string;
   schedule: string;
+  capacity: number | null;
+  vehicleRequired: boolean | null;
+  workPeriod: "" | "하루" | "단기" | "정기";
+  slotKeys: ("평일오전" | "평일오후" | "주말오전" | "주말오후")[];
   role: string;
   tags: string[];
 }
@@ -188,6 +207,13 @@ function parseRough(text: string): ParsedRough {
     t.match(/([가-힣]{2,}동)\b/);
   if (locMatch) location = locMatch[0].trim();
 
+  const labeledValue = (labels: string) => {
+    const match = text.match(new RegExp(`(?:${labels})\\s*[:：]?\\s*([^\\n,;]+)`, "i"));
+    return match?.[1]?.trim() ?? "";
+  };
+  const pickupAddress = labeledValue("상차지|집결지|출발지");
+  const dropoffAddress = labeledValue("배송\\s*권역|배송지|도착지|종료\\s*지점|마지막\\s*경유지");
+
   // 회사/매장: "스타벅스 성수점", "비마트 강남점" 같이 'XX점' 앞 단어
   let company = "";
   const compMatch = t.match(/([가-힣A-Za-z]+)\s*([가-힣]+점)/);
@@ -205,6 +231,29 @@ function parseRough(text: string): ParsedRough {
   const timeRange = t.match(/\d{1,2}\s*[:시]\s*\d{0,2}\s*[~-]\s*\d{1,2}\s*[:시]\s*\d{0,2}/);
   if (timeRange) schedParts.push(timeRange[0].replace(/\s+/g, ""));
   const schedule = schedParts.join(" ");
+  const capacityMatch = t.match(/(?:모집\s*)?(\d+)\s*명/);
+  const capacity = capacityMatch ? Number(capacityMatch[1]) : null;
+  const vehicleRequired = /차량\s*(?:불필요|없어도|없이)|도보\s*가능/.test(t)
+    ? false
+    : /(?:자차|차량|오토바이|이륜차|승용차|승합차|\d+톤)\s*(?:필수|필요|지참)/.test(t)
+      ? true
+      : null;
+  const workPeriod: ParsedRough["workPeriod"] = /당일|하루/.test(t)
+    ? "하루"
+    : /상시|정기|장기/.test(t)
+      ? "정기"
+      : /단기|며칠|몇\s*주/.test(t)
+        ? "단기"
+        : "";
+  const weekday = /평일|월|화|수|목|금/.test(t);
+  const weekend = /주말|토|일/.test(t);
+  const morning = /오전|새벽/.test(t);
+  const afternoon = /오후|저녁|야간/.test(t);
+  const slotKeys: ParsedRough["slotKeys"] = [];
+  if (weekday && morning) slotKeys.push("평일오전");
+  if (weekday && afternoon) slotKeys.push("평일오후");
+  if (weekend && morning) slotKeys.push("주말오전");
+  if (weekend && afternoon) slotKeys.push("주말오후");
 
   // 직무: "청소", "배달", "배송", "정리", "관리", "주방", "서빙" 등 키워드
   let role = "";
@@ -220,7 +269,20 @@ function parseRough(text: string): ParsedRough {
   if (/식사|중식|식대/.test(t)) tags.push("식사 제공");
   if (/주차/.test(t)) tags.push("주차 가능");
 
-  return { company, location, pay, schedule, role, tags };
+  return {
+    company,
+    location,
+    pickupAddress,
+    dropoffAddress,
+    pay,
+    schedule,
+    capacity,
+    vehicleRequired,
+    workPeriod,
+    slotKeys,
+    role,
+    tags,
+  };
 }
 
 function shortLoc(loc: string): string {

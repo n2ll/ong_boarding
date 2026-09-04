@@ -45,12 +45,35 @@ test("multi-channel generation asks Claude only for the supported job-board and 
       Object.keys(request.tools[0].input_schema.properties),
       ["title", "fields", "albamon", "sms"],
     );
+    const fieldsSchema = request.tools[0].input_schema.properties.fields as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    assert.deepEqual(
+      Object.keys(fieldsSchema.properties),
+      [
+        "company",
+        "location",
+        "pickupAddress",
+        "dropoffAddress",
+        "pay",
+        "schedule",
+        "capacity",
+        "vehicleRequired",
+        "workPeriod",
+        "slotKeys",
+        "role",
+        "tags",
+      ],
+    );
+    assert.deepEqual(fieldsSchema.required, Object.keys(fieldsSchema.properties));
     assert.deepEqual(request.tools[0].input_schema.required, ["title", "fields", "albamon", "sms"]);
     assert.doesNotMatch(request.system, /당근|danggeun/i);
     assert.doesNotMatch(request.tools[0].description, /당근|danggeun/i);
     assert.match(request.system, /#\{이름\}/);
     assert.match(request.system, /#\{맞춤링크\}/);
     assert.match(request.system, /배정·근무 확정이 아니며/);
+    assert.match(request.system, /상차지·집결지와 배송 권역·마지막 경유지를 구분/);
     assert.doesNotMatch(request.system, /'지원'이라고 답장/);
   } finally {
     if (previousKey === undefined) delete process.env.CLAUDE_API;

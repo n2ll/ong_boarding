@@ -95,6 +95,34 @@ interface RosterResp {
   counts: { effective: number; by_rule: number; manual_include: number; excluded: number };
 }
 
+interface DraftJobAudience {
+  pickupAddress: string;
+  dropoffAddress: string;
+  vehicleRequired: boolean;
+  distanceBasis?: "pickup" | "nearest";
+}
+
+interface AudienceRecommendation {
+  applicant_id: number;
+  name: string | null;
+  availability?: string | null;
+  own_vehicle?: string | null;
+  distance_km?: number | null;
+  reasons?: string[];
+  sms_eligible?: boolean;
+}
+
+interface ExposurePreview {
+  count: number;
+  total: number;
+  sample: string[];
+  visible_count?: number;
+  sms_eligible_count?: number;
+  recommendations?: AudienceRecommendation[];
+  radius_unavailable?: boolean;
+  geo_unknown?: number;
+}
+
 const VIA_LABEL: Record<RosterPerson["via"], string> = {
   rule: "규칙",
   include: "수동",
@@ -122,15 +150,19 @@ export function ExposureEditor({
   onChange,
   jobId,
   distanceBasis,
+  draftJob,
 }: {
   value: ExposureDraft;
   onChange: (next: ExposureDraft) => void;
   jobId?: number;
   /** 부모 폼에서 편집 중인 거리 기준 — 미리보기가 저장된 값 대신 이걸로 계산한다(수정 모달 전용). */
   distanceBasis?: string;
+  /** 신규 공고 저장 전 실제 노출·문자 가능 인원을 계산할 현재 폼 값. */
+  draftJob?: DraftJobAudience;
 }) {
   const confirm = useConfirm();
   const targeted = value.exposure === "targeted";
+  const canUseRadius = Boolean(jobId || draftJob);
 
   // 규칙 빌더 옵션 — 실데이터 distinct 값(지정 노출을 켰을 때만 로드)
   const { data: options } = useSWR<{
@@ -146,30 +178,26 @@ export function ExposureEditor({
   );
 
   // "규칙 해당 N명" 미리보기 — draft 규칙 변경을 500ms 디바운스해 POST
-  const [preview, setPreview] = useState<{
-    count: number;
-    total: number;
-    sample: string[];
-    radius_unavailable?: boolean;
-    geo_unknown?: number;
-  } | null>(null);
+  const [preview, setPreview] = useState<ExposurePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   // 미리보기 조회 실패를 '규칙 비어 있음'과 구분(D12) — 에러를 빈 규칙으로 위장하지 않는다.
   const [previewError, setPreviewError] = useState(false);
   const ruleJson = useMemo(() => JSON.stringify(draftToRule(value.rule)), [value.rule]);
+  const draftJobJson = useMemo(() => JSON.stringify(draftJob ?? null), [draftJob]);
+  const hasDraftJob = draftJobJson !== "null";
   const previewSeq = useRef(0);
   useEffect(() => {
     // 매 실행마다 seq 증가 — 규칙을 비우거나 targeted를 끄는 early-return 경로도
     // in-flight 응답을 무효화해야 stale 카운트·스피너 고착이 없다.
     const seq = ++previewSeq.current;
-    if (!targeted) {
+    if (!targeted && !hasDraftJob) {
       setPreview(null);
       setPreviewLoading(false);
       setPreviewError(false);
       return;
     }
     const rule = JSON.parse(ruleJson);
-    if (!rule) {
+    if (targeted && !rule && !hasDraftJob) {
       setPreview(null);
       setPreviewLoading(false);
       setPreviewError(false);
@@ -177,27 +205,44 @@ export function ExposureEditor({
     }
     setPreviewLoading(true);
     setPreviewError(false);
+    const controller = new AbortController();
     const timer = setTimeout(() => {
+      const draft = JSON.parse(draftJobJson) as DraftJobAudience | null;
       fetch("/api/admin/exposure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         // 반경 축은 공고 기준점이 필요하다 — 저장된 공고면 그 공고로 계산한다(없으면 '계산 불가'로 표시).
-        body: JSON.stringify({ rule, job_id: jobId ?? null, distance_basis: distanceBasis ?? null }),
+        body: JSON.stringify({
+          exposure: value.exposure,
+          rule,
+          job_id: jobId ?? null,
+          distance_basis: distanceBasis ?? draft?.distanceBasis ?? null,
+          draft_job: draft ? {
+            pickup_address: draft.pickupAddress,
+            dropoff_address: draft.dropoffAddress,
+            vehicle_required: draft.vehicleRequired,
+            distance_basis: draft.distanceBasis ?? "nearest",
+          } : null,
+        }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((json) => {
           if (previewSeq.current === seq) { setPreview(json); setPreviewError(false); }
         })
-        .catch(() => {
+        .catch((error) => {
           // 실패는 '규칙 비어 있음'이 아니라 '조회 오류'로 구분 표시(D12).
-          if (previewSeq.current === seq) { setPreview(null); setPreviewError(true); }
+          if (error?.name !== "AbortError" && previewSeq.current === seq) { setPreview(null); setPreviewError(true); }
         })
         .finally(() => {
           if (previewSeq.current === seq) setPreviewLoading(false);
         });
     }, 500);
-    return () => clearTimeout(timer);
-  }, [targeted, ruleJson, jobId, distanceBasis]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [targeted, ruleJson, jobId, distanceBasis, draftJobJson, hasDraftJob, value.exposure]);
 
   // 유효 노출 명단(수정 모달 전용) — 서버에 '저장된' exposure/rule 기준
   const {
@@ -415,10 +460,14 @@ export function ExposureEditor({
             <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
               집결지 거리{" "}
               <span className="font-semibold text-muted-foreground">
-                {jobId ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요" : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
+                {jobId
+                  ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요"
+                  : draftJob
+                    ? "— 지금 입력한 집결지·경유지로 저장 전에 계산해요"
+                    : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
               </span>
             </div>
-            {jobId ? (
+            {canUseRadius ? (
               <>
                 <div className="flex flex-wrap gap-1.5 items-center">
                   {[5, 10, 15, 20, 30].map((km) => (
@@ -460,7 +509,7 @@ export function ExposureEditor({
               </>
             ) : (
               <p className="text-[11px] text-muted-foreground">
-                등록을 마치면 수정 모달에서 반경을 고를 수 있어요. 지금은 지역·시군구로 좁혀 주세요.
+                집결지나 경유지를 입력하면 저장 전에도 반경을 고를 수 있어요. 지금은 지역·시군구로 좁혀 주세요.
               </p>
             )}
           </div>
@@ -515,31 +564,86 @@ export function ExposureEditor({
             </label>
           </div>
 
-          <p className="text-[11px] text-muted-foreground leading-snug border-t border-muted pt-2">
-            여기 숫자는 <b className="text-muted-foreground">노출 기준 인재풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
-            문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
-          </p>
-          <div className="text-[12px] font-bold pt-1">
-            {previewLoading ? (
-              <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
-            ) : previewError ? (
-              <span className="text-error-strong">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
-            ) : preview?.radius_unavailable ? (
-              // 반경 규칙인데 기준점이 없다 → '0명'으로 보여주면 조건이 까다로운 줄 오해한다.
-              <span className="text-error-strong">
-                거리를 계산할 수 없어 해당 인원을 셀 수 없어요 — 이 공고에 집결지 좌표가 없습니다.
-              </span>
-            ) : preview ? (
-              <span className="text-info-strong">
-                규칙 해당 {preview.count}명 <span className="text-muted-foreground font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>
-              </span>
-            ) : !jobId ? (
-              // 등록 시점(jobId 없음)엔 수동 명단이 없어 빈 규칙=노출 0명 → 강한 경고(D11).
-              <span className="text-warning">⚠️ 지정 노출인데 규칙이 비어 있어요 — 등록 후 파이프라인에서 노출 대상을 추가하지 않으면 아무에게도 안 보입니다.</span>
-            ) : (
-              <span className="text-muted-foreground">규칙이 비어 있어요 — 수동 지정 대상에게만 노출됩니다.</span>
-            )}
+          {!draftJob && (
+            <>
+              <p className="text-[11px] text-muted-foreground leading-snug border-t border-muted pt-2">
+                여기 숫자는 <b className="text-muted-foreground">노출 기준 인재풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
+                문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
+              </p>
+              <div className="text-[12px] font-bold pt-1">
+                {previewLoading ? (
+                  <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
+                ) : previewError ? (
+                  <span className="text-error-strong">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
+                ) : preview?.radius_unavailable ? (
+                  <span className="text-error-strong">
+                    거리를 계산할 수 없어 해당 인원을 셀 수 없어요 — 이 공고에 집결지 좌표가 없습니다.
+                  </span>
+                ) : preview ? (
+                  <span className="text-info-strong">
+                    규칙 해당 {preview.count}명 <span className="text-muted-foreground font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>
+                  </span>
+                ) : !jobId ? (
+                  <span className="text-warning">⚠️ 지정 노출인데 규칙이 비어 있어요 — 등록 후 파이프라인에서 노출 대상을 추가하지 않으면 아무에게도 안 보입니다.</span>
+                ) : (
+                  <span className="text-muted-foreground">규칙이 비어 있어요 — 수동 지정 대상에게만 노출됩니다.</span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {draftJob && (
+        <div className="rounded-2xl border border-info/25 bg-info-soft/35 p-3.5" aria-live="polite">
+          <div className="flex items-center gap-1.5 text-[13px] font-extrabold text-foreground">
+            <Users size={15} aria-hidden="true" /> 추천 노출 대상
           </div>
+          {previewLoading ? (
+            <div className="mt-3 flex items-center gap-2 text-[12px] font-semibold text-muted-foreground">
+              <Loader2 size={14} className="animate-spin" /> 현재 조건으로 인원을 계산하고 있어요…
+            </div>
+          ) : previewError ? (
+            <p className="mt-2 text-[12px] font-semibold text-error-strong">대상 계산을 불러오지 못했어요. 조건을 바꾸면 다시 시도합니다.</p>
+          ) : preview?.radius_unavailable ? (
+            <p className="mt-2 text-[12px] font-semibold text-error-strong">입력한 위치의 거리를 계산할 수 없어요. 주소를 더 자세히 적거나 반경 조건을 해제해 주세요.</p>
+          ) : preview ? (
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-info/20 bg-white p-3">
+                  <div className="text-[11px] font-bold text-muted-foreground">맞춤 링크 노출</div>
+                  <div className="mt-0.5 text-[20px] font-extrabold text-foreground">{preview.visible_count ?? preview.count}명</div>
+                </div>
+                <div className="rounded-xl border border-info/20 bg-white p-3">
+                  <div className="text-[11px] font-bold text-muted-foreground">현재 문자 안내 가능</div>
+                  <div className="mt-0.5 text-[20px] font-extrabold text-foreground">{preview.sms_eligible_count ?? 0}명</div>
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                동의·수신거부·연락처·중복을 반영한 현재 시점의 예상치예요. 등록 순간과 실제 발송 전에도 다시 확인합니다.
+              </p>
+              {(preview.recommendations?.length ?? 0) > 0 && (
+                <div className="mt-3 border-t border-info/15 pt-3">
+                  <div className="mb-1.5 text-[11px] font-bold text-muted-foreground">조건이 잘 맞는 순서</div>
+                  <div className="space-y-1.5">
+                    {preview.recommendations?.map((person) => (
+                      <div key={person.applicant_id} className="flex items-start gap-2 rounded-xl bg-white px-3 py-2 text-[12px]">
+                        <span className="min-w-0 flex-1">
+                          <b className="text-foreground">{person.name ?? `#${person.applicant_id}`}</b>
+                          {person.reasons?.length ? <span className="ml-1 text-muted-foreground">· {person.reasons.join(" · ")}</span> : null}
+                        </span>
+                        {typeof person.distance_km === "number" && (
+                          <span className="shrink-0 font-bold text-info-strong">{person.distance_km.toFixed(1)}km</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-2 text-[12px] text-muted-foreground">조건을 입력하면 예상 인원을 보여드려요.</p>
+          )}
         </div>
       )}
 

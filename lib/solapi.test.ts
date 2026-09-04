@@ -5,6 +5,41 @@ const { sendSms, sendAlimtalk, sendNotification, findSmsByClientRequestId } = aw
   new URL("./solapi.ts", import.meta.url).href
 ) as typeof import("./solapi");
 
+test("Vercel Preview never calls the SMS provider", async () => {
+  const previous = {
+    dryRun: process.env.SMS_DRY_RUN,
+    vercelEnv: process.env.VERCEL_ENV,
+    apiKey: process.env.SOLAPI_API_KEY,
+    apiSecret: process.env.SOLAPI_API_SECRET,
+  };
+  const originalFetch = globalThis.fetch;
+  process.env.SMS_DRY_RUN = "0";
+  process.env.VERCEL_ENV = "preview";
+  process.env.SOLAPI_API_KEY = "test-key";
+  process.env.SOLAPI_API_SECRET = "test-secret";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    groupInfo: { groupId: "provider-called", count: { registeredFailed: 0 } },
+    failedMessageList: [],
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+
+  try {
+    assert.deepEqual(await sendSms("01012345678", "preview safety check"), {
+      success: true,
+      messageId: "dry-run",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.dryRun === undefined) delete process.env.SMS_DRY_RUN;
+    else process.env.SMS_DRY_RUN = previous.dryRun;
+    if (previous.vercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = previous.vercelEnv;
+    if (previous.apiKey === undefined) delete process.env.SOLAPI_API_KEY;
+    else process.env.SOLAPI_API_KEY = previous.apiKey;
+    if (previous.apiSecret === undefined) delete process.env.SOLAPI_API_SECRET;
+    else process.env.SOLAPI_API_SECRET = previous.apiSecret;
+  }
+});
+
 async function withLiveSmsEnvironment<T>(run: () => Promise<T>): Promise<T> {
   const previous = {
     dryRun: process.env.SMS_DRY_RUN,

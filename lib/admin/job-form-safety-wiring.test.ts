@@ -128,6 +128,27 @@ test("create and edit submit paths use the same required field validator", () =>
   assert.match(jobsSource, /setEditOpenSections\(\(sections\) => \(\{[\s\S]*work: true/);
 });
 
+test("job create and edit use the shared switch for vehicle requirements", () => {
+  assert.match(jobsSource, /import \{ Switch \} from "\.\/ui\/switch"/);
+
+  const registerModalStart = jobsSource.indexOf("{/* AI JD Generator Modal */}");
+  const editModalStart = jobsSource.indexOf("{/* 공고 수정 모달", registerModalStart);
+  const registerModal = jobsSource.slice(registerModalStart, editModalStart);
+  const editModalEnd = jobsSource.indexOf("{/* 공고 마감 확인 모달", editModalStart);
+  const editModal = jobsSource.slice(editModalStart, editModalEnd);
+
+  assert.match(
+    registerModal,
+    /<Switch[\s\S]*?checked=\{newJobVehicleRequired\}[\s\S]*?onCheckedChange=\{\(checked\) => \{[\s\S]*?newJobVehicleManuallySetRef\.current = true;[\s\S]*?setNewJobVehicleRequired\(checked\);[\s\S]*?\}\}[\s\S]*?aria-label="차량\(이륜\/사륜\) 필요"[\s\S]*?\/>/,
+  );
+  assert.match(
+    editModal,
+    /<Switch[\s\S]*?checked=\{editForm\.vehicleRequired\}[\s\S]*?onCheckedChange=\{\(checked\) => setEditForm\(\{ \.\.\.editForm, vehicleRequired: checked \}\)\}[\s\S]*?aria-label="차량\(이륜\/사륜\) 필요"[\s\S]*?\/>/,
+  );
+  assert.doesNotMatch(registerModal, /<button[^>]*role="switch"/);
+  assert.doesNotMatch(editModal, /<button[^>]*role="switch"/);
+});
+
 test("the shared modal can focus a task-specific first field instead of its close button", () => {
   const modalSource = readFileSync(
     new URL("../../components/ui/modal.tsx", import.meta.url),
@@ -135,7 +156,7 @@ test("the shared modal can focus a task-specific first field instead of its clos
   );
   assert.match(modalSource, /initialFocusRef\?: React\.RefObject<HTMLElement>/);
   assert.match(modalSource, /onOpenAutoFocus/);
-  assert.match(jobsSource, /initialFocusRef=\{newJobClientRef\}/);
+  assert.match(jobsSource, /initialFocusRef=\{aiPromptRef\}/);
   assert.match(jobsSource, /initialFocusRef=\{editTitleRef\}/);
 });
 

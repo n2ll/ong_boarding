@@ -12,6 +12,10 @@ import { createServiceClient } from "@/lib/supabase";
 import { fetchApplicantsForExposure, matchesRule, normalizeRule } from "@/lib/exposure";
 import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "@/lib/admin/types";
 import { EXPOSURE_JOB_GEO_COLUMNS, jobSupportsRadius, type GeoJob } from "@/lib/geo";
+import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
+import { normalizePhone } from "@/lib/ongmanaging";
+import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+import { selectJobAudiencePreview } from "@/lib/admin/job-audience-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -95,21 +99,123 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const rule = normalizeRule(body?.rule);
+  const exposure = body?.exposure === "all" ? "all" : "targeted";
   const supabase = createServiceClient();
   try {
-    const applicants = await fetchApplicantsForExposure(supabase);
     const now = Date.now();
+    const tenMinutesAgo = new Date(now - 10 * 60 * 1000).toISOString();
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [applicants, blacklistResult, guardResult, recentMessages, recentEvents] = await Promise.all([
+      fetchApplicantsForExposure(supabase),
+      supabase.from("recruitment_blacklist").select("phone"),
+      supabase
+        .from("bulk_message_phone_guards")
+        .select("applicant_phone")
+        .in("scope", ["bulk_10m", "job_notice_24h", "new_job_7d"])
+        .gt("expires_at", new Date(now).toISOString()),
+      fetchAllPostgrestRows(async (from, to) => {
+        const result = await supabase
+          .from("messages")
+          .select("id, applicant_id")
+          .eq("direction", "outbound")
+          .eq("sent_by", "system-bulk")
+          .gt("created_at", tenMinutesAgo)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return {
+          data: result.data as Array<{ id: number; applicant_id: number | null }> | null,
+          error: result.error,
+        };
+      }, "공고 등록 미리보기 최근 문자"),
+      fetchAllPostgrestRows(async (from, to) => {
+        const result = await supabase
+          .from("pool_events")
+          .select("id, applicant_id, meta, created_at")
+          .eq("event_type", "ping_sent")
+          .gt("created_at", sevenDaysAgo)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return {
+          data: result.data as Array<{
+            id: number;
+            applicant_id: number;
+            meta: unknown;
+            created_at: string;
+          }> | null,
+          error: result.error,
+        };
+      }, "공고 등록 미리보기 최근 공고 안내"),
+    ]);
+    if (blacklistResult.error) throw new Error(`[exposure preview] blacklist load failed: ${blacklistResult.error.message}`);
+    if (guardResult.error) throw new Error(`[exposure preview] phone guard load failed: ${guardResult.error.message}`);
+
+    const phoneByApplicantId = new Map(
+      applicants.map((applicant) => [applicant.id, normalizePhone(applicant.phone ?? "")]),
+    );
+    const guardedPhones = new Set(
+      (guardResult.data ?? [])
+        .map((row) => normalizePhone(String(row.applicant_phone ?? "")))
+        .filter(Boolean),
+    );
+    for (const message of recentMessages) {
+      const phone = typeof message.applicant_id === "number"
+        ? phoneByApplicantId.get(message.applicant_id)
+        : null;
+      if (phone) guardedPhones.add(phone);
+    }
+    const oneDayAgoMs = now - 24 * 60 * 60 * 1000;
+    for (const event of recentEvents) {
+      const purpose = (event.meta as { purpose?: unknown } | null)?.purpose;
+      const createdAtMs = new Date(event.created_at).getTime();
+      const blocksNewJob = purpose === "new_job"
+        || (
+          Number.isFinite(createdAtMs)
+          && createdAtMs > oneDayAgoMs
+          && (purpose === "job_closed" || purpose === "campaign")
+        );
+      if (!blocksNewJob) continue;
+      const phone = phoneByApplicantId.get(event.applicant_id);
+      if (phone) guardedPhones.add(phone);
+    }
+    const blacklistedPhones = new Set(
+      (blacklistResult.data ?? [])
+        .map((row) => normalizePhone(String(row.phone ?? "")))
+        .filter(Boolean),
+    );
+
     // 반경 축은 **공고 기준점**이 필요하다 — 미리보기가 공고를 받으면 그 공고로 재고,
     // 못 받으면 그 축을 셀 수 없다는 사실을 그대로 알린다(0명으로 위장하지 않는다).
     const jobId = Number(body?.job_id);
     let job: GeoJob | null = null;
+    let vehicleRequired = body?.draft_job?.vehicle_required === true;
+    let geocodePrecision: { pickup: string | null; dropoff: string | null } | null = null;
     if (Number.isFinite(jobId) && jobId > 0) {
-      const { data: jobRow } = await supabase
+      const { data: jobRow, error: jobError } = await supabase
         .from("jobs")
         .select(EXPOSURE_JOB_GEO_COLUMNS)
         .eq("id", jobId)
         .maybeSingle();
+      if (jobError) throw new Error(`[exposure preview] job load failed: ${jobError.message}`);
       job = (jobRow as unknown as GeoJob) ?? null;
+    } else if (body?.draft_job && typeof body.draft_job === "object") {
+      const pickupAddress = typeof body.draft_job.pickup_address === "string"
+        ? body.draft_job.pickup_address.trim()
+        : "";
+      const dropoffAddress = typeof body.draft_job.dropoff_address === "string"
+        ? body.draft_job.dropoff_address.trim()
+        : "";
+      const [pickup, dropoff] = await Promise.all([
+        geocodeAddressWithFallback(pickupAddress),
+        geocodeAddressWithFallback(dropoffAddress),
+      ]);
+      job = {
+        pickup_lat: pickup.geo?.lat ?? null,
+        pickup_lng: pickup.geo?.lng ?? null,
+        dropoff_lat: dropoff.geo?.lat ?? null,
+        dropoff_lng: dropoff.geo?.lng ?? null,
+        distance_basis: body.draft_job.distance_basis === "pickup" ? "pickup" : "nearest",
+      };
+      geocodePrecision = { pickup: pickup.precision, dropoff: dropoff.precision };
     }
     // 수정 모달이 '방금 고른'(아직 저장 안 한) 거리 기준을 넘기면 그걸로 계산 —
     // 저장된 기준으로 재면 같은 화면에서 미리보기와 저장 결과 인원이 어긋난다(실측 296↔190).
@@ -119,12 +225,31 @@ export async function POST(req: NextRequest) {
     }
     const radiusNeedsJob = typeof rule?.radiusKm === "number" && rule.radiusKm > 0;
     const radiusUnavailable = radiusNeedsJob && !jobSupportsRadius(job);
-    const matched = rule ? applicants.filter((a) => matchesRule(a, rule, { nowMs: now, job })) : [];
+    const matched = exposure === "all"
+      ? applicants
+      : rule
+        ? applicants.filter((a) => matchesRule(a, rule, { nowMs: now, job }))
+        : [];
+    const audience = selectJobAudiencePreview({
+      applicants,
+      exposure,
+      rule,
+      job,
+      vehicleRequired,
+      nowMs: now,
+      blacklistedPhones,
+      guardedPhones,
+    });
     return NextResponse.json({
       rule, // 정규화된 규칙(무효 키 제거 결과)을 되돌려줘 UI가 실제 저장될 값을 보여줄 수 있게
       count: matched.length,
       total: applicants.length,
       sample: matched.slice(0, 5).map((a) => a.name ?? `#${a.id}`),
+      visible_count: audience.visibleCount,
+      sms_eligible_count: audience.smsEligibleCount,
+      recommendations: audience.recommendations,
+      snapshot_at: new Date(now).toISOString(),
+      geocode_precision: geocodePrecision,
       // 반경 규칙인데 공고 좌표가 없거나 공고를 못 받았다 → 화면이 '0명'이 아니라 '계산 불가'로 보여야 한다.
       radius_unavailable: radiusUnavailable,
       // 좌표 없는 인원 수 — 반경 규칙에서 항상 빠지는 집단(주소가 플레이스홀더라 지오코딩 불가).
