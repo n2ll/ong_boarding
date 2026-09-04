@@ -6,6 +6,7 @@ import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare } from "lucide
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { dashboardQueuePreview, oldestUntouchedReplyDays } from "@/lib/admin/dashboard-priority";
 import { fetchMessagePreviews } from "@/lib/admin/message-preview-request";
+import { hasTaskQueueActivityAfterReset } from "@/lib/admin/task-queue-reset";
 
 /**
  * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
@@ -82,7 +83,7 @@ export function ReplyQueueCard({
 } = {}) {
   // scope=dashboard — Dashboard.tsx와 **반드시 같은 키**(합집합 컬럼 응답·캐시 공유).
   // 이 카드의 mutate()가 대시보드 통계까지 갱신하는 것도 같은 키라서 가능하다.
-  const { data, error, mutate } = useSWR<{ data?: AppRow[] }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
+  const { data, error, mutate } = useSWR<{ data?: AppRow[]; task_queue_reset_at?: string | null }>("/api/admin/applicants?scope=dashboard", { refreshInterval: 60_000 }); // 살아있는 갱신
   // 공고 제목 매핑용 — Jobs 탭과 동일 SWR 키라 중복 호출을 dedup. 실패해도 필터만 미노출.
   const { data: jobsRes } = useSWR<{ jobs?: JobLite[] }>("/api/admin/jobs?status=all");
   const jobTitleById = useMemo(() => {
@@ -92,6 +93,8 @@ export function ReplyQueueCard({
   }, [jobsRes]);
 
   // 미리보기 조회 대상: 답장(inbound) 이력이 있는 전원 — 기간 제한 없음.
+  // 단, 관리자가 업무를 초기화한 시각 이전 대화는 완료 처리된 과거 이력으로 접는다.
+  // 이후 새 문자가 오면 last_message_at이 갱신돼 자동으로 다시 대상이 된다.
   // 예전엔 최근 14일 창으로 조회 대상 자체를 잘랐다. 그 결과 답장이 오고 14일이 지나면
   // **아직 아무도 답하지 않았어도** 큐에서 조용히 빠졌고, 화면은 "답할 대화 없음"이라는
   // 정상 화면을 보여줬다. SLA 도구는 오래된 것이 사라지는 게 아니라 위로 와야 한다.
@@ -99,7 +102,10 @@ export function ReplyQueueCard({
   //  안 보이고 미처리는 무기한'이 이 큐의 새 규칙이다. 2026-08-14 감사)
   const previewTargets = useMemo(() => {
     const rows = data?.data ?? [];
-    return rows.filter((a) => a.last_message_at);
+    return rows.filter((a) => (
+      a.last_message_at
+      && hasTaskQueueActivityAfterReset(data?.task_queue_reset_at, a.last_message_at)
+    ));
   }, [data]);
 
   // 마지막 메시지 미리보기 — 조회 대상에 한해서만 가볍게 조회. (미답 판정에도 사용)

@@ -15,6 +15,11 @@ import {
   fetchCompleteApplicantCandidateRows,
   fetchCompleteApplicantRows,
 } from "@/lib/admin/applicant-list";
+import { parseTaskQueueResetAt } from "@/lib/admin/task-queue-reset";
+import {
+  TASK_QUEUE_RESET_CATEGORY,
+  TASK_QUEUE_RESET_TITLE,
+} from "@/lib/admin/prompt-example-reserved";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +191,16 @@ export async function GET(req: NextRequest) {
   const manualMessageAttentionPromise = liveScope
     ? loadManualMessageAttention(supabase)
     : null;
+  const taskQueueResetPromise = dashboardScope || liveScope
+    ? supabase
+      .from("prompt_examples")
+      .select("body")
+      .eq("category", TASK_QUEUE_RESET_CATEGORY)
+      .eq("title", TASK_QUEUE_RESET_TITLE)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    : null;
 
   let data;
   try {
@@ -338,8 +353,16 @@ export async function GET(req: NextRequest) {
   // 부수 효과로 응답에서 24KB가 빠진다.
   // scope=live는 애초에 토큰 컬럼을 고르지 않으므로 이 변환을 건너뛴다 —
   // 안 그러면 모두 has_access_token: false가 붙어 '링크 없음'처럼 읽히는 값이 생긴다.
+  const taskQueueResetResult = taskQueueResetPromise
+    ? await taskQueueResetPromise
+    : null;
+  if (taskQueueResetResult?.error) {
+    console.error("[applicants] task queue reset lookup failed", taskQueueResetResult.error);
+  }
+  const taskQueueResetAt = parseTaskQueueResetAt(taskQueueResetResult?.data?.body);
+
   if (dashboardScope) {
-    return NextResponse.json({ data: withStage });
+    return NextResponse.json({ data: withStage, task_queue_reset_at: taskQueueResetAt });
   }
 
   const safe = liveScope
@@ -395,6 +418,7 @@ export async function GET(req: NextRequest) {
     data: safe,
     previews,
     manual_message_attention: manualMessageAttention,
+    task_queue_reset_at: taskQueueResetAt,
   });
 }
 

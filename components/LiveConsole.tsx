@@ -83,6 +83,7 @@ import {
   agentModeView,
   type AdminAgentModeResponse,
 } from "@/lib/admin/agent-mode-view";
+import { hasTaskQueueActivityAfterReset } from "@/lib/admin/task-queue-reset";
 import { useApplicantDetailUnsavedGuard } from "./useApplicantDetailUnsavedGuard";
 
 type OperationsTab = "all" | "intervention" | "confirm" | "inbox";
@@ -99,6 +100,7 @@ interface Applicant {
   branch1?: string | null;
   created_at?: string | null;
   last_message_at?: string | null;
+  agent_stage_updated_at?: string | null;
   sms_opt_out_at?: string | null;
   /**
    * 목록 API가 사람마다 함께 내려주는 '살아있는 공고 결속'.
@@ -129,6 +131,7 @@ interface LiveApplicantsResponse {
   data?: Applicant[];
   previews?: Record<number, LastMessagePreview>;
   manual_message_attention?: ManualMessageAttentionCollection;
+  task_queue_reset_at?: string | null;
 }
 
 interface Handoff {
@@ -494,15 +497,23 @@ export function LiveConsole() {
   const manualMessageAttentionIsClear = manualMessageAttentionState === "ready"
     && manualMessageAttentionCount === 0
     && manualMessageAttention?.truncated !== true;
-  // 목록 통과 조건: 기본 조건(활성 대화·스크리닝·미열람 답장) 또는 '최근 14일 내 inbound 있음'(풀 응답)
+  // 목록 통과 조건: 업무 초기화 이후 활동 중 기본 조건(활성 대화·스크리닝·미열람 답장) 또는
+  // '최근 14일 내 inbound 있음'(풀 응답)
   // 또는 '마지막 메시지가 매니저 수동 발신'(답 대기) — 발신만 하고 회신을 기다리는 대화(빠른 컨택 등)가
   // 목록에서 사라지지 않는다. previewById에는 서버가 합집합으로 찾아준 답 대기 건도 들어있다.
   const chats = useMemo(
     () =>
       (appsData?.data ?? []).filter((a) => {
         if (manualMessageAttentionByApplicant.has(a.id)) return true;
-        if (isBaseChat(a)) return true;
         const pv = previewById[a.id];
+        if (!hasTaskQueueActivityAfterReset(
+          appsData?.task_queue_reset_at,
+          pv?.created_at,
+          a.last_message_at,
+          a.agent_stage_updated_at,
+          a.created_at,
+        )) return false;
+        if (isBaseChat(a)) return true;
         if (!pv) return false;
         // 미답(마지막 메시지가 지원자 답장)은 기간 제한 없이 남는다 — 예전엔 14일이 지나면
         // 아무도 답하지 않았어도 목록에서 사라졌고, 화면은 "진행 중인 대화가 없어요"라는
