@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("new job flow asks for routing context before the AI brief", () => {
+test("new job flow starts from the operating memo, then reviews routing context", () => {
   const jobsSource = readFileSync(
     new URL("../../components/Jobs.tsx", import.meta.url),
     "utf8",
@@ -21,10 +21,11 @@ test("new job flow asks for routing context before the AI brief", () => {
   const aiBrief = modalSource.indexOf("value={aiPrompt}");
 
   assert.ok(clientField >= 0, "client field should exist in the new job modal");
+  assert.ok(aiBrief >= 0, "AI brief should exist in the new job modal");
+  assert.ok(clientField > aiBrief, "routing review should follow the pasted operating memo");
   assert.ok(branchField > clientField, "branch field should follow the client field");
   assert.ok(pickupField > branchField, "current pickup should follow reusable routing context");
   assert.ok(dropoffField > pickupField, "current delivery location should follow pickup");
-  assert.ok(aiBrief > dropoffField, "AI brief should follow the current posting locations");
 
   const generationRequest = jobsSource.slice(
     jobsSource.indexOf('fetch("/api/admin/jobs/generate-posting"'),
@@ -49,6 +50,51 @@ test("posting generation gives the current job locations precedence over reusabl
   assert.doesNotMatch(routeSource, /\["초보 가능", "주급 지급"\]/);
   assert.doesNotMatch(routeSource, /f\.pay \|\| "협의"/);
   assert.doesNotMatch(routeSource, /f\.schedule \|\| "협의"/);
+});
+
+test("a pasted operating memo can generate first and autofill structured job fields", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const generationStart = jobsSource.indexOf("const handleGenerateJD = async () => {");
+  const generationEnd = jobsSource.indexOf("const copyChannel", generationStart);
+  const generationSource = jobsSource.slice(generationStart, generationEnd);
+
+  assert.doesNotMatch(
+    generationSource,
+    /validateJobCreateWorkLocation/,
+    "blank locations must not block AI extraction from the pasted memo",
+  );
+  assert.match(generationSource, /p\.fields\?\.pickupAddress/);
+  assert.match(generationSource, /p\.fields\?\.dropoffAddress/);
+  assert.match(generationSource, /p\.fields\?\.capacity/);
+  assert.match(generationSource, /p\.fields\?\.vehicleRequired/);
+  assert.match(generationSource, /p\.fields\?\.workPeriod/);
+  assert.match(generationSource, /p\.fields\?\.slotKeys/);
+  assert.match(generationSource, /setGeneratedContext\(createJobGenerationContext\(\{/);
+  assert.match(jobsSource, /메모에서 찾지 못한 필수 정보/);
+  assert.match(jobsSource, /비워두면 붙여넣은 메모에서 AI가 찾아 채워요/);
+  assert.ok(
+    jobsSource.indexOf("AI에 전달할 배송 스케줄·라인 메모")
+      < jobsSource.indexOf('id="new-job-context-title"'),
+    "the paste-first AI brief must appear before manual context review",
+  );
+});
+
+test("restoring a saved draft preserves its locations on the next AI generation", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const restoreStart = jobsSource.indexOf("const restoreNewJobDraft = async () => {");
+  const restoreEnd = jobsSource.indexOf("const discardRecoverableNewJobDraft", restoreStart);
+  const restoreSource = jobsSource.slice(restoreStart, restoreEnd);
+
+  assert.match(restoreSource, /aiPrefilledPickupRef\.current = null/);
+  assert.match(restoreSource, /aiPrefilledDropoffRef\.current = null/);
+  assert.match(restoreSource, /newJobPickupAddressValueRef\.current = draft\.pickupAddress/);
+  assert.match(restoreSource, /newJobDropoffAddressValueRef\.current = draft\.dropoffAddress/);
 });
 
 test("new-job close protects meaningful work and cannot race an in-flight registration", () => {
@@ -152,6 +198,20 @@ test("a delayed duplicate action cannot replace an already-open new-job draft", 
   assert.match(duplicateSource, /작성 중인 공고를 먼저 등록하거나 닫아 주세요/);
 });
 
+test("the primary toolbar can start from the most recent job", () => {
+  const jobsSource = readFileSync(
+    new URL("../../components/Jobs.tsx", import.meta.url),
+    "utf8",
+  );
+  const toolbarStart = jobsSource.indexOf('title="테스트 지원자의 맞춤 공고 링크');
+  const toolbarEnd = jobsSource.indexOf("</div>", jobsSource.indexOf("openBlankNewJobForm", toolbarStart));
+  const toolbarSource = jobsSource.slice(toolbarStart, toolbarEnd);
+
+  assert.match(toolbarSource, /jobs\.length > 0/);
+  assert.match(toolbarSource, /duplicateJob\(jobs\[0\]\.id\)/);
+  assert.match(toolbarSource, /최근 공고로 시작/);
+});
+
 test("recruitment route cards use a roving radio group with arrow-key selection", () => {
   const jobsSource = readFileSync(
     new URL("../../components/Jobs.tsx", import.meta.url),
@@ -181,7 +241,7 @@ test("new-job modal starts from the existing pool without expanding external rec
   const recruitFieldSource = modalSource.slice(recruitFieldStart, recruitFieldEnd);
 
   assert.match(jobsSource, /const DEFAULT_RECRUIT_MODE: RecruitMode = "internal"/);
-  assert.match(modalSource, /initialFocusRef=\{newJobClientRef\}/);
+  assert.match(modalSource, /initialFocusRef=\{aiPromptRef\}/);
   assert.doesNotMatch(recruitFieldSource, /defaultOpen/);
   assert.doesNotMatch(recruitFieldSource, /initialFocusRef/);
 });
@@ -246,10 +306,12 @@ test("a recoverable draft banner never overlaps the generated-copy editor", () =
   const modalEnd = jobsSource.indexOf("{/* 공고 수정 모달", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
-  assert.match(
+  assert.match(modalSource, /shadow-sm xl:col-span-2/);
+  assert.match(modalSource, /aria-labelledby="new-job-context-title"[^>]+xl:col-span-2/);
+  assert.doesNotMatch(
     modalSource,
-    /recoverableNewJobDraft \? "xl:row-start-3" : "xl:row-start-2"/,
-    "the copy editor must move below both the recovery banner and context card",
+    /recoverableNewJobDraft \? "xl:row-start/,
+    "grid auto-placement should keep the generated editor after every full-width banner",
   );
   assert.equal(
     modalSource.match(/htmlFor="new-job-branch" className=/g)?.length,

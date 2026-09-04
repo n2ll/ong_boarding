@@ -28,3 +28,7 @@ next-env.d.ts
 
 # playwright MCP 로컬 아티팩트(콘솔 로그·트레이스 등)
 .playwright-mcp/
+
+# Playwright E2E artifacts
+/playwright-report/
+/test-results/

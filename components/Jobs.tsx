@@ -14,6 +14,7 @@ import { Badge } from "./ui/badge";
 import { SelectField, TextareaField, TextField } from "./ui/field";
 import { StageBadge } from "./ui/stage-badge";
 import { Modal } from "./ui/modal";
+import { Switch } from "./ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { sourceLabel } from "@/lib/applicant-source";
 import { isJobEffectivelyClosed, isSystemJobTitle, stripSystemPrefix } from "@/lib/jobs";
@@ -28,7 +29,6 @@ import { MANAGER_PANEL_DOCK_MIN_WIDTH, managerPanelKeyboardAction, shouldDockMan
 import { candidateClosureAction, type CandidateClosureKind } from "@/lib/admin/candidate-closure-action";
 import { buildJobListSummary, type JobListSummaryItem } from "@/lib/admin/job-list-layout";
 import {
-  validateJobCreateWorkLocation,
   validateJobRequiredFields,
   type JobCreateValidationIssue,
 } from "@/lib/admin/job-create-validation";
@@ -840,6 +840,8 @@ export function Jobs() {
   // AI가 비어 있던 등록 필드에 자동 입력한 마지막 값. 재생성 때 자동값만 교체하고 매니저 수정값은 보존한다.
   const aiPrefilledPayInfoRef = useRef<string | null>(null);
   const aiPrefilledFactsRef = useRef<string | null>(null);
+  const aiPrefilledPickupRef = useRef<string | null>(null);
+  const aiPrefilledDropoffRef = useRef<string | null>(null);
   const [registering, setRegistering] = useState(false);
   const [query, setQuery] = useState("");
   const [clientFilter, setClientFilter] = useState<number | "">("");
@@ -875,9 +877,14 @@ export function Jobs() {
   const [newJobSlotKeys, setNewJobSlotKeys] = useState<string[]>([]);
   const [newJobStartDate, setNewJobStartDate] = useState("");
   const [newJobPickupAddress, setNewJobPickupAddress] = useState("");
+  const newJobPickupAddressValueRef = useRef(newJobPickupAddress);
+  newJobPickupAddressValueRef.current = newJobPickupAddress;
   // 마지막 경유지(배송 종료 지점) — 상차지와 함께 후보↔공고 거리 정렬(가까운 쪽 기준)에 쓰인다.
   const [newJobDropoffAddress, setNewJobDropoffAddress] = useState("");
+  const newJobDropoffAddressValueRef = useRef(newJobDropoffAddress);
+  newJobDropoffAddressValueRef.current = newJobDropoffAddress;
   const [newJobVehicleRequired, setNewJobVehicleRequired] = useState(true);
+  const newJobVehicleManuallySetRef = useRef(false);
   // AI 응대 근거(급여·정책) — 등록 단계에서 접이식으로 함께 입력해 편집 모달 2단계 강제를 없앤다.
   const [newJobPayInfo, setNewJobPayInfo] = useState("");
   const newJobPayInfoValueRef = useRef(newJobPayInfo);
@@ -1454,23 +1461,6 @@ export function Jobs() {
       });
       return;
     }
-    const workLocationIssue = validateJobCreateWorkLocation({
-      pickupAddress: newJobPickupAddress,
-      dropoffAddress: newJobDropoffAddress,
-    });
-    if (workLocationIssue) {
-      setNewJobValidationIssue(workLocationIssue);
-      toast.error(workLocationIssue.message);
-      requestAnimationFrame(() => {
-        const locationField = workLocationIssue.field === "pickupAddress"
-          ? newJobPickupAddressRef.current
-          : newJobDropoffAddressRef.current;
-        if (!locationField) return;
-        locationField.focus({ preventScroll: true });
-        locationField.scrollIntoView({ block: "center" });
-      });
-      return;
-    }
     const requestedContext = createJobGenerationContext({
       prompt: aiPrompt,
       clientId: newJobClientId,
@@ -1504,7 +1494,16 @@ export function Jobs() {
       }
       const p = json.posting as {
         title: string;
-        fields?: { pay?: string; schedule?: string };
+        fields?: {
+          pay?: string;
+          schedule?: string;
+          pickupAddress?: string;
+          dropoffAddress?: string;
+          capacity?: number | null;
+          vehicleRequired?: boolean | null;
+          workPeriod?: "" | "하루" | "단기" | "정기";
+          slotKeys?: string[];
+        };
         albamon: { body: string };
         sms: { body: string };
       };
@@ -1517,6 +1516,40 @@ export function Jobs() {
       const payText = p.fields?.pay?.trim() ?? "";
       const schedText = p.fields?.schedule?.trim() ?? "";
       const scheduleFact = schedText ? `근무: ${schedText}` : "";
+      const currentPickup = newJobPickupAddressValueRef.current;
+      const pickupAutofill = resolveJobGenerationAutofill({
+        currentValue: currentPickup,
+        previousGeneratedValue: aiPrefilledPickupRef.current,
+        nextGeneratedValue: p.fields?.pickupAddress?.trim() ?? "",
+      });
+      if (pickupAutofill.value !== currentPickup) setNewJobPickupAddress(pickupAutofill.value);
+      newJobPickupAddressValueRef.current = pickupAutofill.value;
+      aiPrefilledPickupRef.current = pickupAutofill.generatedValue;
+
+      const currentDropoff = newJobDropoffAddressValueRef.current;
+      const dropoffAutofill = resolveJobGenerationAutofill({
+        currentValue: currentDropoff,
+        previousGeneratedValue: aiPrefilledDropoffRef.current,
+        nextGeneratedValue: p.fields?.dropoffAddress?.trim() ?? "",
+      });
+      if (dropoffAutofill.value !== currentDropoff) setNewJobDropoffAddress(dropoffAutofill.value);
+      newJobDropoffAddressValueRef.current = dropoffAutofill.value;
+      aiPrefilledDropoffRef.current = dropoffAutofill.generatedValue;
+
+      if (Number.isSafeInteger(p.fields?.capacity) && Number(p.fields?.capacity) > 0) {
+        setNewJobCapacity((current) => current === "" ? Number(p.fields?.capacity) : current);
+      }
+      if (p.fields?.workPeriod) {
+        setNewJobPeriod((current) => current || p.fields?.workPeriod || "");
+      }
+      if (schedText) setNewJobSlot((current) => current || schedText);
+      if (Array.isArray(p.fields?.slotKeys)) {
+        const generatedSlotKeys = p.fields.slotKeys.filter((key) => ["평일오전", "평일오후", "주말오전", "주말오후"].includes(key));
+        setNewJobSlotKeys((current) => current.length === 0 ? generatedSlotKeys : current);
+      }
+      if (typeof p.fields?.vehicleRequired === "boolean" && !newJobVehicleManuallySetRef.current) {
+        setNewJobVehicleRequired(p.fields.vehicleRequired);
+      }
       const currentPayInfo = newJobPayInfoValueRef.current;
       const payAutofill = resolveJobGenerationAutofill({
         currentValue: currentPayInfo,
@@ -1545,7 +1578,13 @@ export function Jobs() {
       setActiveChannel("albamon");
       setPromptOpen(false); // 초안이 화면 위쪽에 오게 — 조건 입력은 '조건 수정'으로 다시 펼친다
       setAiSource(json.source === "mock" ? "mock" : "ai");
-      setGeneratedContext(requestedContext);
+      setGeneratedContext(createJobGenerationContext({
+        prompt: requestedContext.prompt,
+        clientId: requestedContext.clientId ?? "",
+        branchId: requestedContext.branchId ?? "",
+        pickupAddress: pickupAutofill.value,
+        dropoffAddress: dropoffAutofill.value,
+      }));
       // 복제본을 새 기준으로 다시 생성했다면 더는 원본 저장본이 아니다.
       setDuplicatedFrom(null);
       setChannelDraftsFromCopy(false);
@@ -1585,6 +1624,8 @@ export function Jobs() {
     setGeneratedContext(null);
     aiPrefilledPayInfoRef.current = null;
     aiPrefilledFactsRef.current = null;
+    aiPrefilledPickupRef.current = null;
+    aiPrefilledDropoffRef.current = null;
     setPostingTitle("");
     setNewJobClientId("");
     setNewJobBranchId("");
@@ -1601,8 +1642,11 @@ export function Jobs() {
     setNewJobSlotKeys([]);
     setNewJobStartDate("");
     setNewJobPickupAddress("");
+    newJobPickupAddressValueRef.current = "";
     setNewJobDropoffAddress("");
+    newJobDropoffAddressValueRef.current = "";
     setNewJobVehicleRequired(true);
+    newJobVehicleManuallySetRef.current = false;
     setNewJobPayInfo("");
     newJobPayInfoValueRef.current = "";
     setNewJobValidationIssue(null);
@@ -1626,6 +1670,12 @@ export function Jobs() {
   // 등록에 쓸 본문이 실제로 있나 — '직접 작성'으로 빈 편집칸만 열어둔 상태와 구분한다.
   // (AI 초안 없이도 등록할 수 있게 하면서, 빈 공고가 등록되는 것은 계속 막는다.)
   const draftBody = jobCreateDraftBody(channelDrafts);
+  const newJobMissingRequiredLabels = [
+    newJobCapacity === "" ? "모집 인원" : null,
+    !newJobPickupAddress.trim() ? "상차지·집결지" : null,
+    !newJobDropoffAddress.trim() ? "배송 권역·마지막 경유지" : null,
+    !newJobPayInfo.trim() ? "급여·정산 안내" : null,
+  ].filter((label): label is string => Boolean(label));
   const hasUnsavedNewJobDraft = hasJobCreateDraft({
     prompt: aiPrompt,
     postingTitle,
@@ -1861,6 +1911,8 @@ export function Jobs() {
     setGeneratedContext(draft.generatedContext);
     aiPrefilledPayInfoRef.current = null;
     aiPrefilledFactsRef.current = null;
+    aiPrefilledPickupRef.current = null;
+    aiPrefilledDropoffRef.current = null;
     setPromptOpen(!draft.channelDrafts);
     setNewJobClientId(restoredClientId);
     setNewJobBranchId(restoredBranchId);
@@ -1875,8 +1927,11 @@ export function Jobs() {
     setNewJobSlotKeys(draft.slotKeys);
     setNewJobStartDate(draft.startDate);
     setNewJobPickupAddress(draft.pickupAddress);
+    newJobPickupAddressValueRef.current = draft.pickupAddress;
     setNewJobDropoffAddress(draft.dropoffAddress);
+    newJobDropoffAddressValueRef.current = draft.dropoffAddress;
     setNewJobVehicleRequired(draft.vehicleRequired);
+    newJobVehicleManuallySetRef.current = true;
     setNewJobPayInfo(draft.payInfo);
     newJobPayInfoValueRef.current = draft.payInfo;
     setNewJobPolicyNotes(draft.policyNotes);
@@ -2040,6 +2095,7 @@ export function Jobs() {
     setNewJobPickupAddress(j.pickupAddress);
     setNewJobDropoffAddress(j.dropoffAddress);
     setNewJobVehicleRequired(j.vehicleRequired);
+    newJobVehicleManuallySetRef.current = true;
     setNewJobPayInfo(j.payInfo);
     setNewJobPolicyNotes(j.policyNotes);
     setNewJobAiFacts(j.aiFacts);
@@ -3112,6 +3168,18 @@ export function Jobs() {
               >
                 {!previewLoading && <Eye size={16} />} <span className="hidden sm:inline">지원자 화면</span> 미리보기
               </Button>
+              {jobs.length > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => void duplicateJob(jobs[0].id)}
+                  isLoading={duplicatingId === jobs[0].id}
+                  title={`가장 최근 공고 '${jobs[0].title}'의 조건과 본문을 불러옵니다`}
+                >
+                  {duplicatingId !== jobs[0].id && <CopyPlus size={16} />}
+                  <span className="hidden lg:inline">최근 공고로 시작</span>
+                  <span className="lg:hidden">최근 공고</span>
+                </Button>
+              )}
               <Button variant="brand" onClick={openBlankNewJobForm}>
                 <Wand2 size={16} /> 새 공고
               </Button>
@@ -3609,8 +3677,8 @@ export function Jobs() {
       {aiModalOpen && (
         <Modal bare open={aiModalOpen} onClose={closeRegisterModal} busy={registering} size="full"
                title="새 공고 등록"
-               description="화주사 맥락을 고른 뒤 AI 초안을 만들거나 공고 본문을 직접 작성하세요."
-               initialFocusRef={newJobClientRef}
+               description="배송 스케줄이나 라인 메모를 붙여넣으면 AI가 공고와 필수 정보를 정리합니다."
+               initialFocusRef={aiPromptRef}
                closeOnOutside={false}
                className="xl:max-w-6xl max-w-[800px] sm:max-w-[800px]">
             <div className="flex items-center justify-between gap-3 border-b border-border-strong px-5 py-4 sm:px-7 sm:py-5">
@@ -3621,7 +3689,7 @@ export function Jobs() {
                 <div>
                   {/* Modal이 스크린리더용 DialogTitle을 이미 제공한다. 같은 제목을 두 번 읽지 않도록 시각 제목은 숨김 처리. */}
                   <div aria-hidden="true" className="text-[18px] font-extrabold text-foreground tracking-tight">새 공고 등록</div>
-                  <p className="text-[13px] text-muted-foreground mt-0.5">화주사 맥락을 고른 뒤 AI 초안을 만들거나 공고 본문을 직접 작성하세요.</p>
+                  <p className="text-[13px] text-muted-foreground mt-0.5">배송 스케줄이나 라인 메모를 붙여넣으면 AI가 공고와 필수 정보를 정리합니다.</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" aria-label="공고 등록 창 닫기" onClick={closeRegisterModal} disabled={registering}>
@@ -3658,14 +3726,75 @@ export function Jobs() {
                   </div>
                 </div>
               )}
-              {/* AI가 실제로 참조하는 화주사·지점과 이번 공고의 위치를 먼저 정한다. 생성 후 2열에서도 이 카드는 전체 폭을 써서
-                  DOM 순서와 시각 순서가 모두 공고 맥락 → AI 조건 → 초안으로 유지된다. */}
+              {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
+              {promptOpen ? (
+                <div className="bg-card border border-brand-yellow/70 rounded-2xl p-5 shadow-sm xl:col-span-2">
+                  <div className="mb-4 flex items-start gap-3">
+                    <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">1</span>
+                    <div>
+                      <h3 className="text-[14px] font-extrabold text-foreground">AI에 전달할 배송 스케줄·라인 메모</h3>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">담당자가 준 배송 스케줄·라인 정보·표를 그대로 붙여넣으세요. AI가 위치·시간·급여·모집 인원을 나눠 채웁니다.</p>
+                    </div>
+                  </div>
+                  <label htmlFor="new-job-ai-brief" className="block text-[13px] font-bold text-gray-700 mb-2">받은 내용을 그대로 붙여넣어 주세요</label>
+                  <textarea
+                    ref={aiPromptRef}
+                    id="new-job-ai-brief"
+                    value={aiPrompt}
+                    disabled={isGenerating}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder={'예:\n상차지: 성수 물류센터 3번 게이트\n배송 권역: 하남 미사 일대, 종료 미사역\n평일 새벽 3~9시 / 3명 / 건당 3,500원 / 1톤 냉장차 필요'}
+                    className="w-full bg-background border border-border-strong rounded-md px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none disabled:cursor-not-allowed disabled:opacity-55"
+                  />
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
+                        다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
+                    {!channelDrafts && !isGenerating && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setChannelDrafts(normalizeJobCreateChannelDrafts({ albamon: "", sms: "" }));
+                          setChannelDraftsFromCopy(false);
+                          setGeneratedContext(null);
+                          setActiveChannel("albamon");
+                          setPromptOpen(false);
+                        }}
+                        title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
+                      >직접 작성</Button>
+                    )}
+                    <Button variant="primary" onClick={handleGenerateJD} disabled={!aiPrompt.trim()} isLoading={isGenerating}>
+                      {!isGenerating && <Sparkles size={16} className="text-brand-yellow" />}
+                      {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">아래 공고 정보에 미리 적어 둔 값도 생성에 함께 반영합니다.</p>
+                </div>
+
+              ) : (
+                /* 접힌 상태 — 초안 편집칸을 첫 화면에 올리려고 접는다. 조건은 언제든 다시 펼칠 수 있다. */
+                <div className="bg-card border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex flex-wrap items-center gap-3 xl:col-span-2">
+                  <Wand2 size={15} className="text-warning-strong shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-bold text-gray-700">
+                      {aiPrompt.trim() ? "AI 초안 생성 조건" : "본문을 직접 편집하는 중"}
+                    </div>
+                    <div className="text-[13px] text-muted-foreground truncate">
+                      {aiPrompt.trim() || (showPoolSmsDraft
+                        ? "조건을 입력하면 AI가 공고 원문과 문자 안내를 다시 써줍니다"
+                        : "조건을 입력하면 AI가 공고 원문을 다시 써줍니다")}
+                    </div>
+                  </div>
+                  <Button variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto" disabled={isGenerating} onClick={() => setPromptOpen(true)}>조건 수정 · 다시 생성</Button>
+                </div>
+              )}
+
+              {/* AI가 메모에서 찾은 값을 확인하고, 찾지 못한 값만 보완한다. */}
               <section aria-labelledby="new-job-context-title" className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm xl:col-span-2">
                 <div className="flex items-start gap-3">
-                  <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">1</span>
+                  <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
                   <div>
-                    <h3 id="new-job-context-title" className="text-[14px] font-extrabold text-foreground">공고 맥락</h3>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">화주사·지점은 참고값이고, 이번 공고의 상차지와 배송 위치를 우선해 초안을 만들어요.</p>
+                    <h3 id="new-job-context-title" className="text-[14px] font-extrabold text-foreground">AI가 채울 공고 정보</h3>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">AI가 메모에서 찾은 위치를 채웁니다. 화주사·지점과 실제 근무 위치만 확인해 주세요.</p>
                   </div>
                 </div>
 
@@ -3766,7 +3895,7 @@ export function Jobs() {
                         if (newJobValidationIssue?.field === "pickupAddress") setNewJobValidationIssue(null);
                       }}
                       placeholder="예: 성수동 물류센터 3번 게이트"
-                      hint="지원자가 처음 찾아갈 실제 상차·집결 장소를 적어주세요."
+                      hint="비워두면 붙여넣은 메모에서 AI가 찾아 채워요. 지원자가 처음 찾아갈 실제 장소인지 확인해 주세요."
                       error={newJobValidationIssue?.field === "pickupAddress" ? newJobValidationIssue.message : undefined}
                     />
                     <TextField
@@ -3780,72 +3909,21 @@ export function Jobs() {
                         if (newJobValidationIssue?.field === "dropoffAddress") setNewJobValidationIssue(null);
                       }}
                       placeholder="예: 하남 미사강변도시 일대 · 종료 미사역"
-                      hint="배송지 범위와 종료 지점을 함께 적으면 지원자의 추가 질문을 줄일 수 있어요."
+                      hint="비워두면 붙여넣은 메모에서 AI가 찾아 채워요. 배송 범위와 종료 지점이 맞는지 확인해 주세요."
                       error={newJobValidationIssue?.field === "dropoffAddress" ? newJobValidationIssue.message : undefined}
                     />
                   </div>
                 </section>
               </section>
 
-              {/* Prompt Input — 초안이 나오면 한 줄로 접힌다(아래 promptOpen 주석 참고). */}
-              {promptOpen ? (
-                <div className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
-                  <div className="mb-4 flex items-start gap-3">
-                    <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
-                    <div>
-                      <h3 className="text-[14px] font-extrabold text-foreground">AI에 전달할 채용 조건</h3>
-                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">시간·권역·급여·필요 차량처럼 이번 공고에서 달라지는 조건을 적어 주세요.</p>
-                    </div>
-                  </div>
-                  <label htmlFor="new-job-ai-brief" className="block text-[13px] font-bold text-gray-700 mb-2">어떤 포지션을 찾고 계신가요?</label>
-                  <textarea
-                    ref={aiPromptRef}
-                    id="new-job-ai-brief"
-                    value={aiPrompt}
-                    disabled={isGenerating}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    placeholder="예: 강북권 새벽 냉장배송, 주 5일 새벽 3~9시, 건당 3,500원, 1톤 냉장차 지참"
-                    className="w-full bg-background border border-border-strong rounded-md px-4 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring min-h-[100px] resize-none disabled:cursor-not-allowed disabled:opacity-55"
-                  />
-                  <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    {/* 직접 작성 — 예전엔 AI 초안이 없으면 등록 버튼이 아예 안 눌려서, 본문을 직접 쓰거나
-                        다른 데서 복사해 붙이려면 AI를 한 번 돌려야 했다(사장님 지시 2026-08-05). */}
-                    {!channelDrafts && !isGenerating && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          setChannelDrafts(normalizeJobCreateChannelDrafts({ albamon: "", sms: "" }));
-                          setChannelDraftsFromCopy(false);
-                          setGeneratedContext(null);
-                          setActiveChannel("albamon");
-                          setPromptOpen(false);
-                        }}
-                        title="AI를 쓰지 않고 본문을 직접 쓰거나 붙여넣습니다"
-                      >직접 작성</Button>
-                    )}
-                    <Button variant="primary" onClick={handleGenerateJD} disabled={!aiPrompt.trim()} isLoading={isGenerating}>
-                      {!isGenerating && <Sparkles size={16} className="text-brand-yellow" />}
-                      {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
-                    </Button>
-                  </div>
-                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">위 공고 맥락을 바꿨다면 새 기준으로 다시 생성해 주세요.</p>
-                </div>
-
-              ) : (
-                /* 접힌 상태 — 초안 편집칸을 첫 화면에 올리려고 접는다. 조건은 언제든 다시 펼칠 수 있다. */
-                <div className="bg-card border border-border-strong rounded-2xl px-5 py-3.5 shadow-sm flex flex-wrap items-center gap-3">
-                  <Wand2 size={15} className="text-warning-strong shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-bold text-gray-700">
-                      {aiPrompt.trim() ? "AI 초안 생성 조건" : "본문을 직접 편집하는 중"}
-                    </div>
-                    <div className="text-[13px] text-muted-foreground truncate">
-                      {aiPrompt.trim() || (showPoolSmsDraft
-                        ? "조건을 입력하면 AI가 공고 원문과 문자 안내를 다시 써줍니다"
-                        : "조건을 입력하면 AI가 공고 원문을 다시 써줍니다")}
-                    </div>
-                  </div>
-                  <Button variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto" disabled={isGenerating} onClick={() => setPromptOpen(true)}>조건 수정 · 다시 생성</Button>
+              {channelDrafts && newJobMissingRequiredLabels.length > 0 && (
+                <div role="status" className="rounded-2xl border border-warning/35 bg-warning-soft px-4 py-3.5 xl:col-start-1">
+                  <p className="text-[13px] font-extrabold text-warning-strong">
+                    메모에서 찾지 못한 필수 정보: {newJobMissingRequiredLabels.join(" · ")}
+                  </p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                    아래 공고 설정에서 이 항목만 확인하면 등록할 수 있어요.
+                  </p>
                 </div>
               )}
 
@@ -3855,7 +3933,7 @@ export function Jobs() {
                   복제로 열었을 때도 같은 이유로 원본 제목·본문이 안 보였다(지역명을 안 고치고 등록하는 사고). */}
               {/* Generated Result — 구인광고 원문 / 지원자 문자 */}
               {(isGenerating || channelDrafts) && (
-                <div className={`bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden xl:sticky xl:top-0 xl:col-start-2 xl:row-span-6 xl:self-start xl:max-h-[calc(88dvh-170px)] xl:overflow-y-auto ${recoverableNewJobDraft ? "xl:row-start-3" : "xl:row-start-2"} ${isGenerating && !channelDrafts ? "min-h-[180px]" : ""}`}>
+                <div className={`bg-card border border-brand-yellow rounded-2xl p-5 shadow-sm relative overflow-hidden xl:sticky xl:top-0 xl:col-start-2 xl:row-span-6 xl:self-start xl:max-h-[calc(88dvh-170px)] xl:overflow-y-auto ${isGenerating && !channelDrafts ? "min-h-[180px]" : ""}`}>
                   {isGenerating && (
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center backdrop-blur-md">
                       <Loader2 size={28} className="text-warning-strong animate-spin mb-3" />
@@ -4033,16 +4111,15 @@ export function Jobs() {
                 {/* 차량 필요 — 맞춤 공고 링크 카드에 표시. 수정 모달과 같은 토글 카드로 통일(예전엔 등록만 체크박스). */}
                 <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
                   <div className="text-[13px] font-bold text-foreground">차량(이륜/사륜) 필요</div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={newJobVehicleRequired}
+                  <Switch
+                    checked={newJobVehicleRequired}
+                    disabled={isGenerating}
+                    onCheckedChange={(checked) => {
+                      newJobVehicleManuallySetRef.current = true;
+                      setNewJobVehicleRequired(checked);
+                    }}
                     aria-label="차량(이륜/사륜) 필요"
-                    onClick={() => setNewJobVehicleRequired(!newJobVehicleRequired)}
-                    className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${newJobVehicleRequired ? "bg-success" : "bg-switch-background"}`}
-                  >
-                    <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${newJobVehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
-                  </button>
+                  />
                 </div>
 
                 {/* 지원자가 금액·정산 주기를 다시 묻지 않도록, 사람이 읽는 안내 문장을 유일한 필수 정보원으로 둔다.
@@ -4159,7 +4236,16 @@ export function Jobs() {
                 <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5">
                   <div className="text-[13px] font-bold text-foreground mb-0.5">노출 대상 — 이 공고를 누구에게 보여줄까요</div>
                   <div className="text-[12px] text-muted-foreground mb-3">맞춤 공고 링크에서 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
-                  <ExposureEditor value={newJobExposure} onChange={setNewJobExposure} />
+                  <ExposureEditor
+                    value={newJobExposure}
+                    onChange={setNewJobExposure}
+                    draftJob={{
+                      pickupAddress: newJobPickupAddress,
+                      dropoffAddress: newJobDropoffAddress,
+                      vehicleRequired: newJobVehicleRequired,
+                      distanceBasis: "nearest",
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -4346,9 +4432,11 @@ export function Jobs() {
                       </div>
                       <div className="flex items-center justify-between p-4 bg-background border border-border-strong rounded-2xl">
                         <div className="text-[13px] font-bold text-foreground">차량(이륜/사륜) 필요</div>
-                        <button type="button" role="switch" aria-checked={editForm.vehicleRequired} aria-label="차량(이륜/사륜) 필요" onClick={() => setEditForm({ ...editForm, vehicleRequired: !editForm.vehicleRequired })} className={`after:absolute after:-inset-2 after:content-[''] w-12 h-7 rounded-full relative transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${editForm.vehicleRequired ? "bg-success" : "bg-switch-background"}`}>
-                          <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${editForm.vehicleRequired ? "translate-x-6" : "translate-x-1"}`} />
-                        </button>
+                        <Switch
+                          checked={editForm.vehicleRequired}
+                          onCheckedChange={(checked) => setEditForm({ ...editForm, vehicleRequired: checked })}
+                          aria-label="차량(이륜/사륜) 필요"
+                        />
                       </div>
                       {/* E18 · 급여·정산 — 등록 모달과 같은 그룹·같은 섹션 위치로 올렸다.
                           예전엔 '공고 본문·급여·AI 근거' 접이식 안 2단 깊이라, 등록 때는 0클릭이던 급여가 수정 때는 펼쳐야 보였다. */}

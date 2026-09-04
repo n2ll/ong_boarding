@@ -18,14 +18,18 @@ async function withSlackEnvironment<T>(
   enabled: "0" | "1",
   run: () => Promise<T>,
   webhookUrl: string | null = "https://hooks.slack.test/services/test",
+  vercelEnv: string | null = null,
 ): Promise<T> {
   const previous = {
     enabled: process.env.SLACK_NOTIFICATIONS_ENABLED,
     webhookUrl: process.env.SLACK_WEBHOOK_URL,
+    vercelEnv: process.env.VERCEL_ENV,
   };
   process.env.SLACK_NOTIFICATIONS_ENABLED = enabled;
   if (webhookUrl === null) delete process.env.SLACK_WEBHOOK_URL;
   else process.env.SLACK_WEBHOOK_URL = webhookUrl;
+  if (vercelEnv === null) delete process.env.VERCEL_ENV;
+  else process.env.VERCEL_ENV = vercelEnv;
   try {
     return await run();
   } finally {
@@ -33,6 +37,8 @@ async function withSlackEnvironment<T>(
     else process.env.SLACK_NOTIFICATIONS_ENABLED = previous.enabled;
     if (previous.webhookUrl === undefined) delete process.env.SLACK_WEBHOOK_URL;
     else process.env.SLACK_WEBHOOK_URL = previous.webhookUrl;
+    if (previous.vercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = previous.vercelEnv;
   }
 }
 
@@ -107,6 +113,48 @@ test("the global OFF switch prevents every Slack notification from leaving the s
       globalThis.fetch = originalFetch;
     }
   });
+});
+
+test("Vercel Preview prevents every Slack notification from leaving the server", async () => {
+  await withSlackEnvironment("1", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response("ok", { status: 200 });
+    };
+    try {
+      assert.equal(await sendSlackText("preview automation alert"), false);
+      await sendSlackOnboardingReady({
+        applicant_name: "테스트 지원자",
+        applicant_phone: "01000000000",
+        branch: "테스트 지점",
+        work_hours: "오전",
+      });
+      await sendSlackPausedAlert({
+        applicant_name: "테스트 지원자",
+        applicant_phone: "01000000000",
+        branch: "테스트 지점",
+        reason: "매니저 확인 필요",
+      });
+      assert.deepEqual(await sendSlackOnboardingHandoff({
+        applicant_name: "테스트 지원자",
+        applicant_phone: "01000000000",
+        branch: "테스트 지점",
+      }), { kind: "disabled", reason: "switch_off" });
+      await sendSlackAgentAlert({
+        applicant_name: "테스트 지원자",
+        applicant_phone: "01000000000",
+        branch: "테스트 지점",
+        inbound_text: "문의",
+        missing_info: "운영 정보",
+      });
+
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, "https://hooks.slack.test/services/test", "preview");
 });
 
 test("the global ON switch allows Slack delivery when a webhook is configured", async () => {

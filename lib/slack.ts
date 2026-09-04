@@ -2,6 +2,7 @@
  * Slack 알림 — 전역 발송 스위치 적용
  *
  * SLACK_NOTIFICATIONS_ENABLED=1과 SLACK_WEBHOOK_URL이 모두 있어야 발송한다.
+ * Vercel Preview에서는 설정값과 무관하게 발송하지 않는다.
  * 전역 OFF에서는 모든 발송 함수가 네트워크 요청 없이 self-disable한다.
  */
 
@@ -10,6 +11,7 @@ import type { SlackDeliveryResult } from "./onboarding-handoff";
 type SlackEnvironment = {
   SLACK_NOTIFICATIONS_ENABLED?: string;
   SLACK_WEBHOOK_URL?: string;
+  VERCEL_ENV?: string;
 };
 
 export function getSlackNotificationStatus(
@@ -18,8 +20,9 @@ export function getSlackNotificationStatus(
   const source: SlackEnvironment = env ?? {
     SLACK_NOTIFICATIONS_ENABLED: process.env.SLACK_NOTIFICATIONS_ENABLED,
     SLACK_WEBHOOK_URL: process.env.SLACK_WEBHOOK_URL,
+    VERCEL_ENV: process.env.VERCEL_ENV,
   };
-  const enabled = source.SLACK_NOTIFICATIONS_ENABLED === "1";
+  const enabled = source.SLACK_NOTIFICATIONS_ENABLED === "1" && source.VERCEL_ENV !== "preview";
   const webhookConfigured = !!source.SLACK_WEBHOOK_URL?.trim();
   return { enabled, webhookConfigured, active: enabled && webhookConfigured };
 }

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "./admin/types";
-import { distanceToJobKm, jobSupportsRadius, type GeoJob } from "./geo";
+import { SLOTS, SLOT_LABEL, applicantAvailableSlots, type SlotKey } from "./admin/types.ts";
+import { distanceToJobKm, jobSupportsRadius, type GeoJob } from "./geo.ts";
 
 /**
  * J · 타겟 공고 노출 — 규칙 매처 + 유효 노출 판정 (파이프라인 필터 의미와 단일 소스).
@@ -471,13 +471,27 @@ export async function ensureExposureIncludeForLinked(
  */
 export async function fetchApplicantsForExposure(
   supabase: SupabaseClient
-): Promise<(ExposureApplicant & { name: string | null })[]> {
+): Promise<(ExposureApplicant & {
+  name: string | null;
+  phone: string | null;
+  access_token: string | null;
+  status: string | null;
+  sms_opt_out_at: string | null;
+  marketing_consent: boolean | null;
+})[]> {
   const suntop = await fetchSuntopDoneSet(supabase);
-  const out: (ExposureApplicant & { name: string | null })[] = [];
+  const out: (ExposureApplicant & {
+    name: string | null;
+    phone: string | null;
+    access_token: string | null;
+    status: string | null;
+    sms_opt_out_at: string | null;
+    marketing_consent: boolean | null;
+  })[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("applicants")
-      .select("id, name, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
+      .select("id, name, phone, access_token, status, sms_opt_out_at, marketing_consent, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
       .order("id", { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(`[exposure] applicants load failed: ${error.message}`);
@@ -486,6 +500,11 @@ export async function fetchApplicantsForExposure(
       const row = r as {
         id: number;
         name: string | null;
+        phone: string | null;
+        access_token: string | null;
+        status: string | null;
+        sms_opt_out_at: string | null;
+        marketing_consent: boolean | null;
         sido: string | null;
         sigungu: string | null;
         availability: string | null;

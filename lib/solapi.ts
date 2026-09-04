@@ -36,10 +36,12 @@ export type SmsProviderLookupResult =
 
 /**
  * 실제 SMS 발송을 건너뛸지 판단(개발 오발송 방지).
+ * - Vercel Preview → 항상 건너뜀(SMS_DRY_RUN=0이어도 실발송 금지).
  * - SMS_DRY_RUN=1 → 항상 건너뜀.  SMS_DRY_RUN=0 → 항상 실제 발송.
- * - 미설정이면 프로덕션만 실제 발송(dev/preview는 자동 dry-run).
+ * - 미설정이면 프로덕션만 실제 발송(dev는 자동 dry-run).
  */
 function isSmsDryRun(): boolean {
+  if (process.env.VERCEL_ENV === "preview") return true;
   const flag = process.env.SMS_DRY_RUN;
   if (flag === "1") return true;
   if (flag === "0") return false;
