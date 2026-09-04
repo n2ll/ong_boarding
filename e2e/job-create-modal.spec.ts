@@ -38,7 +38,10 @@ async function fulfillJson(route: Route, value: unknown) {
   });
 }
 
-async function installControlledNetwork(page: Page) {
+async function installControlledNetwork(
+  page: Page,
+  generatePosting?: (route: Route) => Promise<void>,
+) {
   const apiRequests: string[] = [];
   const blockedRequests: string[] = [];
 
@@ -68,6 +71,10 @@ async function installControlledNetwork(page: Page) {
 
     const key = `${request.method()} ${url.pathname}${url.search}`;
     apiRequests.push(key);
+    if (key === "POST /api/admin/jobs/generate-posting" && generatePosting) {
+      await generatePosting(route);
+      return;
+    }
     if (Object.prototype.hasOwnProperty.call(API_FIXTURES, key)) {
       await fulfillJson(route, API_FIXTURES[key]);
       return;
@@ -131,5 +138,66 @@ test("공고 등록 모달의 메모 우선 입력과 차량 토글이 정상 �
   expectThumbInsideTrack(uncheckedTrackBox!, uncheckedThumbBox!);
 
   await expect.poll(() => [...new Set(network.apiRequests)].sort()).toEqual(Object.keys(API_FIXTURES).sort());
+  expect(network.blockedRequests).toEqual([]);
+});
+
+test("AI가 찾지 못한 필수 정보만 묻고 답변을 재생성 요청에 반영한다", async ({ page }) => {
+  const generationRequests: Record<string, unknown>[] = [];
+  const network = await installControlledNetwork(page, async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    generationRequests.push(body);
+    await fulfillJson(route, {
+      ok: true,
+      source: "ai",
+      posting: {
+        title: "성수 새벽 배송 모집",
+        fields: {
+          pay: body.pay_info || "",
+          schedule: "평일 오전 3시~9시",
+          pickupAddress: body.pickup_address || "성수 물류센터 3번 게이트",
+          dropoffAddress: body.dropoff_address || "",
+          capacity: body.capacity || null,
+          vehicleRequired: true,
+          workPeriod: "정기",
+          slotKeys: ["평일오전"],
+        },
+        albamon: { body: `성수 새벽 배송 모집\n${body.pay_info || "급여 확인 필요"}` },
+        sms: { body: "성수 새벽 배송 모집 안내" },
+      },
+    });
+  });
+
+  await page.goto("/jobs");
+  await page.getByRole("button", { name: "새 공고", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "새 공고 등록" });
+  await dialog.getByRole("textbox", { name: "받은 내용을 그대로 붙여넣어 주세요" }).fill(
+    "성수 물류센터에서 평일 새벽 배송",
+  );
+  await dialog.getByRole("button", { name: "AI 초안 생성" }).click();
+
+  const followup = dialog.getByRole("region", { name: "AI가 확인할 내용" });
+  await expect(followup).toBeVisible();
+  await expect(followup.getByLabel("상차지·집결지")).toHaveCount(0);
+  await expect(followup.getByLabel("모집 인원")).toBeVisible();
+  await expect(followup.getByLabel("배송 권역·마지막 경유지")).toBeVisible();
+  await expect(followup.getByLabel("급여·정산 안내")).toBeVisible();
+
+  const updateButton = followup.getByRole("button", { name: "답변 반영해 초안 업데이트" });
+  await expect(updateButton).toBeDisabled();
+  await followup.getByLabel("모집 인원").fill("4");
+  await followup.getByLabel("배송 권역·마지막 경유지").fill("하남 미사 일대 · 종료 미사역");
+  await followup.getByLabel("급여·정산 안내").fill("건당 3,500원 · 매주 금요일 정산");
+  await expect(updateButton).toBeEnabled();
+  await updateButton.click();
+
+  await expect(followup).toHaveCount(0);
+  expect(generationRequests).toHaveLength(2);
+  expect(generationRequests[1]).toMatchObject({
+    capacity: 4,
+    pickup_address: "성수 물류센터 3번 게이트",
+    dropoff_address: "하남 미사 일대 · 종료 미사역",
+    pay_info: "건당 3,500원 · 매주 금요일 정산",
+  });
   expect(network.blockedRequests).toEqual([]);
 });

@@ -16,6 +16,8 @@ test("job generation context ignores formatting-only changes", async () => {
     branchId: 34,
     pickupAddress: "성수동   물류센터",
     dropoffAddress: "하남 미사 일대  ",
+    capacity: 3,
+    payInfo: "건당 3,500원 · 매주 금요일 정산",
   });
   const formattedOnly = createContext({
     prompt: "새벽 배송 기사",
@@ -23,6 +25,8 @@ test("job generation context ignores formatting-only changes", async () => {
     branchId: 34,
     pickupAddress: " 성수동 물류센터 ",
     dropoffAddress: "하남   미사 일대",
+    capacity: 3,
+    payInfo: " 건당 3,500원  ·  매주 금요일 정산 ",
   });
 
   assert.deepEqual(changedFields(baseline, formattedOnly), []);
@@ -34,6 +38,8 @@ test("job generation context ignores formatting-only changes", async () => {
       branchId: "",
       pickupAddress: "성수동 물류센터",
       dropoffAddress: "하남 일대",
+      capacity: "",
+      payInfo: "",
     }).prompt,
     "주 5일\n- 새벽 3시 시작\n- 건당 3,500원",
     "multi-line manager instructions should keep their structure in the generation request",
@@ -48,6 +54,8 @@ test("job generation context reports every changed AI input in a stable order", 
     branchId: 34,
     pickupAddress: "성수동 물류센터",
     dropoffAddress: "하남 미사 일대",
+    capacity: 3,
+    payInfo: "건당 3,500원",
   });
   const changed = contextModule.createJobGenerationContext({
     prompt: "주간 배송 기사",
@@ -55,11 +63,13 @@ test("job generation context reports every changed AI input in a stable order", 
     branchId: "",
     pickupAddress: "송파 물류센터",
     dropoffAddress: "강동구 일대",
+    capacity: 5,
+    payInfo: "건당 4,000원 · 익주 금요일 정산",
   });
 
   assert.deepEqual(
     contextModule.changedJobGenerationContextFields(baseline, changed),
-    ["prompt", "client", "branch", "pickupAddress", "dropoffAddress"],
+    ["prompt", "client", "branch", "pickupAddress", "dropoffAddress", "capacity", "payInfo"],
   );
   assert.deepEqual(
     contextModule.changedJobGenerationContextFields(baseline, baseline),

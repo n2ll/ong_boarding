@@ -7,7 +7,7 @@
  *   2) 실패(키 없음/타임아웃/파싱 실패)하면 메모를 휴리스틱 파싱해 목업 템플릿으로 폴백
  * → 시연 중 네트워크/모델 이슈가 있어도 항상 그럴듯한 결과를 반환한다.
  *
- * body: { prompt: string, client_id?, branch_id?, pickup_address?, dropoff_address? }
+ * body: { prompt: string, client_id?, branch_id?, pickup_address?, dropoff_address?, capacity?, pay_info? }
  * res:  { ok, source: "ai"|"mock", posting: MultiPlatformPosting }
  */
 
@@ -15,8 +15,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { generateMultiPlatformPosting, type MultiPlatformPosting } from "@/lib/claude";
 import {
+  buildCurrentJobPostingFactsContext,
   buildCurrentJobPostingLocationContext,
   formatCurrentJobPostingLocation,
+  type CurrentJobPostingFacts,
 } from "@/lib/admin/job-posting-context";
 import { resolveJobAnnouncementBody } from "@/lib/admin/job-announcement-copy";
 
@@ -29,6 +31,8 @@ export async function POST(req: NextRequest) {
   let branchId: number | null = null;
   let pickupAddress = "";
   let dropoffAddress = "";
+  let capacity: number | null = null;
+  let payInfo = "";
   try {
     const body = await req.json();
     prompt = String(body?.prompt ?? "").trim();
@@ -36,6 +40,8 @@ export async function POST(req: NextRequest) {
     if (typeof body?.branch_id === "number") branchId = body.branch_id;
     if (typeof body?.pickup_address === "string") pickupAddress = body.pickup_address.trim();
     if (typeof body?.dropoff_address === "string") dropoffAddress = body.dropoff_address.trim();
+    if (Number.isSafeInteger(body?.capacity) && body.capacity > 0) capacity = body.capacity;
+    if (typeof body?.pay_info === "string") payInfo = body.pay_info.trim().slice(0, 2000);
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
@@ -49,7 +55,9 @@ export async function POST(req: NextRequest) {
   // 상차지·배송지는 라인 마스터가 아니라 이번 공고의 값이 권위값이다. 마스터와 충돌하면 이 값을 우선하라고 명시한다.
   const currentLocation = { pickupAddress, dropoffAddress };
   const currentLocationContext = buildCurrentJobPostingLocationContext(currentLocation);
-  const generationContext = [masterContext, currentLocationContext].filter(Boolean).join("\n") || undefined;
+  const currentFacts = { capacity, payInfo };
+  const currentFactsContext = buildCurrentJobPostingFactsContext(currentFacts);
+  const generationContext = [masterContext, currentLocationContext, currentFactsContext].filter(Boolean).join("\n") || undefined;
 
   // 1) Claude 우선
   try {
@@ -75,7 +83,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     source: "mock",
-    posting: buildMockPosting(prompt, formatCurrentJobPostingLocation(currentLocation)),
+    posting: buildMockPosting(prompt, formatCurrentJobPostingLocation(currentLocation), currentFacts),
   });
 }
 
@@ -107,12 +115,17 @@ async function buildMasterContext(
 // 목업 폴백 — 메모에서 핵심 정보를 휴리스틱으로 뽑아 채널별 템플릿에 채운다.
 // ──────────────────────────────────────────────────────────────────────────
 
-function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPosting {
+function buildMockPosting(
+  prompt: string,
+  currentLocation = "",
+  currentFacts: CurrentJobPostingFacts = { capacity: null, payInfo: "" },
+): MultiPlatformPosting {
   const f = parseRough(prompt);
 
   const company = f.company;
   const location = currentLocation || f.location || "";
-  const pay = f.pay;
+  const pay = currentFacts.payInfo || f.pay;
+  const capacity = currentFacts.capacity ?? f.capacity;
   const schedule = f.schedule;
   const role = f.role || "업무";
   const tags = f.tags;
@@ -121,6 +134,7 @@ function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPo
   const title = `${shortLocation ? `[${shortLocation}] ` : ""}${role} 모집`;
 
   const workConditionLines = [
+    capacity ? `- 모집 인원: ${capacity}명` : null,
     schedule ? `- 근무시간: ${schedule}` : null,
     pay ? `- 급여: ${pay}` : null,
     location ? `- 근무지: ${location}` : null,
@@ -157,7 +171,7 @@ function buildMockPosting(prompt: string, currentLocation = ""): MultiPlatformPo
       dropoffAddress: f.dropoffAddress,
       pay,
       schedule,
-      capacity: f.capacity,
+      capacity,
       vehicleRequired: f.vehicleRequired,
       workPeriod: f.workPeriod,
       slotKeys: f.slotKeys,

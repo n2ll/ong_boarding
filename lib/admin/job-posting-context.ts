@@ -3,6 +3,11 @@ export interface CurrentJobPostingLocation {
   dropoffAddress: string;
 }
 
+export interface CurrentJobPostingFacts {
+  capacity: number | null;
+  payInfo: string;
+}
+
 function normalizeLocation(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -33,4 +38,21 @@ export function formatCurrentJobPostingLocation({
     pickup ? `상차·집결 ${pickup}` : null,
     dropoff ? `배송·종료 ${dropoff}` : null,
   ].filter(Boolean).join(" / ");
+}
+
+export function buildCurrentJobPostingFactsContext({
+  capacity,
+  payInfo,
+}: CurrentJobPostingFacts): string | undefined {
+  const normalizedPayInfo = normalizeLocation(payInfo);
+  const validCapacity = Number.isSafeInteger(capacity) && Number(capacity) > 0
+    ? capacity
+    : null;
+  if (validCapacity === null && !normalizedPayInfo) return undefined;
+
+  return [
+    "[이번 공고 관리자 확인 답변 — 원 메모보다 아래 값을 우선합니다]",
+    validCapacity !== null ? `모집 인원: ${validCapacity}명` : null,
+    normalizedPayInfo ? `급여·정산 안내: ${normalizedPayInfo}` : null,
+  ].filter(Boolean).join("\n");
 }

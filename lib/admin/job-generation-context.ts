@@ -3,7 +3,9 @@ export type JobGenerationContextField =
   | "client"
   | "branch"
   | "pickupAddress"
-  | "dropoffAddress";
+  | "dropoffAddress"
+  | "capacity"
+  | "payInfo";
 
 export interface JobGenerationContextInput {
   prompt: string;
@@ -11,6 +13,8 @@ export interface JobGenerationContextInput {
   branchId: number | "";
   pickupAddress: string;
   dropoffAddress: string;
+  capacity: number | "";
+  payInfo: string;
 }
 
 export interface JobGenerationContext {
@@ -19,6 +23,8 @@ export interface JobGenerationContext {
   branchId: number | null;
   pickupAddress: string;
   dropoffAddress: string;
+  capacity: number | null;
+  payInfo: string;
 }
 
 function normalizeLocation(value: string): string {
@@ -31,6 +37,8 @@ export function createJobGenerationContext({
   branchId,
   pickupAddress,
   dropoffAddress,
+  capacity,
+  payInfo,
 }: JobGenerationContextInput): JobGenerationContext {
   return {
     prompt: prompt.trim(),
@@ -38,6 +46,8 @@ export function createJobGenerationContext({
     branchId: branchId === "" ? null : branchId,
     pickupAddress: normalizeLocation(pickupAddress),
     dropoffAddress: normalizeLocation(dropoffAddress),
+    capacity: capacity === "" ? null : capacity,
+    payInfo: normalizeLocation(payInfo),
   };
 }
 
@@ -53,6 +63,8 @@ export function changedJobGenerationContextFields(
   if (generatedContext.branchId !== currentContext.branchId) changed.push("branch");
   if (generatedContext.pickupAddress !== currentContext.pickupAddress) changed.push("pickupAddress");
   if (generatedContext.dropoffAddress !== currentContext.dropoffAddress) changed.push("dropoffAddress");
+  if (generatedContext.capacity !== currentContext.capacity) changed.push("capacity");
+  if (generatedContext.payInfo !== currentContext.payInfo) changed.push("payInfo");
   return changed;
 }
 

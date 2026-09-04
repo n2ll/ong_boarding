@@ -47,3 +47,28 @@ test("blank current posting locations add no false context", async () => {
     "",
   );
 });
+
+test("manager answers become authoritative generation context", async () => {
+  const contextModule = await import("./job-posting-context.ts");
+  const buildFactsContext = contextModule.buildCurrentJobPostingFactsContext;
+
+  assert.equal(typeof buildFactsContext, "function");
+  if (typeof buildFactsContext !== "function") return;
+
+  assert.equal(
+    buildFactsContext({
+      capacity: 3,
+      payInfo: "  건당 3,500원  ·  매주 금요일 정산  ",
+    }),
+    [
+      "[이번 공고 관리자 확인 답변 — 원 메모보다 아래 값을 우선합니다]",
+      "모집 인원: 3명",
+      "급여·정산 안내: 건당 3,500원 · 매주 금요일 정산",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    buildFactsContext({ capacity: null, payInfo: "   " }),
+    undefined,
+  );
+});
