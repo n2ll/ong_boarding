@@ -4,12 +4,9 @@ import test from "node:test";
 
 import {
   beginJobRegistrationFollowup,
-  settleJobRegistrationFollowup,
   shouldOfferSosCandidateSelection,
-  type JobRegistrationFollowup,
 } from "./job-registration-followup.ts";
 
-type Announcement = { targets: number };
 type DuplicateSource = { title: string; body: string };
 
 const duplicateSource: DuplicateSource = {
@@ -17,9 +14,9 @@ const duplicateSource: DuplicateSource = {
   body: "공고 본문",
 };
 
-test("a successful registration exposes a durable follow-up while announcement targets load", () => {
+test("a successful registration exposes a durable manager follow-up", () => {
   assert.deepEqual(
-    beginJobRegistrationFollowup<Announcement, DuplicateSource>({
+    beginJobRegistrationFollowup<DuplicateSource>({
       jobId: 42,
       title: "강남 배송원 모집",
       note: "상차지 좌표를 확인해 주세요.",
@@ -30,65 +27,6 @@ test("a successful registration exposes a durable follow-up while announcement t
       title: "강남 배송원 모집",
       note: "상차지 좌표를 확인해 주세요.",
       duplicateSource,
-      announcement: { status: "checking" },
-    },
-  );
-});
-
-test("an external-only registration starts with an explicit non-applicable announcement state", () => {
-  assert.deepEqual(
-    beginJobRegistrationFollowup<Announcement, DuplicateSource>({
-      jobId: 45,
-      title: "외부 채널 전용 공고",
-      note: null,
-      duplicateSource,
-      announcement: {
-        status: "empty",
-        description: "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
-      },
-    }),
-    {
-      jobId: 45,
-      title: "외부 채널 전용 공고",
-      note: null,
-      duplicateSource,
-      announcement: {
-        status: "empty",
-        description: "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
-      },
-    },
-  );
-});
-
-test("a late announcement lookup cannot revive a dismissed or newer registration follow-up", () => {
-  const current = beginJobRegistrationFollowup<Announcement, DuplicateSource>({
-    jobId: 43,
-    title: "서초 배송원 모집",
-    note: null,
-    duplicateSource,
-  });
-  const ready = { status: "ready", payload: { targets: 3 } } as const;
-
-  assert.equal(settleJobRegistrationFollowup(null, 42, ready), null);
-  assert.equal(settleJobRegistrationFollowup(current, 42, ready), current);
-});
-
-test("only the matching registration receives its announcement result", () => {
-  const current: JobRegistrationFollowup<Announcement, DuplicateSource> = beginJobRegistrationFollowup({
-    jobId: 44,
-    title: "송파 배송원 모집",
-    note: null,
-    duplicateSource,
-  });
-
-  assert.deepEqual(
-    settleJobRegistrationFollowup(current, 44, {
-      status: "ready",
-      payload: { targets: 5 },
-    }),
-    {
-      ...current,
-      announcement: { status: "ready", payload: { targets: 5 } },
     },
   );
 });
@@ -100,7 +38,7 @@ test("SOS candidate selection is only offered to jobs visible to the existing po
   assert.equal(shouldOfferSosCandidateSelection(null, "internal"), false);
 });
 
-test("announcement lookup cannot keep the core registration request pending", () => {
+test("registration completion does not bypass manager selection with an automatic announcement lookup", () => {
   const jobsSource = readFileSync(
     new URL("../../components/Jobs.tsx", import.meta.url),
     "utf8",
@@ -109,24 +47,19 @@ test("announcement lookup cannot keep the core registration request pending", ()
   const registrationEnd = jobsSource.indexOf("const q = query.trim()", registrationStart);
   const registrationSource = jobsSource.slice(registrationStart, registrationEnd);
 
-  assert.match(registrationSource, /void fetchAnnounceTargets\(newJobId\)/);
-  assert.doesNotMatch(registrationSource, /await fetchAnnounceTargets\(newJobId\)/);
+  assert.doesNotMatch(registrationSource, /fetchAnnounceTargets\(newJobId\)/);
 });
 
-test("external-only registration never opens an announcement lookup whose pull link cannot show the job", () => {
+test("external-only registration does not offer pool recommendation selection", () => {
   const jobsSource = readFileSync(
     new URL("../../components/Jobs.tsx", import.meta.url),
     "utf8",
   );
-  const registrationStart = jobsSource.indexOf("const handleRegisterJob = async () => {");
-  const registrationEnd = jobsSource.indexOf("const q = query.trim()", registrationStart);
-  const registrationSource = jobsSource.slice(registrationStart, registrationEnd);
+  const modalStart = jobsSource.indexOf("{/* 등록 완료 후속 단계");
+  const modalEnd = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달", modalStart);
+  const modalSource = jobsSource.slice(modalStart, modalEnd);
 
-  assert.match(registrationSource, /newJobRow\?\.recruitMode === "external"[\s\S]*외부 채널 모집 전용/);
-  assert.match(
-    registrationSource,
-    /newJobId !== null && !sosSnapshot\.id && newJobRow\?\.recruitMode !== "external"/,
-  );
+  assert.match(modalSource, /recruitMode !== "external"[\s\S]*추천 명단 확인/);
 });
 
 test("same-conditions completion action reuses the successful POST snapshot without another GET", () => {
@@ -138,7 +71,7 @@ test("same-conditions completion action reuses the successful POST snapshot with
   const directEnd = jobsSource.indexOf("const duplicateJob = async (jobId: string) => {", directStart);
   const directSource = jobsSource.slice(directStart, directEnd);
   const modalStart = jobsSource.indexOf("{/* 등록 완료 후속 단계");
-  const modalEnd = jobsSource.indexOf("{/* 새 공고 안내 확인 모달", modalStart);
+  const modalEnd = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
   assert.ok(directStart >= 0 && directEnd > directStart, "direct duplicate handler should exist");
@@ -157,12 +90,15 @@ test("registration completion does not promote an unsupported Danggeun publishin
     "utf8",
   );
   const modalStart = jobsSource.indexOf("{/* 등록 완료 후속 단계");
-  const modalEnd = jobsSource.indexOf("{/* 새 공고 안내 확인 모달", modalStart);
+  const modalEnd = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
   assert.doesNotMatch(modalSource, /당근에 공고 게시하기/);
   assert.doesNotMatch(modalSource, /당근 게시 내용 · 지원 링크 복사/);
-  assert.match(modalSource, /우리 인력에게 새 공고 안내/);
+  assert.match(modalSource, /추천 명단 확인/);
+  assert.match(modalSource, /추천 근거 확인 → 대상 선택 → 공고 노출 → 문자 검토/);
+  assert.doesNotMatch(modalSource, /registrationFollowup\.announcement\.status/);
+  assert.doesNotMatch(modalSource, /setAnnounceModal\(/);
 });
 
 test("job announcements preview and send one resolved draft and stay open while sending", () => {
@@ -170,7 +106,7 @@ test("job announcements preview and send one resolved draft and stay open while 
     new URL("../../components/Jobs.tsx", import.meta.url),
     "utf8",
   );
-  const announcementStart = jobsSource.indexOf("{/* 새 공고 안내 확인 모달");
+  const announcementStart = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달");
   const announcementEnd = jobsSource.indexOf("{/* 공고별 지원자 보드", announcementStart);
   const announcementSource = jobsSource.slice(announcementStart, announcementEnd);
 
@@ -220,7 +156,7 @@ test("job announcement mixed results keep the modal open and retry only confirme
   const sendStart = jobsSource.indexOf("const sendAnnounce = async () => {");
   const sendEnd = jobsSource.indexOf("// 마감 확정", sendStart);
   const sendSource = jobsSource.slice(sendStart, sendEnd);
-  const modalStart = jobsSource.indexOf("{/* 새 공고 안내 확인 모달");
+  const modalStart = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달");
   const modalEnd = jobsSource.indexOf("{/* 공고별 지원자 보드", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
@@ -271,7 +207,7 @@ test("SOS registration persists the job link and keeps candidate selection as a 
   const registrationEnd = jobsSource.indexOf("const q = query.trim()", registrationStart);
   const registrationSource = jobsSource.slice(registrationStart, registrationEnd);
   const modalStart = jobsSource.indexOf("{/* 등록 완료 후속 단계");
-  const modalEnd = jobsSource.indexOf("{/* 새 공고 안내 확인 모달", modalStart);
+  const modalEnd = jobsSource.indexOf("{/* 행 '대기자에게 안내' 확인 모달", modalStart);
   const modalSource = jobsSource.slice(modalStart, modalEnd);
 
   assert.match(registrationSource, /fetch\(`\/api\/admin\/sos\/\$\{sosSnapshot\.id\}`/);

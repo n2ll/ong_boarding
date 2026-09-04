@@ -138,3 +138,14 @@ export function prioritizePipelineRecommendations<T extends { id: string }>(
     return aRank - bRank;
   });
 }
+
+/** 추천 명단 일괄 선택은 현재 화면에 남은 추천 인원만 순위대로 고른다. */
+export function pipelineRecommendedSelectionIds<T extends { id: string }>(
+  cards: readonly T[],
+  rankedApplicantIds: readonly string[],
+  limit = 50,
+): string[] {
+  const visibleIds = new Set(cards.map((card) => card.id));
+  const safeLimit = Math.max(1, Math.min(50, Number.isFinite(limit) ? Math.floor(limit) : 50));
+  return rankedApplicantIds.filter((id) => visibleIds.has(id)).slice(0, safeLimit);
+}

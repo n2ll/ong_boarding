@@ -64,6 +64,7 @@ import {
 } from "@/lib/admin/pipeline-job-context";
 import {
   pipelineJobRecommendations,
+  pipelineRecommendedSelectionIds,
   prioritizePipelineRecommendations,
 } from "@/lib/admin/pipeline-recommendation";
 import { remoteCollectionState } from "@/lib/admin/remote-data-state";
@@ -1644,6 +1645,13 @@ export function Pipeline() {
     focusedJobRecommendations.rankedApplicantIds,
     recommendationPriorityActive,
   );
+  const focusedRecommendedSelectionCount = focusedActiveJob
+    ? pipelineRecommendedSelectionIds(
+        filteredCards,
+        focusedJobRecommendations.rankedApplicantIds,
+        topN,
+      ).length
+    : 0;
   const filteredApplicantIds = filteredCards.map((card) => Number(card.id));
   const filteredApplicantIdsKey = filteredApplicantIds.join(",");
   const applicantNavigation = getPipelineApplicantNavigation(
@@ -1994,6 +2002,20 @@ export function Pipeline() {
     setSelectedRows(new Set(ids));
     setWaitlistJobId(null);
     toast.success(`발송 가능한 상위 ${ids.length}명을 선택했어요.`);
+  };
+
+  const selectFocusedRecommendations = () => {
+    if (!requireFocusedJobReady()) return;
+    if (!requireFreshApplicants()) return;
+    const ids = pipelineRecommendedSelectionIds(
+      filteredCards,
+      focusedJobRecommendations.rankedApplicantIds,
+      topN,
+    );
+    if (ids.length === 0) return toast.error("현재 조건에서 선택할 추천 인력이 없어요.");
+    setSelectedRows(new Set(ids));
+    setWaitlistJobId(null);
+    toast.success(`추천 ${ids.length}명을 선택했어요. 각 행에서 제외하거나 다른 인원을 추가할 수 있어요.`);
   };
 
   // 공고 관심자 원클릭 선택 — 해당 공고에 interest_click을 남긴 지원자 중 확정인력을 제외하고
@@ -2773,19 +2795,32 @@ export function Pipeline() {
                 </span>
               )}
               {focusedJobRecommendations.rankedApplicantIds.length > 0 && (
-                <button
-                  type="button"
-                  aria-pressed={recommendationPriority}
-                  onClick={() => setRecommendationPriority((current) => !current)}
-                  className={`min-h-8 shrink-0 rounded-lg border px-2.5 text-[12px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
-                    recommendationPriority
-                      ? "border-foreground bg-foreground text-white"
-                      : "border-border-strong bg-card text-gray-700 hover:bg-background"
-                  }`}
-                  title="추천 밖 인력은 숨기지 않고, 추천 순위를 목록 앞에 둘지만 바꿉니다."
-                >
-                  추천 우선
-                </button>
+                <>
+                  <button
+                    type="button"
+                    aria-pressed={recommendationPriority}
+                    onClick={() => setRecommendationPriority((current) => !current)}
+                    className={`min-h-8 shrink-0 rounded-lg border px-2.5 text-[12px] font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
+                      recommendationPriority
+                        ? "border-foreground bg-foreground text-white"
+                        : "border-border-strong bg-card text-gray-700 hover:bg-background"
+                    }`}
+                    title="추천 밖 인력은 숨기지 않고, 추천 순위를 목록 앞에 둘지만 바꿉니다."
+                  >
+                    추천 우선
+                  </button>
+                  <Button
+                    type="button"
+                    variant="brand"
+                    size="toolbar"
+                    onClick={selectFocusedRecommendations}
+                    disabled={applicantActionsBlocked || focusedRecommendedSelectionCount === 0}
+                    title="현재 조건에 남은 추천 인원을 선택합니다. 선택 후 각 행에서 제외하거나 다른 인원을 추가할 수 있어요."
+                    className="shrink-0"
+                  >
+                    <Check size={14} aria-hidden="true" /> 추천 {focusedRecommendedSelectionCount}명 선택
+                  </Button>
+                </>
               )}
             </div>
           </section>

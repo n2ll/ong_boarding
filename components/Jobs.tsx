@@ -73,7 +73,6 @@ import {
 } from "@/lib/admin/types";
 import {
   beginJobRegistrationFollowup,
-  settleJobRegistrationFollowup,
   shouldOfferSosCandidateSelection,
   type JobRegistrationFollowup,
 } from "@/lib/admin/job-registration-followup";
@@ -940,13 +939,13 @@ export function Jobs() {
   // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
   const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
   const [closing, setClosing] = useState(false);
-  // 새 공고 안내 모달 — 등록 완료 단계의 '안내 검토'와 행 '대기자에게 안내'가 같은 모달을 쓴다.
+  // 행 '대기자에게 안내'에서 기존 충원 안내·알림 신청 대상에게 보낼 문자를 검토한다.
   // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
   const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; body: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   const [announceSendReport, setAnnounceSendReport] = useState<NoticeSendReport | null>(null);
-  // 등록 성공과 후속 안내 조회를 분리한다. 비만료 완료 창이 연속 등록·안내 검토를 한곳에서 조정하며,
-  // 늦은 대상 조회가 이미 시작한 다음 공고 위에 별도 모달을 띄우지 못하게 소유권을 가진다.
-  const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<AnnounceTargetsRes, JobDuplicateSource> | null>(null);
+  // 등록 성공 뒤 비만료 완료 창에서 다음 공고 작성 또는 인재풀 대상 선별로 이어 준다.
+  // 문자는 인재풀에서 명단을 확인하고 노출을 저장한 뒤에만 별도 검토한다.
+  const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<JobDuplicateSource> | null>(null);
   // 긴급 건에서 만든 공고는 완료 모달이 닫힐 때까지 원 수요와 필터 맥락을 보존해
   // 사라지는 토스트 없이 인력 선별 화면으로 이어 준다.
   const [registrationSosContext, setRegistrationSosContext] = useState<{
@@ -2381,55 +2380,14 @@ export function Jobs() {
           title,
           note: followupNote,
           duplicateSource,
-          ...((sosSnapshot.id || newJobRow?.recruitMode === "external")
-            ? {
-                announcement: {
-                  status: "empty" as const,
-                  description: sosSnapshot.id
-                    ? "긴급 건은 먼저 인력풀에서 대상을 선별한 뒤 선택한 분에게 명시적으로 안내하세요."
-                    : "외부 채널 모집 전용 공고라 인력풀 문자 안내를 보내지 않아요.",
-                },
-              }
-            : {}),
         }));
       }
 
-      // 핵심 저장은 끝났다. 목록 재검증·안내 대상 조회가 느려도 다음 공고 작성은 잠그지 않는다.
+      // 핵심 저장은 끝났다. 목록 재검증이 느려도 다음 공고 작성은 잠그지 않는다.
       clearStoredNewJobDraft();
       setAiModalOpen(false);
       resetNewJobForm();
       loadJobs();
-
-      // 선택적 후속 조회는 완료 창의 상태만 갱신한다. 사용자가 완료 창을 닫거나 다음 공고를 시작했다면
-      // settleJobRegistrationFollowup이 null/다른 jobId를 보존해 늦은 응답으로 창을 되살리지 않는다.
-      if (newJobId !== null && !sosSnapshot.id && newJobRow?.recruitMode !== "external") {
-        void fetchAnnounceTargets(newJobId)
-          .then((at) => {
-            if (at.targets.length > 0) {
-              setRegistrationFollowup((current) =>
-                settleJobRegistrationFollowup(current, newJobId, { status: "ready", payload: at }),
-              );
-            } else {
-              const description = announceZeroTargetDescription({
-                consent: at.dropped_by_consent ?? { total: 0, promised: 0 },
-                fatigue: at.dropped_by_fatigue ?? { total: 0, promised: 0 },
-                exposure: at.dropped_by_exposure ?? { total: 0, promised: 0 },
-                fatigueDays: at.fatigue_days ?? 7,
-              });
-              setRegistrationFollowup((current) =>
-                settleJobRegistrationFollowup(current, newJobId, {
-                  status: "empty",
-                  description: description ?? "현재 조건에서 별도로 안내할 대상은 없어요.",
-                }),
-              );
-            }
-          })
-          .catch(() => {
-            setRegistrationFollowup((current) =>
-              settleJobRegistrationFollowup(current, newJobId, { status: "error" }),
-            );
-          });
-      }
     } catch {
       toast.error("공고 등록에 실패했어요");
     } finally {
@@ -2966,7 +2924,7 @@ export function Jobs() {
     }
   };
 
-  // 새 공고 안내 대상 조회 — 등록 직후(자동)와 행 '대기자에게 안내'(수동) 공용.
+  // 행 '대기자에게 안내'에서 기존 충원 안내·알림 신청 대상을 조회한다.
   const fetchAnnounceTargets = async (jobId: number): Promise<AnnounceTargetsRes> => {
     const res = await fetch(`/api/admin/jobs/${jobId}/announce-targets`);
     const json = await res.json();
@@ -2974,7 +2932,7 @@ export function Jobs() {
     return json as AnnounceTargetsRes;
   };
 
-  // 행 '대기자에게 안내' — 등록 직후 모달을 놓쳤거나 야간이라 미뤘을 때 같은 모달을 다시 연다.
+  // 행 '대기자에게 안내' — 현재 노출 설정과 수신 동의를 반영한 문자를 검토한다.
   const openAnnounce = async (job: JobRow) => {
     if (announceBusyId) return;
     setAnnounceBusyId(job.id);
@@ -4805,7 +4763,7 @@ export function Jobs() {
         </Modal>
       )}
 
-      {/* 등록 완료 후속 단계 — 사라지는 토스트와 자동 안내 모달이 경쟁하지 않게 연속 등록·안내 검토를 한곳에 둔다. */}
+      {/* 등록 완료 후속 단계 — 연속 등록 또는 인재풀 추천 명단 확인으로 바로 이어 준다. */}
       {registrationFollowup && (
         <Modal
           open={Boolean(registrationFollowup)}
@@ -4891,7 +4849,7 @@ export function Jobs() {
                               : "기존 인력풀에서 찾기"}
                           </div>
                           <p className="mt-1 text-[12px] font-medium leading-relaxed text-muted-foreground">
-                            추천 근거를 확인하고 노출할 대상을 고르세요. 이동·선택만으로 문자·배정·확정되지는 않아요.
+                            추천 근거 확인 → 대상 선택 → 공고 노출 → 문자 검토 순서로 이어집니다. 이동·선택만으로 발송·배정·확정되지는 않아요.
                           </p>
                           <Button
                             type="button"
@@ -4908,7 +4866,7 @@ export function Jobs() {
                               router.push(`/pipeline?job=${encodeURIComponent(String(jobId))}`);
                             }}
                           >
-                            <Users size={15} /> 추천 인력 보기
+                            <Users size={15} /> 추천 명단 확인
                           </Button>
                         </div>
                       )}
@@ -4976,69 +4934,12 @@ export function Jobs() {
                 </div>
               </section>
 
-              {registrationFollowup.duplicateSource.recruitMode !== "external" && (
-                <section aria-labelledby="registration-followup-announce-title" className="border-t border-border-strong bg-background px-4 py-4">
-                  <div className="flex items-start gap-3">
-                    <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-[12px] font-extrabold text-white">
-                      3
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h3 id="registration-followup-announce-title" className="text-[13px] font-extrabold text-foreground">우리 인력에게 새 공고 안내</h3>
-                      {registrationFollowup.announcement.status === "checking" && (
-                        <div role="status" className="mt-2 flex min-h-8 items-center gap-2 text-[13px] font-medium text-muted-foreground">
-                          <Loader2 aria-hidden="true" size={15} className="animate-spin motion-reduce:animate-none" /> 동의와 발송 간격을 확인하고 있어요. 기다리지 않고 다음 공고를 만들어도 됩니다.
-                        </div>
-                      )}
-                      {registrationFollowup.announcement.status === "ready" && (
-                        <div className="mt-2 flex min-h-8 flex-col items-start gap-3">
-                          <p className="text-[13px] font-medium leading-relaxed text-foreground">
-                            안내 가능한 대상 <b>{registrationFollowup.announcement.payload.targets.length}명</b>이 있어요.
-                            {registrationFollowup.announcement.payload.night && " 야간에는 검토만 가능하고 발송은 아침 9시 이후에 할 수 있어요."}
-                          </p>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={duplicatingId !== null}
-                            onClick={() => {
-                              const at = registrationFollowup.announcement.status === "ready"
-                                ? registrationFollowup.announcement.payload
-                                : null;
-                              if (!at) return;
-                              const jobId = registrationFollowup.jobId;
-                              setRegistrationFollowup(null);
-                              setAnnounceSendReport(null);
-                              setAnnounceModal({
-                                jobId,
-                                smsTitle: at.sms_title,
-                                body: at.sms_body,
-                                targets: at.targets,
-                                groups: at.groups,
-                                night: at.night,
-                                dropped: at.dropped_by_exposure,
-                              });
-                            }}
-                          >
-                            <Megaphone size={15} /> {registrationFollowup.announcement.payload.targets.length}명 안내 검토
-                          </Button>
-                        </div>
-                      )}
-                      {registrationFollowup.announcement.status === "empty" && (
-                        <p className="mt-2 min-h-8 text-[13px] font-medium leading-relaxed text-muted-foreground">{registrationFollowup.announcement.description}</p>
-                      )}
-                      {registrationFollowup.announcement.status === "error" && (
-                        <p className="mt-2 min-h-8 text-[13px] font-medium leading-relaxed text-muted-foreground">대상을 지금 확인하지 못했어요. 공고 행의 ‘대기자에게 안내’에서 나중에 다시 확인할 수 있어요.</p>
-                      )}
-                    </div>
-                  </div>
-                </section>
-              )}
             </motion.div>
           </div>
         </Modal>
       )}
 
-      {/* 새 공고 안내 확인 모달 — 등록 완료 단계와 행 '대기자에게 안내'가 같은 검토 모달을 연다.
-          충원 안내 이력(waitlist_notice)·알림 신청(notify_request) 기반 후보를 게시 순간 원클릭으로. */}
+      {/* 행 '대기자에게 안내' 확인 모달 — 충원 안내 이력(waitlist_notice)·알림 신청(notify_request) 기반 후보에게 보낼 문자를 검토한다. */}
       {announceModal && (
         <Modal bare open={Boolean(announceModal)} onClose={() => { if (!announcing) { setAnnounceSendReport(null); setAnnounceModal(null); } }} busy={announcing} size="md"
                title="새 공고 안내 대상에게 보낼까요?"

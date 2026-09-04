@@ -42,6 +42,7 @@ async function installControlledNetwork(
   page: Page,
   generatePosting?: (route: Route) => Promise<void>,
   exposurePreview?: (route: Route) => Promise<void>,
+  registerJob?: (route: Route) => Promise<void>,
 ) {
   const apiRequests: string[] = [];
   const blockedRequests: string[] = [];
@@ -74,6 +75,10 @@ async function installControlledNetwork(
     apiRequests.push(key);
     if (key === "POST /api/admin/jobs/generate-posting" && generatePosting) {
       await generatePosting(route);
+      return;
+    }
+    if (key === "POST /api/admin/jobs" && registerJob) {
+      await registerJob(route);
       return;
     }
     if (url.pathname === "/api/admin/exposure" && exposurePreview) {
@@ -262,4 +267,103 @@ test("추천 노출 조건을 한 번에 적용하고 관리자가 바로 수정
   await expect(dialog).toContainText("추천을 적용한 뒤 공고 정보가 바뀌었어요");
   await expect(dialog.getByRole("button", { name: "추천 조건 다시 적용" })).toBeVisible();
   expect(network.blockedRequests).toEqual([]);
+});
+
+test("등록 완료 뒤 자동 문자 조회 없이 추천 명단 확인으로 이어진다", async ({ page }) => {
+  const registrationRequests: Record<string, unknown>[] = [];
+  const network = await installControlledNetwork(
+    page,
+    async (route) => {
+      await fulfillJson(route, {
+        ok: true,
+        source: "ai",
+        posting: {
+          title: "성수 오전 배송 모집",
+          fields: {
+            pay: "건당 3,500원 · 매주 금요일 정산",
+            schedule: "평일 오전 7시~12시",
+            pickupAddress: "성수 물류센터 3번 게이트",
+            dropoffAddress: "강남 일대 · 종료 강남역",
+            capacity: 3,
+            vehicleRequired: true,
+            workPeriod: "정기",
+            slotKeys: ["평일오전"],
+          },
+          albamon: { body: "성수 오전 배송 모집\n평일 오전 7시~12시" },
+          sms: { body: "[옹고잉] 성수 오전 배송 공고를 확인해 주세요. #{맞춤링크}" },
+        },
+      });
+    },
+    undefined,
+    async (route) => {
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      registrationRequests.push(payload);
+      await fulfillJson(route, {
+        job: {
+          ...payload,
+          id: 77,
+          title: "성수 오전 배송 모집",
+          body: "성수 오전 배송 모집\n평일 오전 7시~12시",
+          branch: null,
+          branch_id: null,
+          client_id: null,
+          status: "active",
+          recruit_mode: "internal",
+          exposure: "all",
+          exposure_rule: null,
+          vehicle_required: true,
+          capacity: 3,
+          created_at: "2026-09-04T00:00:00.000Z",
+          closed_at: null,
+          work_period: "정기",
+          closes_at: null,
+          counts: {},
+          confirmed_count: 0,
+          review_ready_count: 0,
+          interest_count: 0,
+          tracking_submission_count: 0,
+          pickup_address: "성수 물류센터 3번 게이트",
+          dropoff_address: "강남 일대 · 종료 강남역",
+          pickup_lat: 37.5445,
+          dropoff_lat: 37.4979,
+        },
+      });
+    },
+  );
+
+  await page.goto("/jobs");
+  await page.getByRole("button", { name: "새 공고", exact: true }).click();
+
+  const createDialog = page.getByRole("dialog", { name: "새 공고 등록" });
+  await createDialog.getByRole("textbox", { name: "받은 내용을 그대로 붙여넣어 주세요" }).fill(
+    "성수 물류센터에서 강남권 배송, 평일 오전 7시 시작, 3명, 건당 3,500원",
+  );
+  await createDialog.getByRole("button", { name: "AI 초안 생성" }).click();
+  await createDialog.getByRole("button", { name: "이 내용으로 공고 등록" }).click();
+
+  const completionDialog = page.getByRole("dialog", { name: "공고 등록 완료" });
+  await expect(completionDialog).toBeVisible();
+  await expect(completionDialog).toContainText("추천 근거 확인 → 대상 선택 → 공고 노출 → 문자 검토");
+  const recommendationButton = completionDialog.getByRole("button", { name: "추천 명단 확인" });
+  await expect(recommendationButton).toBeVisible();
+
+  expect(registrationRequests).toHaveLength(1);
+  expect(registrationRequests[0]).toMatchObject({
+    recruit_mode: "internal",
+    capacity: 3,
+    pickup_address: "성수 물류센터 3번 게이트",
+    dropoff_address: "강남 일대 · 종료 강남역",
+    pay_info: "건당 3,500원 · 매주 금요일 정산",
+  });
+  expect(network.apiRequests.some((request) => request.includes("/announce-targets"))).toBe(false);
+  expect(network.blockedRequests).toEqual([]);
+
+  const [pipelineRequest] = await Promise.all([
+    page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.pathname === "/pipeline" && url.searchParams.get("job") === "77";
+    }),
+    recommendationButton.click(),
+  ]);
+  expect(new URL(pipelineRequest.url()).searchParams.get("job")).toBe("77");
 });

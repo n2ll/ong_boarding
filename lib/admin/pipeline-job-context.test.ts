@@ -254,6 +254,8 @@ test("Pipeline wires the focused job to a visible safe handoff and exposure pick
 
   assert.match(source, /const focusedActiveJob = pipelineFocusedActiveJob\(/);
   assert.match(source, /aria-label="공고별 내부 충원 단계"[\s\S]*?fillMissionSteps\.map\(/);
+  assert.match(source, /pipelineRecommendedSelectionIds\([\s\S]*?추천 \$\{ids\.length\}명을 선택했어요/);
+  assert.match(source, /추천 \{focusedRecommendedSelectionCount\}명 선택/);
   assert.match(source, /focusedActiveJob[\s\S]*?\{selectedRows\.size\}명에게 공고 노출[\s\S]*?문자 보내기/);
   assert.match(source, /노출만으로 후보 등록·문자 발송·배정·근무 확정이 이루어지지 않습니다/);
   assert.match(source, /setExposureJobIds\(pipelineExposureJobIdsOnOpen\(/);
