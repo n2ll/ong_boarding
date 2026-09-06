@@ -111,11 +111,11 @@ function transitionLabelOf(transition: StageTransition): string {
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
   // Opt-out persistence must never wait behind a conversational lock.
   if (input.simulate || isExplicitSmsOptOutText(input.inbound_text)) return runClaimedAgentForCandidate(input);
-  const mode = await getAgentMode(input.supabase);
-  if (mode === "off") return { ok: true, skipped: "agent kill-switch ON — global pause" };
   const { data: candidate, error } = await input.supabase.from("job_candidates")
     .select("applicant_id, job_id").eq("id", input.candidate_id).single();
   if (error || !candidate?.applicant_id || !candidate?.job_id) return { ok: false, error: "reply claim candidate lookup failed" };
+  const mode = await getAgentMode(input.supabase, input.received_at ? { applicantId: candidate.applicant_id, receivedAt: input.received_at } : undefined);
+  if (mode === "off") return { ok: true, skipped: "agent kill-switch ON — global pause" };
   // 먼저 답장 텀과 연속 문자 병합을 마친다. 대기 중 잠금을 잡으면 최신 핸들러도
   // busy로 종료되어 두 문자 모두 응답되지 않는다. 잠금 안에서는 더 이상 양보하지 않는다.
   if (mode !== "draft" && !input.forceDraft && input.received_at) {
@@ -207,19 +207,6 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     return { ok: true, skipped: "explicit SMS opt-out recorded — agent skipped" };
   }
 
-  // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
-  // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
-  const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase);
-  if (mode === "off") {
-    return { ok: true, skipped: "agent kill-switch ON — global pause" };
-  }
-  // 전역 draft 모드이거나, 이 호출만 초안화(forceDraft — 문자함 등록 시 자동발송 차단)면 초안 경로.
-  // simulate(빙의 연습)는 발송 자체가 가짜라 forceDraft를 무시한다.
-  const draftMode = mode === "draft" || (!simulate && forceDraft);
-  // 이번 호출만 초안화된 경우(전역 코파일럿이 아님). 전역 코파일럿은 '부수효과 0' 계약이라 그대로 두고,
-  // forceDraft는 '지원자에게 문자만 안 보낸다'는 뜻이므로 아래에서 전이·state를 정상 저장한다.
-  const perCallDraft = draftMode && mode !== "draft";
-
   // 1) job_candidate + 관련 데이터 로드
   const { data: jc, error: jcErr } = await supabase
     .from("job_candidates")
@@ -241,6 +228,19 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   if (jcErr || !jc) {
     return { ok: false, error: `job_candidate not found: ${jcErr?.message}` };
   }
+
+  // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
+  // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
+  const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase, received_at ? { applicantId: jc.applicant_id as number, receivedAt: received_at } : undefined);
+  if (mode === "off") {
+    return { ok: true, skipped: "agent kill-switch ON — global pause" };
+  }
+  // 전역 draft 모드이거나, 이 호출만 초안화(forceDraft — 문자함 등록 시 자동발송 차단)면 초안 경로.
+  // simulate(빙의 연습)는 발송 자체가 가짜라 forceDraft를 무시한다.
+  const draftMode = mode === "draft" || (!simulate && forceDraft);
+  // 이번 호출만 초안화된 경우(전역 코파일럿이 아님). 전역 코파일럿은 '부수효과 0' 계약이라 그대로 두고,
+  // forceDraft는 '지원자에게 문자만 안 보낸다'는 뜻이므로 아래에서 전이·state를 정상 저장한다.
+  const perCallDraft = draftMode && mode !== "draft";
 
   // 인력풀에서 빠진 지원자('부적합'/'이탈')는 어떤 공고든 자동 응답하지 않는다(사람 단위 제외).
   // ⚠️ '확정인력'은 여기서 막지 않는다 — 한 사람이 시간대가 다르면 여러 라인에 병행 투입될 수 있어,
@@ -394,6 +394,11 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       purpose: stage.name as UsagePurpose,
       usage: result.usage,
     });
+  }
+
+  // 모델 응답을 기다리는 동안 검수가 만료되거나 매니저가 중단했다면 발송·상태 변경을 멈춘다.
+  if (!simulate && await getAgentMode(supabase, received_at ? { applicantId: applicant.id, receivedAt: received_at } : undefined, true) !== mode) {
+    return { ok: true, skipped: "agent mode changed during generation — response discarded" };
   }
 
   // 문의 공고는 모델 검증 뒤에야 알 수 있다. 상담 실행 소유자를 응답한 공고로 세지 않는다.

@@ -280,7 +280,7 @@ async function processInbound(
 
       // 자동 모드의 순수 풀 답장만 분류한다. off/draft·수동 관리·모호한 공고 답변은
       // 모델 호출과 전역 가용성 변경을 하지 않는다. 명시적 수신거부는 위에서 모드와 무관하게 처리한다.
-      if (!route.ok && route.reason === "none" && (await getAgentMode(supabase)) === "auto") {
+      if (!route.ok && route.reason === "none" && (await getAgentMode(supabase, { applicantId: applicant.id, receivedAt })) === "auto") {
         // ping 응답 이벤트 — 응답률·응답속도(신뢰점수 §6.4-4) 재료
         if (lastPing) {
           const latencyMin = Math.max(
@@ -364,7 +364,7 @@ async function processInbound(
         focusJobId: route.focusJobId,
         receivedAt,
         inboundMessageId: String(msg.id),
-        mode: await getAgentMode(supabase),
+        mode: await getAgentMode(supabase, { applicantId: applicant.id, receivedAt }),
         inboundOptOut,
         sendSms: (to, body) => sendSms(to, body),
         notify: (t) => sendSlackText(t),
@@ -404,7 +404,7 @@ async function processInbound(
       // 어떤 실패도 non-fatal — 아래 기존 응답(no active job_candidate)으로 폴백한다.
       // 야간에도 발송함 — 방금 온 답장에 대한 즉시 회신은 기존 활성 후보 응대와 동일 원칙.
       try {
-        const mode = await getAgentMode(supabase);
+        const mode = await getAgentMode(supabase, { applicantId: applicant.id, receivedAt });
         // 편입 조건: auto 모드 + 최근 14일 내 ping_sent(캠페인 코호트) + 이번 인바운드가
         // opt-out으로 분류되지 않았음(inboundOptOut === false — 분류는 위 가용성 블록에서 이미 끝남).
         if (mode === "auto" && recentPingAt && inboundOptOut === false) {

@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { invalidateKillSwitchCache, parseAgentMode, type AgentMode } from "@/lib/agent/kill-switch";
+import { invalidateKillSwitchCache, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
 import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +48,7 @@ export async function GET() {
     const mode = parseAgentMode(stored?.body as string | null | undefined);
     return NextResponse.json({
       mode,
+      test_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentTestSession(stored?.body),
       // 하위호환 — 기존 소비자(disabled boolean)는 '완전 중지'일 때만 true.
       disabled: mode === "off",
       updated_at: (stored as { updated_at?: string } | undefined)?.updated_at ?? null,
@@ -61,10 +62,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown };
+    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown };
 
     let mode: AgentMode;
-    if (payload.mode !== undefined) {
+    const testing = payload.mode === "test";
+    if (testing) {
+      mode = "off";
+    } else if (payload.mode !== undefined) {
       if (payload.mode !== "auto" && payload.mode !== "draft" && payload.mode !== "off") {
         return NextResponse.json(
           { error: "mode는 'auto' | 'draft' | 'off' 중 하나여야 합니다." },
@@ -83,8 +87,20 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServiceClient();
-    const body = MODE_TO_BODY[mode];
+    let body = MODE_TO_BODY[mode];
     const updatedAt = new Date().toISOString();
+    if (testing) {
+      if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 검수를 시작할 수 없습니다." }, { status: 409 });
+      const phone = typeof payload.phone === "string" ? payload.phone.replace(/[^0-9]/g, "") : "";
+      if (!/^01[0-9]{8,9}$/.test(phone)) return NextResponse.json({ error: "테스트 계정의 휴대전화 번호를 입력해주세요." }, { status: 400 });
+      const { data: targets, error: targetError } = await supabase.from("applicants").select("id,name,sms_opt_out_at").eq("phone", phone).limit(2);
+      if (targetError) return NextResponse.json({ error: "테스트 대상 조회 실패" }, { status: 500 });
+      const target = targets?.length === 1 ? targets[0] : null;
+      if (!target || !/테스트|test/i.test(target.name ?? "") || target.sms_opt_out_at) {
+        return NextResponse.json({ error: "이름에 테스트 표시가 있고 수신거부하지 않은 단일 기존 계정만 검수할 수 있습니다." }, { status: 400 });
+      }
+      body = JSON.stringify({ mode: "test", applicant_id: target.id, started_at: updatedAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() });
+    }
 
     // update-first + 부분 유니크 인덱스로 최초 생성 경쟁에서도 예약 행을 하나만 유지한다.
     const { data: updatedRows, error: updateError } = await supabase
@@ -137,6 +153,7 @@ export async function POST(req: NextRequest) {
     const storedMode = parseAgentMode(stored?.body);
     return NextResponse.json({
       mode: storedMode,
+      test_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentTestSession(stored?.body),
       disabled: storedMode === "off",
       env_forced: process.env.AGENT_DISABLED === "1",
       updated_at: stored?.updated_at ?? updatedAt,

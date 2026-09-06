@@ -75,3 +75,12 @@ scope: 진행 중 SMS의 복수 공고 조건 안내 / 공고별 원문 기록 /
 - 실제 POST + background 처리 런타임 테스트에서 off/draft/paused/ambiguous 4건 모두 모델 호출을 재현했다. auto + 순수 풀 답장에만 분류하도록 수정 후 6/6 통과; auto 풀 분류 유지와 off 상태 명시적 수신거부 처리를 함께 검증했다. 관련 상담·수신거부 테스트 전체 **97 passed**, eslint·diff check 및 `npm run build` exit 0 (`/tmp/ongboarding-final-qa-build.log`). 이후 앱 변경은 주석뿐이다.
 - 테스트 계정은 이전 이벤트의 from 값을 확인하고, 테스트 직후 상태와 갱신 시각이 그대로인 경우에만 휴면으로 원복했다. 기존 이벤트는 보존하고 별도 복구 이력을 남겼다(18:04:48 KST).
 - PR131의 첫 커밋은 Vercel 검사 통과. 운영 머지는 자동 승인 검토가 이번 PR에 대한 명시적 승인 부족으로 차단했으며 미머지 상태다. 이후 가용성 경로 수정도 같은 PR에서 검증한다. 새 테스트 SMS는 운영 반영 후 진행한다.
+
+## 승인 후 운영 배포·실제 답장 모델 비교
+- 사용자가 PR131 머지와 실제 답장 Claude 검수를 승인하고 저렴한 모델을 우선 요청했다. 승인 직후 회귀 97/97 통과, 검증한 head `494eff4`를 squash merge했다. 머지 커밋 `09bb2201020fb5ab869eedff9b8b6991a06b3413`, GitHub Production deployment `6291309026` success (2026-09-06 18:22:06 KST).
+- 실제 답장 두 건만 사용하고 지원자 신원·전화번호·원문 ID는 가상화했다. 가상 공고 및 운영 prompt 로더와 실제 screening 모듈을 사용했다. 모델 변경은 평가 프로세스 안에서만 적용했다. 업무 DB 쓰기·SMS·Slack 경로 차단, 사용량만 improve로 기록했다.
+- API 모델 목록에서 사용 가능한 최저가 Haiku는 `claude-haiku-4-5-20251001`이었다. Haiku 1회: 공고별 관심/가능 시간과 출처 2건은 정확했으나, 묻지 않은 근무기간을 안내하고 불필요한 pause/handoff를 생성해 실패했다. 프로필·입력 상태 변경은 없었다.
+- 같은 입력의 기존 `claude-sonnet-4-6` 1회: 원문 2건 각각 올바른 공고/종류/출처, stay, 인계 없음, 프로필·입력 상태 변경 없음으로 7/7 조건 통과. 단일 사례 비교이므로 모델 전반의 품질을 단정하지 않으며 운영 상담 모델은 유지했다.
+- 두 평가 호출 사용량: Haiku input 13,949/output 668, Sonnet input 11,397/output 510, 캐시 0. 공식 기본 요율 기준 합계 $0.05913 추정이며 사용량 RPC 적재 성공. 원문 포함 평가 파일은 `/tmp/ongboarding-consultation-real-reply-eval.json` 및 `/tmp/ongboarding-consultation-real-reply-sonnet-eval.json`에만 보존한다.
+- 운영 관리자 화면에서 실제 답장 두 건·AI 전역 중지·테스트 계정 휴면을 재확인했다. 추가 검증 답변 SMS 발송은 자동 승인 검토가 별도 발송 승인 부족으로 차단했다. 재시도하지 않았고 배포 이후 해당 테스트 계정의 신규 outbound 0건을 DB로 확인했다.
+- 범위: 실제 수신/관리자 표시와 모델 해석을 나누어 확인했다. 운영 webhook→AI→관찰 저장→SMS의 자동 완주는 검증하지 않았으며 전체 AI off 유지. 최신 법인폰 보고 18:10:13 KST, pending_count=1; 기기 앱에서 대기 내용·오류 확인이 남아 있다.

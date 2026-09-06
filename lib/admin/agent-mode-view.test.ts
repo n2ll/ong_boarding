@@ -250,3 +250,11 @@ test("operator copy claims automatic replies only for a current auto snapshot", 
     claimsAutomatic: true,
   });
 });
+
+test("a limited test is visibly distinct from a global shutdown", async () => {
+  const { agentModeView, agentModePresentation } = await loadModule();
+  const test_session = { mode: "test", applicant_id: 7, started_at: new Date(Date.now()-1000).toISOString(), expires_at: new Date(Date.now()+60000).toISOString() };
+  const view = agentModeView!({ data: { mode: "off", disabled: true, env_forced: false, test_session } });
+  assert.match(agentModePresentation!(view).label, /테스트 1명/);
+  assert.equal(agentModePresentation!(view).claimsAutomatic, false);
+});

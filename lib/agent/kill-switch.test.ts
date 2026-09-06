@@ -14,7 +14,7 @@ function fakeClient(result: { data: unknown; error: unknown }) {
 async function loadKillSwitch() {
   const modulePath = "./kill-switch.ts";
   return await import(modulePath) as {
-    getAgentMode: (client: never) => Promise<"auto" | "draft" | "off">;
+    getAgentMode: (client: never, scope?: { applicantId: number; receivedAt: string }) => Promise<"auto" | "draft" | "off">;
     invalidateKillSwitchCache: () => void;
     parseAgentMode: (body: string | null | undefined) => "auto" | "draft" | "off";
   };
@@ -80,4 +80,40 @@ test("a thrown database exception fails closed instead of enabling automatic rep
   };
 
   assert.equal(await getAgentMode(client as never), "off");
+});
+
+function testBody(start = Date.now() - 1000, end = Date.now() + 60_000) {
+  return JSON.stringify({ mode: "test", applicant_id: 7, started_at: new Date(start).toISOString(), expires_at: new Date(end).toISOString() });
+}
+
+test("test session permits only new inbound from one applicant, including with a shared cache", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const client = fakeClient({ data: [{ body: testBody() }], error: null }) as never;
+  const receivedAt = new Date().toISOString();
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt }), "auto");
+  assert.equal(await getAgentMode(client, { applicantId: 8, receivedAt }), "off");
+  assert.equal(await getAgentMode(client), "off", "unscoped cron must remain stopped");
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: new Date(Date.now() - 5000).toISOString() }), "off");
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: "invalid" }), "off");
+});
+
+test("expired, future, overly long or malformed test sessions fail closed", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  for (const body of [testBody(Date.now()-5000, Date.now()-1000), testBody(Date.now()+1000, Date.now()+5000), testBody(Date.now()-1000, Date.now()+3600_000), '{"mode":"test","applicant_id":7}']) {
+    invalidateKillSwitchCache();
+    assert.equal(await getAgentMode(fakeClient({ data: [{ body }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString() }), "off");
+  }
+});
+
+test("environment kill switch overrides a valid test session", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  const before = process.env.AGENT_DISABLED;
+  try {
+    invalidateKillSwitchCache(); process.env.AGENT_DISABLED = "1";
+    assert.equal(await getAgentMode(fakeClient({ data: [{ body: testBody() }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString() }), "off");
+  } finally {
+    if (before === undefined) delete process.env.AGENT_DISABLED; else process.env.AGENT_DISABLED = before;
+    invalidateKillSwitchCache();
+  }
 });

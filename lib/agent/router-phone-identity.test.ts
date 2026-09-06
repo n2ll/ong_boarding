@@ -137,7 +137,7 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
   const observations: unknown[] = [];
   const contexts: StageContext[] = [];
   const rpcCalls: string[] = [];
@@ -263,7 +263,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
       }),
     },
     "./kill-switch": {
-      getAgentMode: async () => input.mode ?? "auto",
+      getAgentMode: async (_db: unknown, scope?: { applicantId: number; receivedAt: string }) => input.scoped && (!scope || scope.applicantId !== 1 || !scope.receivedAt) ? "off" : input.stopAfterModel && contexts.length ? "off" : input.mode ?? "auto",
       COPILOT_DRAFT_MARKER: "[copilot]",
     },
     "./outbound-safety": { detectAutomatedOutboundSafetyViolation: () => null },
@@ -452,4 +452,20 @@ test("known provider rejection releases the claim after pausing", async () => {
   assert.equal(result.delivery_uncertain ?? false, false);
   assert.equal(h.transitions[0].kind, "pause");
   assert.deepEqual(h.rpcCalls, ["claim_pool_agent_reply", "release_pool_agent_reply"]);
+});
+
+test("a stop during model generation prevents response and state writes", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], stopAfterModel: true });
+  const result = await run(h.router, h.supabase);
+  assert.match(result.skipped ?? "", /mode changed/);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions.length, 0);
+  assert.equal((h.database._updates ?? []).length, 0);
+});
+
+test("router supplies verified applicant and inbound timestamp at every scoped mode gate", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], scoped: true, consultation: consultationEnvelope });
+  const result = await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "네", received_at: new Date(Date.now()-120000).toISOString() });
+  assert.equal(result.reply_sent, true);
+  assert.equal(h.smsCalls.length, 1);
 });

@@ -313,6 +313,8 @@ export function AgentBrain() {
   const killEnvForced = killSnapshot?.override?.kind === "environment";
   const killOverrideIsCurrent = globalAgentMode.state === "ready" && killEnvForced;
   const [killBusy, setKillBusy] = useState(false);
+  const [testPhone, setTestPhone] = useState("");
+  const testSession = killApi?.test_session;
   const killUpdatedAt = killSnapshot?.updatedAt ?? null;
   const overview = useMemo(() => brainOverview({
     examples: examplesApi?.data,
@@ -342,7 +344,7 @@ export function AgentBrain() {
           : "bg-card border-border-strong";
 
   const handleChangeKillMode = async (next: BrainMode) => {
-    if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || next === killMode) return;
+    if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || (next === killMode && !testSession)) return;
     const ok =
       next === "off"
         ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
@@ -390,6 +392,22 @@ export function AgentBrain() {
     }
   };
 
+
+  const handleStartTest = async () => {
+    if (killBusy || killEnvForced || globalAgentMode.state !== "ready" || killMode !== "off") return;
+    const ok = await confirm({ title: "이 번호로 자동 응대를 검수할까요?", description: `${testPhone}의 테스트 계정만 20분 동안 새 답장에 AI가 실제 문자를 보냅니다. 일반 지원자와 예약 작업은 중지됩니다.`, confirmText: "검수 시작" });
+    if (!ok) return;
+    setKillBusy(true);
+    try {
+      const res = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "test", phone: testPhone }) });
+      const json = await res.json();
+      if (!res.ok) { toast.error(json.error || "검수를 시작하지 못했어요."); return; }
+      if (!isAdminAgentModeResponse(json)) { toast.error("검수 상태를 확인하지 못했어요."); void mutateKill(); return; }
+      await mutateKill(json, { revalidate: false });
+      toast.success("테스트 계정 1명만 자동 응대를 허용했어요. 20분 뒤 자동 중지됩니다.");
+    } catch { toast.error("검수를 시작하지 못했어요."); }
+    finally { setKillBusy(false); }
+  };
 
   const openKbAdd = () =>
     setKbForm({ id: null, category: kbCategory, title: "", body: "" });
@@ -1057,7 +1075,7 @@ export function AgentBrain() {
                         <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[12px] font-bold text-warning-strong">갱신 실패</span>
                       ) : (
                         <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ${killDisabled ? "bg-error-soft text-error-strong" : killDraft ? "bg-copilot-soft text-copilot-strong" : "bg-success/25 text-success-strong"}`}>
-                          {killOverrideIsCurrent ? "중단됨 (환경변수)" : killDisabled ? "중단됨" : killDraft ? "코파일럿" : "자동 응대"}
+                          {killOverrideIsCurrent ? "중단됨 (환경변수)" : testSession ? "테스트 1명만 자동 응대" : killDisabled ? "중단됨" : killDraft ? "코파일럿" : "자동 응대"}
                         </span>
                       )}
                     </div>
@@ -1099,6 +1117,27 @@ export function AgentBrain() {
                         );
                       })}
                     </div>
+
+                    {killDisabled && !killEnvForced && (
+                      <div className="mt-4 rounded-xl border border-border-strong p-3 text-sm">
+                        {testSession ? (
+                          <>
+                            <p role="status">테스트 계정 1명만 새 답장에 자동 응대합니다. 일반 지원자와 예약 작업은 중지됩니다.</p>
+                            <p className="mt-1 text-muted-foreground">종료: {new Date(testSession.expires_at).toLocaleString("ko-KR")}</p>
+                            <button type="button" disabled={killBusy} onClick={() => handleChangeKillMode("off")} className="mt-2 rounded-lg border px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring">검수 중단</button>
+                          </>
+                        ) : (
+                          <>
+                            <label htmlFor="agent-test-phone" className="block font-bold">자동 응대 검수용 전화번호</label>
+                            <p className="my-2 text-muted-foreground">테스트 표시가 있는 기존 계정 1명에게만 20분간 실제 답장을 보냅니다.</p>
+                            <div className="flex flex-wrap gap-2">
+                              <input id="agent-test-phone" type="tel" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} className="rounded-lg border bg-background px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring" />
+                              <button type="button" disabled={killBusy || !testPhone.trim()} onClick={handleStartTest} className="rounded-lg border px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">20분 검수 시작</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
 
                     {killUpdatedAt && globalAgentMode.state !== "loading" && globalAgentMode.state !== "error" && (
                       <p className="text-[12px] text-muted-foreground mt-3">
