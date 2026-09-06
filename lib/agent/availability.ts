@@ -5,7 +5,7 @@
  * applicants.availability(즉시가능/이번주가능/휴면) 갱신 재료로 쓴다.
  *
  * 호출부: /api/webhooks/supabase-new-message — 매칭된 지원자 중
- *   (a) 활성 job_candidate가 없거나(풀 응답), (b) 최근 14일 내 ping_sent가 있을 때만.
+ *   auto 모드이며 공고 후보가 없는 순수 풀 응답일 때만. paused/ambiguous·off/draft는 제외한다.
  *   일반 스크리닝 대화 전부에 붙이지 않는 것은 비용 가드(§5.7)와
  *   "좋은 기사를 가용성 확인으로 괴롭히지 않기" 원칙 때문 — 가용성은 질문이 아니라
  *   이미 도착한 행동(답장)에서만 추론한다.
