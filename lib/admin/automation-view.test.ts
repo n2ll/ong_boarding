@@ -6,7 +6,7 @@ type OverviewInput = {
   applicantsError?: boolean;
   agentMode?:
     | { state: "loading" | "error"; mode: null }
-    | { state: "stale" | "ready"; mode: "auto" | "draft" | "off" };
+    | { state: "stale" | "ready"; mode: "auto" | "draft" | "off"; testSession?: { mode: "test"; applicant_id: number; started_at: string; expires_at: string } };
   inbox?: unknown[];
   inboxError?: boolean;
   activeJobs?: { title: string }[];
@@ -21,6 +21,18 @@ async function loadViewModule(): Promise<Record<string, unknown>> {
     return {};
   }
 }
+
+test("automation overview labels a limited test without claiming global automation", async () => {
+  const { automationOverview } = await loadViewModule() as {
+    automationOverview: (input: OverviewInput) => { ai: { value: string; detail: string | null; claimsAutomatic: boolean } };
+  };
+  const result = automationOverview({ agentMode: { state: "ready", mode: "off", testSession: {
+    mode: "test", applicant_id: 7, started_at: new Date().toISOString(), expires_at: new Date(Date.now()+60000).toISOString(),
+  } } });
+  assert.equal(result.ai.value, "테스트 1명만 자동 응대");
+  assert.match(result.ai.detail!, /일반 지원자/);
+  assert.equal(result.ai.claimsAutomatic, false);
+});
 
 test("unloaded automation data stays unknown instead of looking healthy or empty", async () => {
   const view = await loadViewModule();

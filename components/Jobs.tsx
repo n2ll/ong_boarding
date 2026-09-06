@@ -3428,7 +3428,7 @@ export function Jobs() {
                     {job.effectivelyClosed ? (
                       "AI 응대 중지 · 마감"
                     ) : agentModeCopy.kind === "off" ? (
-                      <Link href="/brain" className="rounded text-error-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">AI 전역 중지됨</Link>
+                      <Link href="/brain" title={agentModeCopy.detail ?? undefined} className="rounded text-error-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{agentModeCopy.label}</Link>
                     ) : (
                       <span title={agentModeCopy.detail ?? undefined}>
                         {agentModeCopy.kind === "stale" ? "이전 AI 상태 · 갱신 실패" : agentModeCopy.label}

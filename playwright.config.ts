@@ -6,7 +6,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: "./e2e",
   // Realtime이 있는 관리자 상담 화면은 로컬 인증 fixture를 갖춘 전용 설정으로 실행한다.
-  testIgnore: "multi-job-consultation.spec.ts",
+  testIgnore: ["multi-job-consultation.spec.ts", "admin-status-accuracy.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

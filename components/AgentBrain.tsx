@@ -314,7 +314,7 @@ export function AgentBrain() {
   const killOverrideIsCurrent = globalAgentMode.state === "ready" && killEnvForced;
   const [killBusy, setKillBusy] = useState(false);
   const [testPhone, setTestPhone] = useState("");
-  const testSession = killApi?.test_session;
+  const testSession = globalAgentMode.state === "ready" ? globalAgentMode.testSession : undefined;
   const killUpdatedAt = killSnapshot?.updatedAt ?? null;
   const overview = useMemo(() => brainOverview({
     examples: examplesApi?.data,
@@ -347,7 +347,11 @@ export function AgentBrain() {
     if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || (next === killMode && !testSession)) return;
     const ok =
       next === "off"
-        ? await confirm({ title: "AI 전역 응답을 중단할까요?", description: "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)", confirmText: "중단하기", destructive: true })
+        ? await confirm({
+            title: testSession ? "자동 응대 검수를 중단할까요?" : "AI 전역 응답을 중단할까요?",
+            description: testSession ? "검수 대상의 새 답장에도 AI가 자동 응대하지 않습니다. 일반 지원자는 계속 중지 상태입니다." : "이후 들어오는 모든 지원자 메시지에 AI가 자동 응답하지 않습니다. (매니저가 직접 응대해야 합니다)",
+            confirmText: testSession ? "검수 중단" : "중단하기", destructive: true,
+          })
         : next === "draft"
         ? await confirm({ title: "코파일럿 모드로 전환할까요?", description: "AI가 답장 초안을 만들지만 발송은 매니저 승인 후에만 됩니다. (단계 전이·자동 안내 발송도 함께 멈춥니다)", confirmText: "코파일럿 전환" })
         : await confirm({ title: "AI 전역 응답을 재개할까요?", description: "이후 들어오는 지원자 메시지부터 AI가 다시 자동 응답합니다. (중단 기간에 쌓인 과거 메시지는 자동 소급 응답되지 않습니다)", confirmText: "재개하기" });
@@ -380,7 +384,7 @@ export function AgentBrain() {
       }
       toast.success(
         json.mode === "off"
-          ? "AI 전역 응답을 중단했어요."
+          ? testSession ? "자동 응대 검수를 중단했어요. 모든 지원자 자동 응대는 중지 상태입니다." : "AI 전역 응답을 중단했어요."
           : json.mode === "draft"
           ? "코파일럿 모드로 전환했어요. AI는 초안만 만들고, 발송은 매니저 승인 후에만 됩니다. (5초 이내 반영)"
           : "AI 전역 응답을 재개했어요. (5초 이내 반영)"
@@ -497,7 +501,7 @@ export function AgentBrain() {
   const modeSummary = overview.mode.state === "ready" && overview.mode.value
     ? killSnapshot?.override
       ? "환경 강제 중지"
-      : MODE_LABEL[overview.mode.value]
+      : testSession ? agentModeCopy.label : MODE_LABEL[overview.mode.value]
     : overview.mode.state === "loading"
       ? "확인 중"
       : overview.mode.state === "stale"
@@ -1090,7 +1094,7 @@ export function AgentBrain() {
                         { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-copilot bg-copilot-soft ring-1 ring-copilot', dotCls: 'text-copilot-strong' },
                         { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-error bg-error-soft ring-1 ring-error', dotCls: 'text-error-strong' },
                       ]).map((opt) => {
-                        const active = killSnapshot !== null && killMode === opt.id;
+                        const active = killSnapshot !== null && !testSession && killMode === opt.id;
                         return (
                           <button
                             key={opt.id}

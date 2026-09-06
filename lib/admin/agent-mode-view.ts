@@ -121,7 +121,7 @@ const MODE_NAMES: Record<AdminAgentMode, string> = {
   off: "전역 중지",
 };
 
-export function agentModePresentation(view: AdminAgentModeView): AdminAgentModePresentation {
+export function agentModePresentation(view: AdminAgentModeView, applicantId?: number): AdminAgentModePresentation {
   if (view.state === "loading") {
     return {
       kind: "loading",
@@ -150,7 +150,16 @@ export function agentModePresentation(view: AdminAgentModeView): AdminAgentModeP
     };
   }
   if (view.state === "ready" && view.testSession) {
-    return { kind: "off", label: "테스트 1명만 자동 응대", detail: `일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`, canRetry: false, claimsAutomatic: false };
+    const isOtherApplicant = applicantId !== undefined && applicantId !== view.testSession.applicant_id;
+    return {
+      kind: "off",
+      label: applicantId === undefined ? "테스트 1명만 자동 응대"
+        : isOtherApplicant ? "이 지원자 AI 중지됨" : "이 지원자는 자동 응대 검수 대상",
+      detail: isOtherApplicant ? "검수 대상 1명 외 자동 응대 중지 · 수동 응대 가능"
+        : `일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`,
+      canRetry: false,
+      claimsAutomatic: false,
+    };
   }
   if (view.mode === "draft") {
     return {

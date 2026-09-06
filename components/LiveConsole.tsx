@@ -1276,7 +1276,7 @@ export function LiveConsole() {
               >
                 {modeNotice === "loading" ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <AlertTriangle size={14} className="shrink-0" />}
                 <span className="truncate">
-                  {modeNotice === "off" ? "AI 자동응답 중지 · 수동 발송만" : agentModeCopy.label}
+                  {agentModeCopy.label}
                   {agentModeCopy.detail ? ` · ${agentModeCopy.detail}` : ""}
                 </span>
                 {agentModeCopy.canRetry ? (

@@ -232,7 +232,7 @@ export function Automation() {
           <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-error/30 bg-error-soft px-3 py-2">
             <div className="flex min-w-0 items-center gap-2 text-[12px] font-bold text-error-strong">
               <AlertTriangle size={15} className="shrink-0" />
-              AI 자동응답이 중단되어 있습니다. 지원자 응대가 쌓이기 전에 설정을 확인하세요.
+              {stats.ai.detail ? `${stats.ai.value} · ${stats.ai.detail}` : "AI 자동응답이 중단되어 있습니다. 지원자 응대가 쌓이기 전에 설정을 확인하세요."}
             </div>
             <Link href="/brain" className="shrink-0 rounded-lg px-2 py-1.5 text-[12px] font-extrabold text-error-strong outline-none hover:bg-error/10 focus-visible:ring-2 focus-visible:ring-ring">
               설정 확인

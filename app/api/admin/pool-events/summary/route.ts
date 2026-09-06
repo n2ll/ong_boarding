@@ -10,8 +10,8 @@
  *   last_ping_at: string | null;       // 마지막 재컨택 발송(ping_sent)
  *   last_link_view_at: string | null;  // 마지막 맞춤링크 열람(link_view)
  *   last_interest: { job_id: number | null; at: string; immediate: boolean } | null; // 마지막 관심 클릭(interest_click)
- *   last_reply_at: string | null;      // 마지막 ping 답장(ping_reply)
- * }> } // 관련 이벤트가 1건이라도 있는 지원자만 포함.
+ *   last_reply_at: string | null;      // 마지막 수신 문자 또는 기존 ping_reply 기록
+ * }> } // 관련 이벤트 또는 수신 문자가 있는 지원자만 포함.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -63,8 +63,9 @@ export async function POST(req: NextRequest) {
   // 관련 event_type IN + applicant_id IN 결과를 끝까지 읽어 JS 집계한다.
   // 같은 created_at에서도 id desc로 고정해야 각 (지원자, 유형)의 첫 등장이 결정적으로 최신이다.
   let events: PoolEventRow[];
+  let replies: { applicant_id: number; created_at: string }[];
   try {
-    events = await fetchAllPostgrestRows(async (from, to) => {
+    [events, replies] = await Promise.all([fetchAllPostgrestRows(async (from, to) => {
       const { data, error } = await supabase
         .from("pool_events")
         .select("id, applicant_id, job_id, event_type, meta, created_at")
@@ -74,7 +75,18 @@ export async function POST(req: NextRequest) {
         .order("id", { ascending: false })
         .range(from, to);
       return { data: data as PoolEventRow[] | null, error };
-    }, "pool event summary");
+    }, "pool event summary"), fetchAllPostgrestRows(async (from, to) => {
+      // 캠페인과 무관하게 받은 답장도 포함한다. 발신 시각이나 임의 기간 제한을 쓰지 않는다.
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, applicant_id, created_at")
+        .eq("direction", "inbound")
+        .in("applicant_id", numIds)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
+      return { data, error };
+    }, "inbound reply summary")]);
   } catch (error) {
     console.error("[pool-events/summary]", error);
     return NextResponse.json(
@@ -113,6 +125,18 @@ export async function POST(req: NextRequest) {
           };
         }
         break;
+    }
+  }
+
+  for (const reply of replies) {
+    const entry = (summaryById[reply.applicant_id] ??= {
+      last_ping_at: null,
+      last_link_view_at: null,
+      last_interest: null,
+      last_reply_at: null,
+    });
+    if (!entry.last_reply_at || Date.parse(reply.created_at) > Date.parse(entry.last_reply_at)) {
+      entry.last_reply_at = reply.created_at;
     }
   }
 
