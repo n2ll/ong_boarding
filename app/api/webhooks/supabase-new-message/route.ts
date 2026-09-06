@@ -225,7 +225,7 @@ async function processInbound(
     // 예전엔 이 세 경로가 각자 다른 기준을 써서, 같은 답장이 어느 경로로 잡히느냐에 따라 다른 공고로
     // 응대됐다. 앵커(직전 outbound)에서 **대량·캠페인 발송을 제외**하는 것도 여기서 처리한다 —
     // 안 하면 공고 7개를 동시에 발사할 때 모든 답장이 '마지막 발송 공고'로 몰린다.
-    const route = await pickCandidateForInbound(supabase, applicant.id, text);
+    const route = await pickCandidateForInbound(supabase, applicant.id, text, receivedAt);
     const jc = route.ok ? route.candidate : null;
     // 판별 불가는 **고르지 않는다** — 되묻거나(자동 모드 1회) 매니저에게 넘긴다.
     // 다만 **처리는 아래 가용성 분류가 끝난 뒤에** 한다 — '그만 보내세요' 답장에 "어느 자리 말씀이세요?"
@@ -237,16 +237,10 @@ async function processInbound(
 
     // message에 applicant_id (+ 가능하면 job_id) 채우기
     const msgUpdate: Record<string, unknown> = { applicant_id: applicant.id };
-    if (jc?.job_id) msgUpdate.job_id = jc.job_id;
+    if (jc?.job_id) msgUpdate.job_id = route.ok && route.how === "consultation" ? null : jc.job_id;
     await supabase.from("messages").update(msgUpdate).eq("id", msg.id);
 
-    // 첫 응답이면 responded_at 기록
-    if (jc && !jc.responded_at) {
-      await supabase
-        .from("job_candidates")
-        .update({ responded_at: receivedAt })
-        .eq("id", jc.id);
-    }
+    // 공고별 첫 응답 시각은 router가 상담/현재 공고 진행을 검증한 뒤 기록한다.
 
     // 안 읽음 카운터·last_message_at 은 DB 트리거가 한다 — 여기서 하지 않는다.
     //
@@ -284,7 +278,9 @@ async function processInbound(
       const lastPing = recentPings?.[0] ?? null;
       recentPingAt = (lastPing?.created_at as string | undefined) ?? null;
 
-      if (!jc || lastPing) {
+      // 진행 중 대화는 stage의 한 번의 호출에서 판단한다. 공고별 가능 답변을
+      // ping 응답으로 분류해 전역 가용성을 덮거나 Claude를 두 번 호출하지 않는다.
+      if (!jc) {
         // ping 응답 이벤트 — 응답률·응답속도(신뢰점수 §6.4-4) 재료
         if (lastPing) {
           const latencyMin = Math.max(
@@ -365,6 +361,9 @@ async function processInbound(
         applicantName: applicant.name,
         options: route.options,
         why: route.why,
+        focusJobId: route.focusJobId,
+        receivedAt,
+        inboundMessageId: String(msg.id),
         mode: await getAgentMode(supabase),
         inboundOptOut,
         sendSms: (to, body) => sendSms(to, body),
@@ -538,6 +537,7 @@ async function processInbound(
       inbound_message_id: String(msg.id),
       inbound_text: text,
       received_at: receivedAt,
+      consultation_only: route.ok && route.how === "consultation",
     });
     return {
       ok: true,

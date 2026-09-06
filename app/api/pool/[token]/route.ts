@@ -38,7 +38,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   const supabase = createServiceClient();
   const { data: applicant, error } = await supabase
     .from("applicants")
-    .select("id, name, lat, lng, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at, marketing_consent, sms_opt_out_at")
+    .select("id, name, lat, lng, availability, sido, sigungu, own_vehicle, work_hours, available_slots, applied_at, created_at, marketing_consent, sms_opt_out_at, status, conversation_focus_job_id, current_job_id")
     .eq("access_token", token)
     .maybeSingle();
 
@@ -246,7 +246,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     if (evErr) console.error("[pool GET] link_view insert failed", evErr);
   }
 
+  const focusJobId = applicant.conversation_focus_job_id ?? applicant.current_job_id ?? null;
   return NextResponse.json({
+    focus_job_id: list.some((j) => j.id === focusJobId) ? focusJobId : null,
+    has_conversation_focus: focusJobId != null,
+    can_switch_focus: !applicant.sms_opt_out_at && !["확정인력", "인력풀 제외", "부적합", "이탈"].includes(applicant.status ?? ""),
     name: applicant.name,
     availability: applicant.availability,
     // 차량 보유(정규화) — 카드가 '이 일자리는 차량이 필요해요'를 지원자 본인 정보와 대조해 알려주는 데 쓴다.

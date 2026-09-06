@@ -17,8 +17,9 @@
  * ⚠️ 확정 뉘앙스 금지 — 이 모듈은 '어느 대화인가'만 정한다. 확정·배정과 무관하다.
  */
 
+import { withConversationReplyClaim } from "./conversation-reply-claim.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isSystemJobTitle } from "../jobs";
+import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs.ts";
 
 /** AI가 자동 응대를 맡는 단계(paused·abort·null 제외). */
 export const AUTO_ROUTE_STAGES = ["exploration", "screening", "onboarding", "active"] as const;
@@ -31,10 +32,11 @@ export interface RoutedCandidate {
   responded_at: string | null;
   job_title: string | null;
   job_branch: string | null;
+  unavailable?: boolean;
 }
 
 export type InboundRoute =
-  | { ok: true; candidate: RoutedCandidate; how: "single" | "text" | "anchor" }
+  | { ok: true; candidate: RoutedCandidate; how: "single" | "text" | "anchor" | "focus" | "consultation" }
   /** 응대할 후보가 없다 — 풀 답장·수신거부 등 다른 경로의 몫. */
   | { ok: false; reason: "none" }
   /** 활성 후보는 없고 **매니저가 들고 있는 대화(paused)** 만 있다 — AI가 끼어들지 않는다. */
@@ -44,7 +46,8 @@ export type InboundRoute =
       ok: false;
       reason: "ambiguous";
       options: { job_id: number | null; title: string | null; branch: string | null }[];
-      why: "text_multi" | "no_anchor" | "text_vs_anchor";
+      focusJobId?: number;
+      why: "text_multi" | "no_anchor" | "text_vs_anchor" | "text_vs_focus";
     };
 
 /**
@@ -160,39 +163,74 @@ export function matchJobsByText(text: string, jobs: JobTokenSource[]): number[] 
   return hit;
 }
 
-/**
- * 이 답장을 어느 후보(job_candidate)로 처리할지 고른다.
- *
- * 순서:
- *   1. 자동 응대 단계 후보가 **1건** → 그 후보(공고가 하나면 예전과 100% 동일 동작).
- *   2. 여러 건 + 텍스트가 명시한 공고가 **정확히 1건** → 그 후보.
- *   3. 여러 건 + 텍스트 명시가 2건 이상 → `ambiguous`(text_multi). 고르지 않는다.
- *   4. 여러 건 + 텍스트 명시 없음 → **대화 앵커**(마지막 대화성 outbound의 job_id) → 그 후보.
- *   5. 앵커도 없음 → `ambiguous`(no_anchor).
- *
- * `paused` 후보는 선택 대상이 아니다(매니저가 그 대화를 들고 있다). 활성이 하나도 없고 paused만 있으면
- * `paused`를 돌려준다 — 부르는 쪽은 기존처럼 '매니저가 처리' 로 두고 아무 자동 동작도 하지 않는다.
- * (이 구분을 없애면 매니저가 들고 있는 사람이 캠페인 답장 자동 편입 경로로 새어 들어간다.)
- */
+/** 명시적으로 선택한 공고가 준비되지 않았으면 다른 후보로 우회하지 않는다. */
+export function chooseInboundCandidate(args: {
+  candidates: RoutedCandidate[];
+  inboundText: string;
+  focusJobId: number | null;
+  anchorJobId: number | null;
+  focusAt?: string | null;
+  receivedAt?: string | null;
+  /** 상담 시 candidate는 잠금·처리 이력의 소유자일 뿐, 문의 대상/진행 공고를 바꾸지 않는다. */
+  allowConsultation?: boolean;
+}): InboundRoute {
+  const { candidates: all, inboundText, focusJobId, anchorJobId } = args;
+  if (focusJobId != null && args.focusAt && (!args.receivedAt || !Number.isFinite(Date.parse(args.receivedAt)) || Date.parse(args.receivedAt) < Date.parse(args.focusAt))) {
+    return { ok: false, reason: "paused" };
+  }
+  const cands = all.filter((c) => (AUTO_ROUTE_STAGES as readonly string[]).includes(c.agent_stage ?? ""));
+  const focus = focusJobId == null ? null : cands.find((c) => c.job_id === focusJobId);
+  if (focusJobId != null && (!focus || focus.unavailable)) return { ok: false, reason: "paused" };
+  if (!cands.length) return { ok: false, reason: all.some((c) => c.agent_stage === "paused") ? "paused" : "none" };
+
+  // 관심만 남긴 공고의 이름도 충돌 신호로 인식한다.
+  const real = all.filter((c) => !isSystemJobTitle(c.job_title));
+  const pool = real.length ? real : all;
+  const options = pool.map((c) => ({ job_id: c.job_id, title: c.job_title, branch: c.job_branch }));
+  const named = matchJobsByText(inboundText, options);
+  const anchor = cands.find((c) => c.job_id === anchorJobId && !c.unavailable);
+  if (args.allowConsultation) {
+    const owner = focus ?? anchor ?? cands.find((c) => !c.unavailable);
+    const crossesOwner = owner && named.some((id) => id !== owner.job_id);
+    if (owner && (named.length > 1 || crossesOwner || (!focus && !anchor && cands.length > 1))) {
+      return { ok: true, candidate: owner, how: "consultation" };
+    }
+  }
+  if (named.length > 1) return { ok: false, reason: "ambiguous", options, ...(focusJobId == null ? {} : { focusJobId }), why: "text_multi" };
+  if (focus) {
+    if (named.length && named[0] !== focus.job_id) return { ok: false, reason: "ambiguous", options, focusJobId: focus.job_id ?? undefined, why: "text_vs_focus" };
+    return { ok: true, candidate: focus, how: "focus" };
+  }
+  if (named.length === 1) {
+    const hit = cands.find((c) => c.job_id === named[0]);
+    if (!hit) return { ok: false, reason: "paused" };
+    if (anchor && anchor.job_id !== hit.job_id) return { ok: false, reason: "ambiguous", options, why: "text_vs_anchor" };
+    return { ok: true, candidate: hit, how: "text" };
+  }
+  if (anchor) return { ok: true, candidate: anchor, how: "anchor" };
+  if (cands.length === 1) return { ok: true, candidate: cands[0], how: "single" };
+  return { ok: false, reason: "ambiguous", options, why: "no_anchor" };
+}
+
 export async function pickCandidateForInbound(
   supabase: SupabaseClient,
   applicantId: number,
-  inboundText: string
+  inboundText: string,
+  receivedAt?: string
 ): Promise<InboundRoute> {
   const { data, error } = await supabase
     .from("job_candidates")
-    .select("id, job_id, agent_stage, agent_state, responded_at, created_at, jobs:job_id ( title, branch )")
+    .select("id, job_id, agent_stage, agent_state, responded_at, created_at, closed_at, closed_reason, jobs:job_id ( title, branch, status, closes_at )")
     .eq("applicant_id", applicantId)
-    .in("agent_stage", [...AUTO_ROUTE_STAGES, "paused"])
     .order("created_at", { ascending: false });
 
   if (error) {
     console.error("[inbound-routing] 후보 조회 실패", error);
-    return { ok: false, reason: "none" };
+    return { ok: false, reason: "paused" };
   }
 
   const all: RoutedCandidate[] = (data ?? []).map((r) => {
-    const j = (r.jobs ?? null) as unknown as { title: string | null; branch: string | null } | null;
+    const j = (r.jobs ?? null) as unknown as { title: string | null; branch: string | null; status: string | null; closes_at: string | null } | null;
     return {
       id: r.id as number,
       job_id: (r.job_id as number | null) ?? null,
@@ -201,14 +239,15 @@ export async function pickCandidateForInbound(
       responded_at: (r.responded_at as string | null) ?? null,
       job_title: j?.title ?? null,
       job_branch: j?.branch ?? null,
+      unavailable: !!r.closed_at || !!r.closed_reason || (!isSystemJobTitle(j?.title) && (!j || isJobEffectivelyClosed(j.status, j.closes_at))),
     };
   });
 
-  const cands = all.filter((c) => (AUTO_ROUTE_STAGES as readonly string[]).includes(c.agent_stage ?? ""));
-  if (cands.length === 0) {
-    return all.length > 0 ? { ok: false, reason: "paused" } : { ok: false, reason: "none" };
-  }
-  if (cands.length === 1) return { ok: true, candidate: cands[0], how: "single" };
+  const { data: applicant, error: focusError } = await supabase.from("applicants")
+    .select("conversation_focus_job_id, conversation_focus_at").eq("id", applicantId).maybeSingle();
+  if (focusError || !applicant) return { ok: false, reason: "paused" };
+  const focusJobId = (applicant.conversation_focus_job_id as number | null) ?? null;
+  if (focusJobId != null) return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId: null, focusAt: applicant.conversation_focus_at, receivedAt, allowConsultation: true });
 
   // 대화 앵커 — 대량·캠페인 발송은 제외한다(발사 때 그게 마지막 outbound가 된다).
   // **시스템 더미 공고 후보까지 포함해** 찾는다. 예전엔 실공고만 남기고 앵커를 봐서, 당근·배민
@@ -224,28 +263,7 @@ export async function pickCandidateForInbound(
     .limit(1)
     .maybeSingle();
   const anchorJobId = (lastOut?.job_id as number | null) ?? null;
-  const anchorCand = anchorJobId != null ? cands.find((c) => c.job_id === anchorJobId) ?? null : null;
-
-  // 텍스트 명시 판단은 실공고들 사이에서 한다(시스템 더미 공고는 이름으로 부를 대상이 아니다).
-  const real = cands.filter((c) => !isSystemJobTitle(c.job_title ?? ""));
-  const pool = real.length > 0 ? real : cands;
-  const options = pool.map((c) => ({ job_id: c.job_id, title: c.job_title, branch: c.job_branch }));
-
-  const named = matchJobsByText(inboundText, options);
-  if (named.length > 1) return { ok: false, reason: "ambiguous", options, why: "text_multi" };
-  if (named.length === 1) {
-    const hit = pool.find((c) => c.job_id === named[0]);
-    // **텍스트가 진행 중인 대화(앵커)와 다른 공고를 가리키면 고르지 않는다.**
-    // 근거 낱말은 제목에서 뽑은 것이라 "그 자리 말고 다른 데 없나요" 같은 문장에서도 잡힌다 —
-    // 확신에 찬 오판보다 사람이 확인하는 편이 안전하다(되묻기·인계 경로가 이미 있다).
-    if (hit && anchorCand && anchorCand.job_id !== hit.job_id) {
-      return { ok: false, reason: "ambiguous", options, why: "text_vs_anchor" };
-    }
-    if (hit) return { ok: true, candidate: hit, how: "text" };
-  }
-  if (anchorCand) return { ok: true, candidate: anchorCand, how: "anchor" };
-  if (pool.length === 1) return { ok: true, candidate: pool[0], how: "single" };
-  return { ok: false, reason: "ambiguous", options, why: "no_anchor" };
+  return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId, allowConsultation: true });
 }
 
 /** 공고 제목을 문자에 넣을 만큼 짧게 — 괄호 수식어를 떼고 앞부분만. */
@@ -274,20 +292,40 @@ export const ROUTE_ASK_EVENT = "route_ask";
  */
 export async function handleAmbiguousInbound(
   supabase: SupabaseClient,
+  args: Parameters<typeof handleClaimedAmbiguousInbound>[1]
+): Promise<{ asked: boolean; pausedCandidates: number }> {
+  if (args.mode === "off") return { asked: false, pausedCandidates: 0 };
+  const jobId = args.focusJobId ?? args.options.find((option) => option.job_id != null)?.job_id;
+  if (jobId == null) return { asked: false, pausedCandidates: 0 };
+  const claimed = await withConversationReplyClaim({
+    applicantId: args.applicantId, jobId, receivedAt: args.receivedAt, inboundMessageId: args.inboundMessageId,
+    rpc: (name, params) => supabase.rpc(name, params),
+    run: () => handleClaimedAmbiguousInbound(supabase, args),
+    retainClaim: (result) => result.delivery_uncertain === true,
+  });
+  return claimed.executed ? claimed.result : { asked: false, pausedCandidates: 0 };
+}
+
+async function handleClaimedAmbiguousInbound(
+  supabase: SupabaseClient,
   args: {
     applicantId: number;
     phone: string | null;
     applicantName: string | null;
     options: { job_id: number | null; title: string | null; branch: string | null }[];
-    why: "text_multi" | "no_anchor" | "text_vs_anchor";
+    why: "text_multi" | "no_anchor" | "text_vs_anchor" | "text_vs_focus";
     mode: "auto" | "draft" | "off";
     /** 이번 답장이 '그만 보내세요'로 분류됐나(null=분류 못 함). true면 되묻기 문자를 보내지 않는다. */
     inboundOptOut?: boolean | null;
-    sendSms: (phone: string, text: string) => Promise<{ success: boolean; messageId?: string | null; error?: string }>;
+    focusJobId?: number;
+    receivedAt?: string;
+    inboundMessageId?: string;
+    sendSms: (phone: string, text: string) => Promise<{ success: boolean; messageId?: string | null; error?: string; failureKind?: "declared" | "unknown" }>;
     notify?: (text: string) => Promise<unknown>;
   }
-): Promise<{ asked: boolean; pausedCandidates: number }> {
+): Promise<{ asked: boolean; pausedCandidates: number; delivery_uncertain?: boolean }> {
   const { applicantId, phone, applicantName, options, why, mode } = args;
+  let deliveryUncertain = false;
 
   // 전역 '완전 중지'는 아무 전이도 하지 않는다 — router·sweeper와 같은 계약.
   // 이 답장은 매니저가 실시간 응대에서 직접 본다.
@@ -319,7 +357,7 @@ export async function handleAmbiguousInbound(
   const askable = options.every((o) => o.job_id != null && tokens.get(o.job_id));
 
   let sendFailed = false;
-  if (mode === "auto" && !askedRecently && phone && !optedOut && args.inboundOptOut !== true && askable) {
+  if (why !== "text_vs_focus" && mode === "auto" && !askedRecently && phone && !optedOut && args.inboundOptOut !== true && askable) {
     // 확정 뉘앙스 금지 — 어느 자리 이야기인지만 묻는다. 진행·합격 암시 없음.
     const lines = options.map((o) => `· ${shortJobLabel(o)} → '${tokens.get(o.job_id as number)}'`);
     const text = [
@@ -329,7 +367,7 @@ export async function handleAmbiguousInbound(
     ].join("\n");
     const r = await args.sendSms(phone, text);
     if (r.success) {
-      await supabase.from("messages").insert({
+      const { error: recordError } = await supabase.from("messages").insert({
         applicant_id: applicantId,
         applicant_phone: phone,
         direction: "outbound",
@@ -341,6 +379,11 @@ export async function handleAmbiguousInbound(
         // job_id는 비운다 — 이 문자가 앵커가 되면 판별 못 한 공고를 판별한 것처럼 만든다.
         job_id: null,
       });
+      if (recordError) {
+        // 성공한 발송의 원장을 저장하지 못하면 다시 묻지 않고 잠금을 유지한다.
+        console.error("[inbound-routing] 되묻기 발송 원장 저장 실패", recordError);
+        return { asked: true, pausedCandidates: 0, delivery_uncertain: true };
+      }
       await supabase.from("pool_events").insert({
         applicant_id: applicantId,
         event_type: ROUTE_ASK_EVENT,
@@ -350,6 +393,7 @@ export async function handleAmbiguousInbound(
       return { asked: true, pausedCandidates: 0 };
     }
     sendFailed = true;
+    deliveryUncertain = r.failureKind !== "declared";
     console.error("[inbound-routing] 되묻기 발송 실패", r.error);
   }
 
@@ -400,7 +444,7 @@ export async function handleAmbiguousInbound(
   await args.notify?.(
     `🙋 ${label} 답장이 어느 공고 건인지 판별 불가(${why}) — 공고 ${paused}건을 보류로 내리고 넘겼어요. 후보: ${listed} (${whyAsked})`
   );
-  return { asked: false, pausedCandidates: paused };
+  return { asked: false, pausedCandidates: paused, delivery_uncertain: deliveryUncertain };
 }
 
 /** 되묻기·인계 로그용 한 줄 — 매니저가 Slack·콘솔에서 바로 읽을 수 있게. */
@@ -408,7 +452,7 @@ export function describeRoute(route: InboundRoute): string {
   if (route.ok) return `job ${route.candidate.job_id} (${route.how})`;
   if (route.reason === "none") return "응대 대상 후보 없음";
   if (route.reason === "paused") return "매니저가 들고 있는 대화(보류)만 있음";
-  if (route.why === "text_vs_anchor") {
+  if (route.why === "text_vs_anchor" || route.why === "text_vs_focus") {
     return `텍스트가 가리킨 공고와 진행 중 대화가 다름 — 후보 ${route.options.length}건: ${route.options
       .map((o) => o.title ?? `#${o.job_id}`)
       .join(" / ")}`;

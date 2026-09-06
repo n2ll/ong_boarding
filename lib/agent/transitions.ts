@@ -48,6 +48,8 @@ interface ApplyTransitionInput {
 export interface ApplyTransitionResult {
   next_stage: StageName | null;
   auto_sent_messages: number;       // advance 시 자동 발송된 메시지 수
+  /** 발송 여부 또는 발송 기록을 확인할 수 없어 대화 발송 잠금을 유지해야 함. */
+  delivery_uncertain?: boolean;
 }
 
 export async function applyTransition(input: ApplyTransitionInput): Promise<ApplyTransitionResult> {
@@ -95,6 +97,8 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
   // advance 전이의 크리티컬 자동 발송(SCREENING_ANNOUNCE/GUIDE)이 실패하면 사유를 기록.
   // switch 종료 후 이 값이 있으면 단계 진행을 취소하고 paused로 되돌린다.
   let criticalSendFailure: string | null = null;
+  let deliveryPending = false;
+  let deliveryUncertain = false;
   const now = new Date().toISOString();
 
   switch (transition.kind) {
@@ -189,6 +193,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           } else if (await isAlreadySentRecently(announceText)) {
             // 이미 발송됨 — 중복 방지
           } else {
+          deliveryPending = true;
           const r = await maybeSendNotification(
             applicant_phone,
             general ? "GENERAL_SCREENING_ANNOUNCE" : "SCREENING_ANNOUNCE",
@@ -196,7 +201,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             announceText
           );
           if (r.success) {
-            await supabase.from("messages").insert({
+            const { error: recordError } = await supabase.from("messages").insert({
               applicant_id,
               applicant_phone,
               direction: "outbound",
@@ -208,12 +213,17 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
               template_id: r.templateId ?? null,
               job_id,
             });
+            if (recordError) throw new Error(`발송 기록 실패: ${recordError.message}`);
+            deliveryPending = false;
             autoSent++;
           } else {
+            deliveryPending = false;
+            deliveryUncertain = r.failureKind === "unknown";
             criticalSendFailure = `SCREENING_ANNOUNCE 발송 실패: ${r.error ?? "unknown"}`;
           }
           }
         } catch (e) {
+          if (deliveryPending) deliveryUncertain = true;
           criticalSendFailure = `SCREENING_ANNOUNCE 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
           console.error("[transitions] SCREENING_ANNOUNCE send failed", e);
         }
@@ -260,21 +270,6 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
       if (transition.to === "onboarding") {
         // screening → onboarding: 앱·교육 안내 자동 발송 + applicants.status='스크리닝 완료'
         // (별도 "확정 안내" 메시지는 보내지 않음 — AI의 마지막 응답 + 가이드 본문이 그 역할 대신)
-        // screening_passed_at — AI 스크리닝 통과 시점. 예전 이름 confirmed_at은 '매니저 확정'처럼
-        // 읽혀서, 확정 0명인 공고가 "확정 도달"로 집계돼 자동 마감되고 대기자에게 "자리가
-        // 찼어요"가 나간 사고(07-14 공고 33)의 원인 중 하나였다. 매니저 확정은 이 컬럼이 아니라
-        // applicants.status='확정인력' + hired_at이다(2026-08 컬럼 개명).
-        await supabase
-          .from("job_candidates")
-          .update({ screening_passed_at: now })
-          .eq("id", candidate_id);
-        // 자동 status는 매니저 미터치 케이스에만 갱신
-        await supabase
-          .from("applicants")
-          .update({ status: "스크리닝 완료" })
-          .eq("id", applicant_id)
-          .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
-
         // ─── 일반 배송 라인(비마트 외 실제 공고): 배민 앱 가이드 발송 금지 ───
         // 스크리닝 통과 = AI 역할 종료. 선탑(동승) 인계 마무리 1통 발송 후 onboarding 대신
         // paused로 전환해 매니저에게 인계한다 (Slack에 수집 요약 포함).
@@ -290,6 +285,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             } else if (await isAlreadySentRecently(handoffText)) {
               // 이미 발송됨 — 중복 방지
             } else {
+              deliveryPending = true;
               const r = await maybeSendNotification(
                 applicant_phone,
                 "GENERAL_SCREENING_HANDOFF",
@@ -297,7 +293,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
                 handoffText
               );
               if (r.success) {
-                await supabase.from("messages").insert({
+                const { error: recordError } = await supabase.from("messages").insert({
                   applicant_id,
                   applicant_phone,
                   direction: "outbound",
@@ -309,12 +305,17 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
                   template_id: r.templateId ?? null,
                   job_id,
                 });
+                if (recordError) throw new Error(`발송 기록 실패: ${recordError.message}`);
+                deliveryPending = false;
                 autoSent++;
               } else {
+                deliveryPending = false;
+                deliveryUncertain = r.failureKind === "unknown";
                 criticalSendFailure = `GENERAL_HANDOFF 발송 실패: ${r.error ?? "unknown"}`;
               }
             }
           } catch (e) {
+            if (deliveryPending) deliveryUncertain = true;
             criticalSendFailure = `GENERAL_HANDOFF 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
             console.error("[transitions] GENERAL_HANDOFF send failed", e);
           }
@@ -404,6 +405,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           } else if (await isAlreadySentRecently(guideText)) {
             // 이미 발송됨 — 중복 방지
           } else {
+          deliveryPending = true;
           const r2 = await maybeSendNotification(
             applicant_phone,
             "GUIDE",
@@ -411,7 +413,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
             guideText
           );
           if (r2.success) {
-            await supabase.from("messages").insert({
+            const { error: recordError } = await supabase.from("messages").insert({
               applicant_id,
               applicant_phone,
               direction: "outbound",
@@ -423,6 +425,8 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
               template_id: r2.templateId ?? null,
               job_id,
             });
+            if (recordError) throw new Error(`발송 기록 실패: ${recordError.message}`);
+            deliveryPending = false;
             autoSent++;
 
             // 가이드 자동 발송 성공 → applicants.guide_sent 동기화 (대시보드 '가이드 발송' 지표 실측 반영)
@@ -441,10 +445,13 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
               meta: { onboarding_entered_at: now },
             };
           } else {
+            deliveryPending = false;
+            deliveryUncertain = r2.failureKind === "unknown";
             criticalSendFailure = `GUIDE 발송 실패: ${r2.error ?? "unknown"}`;
           }
           }
         } catch (e) {
+          if (deliveryPending) deliveryUncertain = true;
           criticalSendFailure = `GUIDE 발송 예외: ${e instanceof Error ? e.message : "unknown"}`;
           console.error("[transitions] GUIDE send failed", e);
         }
@@ -469,11 +476,29 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
     }
   }
 
+  // 안내 발송과 기록이 실패한 경우 스크리닝 완료 상태를 먼저 남기지 않는다.
+  if (transition.kind === "advance" && transition.to === "onboarding" && !criticalSendFailure) {
+    // screening_passed_at은 AI 스크리닝 통과 시점이며 매니저 확정(hired_at)이 아니다.
+    await supabase
+      .from("job_candidates")
+      .update({ screening_passed_at: now })
+      .eq("id", candidate_id);
+    // 자동 status는 매니저 미터치 케이스에만 갱신
+    await supabase
+      .from("applicants")
+      .update({ status: "스크리닝 완료" })
+      .eq("id", applicant_id)
+      .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
+  }
+
   // advance 전이인데 크리티컬 자동 발송(SCREENING_ANNOUNCE/GUIDE)이 실패했으면
   // 단계를 조용히 진행시키지 않고 paused로 되돌려 매니저에게 인계한다.
-  // (지원자는 0통 수신 → 확정 뉘앙스 금지 자동 준수. 알림은 매니저 대상.)
+  // 발송 여부가 불명확하면 중복 발송을 피하도록 결과 확인을 먼저 요청한다.
   if (transition.kind === "advance" && criticalSendFailure) {
     nextStage = "paused";
+    const failureSummary = deliveryUncertain
+      ? `자동 발송 결과 확인 필요 (${criticalSendFailure})`
+      : `자동 발송 실패 — 수동 발송 필요 (${criticalSendFailure})`;
     // 일반 라인은 onboarding 단계를 쓰지 않는다 — 재개 시 screening으로 복귀해
     // 완료 체크리스트 기반 자동 재전이(인계 마무리 재시도)가 일어나게 한다.
     const pausedFrom =
@@ -484,8 +509,10 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
         paused_at: now,
         pause: {
           category: "tech",
-          summary: `자동 발송 실패 — 수동 발송 필요 (${criticalSendFailure})`,
-          suggested_action: "안내 메시지를 수동 발송한 뒤 단계를 재개하세요.",
+          summary: failureSummary,
+          suggested_action: deliveryUncertain
+            ? "발송 업체의 처리 결과와 메시지 기록을 확인한 뒤 재발송 여부와 단계 재개를 결정하세요."
+            : "안내 메시지를 수동 발송한 뒤 단계를 재개하세요.",
         },
       },
     });
@@ -499,7 +526,7 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
           applicant_name,
           applicant_phone,
           branch: input.applicant_branch ?? job?.branch ?? null,
-          reason: `자동 발송 실패 — 수동 발송 필요 (${criticalSendFailure})`,
+          reason: failureSummary,
         });
       } catch (e) {
         console.error("[transitions] slack send-failure alert failed", e);
@@ -521,7 +548,11 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
   }
   await supabase.from("job_candidates").update(jcUpdate).eq("id", candidate_id);
 
-  return { next_stage: nextStage, auto_sent_messages: autoSent };
+  return {
+    next_stage: nextStage,
+    auto_sent_messages: autoSent,
+    ...(deliveryUncertain ? { delivery_uncertain: true } : {}),
+  };
 }
 
 /** 마감 시각을 정각 단위로 반올림. (30분 이상 → 다음 정각, 미만 → 이전 정각) */

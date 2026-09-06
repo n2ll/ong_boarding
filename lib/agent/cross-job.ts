@@ -16,8 +16,8 @@
  */
 
 import type { OtherActiveJob, StageResult, StageTransition } from "./types";
-import { coarseArea } from "../geo";
-import { jobPayLabel } from "../jobs";
+import { coarseArea } from "../geo.ts";
+import { jobPayLabel } from "../jobs.ts";
 
 const STAGE_KO: Record<string, string> = {
   exploration: "탐색",

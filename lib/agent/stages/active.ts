@@ -9,6 +9,7 @@
  */
 
 import { generateDraftReply } from "../../agent";
+import { processConsultation } from "./consultation";
 import type { Stage, StageContext, StageResult } from "../types";
 
 // "네", "넵", "예", "알겠", "감사", "확인", "좋", "ㅇㅋ", "굿" 등으로만 이뤄진 짧은 응답
@@ -29,6 +30,10 @@ export const activeStage: Stage = {
   name: "active",
 
   async process(ctx: StageContext, inboundText: string): Promise<StageResult> {
+    if (ctx.consultation && (ctx.consultation.force || ctx.consultation.jobs.length > 1 || ctx.consultation.ambiguousFollowup)) {
+      return processConsultation(ctx, inboundText);
+    }
+
     // 가드: 직전 AI 마무리 후 단순 ack → 침묵
     const lastOutbound = [...ctx.history].reverse().find((t) => t.direction === "outbound");
     if (lastOutbound && wasClosingMessage(lastOutbound.body) && isShortAck(inboundText)) {

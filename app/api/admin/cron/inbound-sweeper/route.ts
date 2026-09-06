@@ -63,6 +63,7 @@ interface InboundRow {
   applicant_id: number;
   body: string | null;
   created_at: string;
+  agent_reply_deferred_at: string | null;
 }
 
 interface ResultEntry {
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
   // 조회창 내 인바운드 → 지원자별 최신 1건만 (오래된 것부터 정렬 후 Map 덮어쓰기)
   const { data: inbounds, error: inErr } = await supabase
     .from("messages")
-    .select("id, applicant_id, body, created_at")
+    .select("id, applicant_id, body, created_at, agent_reply_deferred_at")
     .eq("direction", "inbound")
     .not("applicant_id", "is", null)
     .gte("created_at", since)
@@ -197,14 +198,20 @@ export async function GET(req: NextRequest) {
       // 전역 OFF와 야간에는 일반 AI 회수만 멈춘다. 위 수신거부 저장은 항상 수행한다.
       if (!agentRecoveryAllowed) continue;
 
-      // b) 인바운드 이후 outbound가 있으면 이미 응답된 것 — 제외
-      const { data: outAfter } = await supabase
+      // 잠금 때문에 대기한 추가 문자는 앞선 턴의 발송/실행 시각만으로 처리됐다고 볼 수 없다.
+      // 같은 inbound에 대한 초안과 현재 라우팅·모드는 아래에서 계속 검증한다.
+      // b) 일반 인바운드 이후 outbound가 있으면 이미 응답된 것 — 제외
+      const outboundQuery = supabase
         .from("messages")
         .select("id")
         .eq("applicant_id", applicantId)
         .eq("direction", "outbound")
         .gt("created_at", inbound.created_at)
         .limit(1);
+      // 매니저가 이미 답했다면 대기 표시가 있어도 자동 응대를 재개하지 않는다.
+      const { data: outAfter } = await (inbound.agent_reply_deferred_at
+        ? outboundQuery.or("sent_by.is.null,sent_by.not.in.(agent,system-auto)")
+        : outboundQuery);
       if (outAfter && outAfter.length > 0) continue;
 
       // a) 이 인바운드에 대한 초안(코파일럿 pending/auto_sent 기록)이 있으면 처리된 것 — 제외
@@ -231,12 +238,12 @@ export async function GET(req: NextRequest) {
         const v = typeof st.meta?.last_run_at === "string" ? st.meta.last_run_at : null;
         return v && (!max || Date.parse(v) > Date.parse(max)) ? v : max;
       }, null);
-      if (lastRunAt && Date.parse(lastRunAt) >= Date.parse(inbound.created_at)) continue;
+      if (!inbound.agent_reply_deferred_at && lastRunAt && Date.parse(lastRunAt) >= Date.parse(inbound.created_at)) continue;
 
       // c) 어느 공고 건인지는 **웹훅과 같은 함수**가 정한다(lib/agent/inbound-routing).
       //    예전엔 여기서 '활성 단계 최신 1건'을 그냥 골라, 같은 답장이 웹훅으로 잡히면 A 공고
       //    sweeper로 잡히면 B 공고로 응대되는 갈림이 있었다.
-      const route = await pickCandidateForInbound(supabase, applicantId, inboundText);
+      const route = await pickCandidateForInbound(supabase, applicantId, inboundText, inbound.created_at);
       if (!route.ok) {
         // 판별 불가는 여기서도 고르지 않는다 — 되묻거나(자동 1회) 매니저에게 넘긴다.
         if (route.reason === "ambiguous") {
@@ -261,6 +268,9 @@ export async function GET(req: NextRequest) {
             applicantName: a?.name ?? null,
             options: route.options,
             why: route.why,
+            focusJobId: route.focusJobId,
+            receivedAt: inbound.created_at,
+            inboundMessageId: String(inbound.id),
             mode,
             inboundOptOut,
             sendSms: (to, body) => sendSms(to, body),
@@ -284,6 +294,7 @@ export async function GET(req: NextRequest) {
         inbound_message_id: String(inbound.id),
         inbound_text: inboundText,
         received_at: inbound.created_at,
+        consultation_only: route.how === "consultation",
       });
       swept++;
       results.push({
