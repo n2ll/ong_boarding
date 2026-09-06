@@ -40,3 +40,12 @@ scope: 진행 중 SMS의 복수 공고 조건 안내 / 공고별 원문 기록 /
 - 원본 SQL SHA256: `b603d7d2ced507a8dd9039f566bd5248bc44fdf17738ec971c73fc50a3d9604e`.
 - 앱 코드는 이전 검증 커밋 `e48a363`과 동일하다. 후속 변경은 운영 계획·근거 문서뿐이며 `git diff --check`를 다시 확인했다.
 - 실제 SMS/Slack은 보내지 않았다. 통제된 수신번호 검수 전 AI off를 유지한다. DB 검증만으로 실제 모델 응대·폰 수발신 성공을 주장하지 않는다.
+
+## 실제 모델 검수와 후속 보완
+- PR129는 `c09abfc`로 squash merge, 해당 커밋의 Vercel 배포 success를 확인했다. AI off 상태에서 실제 Sonnet 4.6을 가상 공고·지원자에만 호출했다. SMS/Slack 경로는 차단하고 사용량은 `ai_usage_daily`의 improve로 기록했다.
+- 수정 전 4건 중 첫 실행 1건 통과. 시간 질문을 interest 원문으로 제출해 서버가 차단했고, 관심·가용성 진술에는 묻지 않은 missing 항목 안내와 불필요한 인계가 나왔다. 같은 입력 재실행에서도 시간 질문의 interest 출력과 관심 진술의 missing 나열을 재현했다.
+- 근본 원인: 단일 공고 스크리닝 규칙이 상담 원문 기록에 섞이고, answers/observations의 빈 배열 및 missing 목록의 의미가 충분히 구체적이지 않았다. 상담 지시·도구 항목 설명을 보완했다. 잘못된 출력 차단·확정 금지 규칙은 변경하지 않았다.
+- 수정 후 같은 4건 **4/4 통과**: 시간 비교, 공고별 가능 요일, 모호한 긍정, 둘 다 관심. 호출은 시나리오당 1회, 프로필/입력 상태 변경 없음. 입력·출력·검증 항목은 `live-eval.json`에 보존했다.
+- 결정론적 상담 helper·4개 stage 런타임 회귀 **69/69 통과** (`/tmp/ongboarding-consultation-prompt-tests.log`).
+- `npm run build` exit 0 (타입·훅 검사 포함), 변경 파일 eslint exit 0, `git diff --check` clean. 빌드 로그: `/tmp/ongboarding-consultation-prompt-build.log`.
+- 한계: 고정된 4개 가상 입력에 대한 관찰이며 자연어 전반의 품질 보장은 아니다. 두뇌 예시는 빈 fixture이고 운영 인입·저장·SMS 수발신은 아직 통제된 번호로 확인해야 한다.
