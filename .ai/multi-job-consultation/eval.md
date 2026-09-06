@@ -29,3 +29,14 @@ scope: 진행 중 SMS의 복수 공고 조건 안내 / 공고별 원문 기록 /
 - 코파일럿의 관찰 제안은 미저장이다. 매니저가 초안을 발송해도 자동으로 관찰 이벤트를 확정하지 않는다.
 - 이번 추가 상담 기능 자체의 새 마이그레이션은 없다. PR129의 `2026-09-pool-conversation-focus.sql`은 여전히 앱보다 먼저 적용해야 한다.
 - 적용 순서: AI off → 선행 DB migration → 앱 배포 → 통제된 폰으로 A/B 조건 질문·공고별 가능 시간·모호한 긍정·연속 SMS 확인 → 파일럿. 복구는 AI off 후 앱 롤백, 관찰 이력 보존.
+
+## 2026-09-06 운영 DB 적용
+- 대상: 옹보딩 Supabase `lrktxyfzxwwpjffzltnq`. MCP는 읽기 전용이라 로그인된 해당 프로젝트 SQL Editor를 사용했다.
+- 적용 전 선행 interest RPC·outbox·intent 원장 존재, 진행 중 발송 0건·pending intent 0건. 신규 컬럼은 없었다.
+- AI auto → off를 비교 후 갱신하고 읽기로 확인했다(`2026-09-06T04:36:47.407Z`). 캐시 TTL과 webhook 최대 실행 시간 90초가 지난 후 적용했다.
+- `2026-09-pool-conversation-focus.sql`을 단일 트랜잭션으로 적용했다. lock timeout 5초, statement timeout 45초, AI off·진행 중 발송 없음 guard, commit 후 PostgREST schema reload.
+- 첫 시도는 SQL 편집기의 부분 텍스트 교체로 이전 조회문이 남아 구문 분석에서 실패했다. DB 컬럼 미생성 확인 → 전체 문서 선택/삭제 → 읽기 전용 교체 검증 → 원문 재입력 후 `PR129 migration committed` 확인. 앱/SQL 로직은 변경하지 않았다.
+- 적용 후 신규 컬럼 6개 REST 조회 200. RPC 7개의 서명·고정 search_path·security definer 확인. 모두 service_role 실행 허용, anon/authenticated 실행 차단. 함수 본문은 주석·공백 정규화 후 저장소 정의와 MD5 7/7 일치했다.
+- 원본 SQL SHA256: `b603d7d2ced507a8dd9039f566bd5248bc44fdf17738ec971c73fc50a3d9604e`.
+- 앱 코드는 이전 검증 커밋 `e48a363`과 동일하다. 후속 변경은 운영 계획·근거 문서뿐이며 `git diff --check`를 다시 확인했다.
+- 실제 SMS/Slack은 보내지 않았다. 통제된 수신번호 검수 전 AI off를 유지한다. DB 검증만으로 실제 모델 응대·폰 수발신 성공을 주장하지 않는다.
