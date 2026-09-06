@@ -228,8 +228,8 @@ async function processInbound(
     const route = await pickCandidateForInbound(supabase, applicant.id, text, receivedAt);
     const jc = route.ok ? route.candidate : null;
     // 판별 불가는 **고르지 않는다** — 되묻거나(자동 모드 1회) 매니저에게 넘긴다.
-    // 다만 **처리는 아래 가용성 분류가 끝난 뒤에** 한다 — '그만 보내세요' 답장에 "어느 자리 말씀이세요?"
-    // 문자가 나가면 안 된다(수신거부 판정은 그 블록에서 나온다).
+    // 명시적인 수신거부는 위에서 이미 처리했다. 모호하거나 수동 관리 중인 공고 답변을
+    // 아래 풀 가용성 분류에 넣어 전역 상태로 바꾸지 않는다.
     if (!route.ok && route.reason === "ambiguous") {
       console.warn(`[inbound] applicant ${applicant.id}: ${describeRoute(route)}`);
     }
@@ -278,9 +278,9 @@ async function processInbound(
       const lastPing = recentPings?.[0] ?? null;
       recentPingAt = (lastPing?.created_at as string | undefined) ?? null;
 
-      // 진행 중 대화는 stage의 한 번의 호출에서 판단한다. 공고별 가능 답변을
-      // ping 응답으로 분류해 전역 가용성을 덮거나 Claude를 두 번 호출하지 않는다.
-      if (!jc) {
+      // 자동 모드의 순수 풀 답장만 분류한다. off/draft·수동 관리·모호한 공고 답변은
+      // 모델 호출과 전역 가용성 변경을 하지 않는다. 명시적 수신거부는 위에서 모드와 무관하게 처리한다.
+      if (!route.ok && route.reason === "none" && (await getAgentMode(supabase)) === "auto") {
         // ping 응답 이벤트 — 응답률·응답속도(신뢰점수 §6.4-4) 재료
         if (lastPing) {
           const latencyMin = Math.max(
@@ -353,7 +353,7 @@ async function processInbound(
       console.error("[supabase-webhook] availability signal collection failed", e);
     }
 
-    // 판별 불가 처리 — 가용성 분류(수신거부 판정)가 끝난 지금 실행한다.
+    // 판별 불가 처리 — 전역 가용성으로 해석하지 않고 공고 맥락 확인으로 넘긴다.
     if (!route.ok && route.reason === "ambiguous") {
       ambiguousHandled = await handleAmbiguousInbound(supabase, {
         applicantId: applicant.id,

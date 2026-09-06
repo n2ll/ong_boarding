@@ -61,12 +61,47 @@ test("asks about only the unresolved target and writes no availability", () => {
   assert.equal(result.transition.kind, "stay");
 });
 
+test("one remaining job asks whether the reply refers to it without offering a plural choice", () => {
+  const context = ctx();
+  context.consultation!.jobs = context.consultation!.jobs.slice(0, 1);
+  context.consultation!.ambiguousFollowup = true;
+  context.consultation!.sourceMessages[0].body = "네";
+  const result = read({ mode: "clarify", job_ids: [11] }, context, "네");
+  assert.match(result.reply_text, /성수 오전 배송/);
+  assert.match(result.reply_text, /대한 말씀인가요/);
+  assert.doesNotMatch(result.reply_text, /중 어느|여러 공고라면/);
+  assert.deepEqual(result.consultation.observations, []);
+  assert.equal(result.transition.kind, "stay");
+});
+
+test("one explicitly named job asks for the missing question instead of asking to identify the job again", () => {
+  const context = ctx();
+  context.consultation!.sourceMessages[0].body = "성수 오전 배송이 궁금해요";
+  const result = read({ mode: "clarify", job_ids: [11] }, context, "성수 오전 배송이 궁금해요");
+  assert.match(result.reply_text, /어떤 조건/);
+  assert.doesNotMatch(result.reply_text, /중 어느|대한 말씀인가요/);
+  assert.deepEqual(result.consultation.observations, []);
+});
+
 test("missing facts are labelled for manager review instead of borrowed from another job", () => {
   const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 11, fields: ["급여"] }, { job_id: 22, fields: ["집결지(대략)"] }] });
   assert.match(result.reply_text, /70,000/);
   assert.match(result.reply_text, /집결지[\s\S]*확인 필요/);
   assert.equal(result.transition.kind, "pause");
   assert.equal(result.consultation.handoff, true);
+});
+
+test("manager handoff preserves source questions instead of model claims of an unsent answer", () => {
+  const text = "두 공고 주차비와 유류비는 지원하나요?";
+  const result = read({ mode: "handoff", job_ids: [11, 22], reason: "유류비 개인 부담으로 직접 안내함" }, forMessage(text), text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, "확인이 필요한 내용은 매니저에게 전달할게요.");
+  for (const note of [result.transition.reason, result.reasoning, result.state_update.meta.last_reasoning]) {
+    assert.match(note, /성수 오전 배송/);
+    assert.match(note, /강남 오후 배송/);
+    assert.ok(note.includes(text));
+    assert.doesNotMatch(note, /직접 안내함|개인 부담/);
+  }
 });
 
 test("unknown job or unsupported field cannot produce an automatic answer", () => {
