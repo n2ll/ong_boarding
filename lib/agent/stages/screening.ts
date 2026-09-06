@@ -17,7 +17,7 @@ import {
 } from "../../sms-consent-policy";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
-import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
+import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import {
   buildLineKnowledgeBlock,
@@ -627,15 +627,14 @@ ${formatJob(ctx.job)}${general && ctx.jobClosed ? "\n⚠️ 공고 상태: 마�
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
 ${formatOtherActiveJobs(ctx.otherActiveJobs)}
-${formatConsultationContext(ctx)}
 [현재 체크리스트 상태]
 ${general ? formatGeneralChecklist(ctx.state) : formatChecklist(ctx.state)}
 
-[지금까지의 대화]
+${formatConsultationConversation(ctx) ?? `[지금까지의 대화]
 ${formatHistory(ctx.history)}
 
 [방금 받은 구직자 메시지]
-${inboundText}
+${inboundText}`}
 
 위 상황에서 screening_turn tool로 답변·체크리스트 갱신·전이 시그널을 반환해라.`;
 

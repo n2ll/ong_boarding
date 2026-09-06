@@ -155,6 +155,20 @@ function forMessage(text: string): StageContext {
   return context;
 }
 
+test("a past interest quote attached to the new question's source ID cannot be sent or recorded", () => {
+  const text = "성수와 강남의 시간과 급여 알려주세요";
+  const context = forMessage(text);
+  context.history = [{ direction: "inbound", body: "성수 배송 관심 있어요", created_at: "2026-09-05T01:00:00Z" }];
+  const result = read({ mode: "answer", job_ids: [11, 22],
+    answers: [{ job_id: 11, fields: ["근무시간", "급여"] }, { job_id: 22, fields: ["근무시간", "급여"] }],
+    observations: [{ job_id: 11, source_message_id: "m1", kind: "interest", quote: "성수 배송 관심 있어요" }],
+  }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+  assert.equal(result.consultation, undefined);
+  assert.equal(result.applicant_patch, undefined);
+});
+
 for (const quote of ["성수는 월요일 가능", "월요일 가능"]) {
   test(`rejects availability assigned to another explicitly named job: ${quote}`, () => {
     const text = "성수는 월요일 가능하고 강남은 주말 가능해요";

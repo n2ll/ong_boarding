@@ -1,5 +1,5 @@
 import { buildToneGuide } from "../examples";
-import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
+import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import type { StageContext, StageResult } from "../types";
 
 const MODEL = "claude-sonnet-4-6";
@@ -24,7 +24,6 @@ export async function processConsultation(ctx: StageContext, inboundText: string
   const apiKey = process.env.CLAUDE_API;
   if (!apiKey) return failResult(ctx, "CLAUDE_API env missing");
   const consultationCtx: StageContext = { ...ctx, consultation: { ...ctx.consultation, force: true } };
-  const history = ctx.history.map((turn) => `${turn.direction === "inbound" ? "구직자" : "에이전트"}: ${turn.body}`).join("\n");
 
   try {
     const tone = await buildToneGuide(null, { includeCommonFacts: false, includeConversationExamples: false });
@@ -37,7 +36,7 @@ export async function processConsultation(ctx: StageContext, inboundText: string
         system: `너는 옹고잉 채용 상담 에이전트다. 확인된 공고 조건만 안내하고 관심·가능 시간은 원문으로 구분한다. 근무 확정·배정은 매니저가 결정한다. 상담으로 단계, 체크리스트, 지원자 프로필을 변경하지 않는다.\n${tone}${consultationSystemSuffix(consultationCtx)}`,
         tools: [withConsultationTool(TOOL, consultationCtx)],
         tool_choice: { type: "tool", name: TOOL.name },
-        messages: [{ role: "user", content: `${formatConsultationContext(consultationCtx)}\n[지금까지의 대화]\n${history || "(이전 대화 없음)"}\n\n[방금 받은 메시지]\n${inboundText}` }],
+        messages: [{ role: "user", content: formatConsultationConversation(consultationCtx)! }],
       }),
       cache: "no-store",
     });
