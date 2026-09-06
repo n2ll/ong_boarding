@@ -36,7 +36,7 @@ export interface RoutedCandidate {
 }
 
 export type InboundRoute =
-  | { ok: true; candidate: RoutedCandidate; how: "single" | "text" | "anchor" | "focus" }
+  | { ok: true; candidate: RoutedCandidate; how: "single" | "text" | "anchor" | "focus" | "consultation" }
   /** 응대할 후보가 없다 — 풀 답장·수신거부 등 다른 경로의 몫. */
   | { ok: false; reason: "none" }
   /** 활성 후보는 없고 **매니저가 들고 있는 대화(paused)** 만 있다 — AI가 끼어들지 않는다. */
@@ -171,6 +171,8 @@ export function chooseInboundCandidate(args: {
   anchorJobId: number | null;
   focusAt?: string | null;
   receivedAt?: string | null;
+  /** 상담 시 candidate는 잠금·처리 이력의 소유자일 뿐, 문의 대상/진행 공고를 바꾸지 않는다. */
+  allowConsultation?: boolean;
 }): InboundRoute {
   const { candidates: all, inboundText, focusJobId, anchorJobId } = args;
   if (focusJobId != null && args.focusAt && (!args.receivedAt || !Number.isFinite(Date.parse(args.receivedAt)) || Date.parse(args.receivedAt) < Date.parse(args.focusAt))) {
@@ -186,12 +188,19 @@ export function chooseInboundCandidate(args: {
   const pool = real.length ? real : all;
   const options = pool.map((c) => ({ job_id: c.job_id, title: c.job_title, branch: c.job_branch }));
   const named = matchJobsByText(inboundText, options);
+  const anchor = cands.find((c) => c.job_id === anchorJobId && !c.unavailable);
+  if (args.allowConsultation) {
+    const owner = focus ?? anchor ?? cands.find((c) => !c.unavailable);
+    const crossesOwner = owner && named.some((id) => id !== owner.job_id);
+    if (owner && (named.length > 1 || crossesOwner || (!focus && !anchor && cands.length > 1))) {
+      return { ok: true, candidate: owner, how: "consultation" };
+    }
+  }
   if (named.length > 1) return { ok: false, reason: "ambiguous", options, ...(focusJobId == null ? {} : { focusJobId }), why: "text_multi" };
   if (focus) {
     if (named.length && named[0] !== focus.job_id) return { ok: false, reason: "ambiguous", options, focusJobId: focus.job_id ?? undefined, why: "text_vs_focus" };
     return { ok: true, candidate: focus, how: "focus" };
   }
-  const anchor = cands.find((c) => c.job_id === anchorJobId);
   if (named.length === 1) {
     const hit = cands.find((c) => c.job_id === named[0]);
     if (!hit) return { ok: false, reason: "paused" };
@@ -238,7 +247,7 @@ export async function pickCandidateForInbound(
     .select("conversation_focus_job_id, conversation_focus_at").eq("id", applicantId).maybeSingle();
   if (focusError || !applicant) return { ok: false, reason: "paused" };
   const focusJobId = (applicant.conversation_focus_job_id as number | null) ?? null;
-  if (focusJobId != null) return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId: null, focusAt: applicant.conversation_focus_at, receivedAt });
+  if (focusJobId != null) return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId: null, focusAt: applicant.conversation_focus_at, receivedAt, allowConsultation: true });
 
   // 대화 앵커 — 대량·캠페인 발송은 제외한다(발사 때 그게 마지막 outbound가 된다).
   // **시스템 더미 공고 후보까지 포함해** 찾는다. 예전엔 실공고만 남기고 앵커를 봐서, 당근·배민
@@ -254,7 +263,7 @@ export async function pickCandidateForInbound(
     .limit(1)
     .maybeSingle();
   const anchorJobId = (lastOut?.job_id as number | null) ?? null;
-  return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId });
+  return chooseInboundCandidate({ candidates: all, inboundText, focusJobId, anchorJobId, allowConsultation: true });
 }
 
 /** 공고 제목을 문자에 넣을 만큼 짧게 — 괄호 수식어를 떼고 앞부분만. */

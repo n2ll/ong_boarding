@@ -16,6 +16,7 @@ import { emptyOnboarding, isComplete, mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
 import { sendSlackOnboardingReady } from "../../slack";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
+import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import type {
   OnboardingChecklist,
   Stage,
@@ -124,6 +125,7 @@ export function detectBaeminIdFallback(text: string): string {
 }
 
 interface OnboardingToolInput {
+  consultation?: unknown;
   reply_text: string;
   checklist_update: Partial<OnboardingChecklist>;
   baemin_id_text?: string;
@@ -214,6 +216,7 @@ ${ctx.job ? formatJobBrief(ctx.job) : "(공고 없음)"}
 
 [지원자]
 ${ctx.applicant.name ?? ""} (${ctx.applicant.phone})
+${formatConsultationContext(ctx)}
 
 [현재 체크리스트]
 ${formatChecklist(ctx.state)}
@@ -237,8 +240,8 @@ onboarding_turn tool로 응답해라.`;
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 768,
-          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null),
-          tools: [TOOL],
+          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null) + consultationSystemSuffix(ctx),
+          tools: [withConsultationTool(TOOL, ctx)],
           tool_choice: { type: "tool", name: "onboarding_turn" },
           messages: [{ role: "user", content: userContent }],
         }),
@@ -253,7 +256,13 @@ onboarding_turn tool로 응답해라.`;
         usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
       };
       const block = data.content?.find((c) => c.type === "tool_use");
-      if (!block?.input) return failResult("no tool_use block");
+      if (!block?.input) return { ...failResult("no tool_use block"), usage: { model: MODEL, ...(data.usage ?? {}) } };
+
+      const consultation = readConsultationResult(block.input, ctx, inboundText);
+      if (consultation) {
+        consultation.usage = { model: MODEL, ...(data.usage ?? {}) };
+        return consultation;
+      }
 
       const result = toStageResult(block.input, ctx);
       result.usage = { model: MODEL, ...(data.usage ?? {}) };

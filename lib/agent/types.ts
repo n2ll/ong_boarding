@@ -170,6 +170,13 @@ export interface StageContext {
   state: AgentState;
   /** 이 지원자가 동시에 진행 중인 '다른' 공고들. 비어있으면 단일 공고(기존과 동일). */
   otherActiveJobs?: OtherActiveJob[];
+  /** 복수 공고 상담은 확인된 조건과 원문 관찰만 다루며 기존 단계 진행과 분리한다. */
+  consultation?: {
+    jobs: import("./consultation-types").ConsultationJob[];
+    sourceMessages: import("./consultation-types").ConsultationSourceMessage[];
+    force: boolean;
+    ambiguousFollowup: boolean;
+  };
   /** 현재 공고가 실질 마감 상태 — 일반 라인 스크리닝이 '마감 안내 모드'(신규 진행 대신
    *  충원완료 안내 + 새 일자리 문자 동의 확인 + 선탑 전환)로 동작하는 근거. */
   jobClosed?: boolean;
@@ -207,6 +214,13 @@ export interface StageResult {
   answered_other_job_id?: number | null;
   /** 그 공고에서 인용했다고 신고한 항목명 — 백스톱이 '미기재 항목을 답했나'를 코드로 검증한다. */
   answered_other_job_fields?: string[] | null;
+  /** 서버가 검증·구성한 상담 결과. 모델의 자유문장/프로필 patch는 포함하지 않는다. */
+  consultation?: {
+    job_ids: number[];
+    observations: import("./consultation-types").ConsultationObservation[];
+    clarification: boolean;
+    handoff: boolean;
+  };
 }
 
 export interface Stage {

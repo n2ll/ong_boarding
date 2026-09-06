@@ -17,6 +17,7 @@ import {
 } from "../../sms-consent-policy";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
+import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import {
   buildLineKnowledgeBlock,
@@ -388,6 +389,7 @@ async function buildSystemPrompt(
 }
 
 interface ScreeningToolInput {
+  consultation?: unknown;
   reply_text: string;
   checklist_update: Partial<ScreeningChecklist>;
   /** 일반 라인 전용 — 이번 턴에 수집/갱신된 값만 (TOOL_GENERAL에서만 존재). */
@@ -625,6 +627,7 @@ ${formatJob(ctx.job)}${general && ctx.jobClosed ? "\n⚠️ 공고 상태: 마�
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
 ${formatOtherActiveJobs(ctx.otherActiveJobs)}
+${formatConsultationContext(ctx)}
 [현재 체크리스트 상태]
 ${general ? formatGeneralChecklist(ctx.state) : formatChecklist(ctx.state)}
 
@@ -647,8 +650,8 @@ ${inboundText}
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1024,
-          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx),
-          tools: [general ? TOOL_GENERAL : TOOL],
+          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx) + consultationSystemSuffix(ctx),
+          tools: [withConsultationTool(general ? TOOL_GENERAL : TOOL, ctx)],
           tool_choice: { type: "tool", name: "screening_turn" },
           messages: [{ role: "user", content: userContent }],
         }),
@@ -667,10 +670,10 @@ ${inboundText}
       };
       const block = data.content?.find((c) => c.type === "tool_use");
       if (!block?.input) {
-        return failResult("no tool_use block");
+        return { ...failResult("no tool_use block"), usage: { model: MODEL, ...(data.usage ?? {}) } };
       }
 
-      const result = toStageResult(block.input, ctx, inboundText);
+      const result = readConsultationResult(block.input, ctx, inboundText) ?? toStageResult(block.input, ctx, inboundText);
       result.usage = { model: MODEL, ...(data.usage ?? {}) };
       return result;
     } catch (e) {

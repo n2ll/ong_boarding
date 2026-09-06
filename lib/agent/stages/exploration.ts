@@ -16,6 +16,7 @@
 import { mergeAgentState } from "../checklist";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
+import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import { buildLineKnowledgeBlock, isGeneralLineJob } from "../general-line";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
@@ -115,6 +116,7 @@ async function buildSystemPrompt(
 }
 
 interface ExplorationToolInput {
+  consultation?: unknown;
   reply_text: string;
   transition: "stay" | "advance" | "abort" | "pause";
   transition_reason: string;
@@ -220,6 +222,7 @@ ${formatJob(ctx.job)}
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
 ${formatOtherActiveJobs(ctx.otherActiveJobs)}
+${formatConsultationContext(ctx)}
 [지금까지의 대화]
 ${formatHistory(ctx.history)}
 
@@ -239,8 +242,8 @@ ${inboundText}
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1024,
-          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx),
-          tools: [TOOL],
+          system: await buildSystemPrompt(ctx.applicant.branch1 ?? ctx.job?.branch ?? null, ctx) + consultationSystemSuffix(ctx),
+          tools: [withConsultationTool(TOOL, ctx)],
           tool_choice: { type: "tool", name: "exploration_turn" },
           messages: [{ role: "user", content: userContent }],
         }),
@@ -259,10 +262,10 @@ ${inboundText}
       };
       const block = data.content?.find((c) => c.type === "tool_use");
       if (!block?.input) {
-        return failResult("no tool_use block");
+        return { ...failResult("no tool_use block"), usage: { model: MODEL, ...(data.usage ?? {}) } };
       }
 
-      const result = toStageResult(block.input, ctx);
+      const result = readConsultationResult(block.input, ctx, inboundText) ?? toStageResult(block.input, ctx);
       result.usage = { model: MODEL, ...(data.usage ?? {}) };
       return result;
     } catch (e) {

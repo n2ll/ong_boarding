@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { readConsultationResult } from "./multi-job-consultation.ts";
+import type { StageContext } from "./types";
 import { fetchPhoneMessageIdentityIndex } from "../admin/phone-message-identity.ts";
 import {
   hasFutureJobPromotion,
@@ -41,6 +43,7 @@ class QueryBuilder {
   neq(column?: string, value?: unknown) { if (column === "id") this.excludedId = value; return this; }
   gt(column: string, value: string) { if (column === "created_at") this.after = value; return this; }
   not() { return this; }
+  is() { return this; }
   in() { return this; }
   or() { return this; }
   order() { return this; }
@@ -52,8 +55,9 @@ class QueryBuilder {
     return this;
   }
 
-  update() {
+  update(row?: Row) {
     this.action = "update";
+    this.database._updates = [...(this.database._updates ?? []), { table: this.table, ...row }];
     return this;
   }
 
@@ -133,7 +137,9 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
+  const observations: unknown[] = [];
+  const contexts: StageContext[] = [];
   const rpcCalls: string[] = [];
   const smsCalls: Array<{ phone: string; body: string }> = [];
   const transitions: Transition[] = [];
@@ -180,7 +186,11 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
   };
   const stage = {
     name: "exploration",
-    async process() {
+    async process(ctx: StageContext) {
+      contexts.push(ctx);
+      if (input.consultation) return readConsultationResult({ consultation: input.consultation }, ctx, "성수는 월요일 가능하고 강남은 주말 가능해요") ?? {
+        reply_text: "잘못된 기존 단계 응답", state_update: {}, transition: { kind: "advance", to: "screening", reason: "wrong" },
+      };
       return {
         reply_text: "새로운 일자리 공고가 나왔어요. 확인해보세요.",
         reasoning: "future promotion fixture",
@@ -200,6 +210,18 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
   const compiledModule = { exports: {} as Record<string, unknown> };
   const stubs: Record<string, Record<string, unknown>> = {
     "./conversation-reply-claim": { withConversationReplyClaim },
+    "./consultation-context": { loadConsultationJobs: async () => {
+      if (input.contextFails) throw new Error("exposure unavailable");
+      return input.consultation ? [
+        { job_id: 7, title: "성수 공고", branch: "성수", candidate_id: 11, stage: "exploration", expired: false, pay_type: "일당", pay_amount: 70000 },
+        { job_id: 8, title: "강남 공고", branch: "강남", candidate_id: null, stage: null, expired: false },
+      ] : [{ job_id: 7, title: "배송 공고", candidate_id: 11, stage: "exploration", expired: false }];
+    } },
+    "./consultation-history": { loadConsultationHistory: async () => ({ history: [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: new Date().toISOString() }] }) },
+    "./consultation-observations": { saveConsultationObservations: async (_db: unknown, _id: number, values: unknown[]) => {
+      if (input.observationFails) throw new Error("event storage failed");
+      observations.push(...values);
+    } },
     "../solapi": {
       sendSms: async (phone: string, body: string) => {
         smsCalls.push({ phone, body });
@@ -209,6 +231,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     "../jobs": {
       isJobEffectivelyClosed: () => false,
       slotKeysLabel: () => "",
+      isSystemJobTitle: () => false,
     },
     "./general-line": {
       isGeneralLineJob: () => false,
@@ -273,8 +296,65 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     transitions,
     rpcCalls,
     database,
+    observations,
+    contexts,
   };
 }
+
+const consultationEnvelope = { mode: "answer", job_ids: [7, 8], answers: [{ job_id: 7, fields: ["급여"] }], observations: [
+  { job_id: 7, source_message_id: "inbound-1", kind: "availability", quote: "성수는 월요일 가능" },
+  { job_id: 8, source_message_id: "inbound-1", kind: "availability", quote: "강남은 주말 가능해요" },
+] };
+test("consultation persists per-job evidence and sends one response without advancing the host", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope });
+  const result = await run(h.router, h.supabase);
+  assert.equal(result.reply_sent, true);
+  assert.equal(h.smsCalls.length, 1);
+  assert.match(h.smsCalls[0].body, /성수 공고/);
+  assert.match(h.smsCalls[0].body, /강남 공고/);
+  assert.equal(h.observations.length, 2);
+  assert.equal(h.transitions[0].kind, "stay");
+  assert.equal(h.database.message_drafts[0].job_id, null);
+  assert.equal(h.database._updates?.filter((row) => row.table === "applicants").length ?? 0, 0);
+});
+test("draft consultation proposes evidence without persisting it or sending SMS", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope, mode: "draft" });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.observations.length, 0);
+  assert.equal(h.transitions.length, 0);
+  assert.equal(h.database.message_drafts[0].job_id, null);
+  assert.match(String(h.database.message_drafts[0].reasoning), /관찰.*미저장/);
+});
+test("observation persistence failure stops acknowledgement and hands off visibly", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope, observationFails: true });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions[0].kind, "pause");
+  assert.match(h.transitions[0].reason ?? "", /기록.*실패/);
+});
+test("missing job facts can send verified known facts before handing off", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: { ...consultationEnvelope, observations: [], answers: [{ job_id: 7, fields: ["급여"] }, { job_id: 8, fields: ["급여"] }] } });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 1);
+  assert.match(h.smsCalls[0].body, /70,000/);
+  assert.equal(h.transitions[0].kind, "pause");
+});
+test("consultation exposure lookup failure never calls the model or sends SMS", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope, contextFails: true });
+  await run(h.router, h.supabase);
+  assert.equal(h.contexts.length, 0);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions[0].kind, "pause");
+});
+test("invalid consultation in global draft mode remains visible as a need-info card", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: { ...consultationEnvelope, job_ids: [999] }, mode: "draft" });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions.length, 0);
+  assert.equal(h.database.message_drafts[0]?.status, "need_info");
+  assert.match(String(h.database.message_drafts[0]?.missing_info), /상담 검증 실패/);
+});
 
 async function run(router: RouterModule, supabase: unknown) {
   return router.runAgentForCandidate({

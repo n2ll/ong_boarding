@@ -294,6 +294,7 @@ export async function GET(req: NextRequest) {
         inbound_message_id: String(inbound.id),
         inbound_text: inboundText,
         received_at: inbound.created_at,
+        consultation_only: route.how === "consultation",
       });
       swept++;
       results.push({

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { chooseInboundCandidate } from "./inbound-routing.ts";
 
 type Candidate = {
   id: number;
@@ -35,6 +36,31 @@ const candidates: Candidate[] = [
     job_branch: "마포",
   },
 ];
+
+for (const text of ["강서랑 마포 시간은요?", "강서 자리도 관심 있어요"]) {
+  test(`consultation keeps the current execution owner without forcing a single job: ${text}`, () => {
+    assert.deepEqual(chooseInboundCandidate({ candidates, inboundText: text, focusJobId: 22, anchorJobId: 11, allowConsultation: true }), {
+      ok: true, candidate: candidates[1], how: "consultation",
+    });
+  });
+}
+test("consultation without a focus or anchor stays readonly instead of choosing a workflow", () => {
+  assert.deepEqual(chooseInboundCandidate({ candidates, inboundText: "둘 다 가능한가요?", focusJobId: null, anchorJobId: null, allowConsultation: true }), {
+    ok: true, candidate: candidates[0], how: "consultation",
+  });
+});
+test("an interest-only other job can be discussed without starting that candidate", () => {
+  const pool = candidates.map((candidate, index) => index === 0 ? { ...candidate, agent_stage: null } : candidate);
+  assert.deepEqual(chooseInboundCandidate({ candidates: pool, inboundText: "강서도 궁금해요", focusJobId: 22, anchorJobId: null, allowConsultation: true }), {
+    ok: true, candidate: candidates[1], how: "consultation",
+  });
+});
+test("consultation never bypasses paused focus or pre-focus inbound", () => {
+  for (const args of [
+    { candidates: candidates.map((c) => ({ ...c, agent_stage: "paused" })) },
+    { candidates, focusAt: "2026-09-06T10:00:00Z", receivedAt: "2026-09-06T09:00:00Z" },
+  ]) assert.deepEqual(chooseInboundCandidate({ ...args, inboundText: "강서 마포", focusJobId: 22, anchorJobId: null, allowConsultation: true }), { ok: false, reason: "paused" });
+});
 
 test("the explicit conversation focus wins over an older outbound anchor for an ordinary reply", async () => {
   const routing = await loadRoutingModule();

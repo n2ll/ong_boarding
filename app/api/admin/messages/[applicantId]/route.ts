@@ -118,7 +118,7 @@ export async function GET(
     // 재컨택 맥락 이벤트(B1) — 발송·링크열람·관심클릭·가용성·수신거부를 스레드에
     // 인라인 마커로 병합 표시하기 위해 함께 반환. 성능: 최근 90일로 제한.
     // (job_id 필터와 무관하게 지원자 단위 — "이 답장이 무엇에 대한 것인지"의 맥락은 공고를 가리지 않는다)
-    const RECONTACT_EVENT_TYPES = ["ping_sent", "link_view", "interest_click", "availability_set", "opt_out_set", "handoff_resolved"];
+    const RECONTACT_EVENT_TYPES = ["ping_sent", "link_view", "interest_click", "availability_set", "opt_out_set", "handoff_resolved", "job_consultation_observation"];
     const eventsSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
     let eventsList: Awaited<ReturnType<typeof fetchRecentPoolEvents>> = [];
     let poolEventsContextState: "ready" | "error" = "ready";

@@ -117,6 +117,19 @@ function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): strin
     }
     case "availability_set":
       return typeof meta.to === "string" && meta.to ? `🕐 가용성 → ${meta.to}` : "🕐 가용성 변경";
+    case "job_consultation_observation": {
+      const title = ev.job_id != null ? jobsMap[ev.job_id]?.title?.trim() : undefined;
+      const name = title || (ev.job_id != null ? `공고 #${ev.job_id}` : "공고");
+      const observations = (ev.meta ?? {}).observations;
+      const quotes = Array.isArray(observations) ? observations.flatMap((item: unknown) => {
+        if (!item || typeof item !== "object") return [];
+        const observation = item as { kind?: unknown; quote?: unknown };
+        if (typeof observation.quote !== "string" || !observation.quote.trim()) return [];
+        const kind = observation.kind === "availability" ? "가용성" : observation.kind === "interest" ? "관심" : "발언";
+        return [`${kind}: “${observation.quote}”`];
+      }) : [];
+      return `'${name}' 지원자 상담 발언${quotes.length ? ` · ${quotes.join(" · ")}` : ""}`;
+    }
     case "opt_out_set":
       return "🚫 수신거부 등록";
     case "handoff_resolved": {
@@ -562,7 +575,7 @@ export function ConversationThread({
   const dedupedEvents: PoolEvent[] = [];
   for (const ev of currentEvents) {
     const last = dedupedEvents[dedupedEvents.length - 1];
-    if (last && last.event_type === ev.event_type && last.job_id === ev.job_id) {
+    if (last && ev.event_type !== "job_consultation_observation" && last.event_type === ev.event_type && last.job_id === ev.job_id) {
       dedupedEvents[dedupedEvents.length - 1] = ev;
     } else {
       dedupedEvents.push(ev);
@@ -1286,7 +1299,7 @@ export function ConversationThread({
                   <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[12px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className="bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 rounded-full" title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className={`bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 ${ev.event_type === "job_consultation_observation" ? "max-w-full whitespace-pre-wrap break-words rounded-xl" : "rounded-full"}`} title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, currentJobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>

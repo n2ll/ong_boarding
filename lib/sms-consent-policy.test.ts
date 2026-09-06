@@ -516,7 +516,7 @@ test("matched inbound explicit opt-out is persisted before routing and ends the 
     readFile(new URL("../app/api/admin/cron/inbound-sweeper/route.ts", import.meta.url), "utf8"),
   ]);
   const explicitOptOut = webhook.indexOf("isExplicitSmsOptOutText(text)");
-  const availabilityCostGate = webhook.indexOf("if (!jc || lastPing)");
+  const availabilityCostGate = webhook.indexOf("await classifyAvailabilitySignal");
   const routerCall = webhook.lastIndexOf("runAgentForCandidate({");
 
   assert.ok(explicitOptOut >= 0);

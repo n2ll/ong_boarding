@@ -16,7 +16,10 @@
 import { withConversationReplyClaim } from "./conversation-reply-claim";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
-import { isJobEffectivelyClosed } from "../jobs";
+import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
+import { loadConsultationJobs } from "./consultation-context";
+import { loadConsultationHistory } from "./consultation-history";
+import { saveConsultationObservations } from "./consultation-observations";
 import { isGeneralLineJob, joinedClientType } from "./general-line";
 import { ensureExposureIncludeForLinked } from "../exposure";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
@@ -24,8 +27,6 @@ import { getSystemMessage } from "./system-messages";
 import { mergeAgentState } from "./checklist";
 import { applyTransition } from "./transitions";
 import { crossJobBackstop } from "./cross-job";
-import { isLiveLink } from "../candidate-links";
-import { slotKeysLabel } from "../jobs";
 import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
@@ -72,6 +73,8 @@ export interface RunAgentInput {
    *  분류 문자함에서 매니저가 '지원자로 등록'하는 순간 시니어에게 문자가 자동으로 나가지 않게 하는 용도 —
    *  등록은 즉시, 첫 응답은 매니저가 초안을 검수하고 직접 보낸다. simulate(빙의 연습)와는 별개. */
   forceDraft?: boolean;
+  /** 처리 이력의 후보만 정해졌으며, 지원 단계 진행은 금지된 상담 턴. */
+  consultation_only?: boolean;
 }
 
 const REPLY_DELAY_MS = 60_000;       // 인입 시각 기준 답장 목표 지연 (1분)
@@ -256,121 +259,13 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // onboarding도 AI가 응답한다 — 배민 아이디 수집 후 "감사합니다 곧 연락드리겠습니다" 마무리.
   const blockReplyForStage = false;
 
-  // applicants.status가 jc.agent_stage보다 뒤처져 있으면 자동 동기화.
-  // (예: jc=onboarding/active 인데 applicants.status='스크리닝 중'에 머문 케이스 복구)
-  // 매니저가 직접 둔 상태(확정인력/대기자/부적합/이탈/기타)는 절대 건드리지 않는다.
-  const expectedStatus =
-    stageName === "onboarding" || stageName === "active" ? "스크리닝 완료"
-    : stageName === "screening" ? "스크리닝 중"
-    : null;
-  // draft(코파일럿) 모드에서는 상태 변경 부수효과 0 — 동기화도 건너뛴다.
-  if (expectedStatus && !draftMode) {
-    const applicantId = (jc.applicants as { id?: number } | null)?.id;
-    if (applicantId) {
-      await supabase
-        .from("applicants")
-        .update({ status: expectedStatus })
-        .eq("id", applicantId)
-        .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
-    }
-  }
-
   const stage = STAGES[stageName];
   if (!stage) {
     return { ok: false, error: `unknown stage: ${stageName}` };
   }
 
-  // 2) 대화 history (이번 인입 제외)
-  // job_id만으로 좁히면 시스템 더미 공고(__danggeun_system__)를 공유하는 후보들끼리
-  // history가 섞여 AI가 다른 후보 대화를 이 후보 컨텍스트로 인용해버린다.
-  // applicant_id로 추가 좁히기 — 한 후보의 대화만 본 후보 history에 포함.
-  const applicantIdForHistory = jc.applicant_id as number;
-  const { data: msgs } = await supabase
-    .from("messages")
-    .select("direction, body, created_at")
-    .eq("job_id", jc.job_id)
-    .eq("applicant_id", applicantIdForHistory)
-    .neq("id", inbound_message_id)
-    .order("created_at", { ascending: true })
-    .limit(50);
-
-  const stripPrefix = (s: string) =>
-    s.replace(/^\s*\[(?:Web발신|국제발신|광고)\]\s*/i, "").trim();
-
-  const history: ConversationTurn[] = (msgs ?? []).map((m) => ({
-    direction: m.direction as "inbound" | "outbound",
-    body: stripPrefix(m.body as string),
-    created_at: m.created_at as string,
-  }));
-
+  const stripPrefix = (s: string) => s.replace(/^\s*\[(?:Web발신|국제발신|광고)\]\s*/i, "").trim();
   const cleanInbound = stripPrefix(inbound_text);
-
-  // 2b) 멀티-잡 인지 (Phase 1) — 이 지원자가 동시에 진행 중인 '다른' 공고들.
-  // 현재 후보/시스템 더미 공고(__)/abort는 제외. 에이전트가 다른 공고 문의를
-  // 현재 공고 정보로 잘못 답하지 않도록 컨텍스트로만 제공한다(체크리스트는 건드리지 않음).
-  const otherActiveJobs: OtherActiveJob[] = [];
-  {
-    // **답할 수 있는 값까지 함께 싣는다** — 예전엔 공고명·단계만 줘서, 다른 공고 질문이면 무조건
-    // 매니저 인계였다(공고 7개면 흔한 질문마다 인계가 쌓인다). 없는 값은 숨기지 않고 '미기재'로
-    // 열거한다(cross-job.ts) — 빈칸을 감추면 모델이 현재 공고 값으로 메운다.
-    const { data: others } = await supabase
-      .from("job_candidates")
-      .select(
-        `agent_stage, jobs:job_id ( id, title, branch, status, closes_at, slot, slot_keys, work_period, start_date, pay_info, pay_type, pay_amount, pickup_address, vehicle_required )`
-      )
-      .eq("applicant_id", applicantIdForHistory)
-      .not("agent_stage", "is", null)
-      .neq("agent_stage", "abort")
-      .neq("id", candidate_id);
-    for (const o of others ?? []) {
-      const j = (o.jobs ?? null) as unknown as
-        | {
-            id: number;
-            title: string;
-            branch: string | null;
-            status: string | null;
-            closes_at: string | null;
-            slot: string | null;
-            slot_keys: string[] | null;
-            work_period: string | null;
-            start_date: string | null;
-            pay_info: string | null;
-            pay_type: string | null;
-            pay_amount: number | null;
-            pickup_address: string | null;
-            vehicle_required: boolean | null;
-          }
-        | null;
-      // 마감·시스템·종료 판정은 매니저 화면(목록 배지·공고 탭)과 **같은 함수**를 쓴다.
-      // 마감 공고를 블록에 실으면 AI가 이미 충원된 자리의 급여·집결지를 안내한다.
-      if (
-        !j ||
-        !isLiveLink({
-          agentStage: o.agent_stage as string | null,
-          jobTitle: j.title,
-          jobStatus: j.status,
-          jobClosesAt: j.closes_at,
-        })
-      ) {
-        continue;
-      }
-      otherActiveJobs.push({
-        job_id: j.id,
-        title: j.title,
-        branch: j.branch ?? null,
-        stage: (o.agent_stage as StageName) ?? "exploration",
-        // 상세 시간이 없으면 고른 칩 라벨로 — 값이 있는데 '미기재'로 나가면 인계가 늘어난다.
-        slot: j.slot || slotKeysLabel(j.slot_keys) || null,
-        work_period: j.work_period ?? null,
-        start_date: j.start_date ?? null,
-        pay_info: j.pay_info ?? null,
-        pay_type: j.pay_type ?? null,
-        pay_amount: j.pay_amount ?? null,
-        pickup_address: j.pickup_address ?? null,
-        vehicle_required: j.vehicle_required ?? null,
-      });
-    }
-  }
 
   // 3) Stage 호출
   // Supabase 조인 응답은 단일 FK여도 객체/배열이 섞여 들어올 수 있어 unknown 경유
@@ -432,7 +327,41 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     !!job && job.title === BAEMIN_SYSTEM_JOB_TITLE &&
     !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
 
-  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs, jobClosed, baeminSuspended };
+  let consultation: StageContext["consultation"];
+  let history: ConversationTurn[] = [];
+  let otherActiveJobs: OtherActiveJob[] = [];
+  try {
+    const jobs = await loadConsultationJobs(supabase, applicant.id);
+    const currentAllowed = jobs.some((j) => j.job_id === job.id && !j.expired);
+    // 노출에서 제외된 실공고의 현재 단계로도 진행하지 않는다. 마감 안내와 시스템 진입은 기존 계약 유지.
+    if (!currentAllowed && !jobClosed && !isSystemJobTitle(job.title)) throw new Error("현재 공고의 상담 노출을 확인할 수 없음");
+    // 공고가 줄어도 직전 복수 상담의 짧은 답변을 현재 공고 진행으로 오해하지 않는다.
+    const recent = await loadConsultationHistory(supabase, applicant.id, {
+      id: inbound_message_id, body: inbound_text, created_at: received_at ?? new Date().toISOString(),
+    }, jobs);
+    history = recent.history;
+    const enabled = jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id);
+    otherActiveJobs = jobs.filter((j) => j.job_id !== job.id && !j.expired)
+      .map((j) => ({ ...j, stage: j.stage ?? "exploration" }));
+    if (enabled) {
+      consultation = { jobs, sourceMessages: recent.sourceMessages, ambiguousFollowup: recent.ambiguousFollowup,
+        force: input.consultation_only === true || !currentAllowed };
+    }
+  } catch (error) {
+    const reason = `공고 상담 자료 조회 실패 — ${error instanceof Error ? error.message : String(error)}`;
+    if (draftMode) {
+      await supabase.from("message_drafts").insert({ applicant_id: applicant.id, applicant_phone: applicant.phone,
+        inbound_message_id, job_id: null, draft_text: "문의 내용을 매니저가 확인한 뒤 안내드릴게요.",
+        status: "need_info", missing_info: reason, reasoning: `${COPILOT_DRAFT_MARKER} ${reason}` });
+    } else {
+      await applyTransition({ supabase, candidate_id: jc.id, applicant_id: applicant.id, applicant_name: applicant.name,
+        applicant_phone: applicant.phone, applicant_branch: applicant.branch1 ?? null, applicant_work_hours: applicant.work_hours ?? null,
+        job_id: jc.job_id, job, current_stage: stageName, state_update: state,
+        transition: { kind: "pause", category: "cross_job", reason, suggestedAction: "공고 노출과 대화 조회 상태를 확인한 뒤 직접 답해 주세요." }, simulate });
+    }
+    return { ok: false, error: reason, reply_sent: false };
+  }
+  const ctx: StageContext = { job, applicant, history, state, otherActiveJobs, jobClosed, baeminSuspended, consultation };
 
   // 배민 비마트 임시중단 + exploration/onboarding/active — 이 stage들은 비마트 진행/모집
   // (배민ID 수집·앱설치·배차·SCREENING_ANNOUNCE)을 전제하므로 어떤 자동 응답도 내보내면 안 된다.
@@ -467,10 +396,36 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     });
   }
 
+  // 문의 공고는 모델 검증 뒤에야 알 수 있다. 상담 실행 소유자를 응답한 공고로 세지 않는다.
+  if (!draftMode && !result.consultation && result.transition.kind !== "pause") {
+    await supabase.from("job_candidates").update({ responded_at: received_at ?? new Date().toISOString() })
+      .eq("id", jc.id).is("responded_at", null);
+  }
+
+  // applicants.status가 jc.agent_stage보다 뒤처져 있으면 자동 동기화.
+  // (예: jc=onboarding/active 인데 applicants.status='스크리닝 중'에 머문 케이스 복구)
+  // 매니저가 직접 둔 상태(확정인력/대기자/부적합/이탈/기타)는 절대 건드리지 않는다.
+  const expectedStatus =
+    stageName === "onboarding" || stageName === "active" ? "스크리닝 완료"
+    : stageName === "screening" ? "스크리닝 중"
+    : null;
+  // draft(코파일럿) 모드에서는 상태 변경 부수효과 0 — 동기화도 건너뛴다.
+  if (expectedStatus && !draftMode && !result.consultation && result.transition.kind !== "pause") {
+    const applicantId = (jc.applicants as { id?: number } | null)?.id;
+    if (applicantId) {
+      await supabase
+        .from("applicants")
+        .update({ status: expectedStatus })
+        .eq("id", applicantId)
+        .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
+    }
+  }
+
+
   // stage가 applicants 행에 patch할 필드를 실어보냈으면 적용 (예: onboarding의 baemin_id 추출값)
   // draft(코파일럿) 모드에서는 applicants 변경 부수효과 0 — 건너뛴다.
   let applicantPatchPersisted = false;
-  if (!draftMode && result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
+  if (!draftMode && !result.consultation && result.applicant_patch && Object.keys(result.applicant_patch).length > 0) {
     // ⚠️ 노출 규칙 축(available_slots·own_vehicle)을 바꾸는 patch는 **노출을 좁히는 쓰기**다.
     // 대화로 시간대가 '평일오후'로 확정되면, '평일오전' 규칙으로 좁힌 공고에서 이 사람이 빠진다 —
     // 그런데 job_candidates는 그대로라 지원자는 볼 수 없는 공고를 AI만 계속 이야기한다(M1b가 막은 상태).
@@ -577,6 +532,38 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     };
   }
 
+  const consultationSafe = !!result.consultation && !safetyHit && !marketingSafetyHit && !crossHit;
+  // 기록은 지원자의 진술 원장일 뿐이며, 채용 단계/전역 가용성에는 반영하지 않는다.
+  let observationFailure = false;
+  if (!draftMode && !simulate && consultationSafe && result.consultation!.observations.length) {
+    try {
+      await saveConsultationObservations(supabase, applicant.id, result.consultation!.observations, consultation!.sourceMessages);
+    } catch (error) {
+      observationFailure = true;
+      result.reply_text = null;
+      result.transition = { kind: "pause", category: "cross_job", reason: `공고별 발언 기록 실패 — ${error instanceof Error ? error.message : String(error)}`,
+        suggestedAction: "원문과 공고별 기록을 확인하고 직접 답해 주세요." };
+    }
+  }
+  if (!draftMode && !simulate && consultationSafe && !observationFailure) {
+    const { error } = await supabase.from("messages").update({ job_id: null })
+      .eq("applicant_id", applicant.id).eq("direction", "inbound")
+      .in("id", consultation!.sourceMessages.map((message) => message.id));
+    if (error) {
+      observationFailure = true;
+      result.reply_text = null;
+      result.transition = { kind: "pause", category: "cross_job", reason: `상담 문자 공고 귀속 정리 실패 — ${error.message}` };
+    }
+  }
+  const consultationReviewReason = consultation && result.transition.kind === "pause" ? result.transition.reason : null;
+  // 검증 실패도 전역 draft에서 보이지 않는 미처리 문자로 남기지 않는다.
+  const draftText = result.reply_text || (consultationReviewReason ? "문의 내용을 매니저가 확인한 뒤 안내드릴게요." : null);
+  const responseJobId = consultationReviewReason || result.consultation ? null : jc.job_id;
+  if (result.consultation) {
+    result.reasoning = `${result.reasoning ?? ""}\n[복수 공고 상담: ${result.consultation.job_ids.join(", ")}]`;
+    if (draftMode && result.consultation.observations.length) result.reasoning += "\n[공고별 관찰 제안·미저장] " + JSON.stringify(result.consultation.observations);
+  }
+
   // ─── 코파일럿(draft) 모드 분기 ───────────────────────────────────────
   // 여기서부터의 부수효과(SOLAPI 발송·messages INSERT·applyTransition의 stage 전이/
   // 자동 안내 발송/Slack 인계 알림/state 저장)를 전부 건너뛰고 message_drafts INSERT만 한다.
@@ -585,7 +572,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   if (draftMode) {
     let draftCreated = false;
     try {
-      if (result.reply_text) {
+      if (draftText) {
         // 같은 inbound에 대한 미처리 초안이 이미 있으면 중복 생성 방지(웹훅 재전송 대비)
         const { data: dup } = await supabase
           .from("message_drafts")
@@ -604,8 +591,8 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
             applicant_id: applicant.id,
             applicant_phone: applicant.phone,
             inbound_message_id,
-            job_id: jc.job_id,
-            draft_text: result.reply_text,
+            job_id: responseJobId,
+            draft_text: draftText,
             reasoning: `${headerParts.join(" ")}\n${result.reasoning ?? ""}`,
             // 안전 가드에 걸린 초안은 need_info — 초안 카드에 경고 배지가 뜨고 매니저 수정을 유도.
             missing_info: safetyHit
@@ -614,8 +601,8 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
                 ? "새 일자리 문자 동의가 확인되지 않아 미래 일자리 안내 문구를 발송할 수 없습니다."
               : crossHit
                 ? `다른 공고 응대 백스톱(${crossHit.why}) — ${crossHit.transition.kind === "pause" ? crossHit.transition.reason : "현재 공고 진행 보류"}`
-                : null,
-            status: safetyHit || marketingSafetyHit || crossHit ? "need_info" : "pending",
+                : consultationReviewReason,
+            status: safetyHit || marketingSafetyHit || crossHit || consultationReviewReason ? "need_info" : "pending",
           });
           if (draftErr) console.error("[router] copilot draft insert failed", draftErr);
           else draftCreated = true;
@@ -702,7 +689,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // pause 전이 = 매니저 인계 판단이 선 상태. AI가 임의로 사과/응대 메시지를 더 보내지 않고
   // 슬랙 알림만 보낸 뒤 응답 중단한다. (이전엔 reply_text가 있으면 그대로 발송되어
   // "죄송합니다…" 같은 사족이 매니저 인계 전에 한 통 더 나가던 문제 해결)
-  const skipReplyDueToPause = result.transition.kind === "pause";
+  const skipReplyDueToPause = result.transition.kind === "pause" && !(consultationSafe && result.consultation?.handoff && !observationFailure);
   let replySent = false;
   let deliveryUncertain = false;
   let outboundId: string | null = null;
@@ -732,7 +719,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
           sent_by: simulate ? "agent-practice" : "agent",
           solapi_msg_id: sendMessageId,
           message_type: "sms",
-          job_id: jc.job_id,
+          job_id: responseJobId,
           model: tokenCols.model,
           tokens_in: tokenCols.tokens_in,
           tokens_out: tokenCols.tokens_out,
@@ -758,7 +745,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
         await supabase.from("message_drafts").insert({
           applicant_id: applicant.id,
           inbound_message_id,
-          job_id: jc.job_id,
+          job_id: responseJobId,
           draft_text: result.reply_text,
           reasoning: reasoningWithTransition,
           status: "auto_sent",
@@ -776,6 +763,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     replySent &&
     !simulate &&
     jobClosed &&
+    !result.consultation &&
     isGeneralLineJob(job)
   ) {
     try {

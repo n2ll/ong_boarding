@@ -119,27 +119,20 @@ export async function POST(req: NextRequest) {
     const jc = route.ok ? route.candidate : null;
 
     if (jc && AUTO_AGENT_STAGES.has(jc.agent_stage as string)) {
-      // 1) messages 행에 job_id 채워주기 — agent가 history 로드 시 그 공고 컨텍스트만 사용
+      // 1) 단일 공고만 귀속. 복수 상담 문자는 특정 공고에 묶지 않는다.
       await supabase
         .from("messages")
-        .update({ job_id: jc.job_id })
+        .update({ job_id: route.ok && route.how === "consultation" ? null : jc.job_id })
         .eq("id", rec.id);
 
-      // 2) 첫 응답이면 responded_at 기록
-      if (!jc.responded_at) {
-        await supabase
-          .from("job_candidates")
-          .update({ responded_at: rec.created_at })
-          .eq("id", jc.id);
-      }
-
-      // 3) Agent 호출 (Claude + 응답 발송 + transition 적용)
+      // 2) Agent 호출 (Claude + 응답 발송 + transition 적용)
       const agentResult = await runAgentForCandidate({
         supabase,
         candidate_id: jc.id as number,
         inbound_message_id: rec.id,
         inbound_text: rec.body,
         received_at: rec.created_at,
+        consultation_only: route.ok && route.how === "consultation",
       });
 
       return NextResponse.json({ route: "agent", ...agentResult });
