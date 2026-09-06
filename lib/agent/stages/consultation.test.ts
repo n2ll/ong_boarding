@@ -123,6 +123,27 @@ function assertNoProgress(result: StageResult, before: StageContext, after: Stag
 }
 
 for (const stageName of ["exploration", "screening", "onboarding", "active"]) {
+  test(`${stageName}: separates historical statements from the unanswered batch at the end of the prompt`, async () => {
+    const ctx = context();
+    ctx.consultation!.sourceMessages = [
+      { id: "pending-first", body: "새벽 배송은 관심 있어요.", created_at: "2026-09-06T00:01:00Z" },
+      { id: "pending-last", body: "낮 배송 시간과 급여 알려주세요.", created_at: "2026-09-06T00:02:00Z" },
+    ];
+    ctx.history = [
+      { direction: "inbound", body: "낮 배송은 화요일 됩니다", created_at: "2026-09-05T01:00:00Z" },
+      { direction: "outbound", body: "다음 상담을 시작합니다", created_at: "2026-09-06T00:00:00Z" },
+      { direction: "inbound", body: "새벽 배송은 관심 있어요.", created_at: "2026-09-06T00:01:00Z" },
+    ];
+    const { stage, requests } = harness(stageName, advancingOutput({ ...answer(), observations: [] }));
+    await stage.process(ctx, "낮 배송 시간과 급여 알려주세요.");
+    const content = requests[0].body.messages[0].content;
+    assert.ok(content.indexOf("낮 배송은 화요일 됩니다") < content.indexOf("pending-first"), "past statements must precede the authoritative new batch");
+    assert.equal(content.split("새벽 배송은 관심 있어요.").length - 1, 1, "pending messages must not also appear as historical statements");
+    assert.equal(content.split("낮 배송 시간과 급여 알려주세요.").length - 1, 1, "the last message must remain in the same batch, without duplication");
+    assert.ok(content.includes("pending-last"));
+    assert.ok(content.includes("다음 상담을 시작합니다"));
+  });
+
   test(`${stageName}: consultation cannot advance, update checklists, or patch applicant fields`, async () => {
     const ctx = context();
     const before = structuredClone(ctx);

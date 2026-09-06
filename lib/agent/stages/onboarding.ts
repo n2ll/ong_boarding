@@ -16,7 +16,7 @@ import { emptyOnboarding, isComplete, mergeAgentState } from "../checklist";
 import { buildToneGuide } from "../examples";
 import { sendSlackOnboardingReady } from "../../slack";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
-import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
+import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import type {
   OnboardingChecklist,
   Stage,
@@ -216,16 +216,15 @@ ${ctx.job ? formatJobBrief(ctx.job) : "(공고 없음)"}
 
 [지원자]
 ${ctx.applicant.name ?? ""} (${ctx.applicant.phone})
-${formatConsultationContext(ctx)}
 
 [현재 체크리스트]
 ${formatChecklist(ctx.state)}
 
-[지금까지의 대화]
+${formatConsultationConversation(ctx) ?? `[지금까지의 대화]
 ${formatHistory(ctx.history)}
 
 [방금 받은 메시지]
-${inboundText}
+${inboundText}`}
 
 onboarding_turn tool로 응답해라.`;
 

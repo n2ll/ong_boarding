@@ -16,7 +16,7 @@
 import { mergeAgentState } from "../checklist";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
-import { consultationSystemSuffix, formatConsultationContext, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
+import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import { buildLineKnowledgeBlock, isGeneralLineJob } from "../general-line";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
@@ -222,12 +222,11 @@ ${formatJob(ctx.job)}
 [지원자 정보]
 ${formatApplicant(ctx.applicant)}
 ${formatOtherActiveJobs(ctx.otherActiveJobs)}
-${formatConsultationContext(ctx)}
-[지금까지의 대화]
+${formatConsultationConversation(ctx) ?? `[지금까지의 대화]
 ${formatHistory(ctx.history)}
 
 [방금 받은 구직자 메시지]
-${inboundText}
+${inboundText}`}
 
 위 상황에서 exploration_turn tool로 답변·전이 시그널을 반환해라.`;
 
