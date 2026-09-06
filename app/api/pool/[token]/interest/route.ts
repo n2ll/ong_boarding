@@ -234,7 +234,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   const body = await req.json().catch(() => null);
   const jobId = Number(body?.job_id);
-  if (!Number.isFinite(jobId)) {
+  if (!Number.isSafeInteger(jobId) || jobId <= 0) {
     return NextResponse.json({ error: "job_id 필수" }, { status: 400 });
   }
   const actionId = body?.action_id;
@@ -244,6 +244,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // '오늘이나 내일부터 가능' 후속 버튼 — 관심 표시보다 강한 가용성 신호.
   // 여전히 '가능 의사 수집'일 뿐 확정 아님 (확정 뉘앙스 금지).
   const immediate = body?.immediate === true;
+  const switchFocus = req.nextUrl.pathname.endsWith("/focus");
+  const interestOnly = body?.interest_only === true;
+  if ((switchFocus && (immediate || interestOnly)) || (body?.interest_only != null && typeof body.interest_only !== "boolean")) {
+    return NextResponse.json({ error: "요청 정보를 다시 확인해 주세요." }, { status: 400 });
+  }
 
   const supabase = createServiceClient();
 
@@ -255,6 +260,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!applicant) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+
+  const successResponse = async (outcome: string, deduped: boolean) => {
+    if (!switchFocus) return NextResponse.json({ success: true, deduped, engage_recovery: outcome });
+    const { data: current, error } = await supabase.from("applicants")
+      .select("conversation_focus_job_id, conversation_focus_action_key").eq("id", applicant.id).maybeSingle();
+    if (error || !current) return NextResponse.json({ error: "현재 대화 공고를 확인하지 못했어요. 다시 확인해 주세요." }, { status: 503 });
+    // 오래된 요청을 재시도해도 이전 공고를 현재 공고처럼 표시하지 않는다.
+    return NextResponse.json({ success: true, deduped, focus_job_id: current.conversation_focus_job_id === jobId ? jobId : null, engage: current.conversation_focus_action_key === actionId ? outcome : "superseded" });
+  };
 
   // 완료된 동일 요청은 공고의 현재 모집 상태보다 먼저 확인한다. 응답 유실 뒤 공고가
   // 마감되어도 같은 action_id 재시도는 성공으로 복구되어야 한다.
@@ -276,7 +290,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       { status: 503 },
     );
   }
-  if (replay === "conflict") {
+  const replayMeta = replayRow?.meta as { conversation_focus?: boolean; interest_only?: boolean } | null;
+  if (replay === "conflict" || (replay === "deduped" && (
+    (replayMeta?.conversation_focus === true) !== switchFocus || (replayMeta?.interest_only === true) !== interestOnly
+  ))) {
     return NextResponse.json({ error: "이미 다른 요청에 사용된 요청 정보예요." }, { status: 409 });
   }
   if (replay === "deduped") {
@@ -295,11 +312,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     if (resumed.kind === "conflict") {
       return NextResponse.json({ error: resumed.error }, { status: 409 });
     }
-    return NextResponse.json({
-      success: true,
-      deduped: true,
-      engage_recovery: resumed.outcome,
-    });
+    return successResponse(resumed.outcome, true);
   }
 
   const { data: job } = await supabase
@@ -356,15 +369,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // 후보 연결·휴면 후보 재부상·명시 가용성·이벤트·후속 자동응대 의도를 한 트랜잭션으로 저장한다.
   // auto_queue는 이 RPC 안에서 engage_queued_at까지 설정하므로 커밋 직후 런타임이 종료돼도 예약이 남는다.
   const { data: durableData, error: durableError } = await supabase.rpc(
-    "record_pool_interest_with_engage_intent",
+    switchFocus ? "select_pool_conversation_focus" : interestOnly ? "record_pool_interest_only" : "record_pool_interest_with_engage_intent",
     {
       p_job_id: jobId,
       p_applicant_id: applicant.id as number,
-      p_immediate: immediate,
       p_action_key: actionId,
-      p_engage_intent: engageIntent,
+      ...(!switchFocus ? { p_immediate: immediate } : {}),
+      ...(!interestOnly ? { p_engage_intent: engageIntent } : {}),
     },
   );
+  if (durableData === "busy") {
+    return NextResponse.json({ error: "이전 문자 처리를 확인 중이에요. 잠시 후 다시 확인해 주세요." }, { status: 409 });
+  }
+  if (durableError?.code === "23505") {
+    return NextResponse.json({ error: "이미 다른 요청에 사용된 요청 정보예요." }, { status: 409 });
+  }
+  if (switchFocus && durableData === "unavailable") {
+    return NextResponse.json({ error: "지금은 이 공고로 대화를 바꿀 수 없어요. 담당자에게 문의해 주세요." }, { status: 409 });
+  }
   const durable = poolDurableActionDecision(durableData, durableError);
   if (durable.kind === "retryable") {
     console.error("[pool interest] atomic write failed", durableError ?? durableData);
@@ -398,9 +420,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (resumed.kind === "conflict") {
     return NextResponse.json({ error: resumed.error }, { status: 409 });
   }
-  return NextResponse.json({
-    success: true,
-    deduped: durable.kind === "deduped",
-    engage_recovery: resumed.outcome,
-  });
+  return successResponse(resumed.outcome, durable.kind === "deduped");
 }

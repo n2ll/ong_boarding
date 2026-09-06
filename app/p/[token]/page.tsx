@@ -16,6 +16,7 @@ import {
   getPoolActionAttempt,
   poolLoadFailure,
   submitPoolAction,
+  submitPoolConversationFocus,
 } from "@/lib/pool-action";
 import { IMMEDIATE_AVAILABILITY_COPY } from "@/lib/pool-availability";
 import { poolJobGroups } from "@/lib/pool-job-groups";
@@ -109,6 +110,9 @@ export default function PoolPage() {
   const [name, setName] = useState<string | null>(null);
   const [availability, setAvailability] = useState<string | null>(null);
   const [jobs, setJobs] = useState<PoolJob[]>([]);
+  const [focusJobId, setFocusJobId] = useState<number | null>(null);
+  const [hasConversationFocus, setHasConversationFocus] = useState(false);
+  const [canSwitchFocus, setCanSwitchFocus] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -118,9 +122,12 @@ export default function PoolPage() {
     jobId: number;
     message: string;
     retryable: boolean;
+    action?: "interest" | "interest-only" | "focus";
   } | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ jobId: number; message: string } | null>(null);
   // 관심 표시 2단계 — 확인 없는 1탭 즉시 접수는 취소가 불가능해서, 같은 자리에서 한 번 더 확인받는다.
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [confirmingFocus, setConfirmingFocus] = useState(false);
   // 본인 차량 보유(정규화 '있음'|'없음'|'미확인') — 차량이 필요한 공고에 그 사실을 알려주는 데만 쓴다(노출은 그대로).
   const [ownVehicle, setOwnVehicle] = useState<string | null>(null);
   // 갱신 타이머(=[token] 의존 effect)에서 최신 값을 읽기 위한 ref — 확인 중·전송 중 갱신을 건너뛴다.
@@ -128,6 +135,7 @@ export default function PoolPage() {
   const sendingRef = useRef<number | null>(null);
   // 응답을 받지 못한 재시도는 같은 action_id를 보낸다. 서버가 이미 저장했다면 멱등 성공으로 복구된다.
   const actionAttemptsRef = useRef<Map<string, string>>(new Map());
+  const focusRevisionRef = useRef(0);
   confirmingRef.current = confirmingId;
   sendingRef.current = sendingId;
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
@@ -153,17 +161,19 @@ export default function PoolPage() {
   // '오늘·내일부터 가능' 후속 버튼 — 관심 표시 이후에만 노출되는 강한 가용성 신호
   const expressImmediate = async (job: PoolJob) => {
     if (sendingId !== null || immediateIds.has(job.id)) return;
+    const interestOnly = hasConversationFocus && focusJobId !== job.id;
     setActionError(null);
     setSendingId(job.id);
     const attempt = getPoolActionAttempt(
       actionAttemptsRef.current,
-      { jobId: job.id, action: "interest", immediate: true },
+      { jobId: job.id, action: "interest", immediate: true, interestOnly },
     );
     const result = await submitPoolAction({
       token,
       jobId: job.id,
       action: "interest",
       immediate: true,
+      interestOnly,
       actionId: attempt.actionId,
     });
     if (result.ok) {
@@ -182,6 +192,7 @@ export default function PoolPage() {
     // 백그라운드 갱신은 로딩 화면을 다시 띄우지 않고, 관심/알림 상태는 로컬과 서버의 합집합(낙관적 클릭 보존).
     let cancelled = false;
     const load = (background: boolean) => {
+      const focusRevision = focusRevisionRef.current;
       if (!background) {
         setNotFound(false);
         setLoadError(false);
@@ -199,9 +210,15 @@ export default function PoolPage() {
           }
           const json = await res.json();
           if (cancelled) return;
+          if (background && (confirmingRef.current !== null || sendingRef.current !== null)) return;
           setName(json.name ?? null);
           setAvailability(json.availability ?? null);
           setOwnVehicle(json.own_vehicle ?? null);
+          if (focusRevision === focusRevisionRef.current) {
+            setFocusJobId(json.focus_job_id ?? null);
+            setHasConversationFocus(json.has_conversation_focus === true);
+            setCanSwitchFocus(json.can_switch_focus === true);
+          }
           // 백그라운드 갱신에서는 카드 목록·순서를 갈아엎지 않는다 —
           // 읽는 중에 순서가 바뀌면 손가락이 내려오는 순간 다른 공고에 관심이 등록된다(시니어 대상 오클릭).
           // 새 공고·마감 반영은 다음 방문(또는 새로고침) 때 이루어진다. 접수 상태는 아래에서 계속 합쳐진다.
@@ -282,18 +299,35 @@ export default function PoolPage() {
     setRetryKey((current) => current + 1);
   };
 
-  const expressInterest = async (job: PoolJob) => {
+  // 첫 관심 표시가 문자 대화를 시작했는지는 서버에서 결정하므로 현재 공고를 추측하지 않는다.
+  const refreshFocus = async () => {
+    const revision = ++focusRevisionRef.current;
+    try {
+      const response = await fetch(`/api/pool/${token}`);
+      if (!response.ok) return;
+      const json = await response.json();
+      if (revision !== focusRevisionRef.current) return;
+      setFocusJobId(json.focus_job_id ?? null);
+      setHasConversationFocus(json.has_conversation_focus === true);
+      setCanSwitchFocus(json.can_switch_focus === true);
+    } catch {
+      // 저장 성공은 유지하고 다음 페이지 갱신에서 현재 대화를 다시 확인한다.
+    }
+  };
+
+  const expressInterest = async (job: PoolJob, interestOnly = false) => {
     if (sendingId !== null || doneIds.has(job.id)) return;
     setActionError(null);
     setSendingId(job.id);
     const attempt = getPoolActionAttempt(
       actionAttemptsRef.current,
-      { jobId: job.id, action: "interest" },
+      { jobId: job.id, action: "interest", interestOnly },
     );
     const result = await submitPoolAction({
       token,
       jobId: job.id,
       action: "interest",
+      interestOnly,
       actionId: attempt.actionId,
     });
     if (result.ok) {
@@ -301,8 +335,50 @@ export default function PoolPage() {
       setDoneIds((prev) => new Set(prev).add(job.id));
       setFollowupIds((prev) => new Set(prev).add(job.id));
       setConfirmingId(null);
+      if (interestOnly) {
+        setActionNotice({ jobId: job.id, message: "관심을 매니저에게 전달했어요. 현재 문자 대화는 그대로 이어가요." });
+      }
+      void refreshFocus();
     } else {
-      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable });
+      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable, action: interestOnly ? "interest-only" : "interest" });
+    }
+    setSendingId(null);
+  };
+
+  const switchConversationFocus = async (job: PoolJob) => {
+    if (sendingId !== null || !canSwitchFocus || job.expired || job.status === "paused" || job.status === "ended") return;
+    setActionError(null);
+    setSendingId(job.id);
+    const attempt = getPoolActionAttempt(actionAttemptsRef.current, { jobId: job.id, action: "focus" });
+    const result = await submitPoolConversationFocus({ token, jobId: job.id, actionId: attempt.actionId });
+    if (result.ok) {
+      clearPoolActionAttempt(actionAttemptsRef.current, attempt.key);
+      focusRevisionRef.current += 1;
+      setFocusJobId(result.focusJobId);
+      setHasConversationFocus(result.focusJobId !== null);
+      setDoneIds((prev) => new Set(prev).add(job.id));
+      setConfirmingId(null);
+      const currentTitle = jobs.find((current) => current.id === result.focusJobId)?.title;
+      let message: string;
+      if (result.focusJobId !== job.id) {
+        message = currentTitle
+          ? `현재 문자 대화는 ‘${currentTitle}’예요. 이전 요청의 처리 결과를 확인했어요.`
+          : "이전 요청의 처리 결과를 확인했어요. 현재 문자 대화 공고는 이 목록에서 확인할 수 없어요.";
+      } else if (result.engage === "superseded") {
+        message = `현재 문자 대화는 ‘${job.title}’예요. 이전 요청의 처리 결과를 확인했어요.`;
+      } else if (result.engage === "engaged") {
+        message = `‘${job.title}’ 안내 문자를 보냈어요. 받으신 문자에 답장해 주세요.`;
+      } else if (result.engage.startsWith("queued")) {
+        message = `‘${job.title}’로 문자 대화를 선택했어요. 안내 문자는 아침에 보내드려요.`;
+      } else if (result.engage === "skipped:already_in_progress" || (result.engage === "off" && job.status === "talking")) {
+        message = `‘${job.title}’로 문자 대화를 선택했어요. 이 공고에 대해 궁금한 점을 받으신 문자에 답장해 주세요.`;
+      } else {
+        message = `‘${job.title}’로 문자 대화를 선택했어요. 매니저가 내용을 확인한 뒤 안내해 드려요.`;
+      }
+      setActionNotice({ jobId: job.id, message });
+      void refreshFocus();
+    } else {
+      setActionError({ jobId: job.id, message: result.error, retryable: result.retryable, action: "focus" });
     }
     setSendingId(null);
   };
@@ -410,6 +486,11 @@ export default function PoolPage() {
               <>새 일자리가 나오면 이 페이지에 먼저 올라와요. 문자 안내를 받으실 수 있어요.</>
             )}
           </p>
+          {hasConversationFocus && (
+            <p className="mt-3 rounded-2xl border border-border-strong bg-card p-3 text-[16px] font-bold leading-relaxed text-foreground">
+              문자 대화는 한 공고씩 이어가요. 다른 공고에 남긴 관심은 유지돼요.
+            </p>
+          )}
         </header>
 
         {groupedJobs.activeCount === 0 && (
@@ -430,6 +511,9 @@ export default function PoolPage() {
                   <span className="inline-block px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-muted text-muted-foreground border border-border-strong">
                     마감됨
                   </span>
+                  {focusJobId === job.id && (
+                    <span className="ml-2 inline-block rounded-full border border-warning-strong/25 bg-yellow-50 px-2 py-1 text-[14px] font-extrabold text-warning-strong">현재 문자 대화</span>
+                  )}
                   <h2 className="mt-2 text-[16px] font-extrabold text-muted-foreground leading-snug">{job.title}</h2>
                   {job.interested && (
                     <p className="mt-2 flex items-start gap-1.5 text-[14px] font-bold text-success-strong">
@@ -483,9 +567,12 @@ export default function PoolPage() {
             // '다시 관심'을 누른 직후(로컬 클릭)만 접수 상태가 된다. 예전엔 종료 건에도 '연락드릴게요'가
             // 남아 오지 않는 연락을 기다리게 했다.
             const done = doneIds.has(job.id);
+            const otherFocus = hasConversationFocus && focusJobId !== job.id;
+            const switchable = canSwitchFocus && focusJobId !== job.id && job.status !== "paused" && job.status !== "ended";
+            const retryAction = actionError?.jobId === job.id && actionError.retryable ? actionError.action : null;
             const pay = payLabel(job);
             const doneLabel = job.status === "talking"
-              ? POOL_STATUS_DONE_LABEL.talking
+              ? otherFocus ? "진행 내용이 저장돼 있어요" : POOL_STATUS_DONE_LABEL.talking
               : job.status === "paused"
                 ? POOL_STATUS_DONE_LABEL.paused
                 : POOL_STATUS_DONE_LABEL.interested;
@@ -493,10 +580,15 @@ export default function PoolPage() {
             return (
               <section key={job.id} className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
+                  {focusJobId === job.id && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-warning-strong/25 bg-yellow-50 px-2 py-1 text-[14px] font-extrabold text-warning-strong">
+                      <MessageCircle size={16} aria-hidden="true" /> 현재 문자 대화
+                    </span>
+                  )}
                   {/* 상황 배지 — '나 이 자리 어디까지 했더라'를 카드가 먼저 답한다(문구 규칙은 lib/pool-status). */}
                   {job.status === "talking" && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[13px] font-extrabold bg-success-soft text-success-strong border border-success/25">
-                      <MessageCircle size={14} aria-hidden="true" /> 이야기 중
+                      <MessageCircle size={14} aria-hidden="true" /> {otherFocus ? "진행 내용 저장됨" : "이야기 중"}
                     </span>
                   )}
                   {job.status === "paused" && (
@@ -612,13 +704,15 @@ export default function PoolPage() {
                   </div>
                 )}
 
-                {done || confirmingId !== job.id ? (
+                {(done && !confirmingFocus) || confirmingId !== job.id ? (
                   <button
                     onClick={() => {
                       if (done) return;
                       // 전송 중에는 다른 카드 버튼도 눌리지 않는다(예전엔 눌러도 아무 반응이 없어 고장으로 보였다).
                       if (sendingId !== null) return;
                       setActionError(null);
+                      setActionNotice(null);
+                      setConfirmingFocus(false);
                       setConfirmingId(job.id);
                     }}
                     disabled={done || sendingId !== null}
@@ -646,37 +740,72 @@ export default function PoolPage() {
                   <div className="mt-5 rounded-2xl border-2 border-brand-yellow bg-yellow-50 p-3">
                     <p className="text-[16px] font-bold text-foreground text-center leading-snug">
                       <span className="text-warning-strong">{job.title}</span>
-                      <br />이 일자리에 관심 있다고 보낼까요?
+                      <br />{confirmingFocus ? "이 공고로 문자 대화를 바꿀까요?" : "이 일자리에 관심 있다고 보낼까요?"}
                     </p>
+                    {(otherFocus || confirmingFocus) && (
+                      <p className="mt-2 text-center text-[15px] leading-relaxed text-muted-foreground">
+                        다른 공고에 남긴 관심은 유지돼요. 근무 확정은 매니저가 안내해요.
+                      </p>
+                    )}
                     {job.vehicle_required && ownVehicle === "없음" && (
                       <p className="mt-2 text-[14px] font-bold text-warning-strong text-center leading-snug">
                         본인 차량이 필요한 자리예요 — 괜찮으신가요?
                       </p>
                     )}
-                    <div className="mt-3 flex gap-2">
+                    <div className={`mt-3 flex gap-2 ${otherFocus && !confirmingFocus ? "flex-col" : ""}`}>
                       <button
                         onClick={() => {
                           setActionError(null);
                           setConfirmingId(null);
                         }}
-                        disabled={sendingId !== null}
+                        disabled={sendingId !== null || !!retryAction}
                         className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-1 py-4 rounded-2xl text-[16px] font-extrabold bg-white text-gray-700 border border-gray-300"
                       >
-                        아니요
+                        {otherFocus && !confirmingFocus ? "돌아가기" : "아니요"}
                       </button>
                       <button
-                        onClick={() => expressInterest(job)}
-                        disabled={sendingId !== null}
+                        onClick={() => confirmingFocus ? switchConversationFocus(job) : expressInterest(job, otherFocus)}
+                        disabled={sendingId !== null || (!!retryAction && retryAction !== (confirmingFocus ? "focus" : otherFocus ? "interest-only" : "interest"))}
                         className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background flex-[1.4] py-4 rounded-2xl text-[16px] font-extrabold bg-brand-yellow text-foreground active:bg-yellow-500 disabled:opacity-70"
                       >
                         {sendingId === job.id
                           ? "보내는 중…"
-                          : actionError?.jobId === job.id && actionError.retryable
+                          : retryAction === (confirmingFocus ? "focus" : otherFocus ? "interest-only" : "interest")
                             ? "다시 시도하기"
-                            : "네, 보낼게요"}
+                            : confirmingFocus ? "네, 문자 대화 바꿀게요" : otherFocus ? "관심만 전달" : "네, 보낼게요"}
                       </button>
+                      {otherFocus && switchable && !confirmingFocus && (
+                        <button
+                          onClick={() => switchConversationFocus(job)}
+                          disabled={sendingId !== null || (!!retryAction && retryAction !== "focus")}
+                          className="min-h-[56px] rounded-2xl border-2 border-brand-yellow bg-card px-3 py-4 text-[16px] font-extrabold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70"
+                        >
+                          {sendingId === job.id ? "보내는 중…" : retryAction === "focus" ? "다시 시도하기" : "이 공고로 문자 대화"}
+                        </button>
+                      )}
                     </div>
                   </div>
+                )}
+
+                {done && switchable && confirmingId !== job.id && (
+                  <button
+                    onClick={() => {
+                      setActionError(null);
+                      setActionNotice(null);
+                      setConfirmingFocus(true);
+                      setConfirmingId(job.id);
+                    }}
+                    disabled={sendingId !== null}
+                    className="mt-3 min-h-[56px] w-full rounded-2xl border-2 border-brand-yellow bg-card px-3 py-4 text-[17px] font-extrabold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70"
+                  >
+                    이 공고로 문자 대화
+                  </button>
+                )}
+
+                {actionNotice?.jobId === job.id && (
+                  <p role="status" className="mt-3 rounded-2xl border border-success/25 bg-success-soft p-3 text-[16px] font-bold leading-relaxed text-success-strong">
+                    {actionNotice.message}
+                  </p>
                 )}
 
                 {done && (followupIds.has(job.id) || (job.status !== "talking" && job.status !== "paused")) && (

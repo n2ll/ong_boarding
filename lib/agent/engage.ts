@@ -107,18 +107,13 @@ export async function hasEngageMessage(
   return (data?.length ?? 0) > 0;
 }
 
-/** engage_queued_at 클리어 — 컬럼 미적용(마이그레이션 전) 환경에서도 본 흐름이 죽지 않게 non-fatal. */
-async function clearQueueFlag(supabase: SupabaseClient, jcId: number): Promise<void> {
-  const { error } = await supabase
-    .from("job_candidates")
-    .update({ engage_queued_at: null })
-    .eq("id", jcId);
-  if (error) {
-    console.error(
-      "[engage] engage_queued_at clear failed (docs/migrations/2026-07-jc-engage-queued.sql 적용 확인)",
-      error
-    );
-  }
+/** 선택 당시 초점이 유지된 경우에만 예약을 정리한다. 오류 시 예약을 보존한다. */
+async function clearQueueFlag(supabase: SupabaseClient, jcId: number, focusActionKey: string | null): Promise<void> {
+  // 새 선택으로 생긴 같은 공고의 예약을 과거 요청이 지우지 못하도록 DB 잠금에서 확인한다.
+  const { error } = await supabase.rpc("clear_pool_engage_queue", {
+    p_candidate_id: jcId, p_expected_focus_action_key: focusActionKey,
+  });
+  if (error) console.error("[engage] guarded queue clear failed", error);
 }
 
 /** 매니저 확정 인원(applicants.status='확정인력') ≥ capacity — jobs GET의 confirmed_count와 동일 기준. */
@@ -229,7 +224,7 @@ export async function runInterestEngage(params: {
   const [{ data: applicantRow }, { data: jobRow }, { data: jcRow }] = await Promise.all([
     supabase
       .from("applicants")
-      .select("id, name, phone, sms_opt_out_at, current_job_id")
+      .select("id, name, phone, sms_opt_out_at, current_job_id, conversation_focus_job_id, conversation_focus_action_key")
       .eq("id", applicantId)
       .maybeSingle(),
     supabase
@@ -250,6 +245,8 @@ export async function runInterestEngage(params: {
     phone: string | null;
     sms_opt_out_at: string | null;
     current_job_id: number | null;
+    conversation_focus_job_id: number | null;
+    conversation_focus_action_key: string | null;
   } | null;
   const job = jobRow as {
     id: number;
@@ -261,41 +258,46 @@ export async function runInterestEngage(params: {
   const jc = jcRow as { id: number; agent_stage: string | null } | null;
   if (!applicant || !job || !jc) return { action: "skipped", reason: "not_found" };
 
+  if (applicant.conversation_focus_job_id && (applicant.conversation_focus_job_id !== jobId ||
+    (source !== "engage_queued_cron" && params.actionKey !== applicant.conversation_focus_action_key))) {
+    return { action: "skipped", reason: "job_conflict" };
+  }
+
   // 마감/시스템 공고 — 발송 없이 종료(밤사이 마감된 야간 큐 건 정리)
   if (isSystemJobTitle(job.title) || isJobEffectivelyClosed(job.status, job.closes_at)) {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "skipped", reason: "job_closed" };
   }
 
   // 코파일럿(draft) — 인바운드 문자가 없어 초안(message_drafts) 생성 불가 → 수동 컨택 유도
   if (mode === "draft") {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "copilot_manual" };
   }
 
   // ─── 가드 (모두 통과해야 발송) ───
   if (jc.agent_stage) {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "skipped", reason: "already_in_progress" };
   }
   if (!applicant.phone) {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "skipped", reason: "no_phone" };
   }
   // 수신거부 하드 가드 — '그만' 답장 등으로 기록된 지원자는 영구 제외
   if (applicant.sms_opt_out_at) {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "skipped", reason: "opt_out" };
   }
   // 정책: 한 사람 = 하나의 '진행 중' 공고 (dispatch와 동일)
-  if (applicant.current_job_id && applicant.current_job_id !== jobId) {
+  if ((applicant.conversation_focus_job_id && applicant.conversation_focus_job_id !== jobId) || (applicant.current_job_id && applicant.current_job_id !== jobId)) {
     // 야간 큐는 유지한다. 기존 흐름이 정상 종료되어 current_job_id가 풀리면 다음 회차에
     // 새 DB claim을 시도할 수 있고, 그전에는 claim/current_job 가드가 중복 발송을 막는다.
     return { action: "skipped", reason: "job_conflict" };
   }
   // 이 공고로 이미 자동 안내(첫 문자·대기 안내)를 보냈으면 중복 발송 금지
   if (await hasEngageMessage(supabase, jobId, applicantId)) {
-    await clearQueueFlag(supabase, jc.id);
+    await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
     return { action: "skipped", reason: "already_engaged" };
   }
 
@@ -333,6 +335,7 @@ export async function runInterestEngage(params: {
         p_message_body: text,
         p_message_kind: waitlist ? "waitlist" : "screening",
         p_source: source,
+        p_focus_action_key: source === "engage_queued_cron" ? applicant.conversation_focus_action_key ?? null : null,
       });
       if (error) console.error("[engage] applicant-level claim failed", error);
       return poolEngageClaimDecision(data, error);
@@ -371,7 +374,7 @@ export async function runInterestEngage(params: {
       return { action: "skipped", reason: "engage_claimed" };
     }
     if (delivery.reason === "unavailable") {
-      await clearQueueFlag(supabase, jc.id);
+      await clearQueueFlag(supabase, jc.id, applicant.conversation_focus_action_key ?? null);
       return { action: "skipped", reason: "claim_unavailable" };
     }
     return { action: "skipped", reason: "claim_retryable" };

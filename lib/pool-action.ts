@@ -29,12 +29,13 @@ async function requestPoolActionWithTimeout<T>(
 
 type PoolActionInput = {
   jobId: number;
-  action: "interest" | "notify";
+  action: "interest" | "notify" | "focus";
   immediate?: boolean;
+  interestOnly?: boolean;
 };
 
 function poolActionAttemptKey(input: PoolActionInput): string {
-  return `${input.action}:${input.jobId}:${input.immediate === true ? "immediate" : "standard"}`;
+  return `${input.action}:${input.jobId}:${input.immediate === true ? "immediate" : "standard"}:${input.interestOnly === true ? "interest-only" : "engage"}`;
 }
 
 export function getPoolActionAttempt(
@@ -69,15 +70,19 @@ export async function submitPoolAction(
     jobId: number;
     action: "interest" | "notify";
     immediate?: boolean;
+    interestOnly?: boolean;
     actionId: string;
   },
   fetcher: PoolActionFetcher = fetch,
   timeoutMs = 15_000,
 ): Promise<{ ok: true } | { ok: false; error: string; retryable: boolean }> {
   try {
-    const payload = input.immediate
-      ? { job_id: input.jobId, immediate: true, action_id: input.actionId }
-      : { job_id: input.jobId, action_id: input.actionId };
+    const payload = {
+      job_id: input.jobId,
+      action_id: input.actionId,
+      ...(input.immediate ? { immediate: true } : {}),
+      ...(input.interestOnly ? { interest_only: true } : {}),
+    };
     const { response, body } = await requestPoolActionWithTimeout(async (signal) => {
       const response = await fetcher(`/api/pool/${input.token}/${input.action}`, {
         method: "POST",
@@ -105,5 +110,49 @@ export async function submitPoolAction(
       return { ok: false, error: POOL_ACTION_TIMEOUT_ERROR, retryable: true };
     }
     return { ok: false, error: GENERIC_POOL_ACTION_ERROR, retryable: true };
+  }
+}
+
+export async function submitPoolConversationFocus(
+  input: { token: string; jobId: number; actionId: string },
+  fetcher: PoolActionFetcher = fetch,
+  timeoutMs = 15_000,
+): Promise<
+  | { ok: true; focusJobId: number | null; engage: string }
+  | { ok: false; error: string; retryable: boolean }
+> {
+  try {
+    const { response, body } = await requestPoolActionWithTimeout(async (signal) => {
+      const response = await fetcher(`/api/pool/${input.token}/focus`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: input.jobId, action_id: input.actionId }),
+        signal,
+      });
+      const body = await response.json().catch(() => null) as {
+        focus_job_id?: unknown; engage?: unknown; error?: unknown;
+      } | null;
+      return { response, body };
+    }, timeoutMs);
+
+    if (response.ok) {
+      // Replays report the current focus, which may differ from the original request.
+      if ((typeof body?.focus_job_id !== "number" && body?.focus_job_id !== null)
+        || typeof body?.engage !== "string") {
+        return { ok: false, error: GENERIC_POOL_ACTION_ERROR, retryable: true };
+      }
+      return { ok: true, focusJobId: body.focus_job_id, engage: body.engage };
+    }
+    return {
+      ok: false,
+      error: typeof body?.error === "string" && body.error.trim() ? body.error.trim() : GENERIC_POOL_ACTION_ERROR,
+      retryable: response.status >= 500,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof PoolActionTimeoutError ? POOL_ACTION_TIMEOUT_ERROR : GENERIC_POOL_ACTION_ERROR,
+      retryable: true,
+    };
   }
 }

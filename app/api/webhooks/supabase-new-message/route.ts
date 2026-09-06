@@ -225,7 +225,7 @@ async function processInbound(
     // 예전엔 이 세 경로가 각자 다른 기준을 써서, 같은 답장이 어느 경로로 잡히느냐에 따라 다른 공고로
     // 응대됐다. 앵커(직전 outbound)에서 **대량·캠페인 발송을 제외**하는 것도 여기서 처리한다 —
     // 안 하면 공고 7개를 동시에 발사할 때 모든 답장이 '마지막 발송 공고'로 몰린다.
-    const route = await pickCandidateForInbound(supabase, applicant.id, text);
+    const route = await pickCandidateForInbound(supabase, applicant.id, text, receivedAt);
     const jc = route.ok ? route.candidate : null;
     // 판별 불가는 **고르지 않는다** — 되묻거나(자동 모드 1회) 매니저에게 넘긴다.
     // 다만 **처리는 아래 가용성 분류가 끝난 뒤에** 한다 — '그만 보내세요' 답장에 "어느 자리 말씀이세요?"
@@ -365,6 +365,9 @@ async function processInbound(
         applicantName: applicant.name,
         options: route.options,
         why: route.why,
+        focusJobId: route.focusJobId,
+        receivedAt,
+        inboundMessageId: String(msg.id),
         mode: await getAgentMode(supabase),
         inboundOptOut,
         sendSms: (to, body) => sendSms(to, body),

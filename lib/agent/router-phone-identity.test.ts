@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { withConversationReplyClaim } from "./conversation-reply-claim.ts";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
@@ -19,20 +20,26 @@ class QueryBuilder {
   private readonly failIdentity: boolean;
   private action: "select" | "insert" | "update" = "select";
   private insertedRow: Row | null = null;
+  private after: string | null = null;
+  private excludedId: unknown;
+  private readonly recordFails: boolean;
 
   constructor(
     table: string,
     database: Record<string, Row[]>,
     failIdentity: boolean,
+    recordFails = false,
   ) {
     this.table = table;
     this.database = database;
     this.failIdentity = failIdentity;
+    this.recordFails = recordFails;
   }
 
   select() { return this; }
   eq() { return this; }
-  neq() { return this; }
+  neq(column?: string, value?: unknown) { if (column === "id") this.excludedId = value; return this; }
+  gt(column: string, value: string) { if (column === "created_at") this.after = value; return this; }
   not() { return this; }
   in() { return this; }
   or() { return this; }
@@ -55,7 +62,7 @@ class QueryBuilder {
       return { data: this.database.job_candidates[0] ?? null, error: null };
     }
     if (this.table === "messages" && this.action === "insert") {
-      return { data: { id: "outbound-1" }, error: null };
+      return this.recordFails ? { data: null, error: { message: "record failed" } } : { data: { id: "outbound-1" }, error: null };
     }
     return { data: null, error: null };
   }
@@ -80,7 +87,9 @@ class QueryBuilder {
         this.insertedRow,
       ];
     }
-    const data = this.table === "job_candidates" || this.table === "messages"
+    const data = this.table === "messages" && this.after
+      ? this.database.messages.filter((row) => String(row.created_at) > this.after! && row.id !== this.excludedId)
+      : this.table === "job_candidates" || this.table === "messages"
       ? []
       : (this.database[this.table] ?? []);
     return Promise.resolve({ data, error: null }).then(onfulfilled, onrejected);
@@ -93,7 +102,8 @@ type RouterModule = {
     candidate_id: number;
     inbound_message_id: string;
     inbound_text: string;
-  }): Promise<{ ok: boolean; reply_sent?: boolean }>;
+    received_at?: string;
+  }): Promise<{ ok: boolean; reply_sent?: boolean; skipped?: string; delivery_uncertain?: boolean }>;
 };
 
 function applicant(id: number, overrides: Row = {}): Row {
@@ -123,7 +133,8 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void }) {
+  const rpcCalls: string[] = [];
   const smsCalls: Array<{ phone: string; body: string }> = [];
   const transitions: Transition[] = [];
   const selectedApplicant = input.applicants[0];
@@ -162,8 +173,9 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
     }],
   };
   const supabase = {
+    rpc: async (name: string) => { rpcCalls.push(name); return { data: name.startsWith("claim_") ? "claimed" : "released", error: null }; },
     from(table: string) {
-      return new QueryBuilder(table, database, input.failIdentity === true);
+      return new QueryBuilder(table, database, input.failIdentity === true, input.recordFails);
     },
   };
   const stage = {
@@ -187,10 +199,11 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
   }).outputText;
   const compiledModule = { exports: {} as Record<string, unknown> };
   const stubs: Record<string, Record<string, unknown>> = {
+    "./conversation-reply-claim": { withConversationReplyClaim },
     "../solapi": {
       sendSms: async (phone: string, body: string) => {
         smsCalls.push({ phone, body });
-        return { success: true, messageId: "sms-1" };
+        return input.sendFailure ? { success: false, failureKind: input.sendFailure, error: "provider failed" } : { success: true, messageId: "sms-1" };
       },
     },
     "../jobs": {
@@ -208,7 +221,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
     "./transitions": {
       applyTransition: async ({ transition }: { transition: Transition }) => {
         transitions.push(transition);
-        return { next_stage: "exploration", auto_sent_messages: 0 };
+        return { next_stage: "exploration", auto_sent_messages: 0, delivery_uncertain: input.transitionUncertain };
       },
     },
     "./cross-job": { crossJobBackstop: () => null },
@@ -227,7 +240,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
       }),
     },
     "./kill-switch": {
-      getAgentMode: async () => "auto",
+      getAgentMode: async () => input.mode ?? "auto",
       COPILOT_DRAFT_MARKER: "[copilot]",
     },
     "./outbound-safety": { detectAutomatedOutboundSafetyViolation: () => null },
@@ -247,7 +260,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
     Set,
     process,
     console: { error() {}, warn() {} },
-    setTimeout,
+    setTimeout: (callback: () => void) => { input.onSleep?.(); callback(); },
     exports: compiledModule.exports,
     module: compiledModule,
     require: (specifier: string) => stubs[specifier] ?? {},
@@ -258,6 +271,8 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean }) {
     supabase,
     smsCalls,
     transitions,
+    rpcCalls,
+    database,
   };
 }
 
@@ -313,4 +328,48 @@ test("future-job promotion still sends for the selected consented row without a 
   assert.equal(result.reply_sent, true);
   assert.equal(harness.smsCalls.length, 1);
   assert.equal(harness.transitions[0]?.kind, "stay");
+});
+
+
+test("off mode does not take a reply claim", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], mode: "off" });
+  assert.match((await run(h.router, h.supabase)).skipped ?? "", /kill-switch/);
+  assert.deepEqual(h.rpcCalls, []);
+});
+
+test("coalescing happens before the claim so the latest handler can answer", async () => {
+  const at = new Date(Date.now() - 1_000).toISOString();
+  const later = new Date().toISOString();
+  let sleeping = 0;
+  const h = loadRouter({ applicants: [applicant(1)], onSleep: () => {
+    sleeping++;
+    assert.equal(h.rpcCalls.length, 0, "sleep must not hold the conversational lock");
+    h.database.messages.push({ id: "inbound-2", created_at: later, direction: "inbound" });
+  } });
+  const first = await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "네", received_at: at });
+  assert.match(first.skipped ?? "", /coalesced/);
+  assert.equal(sleeping, 1);
+  assert.deepEqual(h.rpcCalls, []);
+  const second = await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-2", inbound_text: "네 가능합니다", received_at: later });
+  assert.equal(second.reply_sent, true);
+  assert.equal(h.smsCalls.length, 1);
+});
+
+for (const failure of ["unknown", "record", "transition"] as const) {
+  test(`${failure} delivery outcome keeps the reply claim for review`, async () => {
+    const h = loadRouter({ applicants: [applicant(1)], sendFailure: failure === "unknown" ? "unknown" : undefined,
+      recordFails: failure === "record", transitionUncertain: failure === "transition" });
+    const result = await run(h.router, h.supabase);
+    assert.equal(result.delivery_uncertain, true);
+    assert.deepEqual(h.rpcCalls, ["claim_pool_agent_reply"]);
+    if (failure !== "transition") assert.equal(h.transitions[0].kind, "pause");
+  });
+}
+
+test("known provider rejection releases the claim after pausing", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], sendFailure: "declared" });
+  const result = await run(h.router, h.supabase);
+  assert.equal(result.delivery_uncertain ?? false, false);
+  assert.equal(h.transitions[0].kind, "pause");
+  assert.deepEqual(h.rpcCalls, ["claim_pool_agent_reply", "release_pool_agent_reply"]);
 });

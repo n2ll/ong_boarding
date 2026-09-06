@@ -13,6 +13,7 @@
  * 4)·5) 대신 message_drafts에 초안만 INSERT — 매니저 승인 시 기존 초안 발송 경로가 처리.
  */
 
+import { withConversationReplyClaim } from "./conversation-reply-claim";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed } from "../jobs";
@@ -80,6 +81,8 @@ export interface RunAgentResult {
   ok: boolean;
   skipped?: string;            // 스킵 사유
   reply_sent?: boolean;
+  /** 공급자 결과 또는 발송 원장 저장이 불명확해 대화 잠금을 유지한다. */
+  delivery_uncertain?: boolean;
   /** 코파일럿(draft) 모드에서 message_drafts에 초안을 만들었는지 */
   draft_created?: boolean;
   /** forceDraft 호출에서 AI가 '매니저 인계'(pause/abort)로 판단해 실제 전이가 적용됐는지.
@@ -103,6 +106,39 @@ function transitionLabelOf(transition: StageTransition): string {
 }
 
 export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
+  // Opt-out persistence must never wait behind a conversational lock.
+  if (input.simulate || isExplicitSmsOptOutText(input.inbound_text)) return runClaimedAgentForCandidate(input);
+  const mode = await getAgentMode(input.supabase);
+  if (mode === "off") return { ok: true, skipped: "agent kill-switch ON — global pause" };
+  const { data: candidate, error } = await input.supabase.from("job_candidates")
+    .select("applicant_id, job_id").eq("id", input.candidate_id).single();
+  if (error || !candidate?.applicant_id || !candidate?.job_id) return { ok: false, error: "reply claim candidate lookup failed" };
+  // 먼저 답장 텀과 연속 문자 병합을 마친다. 대기 중 잠금을 잡으면 최신 핸들러도
+  // busy로 종료되어 두 문자 모두 응답되지 않는다. 잠금 안에서는 더 이상 양보하지 않는다.
+  if (mode !== "draft" && !input.forceDraft && input.received_at) {
+    const wait = Math.min(MAX_REPLY_SLEEP_MS, Date.parse(input.received_at) + REPLY_DELAY_MS - Date.now());
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  if (!input.forceDraft && input.received_at) {
+    const { data: newer, error: newerError } = await input.supabase.from("messages")
+      .select("id").eq("applicant_id", candidate.applicant_id).eq("direction", "inbound")
+      .gt("created_at", input.received_at).neq("id", input.inbound_message_id).limit(1);
+    if (newerError) return { ok: false, error: "newer inbound lookup failed" };
+    if (newer?.length) return { ok: true, skipped: "coalesced — newer inbound will handle" };
+  }
+  const claimed = await withConversationReplyClaim({
+    applicantId: candidate.applicant_id as number,
+    jobId: candidate.job_id as number,
+    receivedAt: input.received_at,
+    inboundMessageId: input.inbound_message_id,
+    retainClaim: (result: RunAgentResult) => result.delivery_uncertain === true,
+    rpc: (name, params) => input.supabase.rpc(name, params),
+    run: () => runClaimedAgentForCandidate(input),
+  });
+  return claimed.executed ? claimed.result : { ok: true, skipped: `conversation reply ${claimed.reason}` };
+}
+
+async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAgentResult> {
   const { supabase, candidate_id, inbound_message_id, inbound_text, simulate = false, received_at, forceDraft = false } = input;
 
   // 수신거부는 에이전트 모드·웹훅 복구 경로보다 먼저 처리한다. 웹훅이 중간에 유실돼
@@ -181,17 +217,6 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // forceDraft는 '지원자에게 문자만 안 보낸다'는 뜻이므로 아래에서 전이·state를 정상 저장한다.
   const perCallDraft = draftMode && mode !== "draft";
 
-  // 답장 텀 — 인입 시각으로부터 REPLY_DELAY_MS 후를 목표로 대기.
-  // 이미 지났으면 즉시 진행. simulate(연습 빙의)는 매니저 테스트라 텀 없이 즉시.
-  // draft 모드도 즉시 — 발송이 없으니 '바로 답장' 느낌을 피할 이유가 없다.
-  if (!simulate && !draftMode && received_at) {
-    const target = new Date(received_at).getTime() + REPLY_DELAY_MS;
-    const wait = Math.min(MAX_REPLY_SLEEP_MS, target - Date.now());
-    if (wait > 0) {
-      await new Promise((r) => setTimeout(r, wait));
-    }
-  }
-
   // 1) job_candidate + 관련 데이터 로드
   const { data: jc, error: jcErr } = await supabase
     .from("job_candidates")
@@ -247,27 +272,6 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
         .update({ status: expectedStatus })
         .eq("id", applicantId)
         .in("status", ["스크리닝 전", "스크리닝 중", "스크리닝 완료"]);
-    }
-  }
-
-  // 답장 텀(sleep) 동안 같은 후보가 추가 메시지를 보냈으면, 더 늦은 핸들러가
-  // 모든 메시지를 한꺼번에 history로 보고 한 번에 답한다. 내(현재) 핸들러는 양보하고 종료.
-  // (사용자 메시지가 무시되지 않으면서도 답장이 중복 발송되는 것을 막는다)
-  // forceDraft(문자함 등록)는 매니저가 1회 누른 호출이라 '더 늦은 핸들러'가 존재하지 않는다 —
-  // 등록 직전 같은 번호의 형제 문자들도 이미 처리 대상이 아니라 그냥 대기 중이었을 뿐이다.
-  // 여기서 양보하면 초안·state가 하나도 안 남아 cron이 auto로 대신 답해버리므로(게이트 우회) 건너뛴다.
-  // 형제 문자는 history 쿼리에 이미 포함돼 초안 품질 손실도 없다.
-  if (!simulate && !forceDraft && received_at) {
-    const { data: newer } = await supabase
-      .from("messages")
-      .select("id")
-      .eq("applicant_id", jc.applicant_id as number)
-      .eq("direction", "inbound")
-      .gt("created_at", received_at)
-      .neq("id", inbound_message_id)
-      .limit(1);
-    if (newer && newer.length > 0) {
-      return { ok: true, skipped: "coalesced — newer inbound will handle" };
     }
   }
 
@@ -700,6 +704,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   // "죄송합니다…" 같은 사족이 매니저 인계 전에 한 통 더 나가던 문제 해결)
   const skipReplyDueToPause = result.transition.kind === "pause";
   let replySent = false;
+  let deliveryUncertain = false;
   let outboundId: string | null = null;
   if (result.reply_text && !skipReplyDueToAdvance && !skipReplyDueToPause && !blockReplyForStage) {
     let sendOk = simulate;
@@ -709,13 +714,14 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
       sendOk = send.success;
       sendMessageId = send.messageId ?? null;
       if (!send.success) {
+        deliveryUncertain = send.failureKind === "unknown";
         result.transition = { kind: "pause", reason: `SMS 발송 실패: ${send.error ?? "unknown"}` };
         console.error("[router] SMS send failed", send.error);
       }
     }
     if (sendOk) {
       const tokenCols = toMessageTokens(result.usage?.model ?? "", result.usage ?? null);
-      const { data: outMsg } = await supabase
+      const { data: outMsg, error: outMsgError } = await supabase
         .from("messages")
         .insert({
           applicant_id: applicant.id,
@@ -736,6 +742,11 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
         .single();
       replySent = true;
       outboundId = outMsg?.id ?? null;
+      if (!simulate && (outMsgError || !outboundId)) {
+        deliveryUncertain = true;
+        result.transition = { kind: "pause", reason: "SMS 발송 후 원장 저장 실패 — 공급자 결과 확인 필요" };
+        console.error("[router] sent SMS recording failed", outMsgError);
+      }
 
       // AI 응답의 reasoning + transition을 message_drafts에 status='auto_sent'로 보관.
       // 매니저가 UI에서 메시지별로 왜 그렇게 답했는지 사후 조회할 수 있게 한다.
@@ -808,6 +819,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   return {
     ok: true,
     reply_sent: replySent,
+    delivery_uncertain: deliveryUncertain || apply.delivery_uncertain === true,
     next_stage: apply.next_stage,
     auto_sent_messages: apply.auto_sent_messages,
     reasoning: result.reasoning,

@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
     // 어느 공고 건인지는 **웹훅·sweeper와 같은 함수**가 정한다(lib/agent/inbound-routing).
     // 예전엔 '단계 무관 최신 1건'을 뽑아서, 그 최신 행이 종료(abort)면 다른 공고가 활성인데도
     // 자동 응대가 안 되고 초안 경로로 떨어졌다. 판별 불가는 고르지 않는다(초안 경로로 폴백).
-    const route = await pickCandidateForInbound(supabase, applicant.id, String(rec.body ?? "").trim());
+    const route = await pickCandidateForInbound(supabase, applicant.id, String(rec.body ?? "").trim(), rec.created_at);
     const jc = route.ok ? route.candidate : null;
 
     if (jc && AUTO_AGENT_STAGES.has(jc.agent_stage as string)) {
@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
         candidate_id: jc.id as number,
         inbound_message_id: rec.id,
         inbound_text: rec.body,
+        received_at: rec.created_at,
       });
 
       return NextResponse.json({ route: "agent", ...agentResult });
