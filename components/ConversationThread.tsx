@@ -544,7 +544,7 @@ export function ConversationThread({
   const isPaused = agentPresentation.kind === "paused";
   const hasActiveFlow = agentPresentation.hasActiveFlow;
   const isAiEnabled = agentPresentation.isAiEnabled;
-  const agentModeCopy = agentModePresentation(agentMode);
+  const agentModeCopy = agentModePresentation(agentMode, applicantId);
   const resumeTarget = agentModeResumeTarget(agentMode);
   const resumeTargetLabel = resumeTarget === "draft" ? "코파일럿" : "AI 자동 응대";
   const aiControlLabel = !isAiEnabled
@@ -1176,7 +1176,7 @@ export function ConversationThread({
                 )}
               </div>
             ) : agentModeCopy.kind === "off" ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-yellow-50 px-3 py-1.5 rounded-lg border border-yellow-200"><AlertTriangle size={14} /> AI 전역 중지됨 — 수동 응대 가능</span>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-warning-strong bg-warning-soft px-3 py-1.5 rounded-lg border border-warning/30"><AlertTriangle size={14} className="shrink-0" /><span>{agentModeCopy.label} · {agentModeCopy.detail ?? "수동 응대 가능"}</span></span>
             ) : agentModeCopy.kind === "draft" ? (
               <span className="flex items-center gap-1.5 text-xs font-bold text-copilot-strong bg-copilot-soft px-3 py-1.5 rounded-lg border border-copilot/30"><Wand2 size={14} /> {agentModeCopy.label}</span>
             ) : (

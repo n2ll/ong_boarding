@@ -10,7 +10,7 @@ export type AutomationMetric = {
 export type AutomationAiMetric = {
   state: AdminAgentModeView["state"];
   mode: AdminAgentMode | null;
-  value: "확인 중" | "확인 실패" | "갱신 실패" | "자동 응대" | "코파일럿" | "전역 중지";
+  value: "확인 중" | "확인 실패" | "갱신 실패" | "자동 응대" | "코파일럿" | "전역 중지" | "테스트 1명만 자동 응대";
   detail: string | null;
   disabled: boolean | null;
   claimsAutomatic: boolean;
@@ -50,12 +50,14 @@ export function automationOverview(input: AutomationOverviewInput): AutomationOv
   );
 
   const modeView = input.agentMode ?? { state: "loading" as const, mode: null };
+  const testSession = modeView.state === "ready" ? modeView.testSession : undefined;
   const value: AutomationAiMetric["value"] = modeView.state === "loading"
     ? "확인 중"
     : modeView.state === "error"
       ? "확인 실패"
       : modeView.state === "stale"
         ? "갱신 실패"
+        : testSession ? "테스트 1명만 자동 응대"
         : modeView.mode === "auto"
           ? "자동 응대"
           : modeView.mode === "draft"
@@ -74,7 +76,7 @@ export function automationOverview(input: AutomationOverviewInput): AutomationOv
       ? "자동 응대 여부를 추정하지 않습니다."
       : modeView.state === "stale"
         ? `이전 확인: ${previousModeName}`
-        : null,
+        : testSession ? "일반 지원자와 예약 작업은 중지 상태입니다." : null,
     disabled: modeView.state === "ready" ? modeView.mode === "off" : null,
     claimsAutomatic: modeView.state === "ready" && modeView.mode === "auto",
     canRetry: modeView.state === "error" || modeView.state === "stale",

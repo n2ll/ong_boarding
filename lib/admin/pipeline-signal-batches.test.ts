@@ -456,21 +456,36 @@ type PoolEvent = {
 
 type JsonResponse = { body: Record<string, unknown>; status: number };
 
-function loadSummaryRoute(events: PoolEvent[]) {
+type ReplyMessage = { id: number; applicant_id: number; direction: "inbound" | "outbound"; created_at: string };
+
+function loadSummaryRoute(events: PoolEvent[], messages: ReplyMessage[] = [], messageErrorFrom?: number) {
   const orders: Array<{ column: string; ascending: boolean }> = [];
 
   class QueryBuilder {
+    private rows: Array<PoolEvent | ReplyMessage>;
+    private queryOrders: Array<{ column: string; ascending: boolean }> = [];
+    private table: string;
+    constructor(table: string) { this.table = table; this.rows = table === "messages" ? [...messages] : [...events]; }
     select() { return this; }
-    in() { return this; }
+    in(column: string, values: unknown[]) {
+      this.rows = this.rows.filter((row) => values.includes(row[column as keyof typeof row]));
+      return this;
+    }
+    eq(column: string, value: unknown) { return this.in(column, [value]); }
     order(column: string, options?: { ascending?: boolean }) {
-      orders.push({ column, ascending: options?.ascending ?? true });
+      const order = { column, ascending: options?.ascending ?? true };
+      orders.push(order);
+      this.queryOrders.push(order);
       return this;
     }
     async range(from: number, to: number) {
-      const sorted = [...events].sort((left, right) => {
-        for (const order of orders) {
-          const a = left[order.column as keyof PoolEvent];
-          const b = right[order.column as keyof PoolEvent];
+      if (this.table === "messages" && messageErrorFrom !== undefined && from >= messageErrorFrom) {
+        return { data: null, error: { message: "message lookup failed" } };
+      }
+      const sorted = [...this.rows].sort((left, right) => {
+        for (const order of this.queryOrders) {
+          const a = left[order.column as keyof typeof left];
+          const b = right[order.column as keyof typeof right];
           const compared = String(a).localeCompare(String(b));
           if (compared !== 0) return order.ascending ? compared : -compared;
         }
@@ -505,7 +520,7 @@ function loadSummaryRoute(events: PoolEvent[]) {
     require: (specifier: string) => {
       if (specifier === "next/server") return { NextResponse: nextResponse };
       if (specifier === "@/lib/supabase") {
-        return { createServiceClient: () => ({ from: () => new QueryBuilder() }) };
+        return { createServiceClient: () => ({ from: (table: string) => new QueryBuilder(table) }) };
       }
       if (specifier === "@/lib/admin/postgrest-pagination") return { fetchAllPostgrestRows };
       return {};
@@ -548,4 +563,42 @@ test("pool event summary reads row 5001 and uses a stable newest-first order", a
     { column: "created_at", ascending: false },
     { column: "id", ascending: false },
   ]);
+});
+
+
+test("reply summary includes non-campaign inbound messages and ignores later outbound", async () => {
+  const oldReply = "2026-07-01T00:00:00.000Z";
+  const latestReply = "2026-09-07T00:00:00.000Z";
+  const { route } = loadSummaryRoute([
+    { id: 1, applicant_id: 7, job_id: null, event_type: "ping_reply", meta: null, created_at: oldReply },
+  ], [
+    { id: 1, applicant_id: 7, direction: "inbound", created_at: latestReply },
+    { id: 2, applicant_id: 7, direction: "outbound", created_at: "2026-09-07T00:01:00.000Z" },
+    { id: 3, applicant_id: 8, direction: "inbound", created_at: latestReply },
+    { id: 4, applicant_id: 9, direction: "outbound", created_at: latestReply },
+    { id: 5, applicant_id: 10, direction: "inbound", created_at: latestReply },
+  ]);
+  const response = await route.POST({ json: async () => ({ applicantIds: [7, 8, 9] }) });
+  const summary = response.body.summaryById as Record<number, PoolEventSummary>;
+  assert.equal(response.status, 200);
+  assert.equal(summary[7].last_reply_at, latestReply);
+  assert.equal(summary[8].last_reply_at, latestReply);
+  assert.equal(summary[9]?.last_reply_at ?? null, null);
+  assert.equal(summary[10], undefined);
+});
+
+test("reply summary reads all inbound pages and fails instead of returning a partial history", async () => {
+  const messages: ReplyMessage[] = [
+    ...Array.from({ length: 1000 }, (_, id) => ({ id, applicant_id: 7, direction: "inbound" as const, created_at: "2026-09-07T00:00:00.000Z" })),
+    { id: 1001, applicant_id: 8, direction: "inbound", created_at: "2026-09-01T00:00:00.000Z" },
+  ];
+  const request = { json: async () => ({ applicantIds: [7, 8] }) };
+  const { route } = loadSummaryRoute([], messages);
+  const response = await route.POST(request);
+  assert.equal(response.status, 200);
+  assert.equal((response.body.summaryById as Record<number, PoolEventSummary>)[8]?.last_reply_at, messages[1000].created_at);
+  const failing = loadSummaryRoute([], messages, 1000);
+  const failure = await failing.route.POST(request);
+  assert.equal(failure.status, 500);
+  assert.equal(failure.body.summaryById, undefined);
 });
