@@ -1,0 +1,131 @@
+{
+  "date": "2026-09-06T04:48:44.711Z",
+  "model": "claude-sonnet-4-6",
+  "synthetic": true,
+  "sms_sent": 0,
+  "prompt_examples": "empty fixture",
+  "cases": [
+    {
+      "name": "compare_times",
+      "input": "새벽 배송과 낮 배송은 각각 몇 시에 일하나요?",
+      "stage": "screening",
+      "checks": {
+        "one_call": true,
+        "no_profile_patch": true,
+        "context_unchanged": true,
+        "stay": true,
+        "has_consultation": true,
+        "both_times": true
+      },
+      "passed": true,
+      "reply": "새벽 배송\n근무시간: 04:00~08:00\n\n낮 배송\n근무시간: 13:00~17:00",
+      "consultation": {
+        "job_ids": [
+          10,
+          20
+        ],
+        "observations": [],
+        "clarification": false,
+        "handoff": false
+      }
+    },
+    {
+      "name": "availability_by_job",
+      "input": "새벽 배송은 월요일 가능합니다. 낮 배송은 금요일 가능합니다.",
+      "stage": "screening",
+      "checks": {
+        "one_call": true,
+        "no_profile_patch": true,
+        "context_unchanged": true,
+        "stay": true,
+        "has_consultation": true,
+        "two_observations": true
+      },
+      "passed": true,
+      "reply": "새벽 배송\n가능 시간 말씀: “새벽 배송은 월요일 가능합니다.”\n\n낮 배송\n가능 시간 말씀: “낮 배송은 금요일 가능합니다.”\n\n말씀하신 내용으로 이해했어요. 근무 진행 여부는 매니저가 확인 후 안내해요.",
+      "consultation": {
+        "job_ids": [
+          10,
+          20
+        ],
+        "observations": [
+          {
+            "job_id": 10,
+            "source_message_id": "inbound-1",
+            "kind": "availability",
+            "quote": "새벽 배송은 월요일 가능합니다."
+          },
+          {
+            "job_id": 20,
+            "source_message_id": "inbound-1",
+            "kind": "availability",
+            "quote": "낮 배송은 금요일 가능합니다."
+          }
+        ],
+        "clarification": false,
+        "handoff": false
+      }
+    },
+    {
+      "name": "ambiguous_yes",
+      "input": "네",
+      "stage": "consultation (active helper)",
+      "checks": {
+        "one_call": true,
+        "no_profile_patch": true,
+        "context_unchanged": true,
+        "stay": true,
+        "has_consultation": true,
+        "clarifies": true
+      },
+      "passed": true,
+      "reply": "‘새벽 배송’, ‘낮 배송’ 중 어느 공고에 대한 말씀인가요? 여러 공고라면 각각 알려주셔도 돼요.",
+      "consultation": {
+        "job_ids": [
+          10,
+          20
+        ],
+        "observations": [],
+        "clarification": true,
+        "handoff": false
+      }
+    },
+    {
+      "name": "interest_both",
+      "input": "새벽 배송과 낮 배송 둘 다 관심 있어요.",
+      "stage": "screening",
+      "checks": {
+        "one_call": true,
+        "no_profile_patch": true,
+        "context_unchanged": true,
+        "stay": true,
+        "has_consultation": true,
+        "two_interests": true
+      },
+      "passed": true,
+      "reply": "새벽 배송\n관심 말씀: “새벽 배송과 낮 배송 둘 다 관심 있어요.”\n\n낮 배송\n관심 말씀: “새벽 배송과 낮 배송 둘 다 관심 있어요.”\n\n말씀하신 내용으로 이해했어요. 근무 진행 여부는 매니저가 확인 후 안내해요.",
+      "consultation": {
+        "job_ids": [
+          10,
+          20
+        ],
+        "observations": [
+          {
+            "job_id": 10,
+            "source_message_id": "inbound-1",
+            "kind": "interest",
+            "quote": "새벽 배송과 낮 배송 둘 다 관심 있어요."
+          },
+          {
+            "job_id": 20,
+            "source_message_id": "inbound-1",
+            "kind": "interest",
+            "quote": "새벽 배송과 낮 배송 둘 다 관심 있어요."
+          }
+        ],
+        "clarification": false,
+        "handoff": false
+      }
+    }
+  ]
+}
