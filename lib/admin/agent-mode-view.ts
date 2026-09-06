@@ -1,3 +1,5 @@
+import type { AgentTestSession } from "../agent/kill-switch";
+
 export type AdminAgentMode = "auto" | "draft" | "off";
 
 export type AdminAgentModeResponse = {
@@ -5,6 +7,7 @@ export type AdminAgentModeResponse = {
   disabled: boolean;
   env_forced: boolean;
   updated_at?: string | null;
+  test_session?: AgentTestSession | null;
 };
 
 export type AdminAgentModeSnapshot = {
@@ -20,7 +23,7 @@ export type AdminAgentModeSnapshot = {
 
 export type AdminAgentModeView =
   | { state: "loading" | "error"; mode: null }
-  | { state: "stale" | "ready"; mode: AdminAgentMode };
+  | { state: "stale" | "ready"; mode: AdminAgentMode; testSession?: AgentTestSession };
 
 export type AdminAgentModePresentation = {
   kind: "loading" | "error" | "stale" | AdminAgentMode;
@@ -75,6 +78,9 @@ export function agentModeView(input: {
   return {
     state: input.error ? "stale" : "ready",
     mode: snapshot.effectiveMode,
+    ...(!snapshot.override && isAdminAgentModeResponse(input.data) && input.data.test_session
+      && Date.parse(input.data.test_session.expires_at) > Date.now()
+      ? { testSession: input.data.test_session } : {}),
   };
 }
 
@@ -142,6 +148,9 @@ export function agentModePresentation(view: AdminAgentModeView): AdminAgentModeP
       canRetry: true,
       claimsAutomatic: false,
     };
+  }
+  if (view.state === "ready" && view.testSession) {
+    return { kind: "off", label: "테스트 1명만 자동 응대", detail: `일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`, canRetry: false, claimsAutomatic: false };
   }
   if (view.mode === "draft") {
     return {

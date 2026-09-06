@@ -526,7 +526,7 @@ test("matched inbound explicit opt-out is persisted before routing and ends the 
   assert.match(webhook.slice(explicitOptOut, availabilityCostGate), /shouldApplyExplicitSmsOptOut/);
 
   const routerOptOut = router.indexOf("isExplicitSmsOptOutText(inbound_text)");
-  const modeLookup = router.indexOf("getAgentMode(supabase)");
+  const modeLookup = router.indexOf("getAgentMode(supabase,");
   assert.ok(routerOptOut >= 0 && routerOptOut < modeLookup);
   assert.match(router.slice(routerOptOut, modeLookup), /sms_opt_out_at/);
   assert.match(router.slice(routerOptOut, modeLookup), /shouldApplyExplicitSmsOptOut/);
