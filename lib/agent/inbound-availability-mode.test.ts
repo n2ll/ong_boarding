@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { isExplicitSmsOptOutText, shouldApplyExplicitSmsOptOut } from "../sms-consent-policy.ts";
 
-async function inbound(mode: string, routeReason = "none", text = "금요일 가능합니다") {
+async function inbound(mode: string, routeReason = "none", text = "금요일 가능합니다", matched = true) {
   let classifications = 0;
   const writes: Array<{ table: string; value: Record<string, unknown> }> = [];
   const pending: Promise<unknown>[] = [];
@@ -15,8 +15,8 @@ async function inbound(mode: string, routeReason = "none", text = "금요일 가
       select() { return q; }, eq() { return q; }, is() { return q; }, gte() { return q; }, order() { return q; }, limit() { return q; },
       update(value: Record<string, unknown>) { writes.push({ table, value }); return q; },
       insert(value: Record<string, unknown>) { writes.push({ table, value }); return q; },
-      maybeSingle: async () => ({ data: applicant, error: null }),
-      single: async () => ({ data: applicant, error: null }),
+      maybeSingle: async () => ({ data: matched ? applicant : null, error: null }),
+      single: async () => ({ data: matched ? applicant : null, error: null }),
       then(resolve: (value: unknown) => unknown) { return Promise.resolve({ data: table === "messages" ? [{ id: "in-1" }] : [], error: null }).then(resolve); },
     }; return q;
   } };
@@ -27,12 +27,12 @@ async function inbound(mode: string, routeReason = "none", text = "금요일 가
     "@/lib/agent/kill-switch": { getAgentMode: async () => mode },
     "@/lib/agent/availability": { classifyAvailabilitySignal: async () => { classifications++; return { signal: "this_week", confidence: 0.9, reasoning: "fixture" }; } },
     "@/lib/agent/inbound-routing": {
-      pickCandidateForInbound: async () => ({ ok: false, reason: routeReason }),
+      pickCandidateForInbound: async () => ({ ok: false, reason: routeReason, options: [] }),
       describeRoute: () => routeReason,
       handleAmbiguousInbound: async () => ({ asked: false, pausedCandidates: 1 }),
     },
     "@/lib/sms-consent-policy": { isExplicitSmsOptOutText, shouldApplyExplicitSmsOptOut },
-    "@/lib/agent/router": {}, "@/lib/agent/baemin-triage": {}, "@/lib/agent/engage": {},
+    "@/lib/agent/router": {}, "@/lib/agent/baemin-triage": { isHardSpam: () => false, triageInbound: async () => { classifications++; throw new Error("triage must not run"); } }, "@/lib/agent/engage": {},
     "@/lib/solapi": {}, "@/lib/slack": {}, "@/lib/agent/system-messages": {},
     "@/lib/agent/outbound-safety": {}, "@/lib/agent/usage": {},
   };
@@ -71,3 +71,12 @@ test("explicit opt-out is persisted even while AI is off without a model call", 
   assert.equal(result.classifications, 0);
   assert.ok(result.writes.some((w) => w.table === "applicants" && w.value.sms_opt_out_at && w.value.availability === "휴면"));
 });
+
+for (const mode of ["off", "draft"]) {
+  test(`${mode}: unmatched inbound stays pending without auto registration or invitation`, async () => {
+    const h = await inbound(mode, "none", "배민 지원 문의드립니다", false);
+    assert.equal(h.classifications, 0);
+    assert.equal(h.writes.some((w) => w.table === "applicants"), false);
+    assert.ok(h.writes.some((w) => w.table === "messages" && w.value.classification === "pending"));
+  });
+}

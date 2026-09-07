@@ -36,6 +36,7 @@ import {
   resolvePreconfirmationGuideText,
 } from "@/lib/agent/outbound-safety";
 import type { AgentState } from "@/lib/agent/types";
+import { getAgentMode } from "@/lib/agent/kill-switch";
 import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,10 @@ export async function GET(req: NextRequest) {
   if (authFail) return authFail;
 
   const supabase = createServiceClient();
+  // 예약 발송에는 검수 인입 범위가 없다. OFF/초안/제한 검수는 예약 작업을 시작하지 않는다.
+  if (await getAgentMode(supabase, undefined, true) !== "auto") {
+    return NextResponse.json({ ok: true, skipped: "agent_not_auto" });
+  }
   const now = Date.now();
   const remindCutoff = new Date(now - DEADLINE_MS).toISOString();
   const handoffCutoff = new Date(now - HANDOFF_DELAY_MS).toISOString();

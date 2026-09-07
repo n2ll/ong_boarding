@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function installStatusFixtures(page: Page, baseURL: string, options: {
-  target?: number; expired?: boolean; envForced?: boolean; failMode?: boolean;
+  target?: number; expired?: boolean; envForced?: boolean; failMode?: boolean; noSession?: boolean;
 } = {}) {
   const session = { access_token: "consultation-fixture", refresh_token: "consultation-fixture", expires_at: Math.floor(Date.now() / 1000) + 3600 };
   await page.context().addCookies([{ name: "sb-127-auth-token", value: `base64-${Buffer.from(JSON.stringify(session)).toString("base64url")}`, url: baseURL }]);
@@ -16,13 +16,13 @@ async function installStatusFixtures(page: Page, baseURL: string, options: {
     "/api/admin/agent/handoffs": { handoffs: [], by_category: {}, total: 0 },
     "/api/admin/confirm/pending": { pending: [], total: 0 },
     "/api/admin/notifications": { counts: { inbox: 0, interventions: 0, aiDisabled: true }, items: [] },
-    "/api/admin/agent/kill-switch": { ...off, test_session: { mode: "test", applicant_id: options.target ?? 7,
+    "/api/admin/agent/kill-switch": { ...off, test_session: options.noSession ? null : { mode: "test", applicant_id: options.target ?? 7, job_ids: [11],
       started_at: new Date(Date.now() - 60_000).toISOString(), expires_at: new Date(Date.now() + (options.expired ? -1 : 1) * 600_000).toISOString() } },
     "/api/admin/applicants/7/active-jobs": { jobs },
     "/api/admin/messages/7": { messages: [], events: [], jobs: { 11: jobs[0] }, draft: null, agent_stage: "screening", access_token: null,
       manual_message_attention: attention, context_status: { reasoning: "ready", pool_events: "ready", job_labels: "ready" } },
     "/api/admin/branches": { data: [] },
-    "/api/admin/jobs": { jobs: [] },
+    "/api/admin/jobs": { jobs: [{ id: 11, title: "상태 검수 배송", status: "active" }] },
     "/api/admin/prompt-examples": { data: [] },
     "/api/admin/usage": {},
     "/api/admin/agent/persona": { data: {} },
@@ -43,8 +43,10 @@ async function installStatusFixtures(page: Page, baseURL: string, options: {
     if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
     if (url.pathname === "/api/admin/agent/kill-switch" && request.method() === "POST") {
       writes.push(request.postDataJSON());
-      fixtures[url.pathname] = off;
-      await route.fulfill({ json: off }); return;
+      const payload = request.postDataJSON();
+      fixtures[url.pathname] = payload.mode === "test" ? { ...off, test_session: {mode: "test", applicant_id: 7, job_ids: payload.job_ids,
+        started_at: new Date().toISOString(), expires_at: new Date(Date.now() + 20 * 60000).toISOString()} } : off;
+      await route.fulfill({ json: fixtures[url.pathname] }); return;
     }
     if (request.method() === "GET" && fixtures[url.pathname]) {
       await route.fulfill({ status: options.failMode && url.pathname.endsWith("/kill-switch") ? 503 : 200, json: fixtures[url.pathname] }); return;
@@ -93,4 +95,29 @@ test("두뇌 요약과 검수 중단 확인이 제한 범위를 설명한다", a
   expect(state.writes).toEqual([{ mode: "off" }]);
   expect(state.errors).toEqual([]);
   expect(state.blocked).toEqual([]);
+});
+
+for (const width of [390, 1280]) test(`검수 시작은 공고 선택과 최종 확인이 필요하다 (${width})`, async ({page, baseURL}) => {
+  await page.setViewportSize({width, height: 900});
+  const state = await installStatusFixtures(page, baseURL!, {noSession: true});
+  await page.goto("/brain?tab=mode");
+  await expect(page.getByRole("radio", {name: /^자동 응대/})).toBeDisabled();
+  const start = page.getByRole("button", {name: "20분 검수 시작"});
+  await page.getByLabel("자동 응대 검수용 전화번호").fill("01000000000");
+  await expect(start).toBeDisabled();
+  await page.getByRole("checkbox", {name: "상태 검수 배송"}).check();
+  await start.click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("상태 검수 배송");
+  await expect(dialog).toContainText("20분");
+  expect(state.writes).toEqual([]);
+  await dialog.getByRole("button", {name: "검수 시작", exact: true}).click();
+  await expect(page.getByRole("status").filter({hasText: "선택 공고 1개만"})).toBeVisible();
+  await expect(page.getByRole("button", {name: "검수 중단", exact: true})).toBeVisible();
+  expect(await page.getByRole("tabpanel").evaluate((panel) => panel.getBoundingClientRect().width)).toBeGreaterThan(250);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  expect(state.writes).toEqual([{mode: "test", phone: "01000000000", job_ids: [11]}]);
+  expect(state.errors).toEqual([]);
+  expect(state.blocked).toEqual([]);
+  await page.screenshot({path: `/tmp/ong-containment-${width}.png`, fullPage: true});
 });

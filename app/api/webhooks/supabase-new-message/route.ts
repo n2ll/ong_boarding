@@ -364,7 +364,8 @@ async function processInbound(
         focusJobId: route.focusJobId,
         receivedAt,
         inboundMessageId: String(msg.id),
-        mode: await getAgentMode(supabase, { applicantId: applicant.id, receivedAt }),
+        mode: await getAgentMode(supabase, { applicantId: applicant.id, receivedAt, jobIds: route.options.map((option) => option.job_id ?? 0) }),
+        canRespond: async () => await getAgentMode(supabase, { applicantId: applicant.id, receivedAt, jobIds: route.options.map((option) => option.job_id ?? 0) }, true) === "auto",
         inboundOptOut,
         sendSms: (to, body) => sendSms(to, body),
         notify: (t) => sendSlackText(t),
@@ -560,6 +561,11 @@ async function processInbound(
     };
   }
 
+  // 미등록자는 검수 대상일 수 없다. 보관만 하고 자동 등록·첫 안내는 시작하지 않는다.
+  if (await getAgentMode(supabase, undefined, true) !== "auto") {
+    await supabase.from("messages").update({ classification: "pending" }).eq("id", msg.id);
+    return { ok: true, matched: false, classification: "pending", reason: "automatic intake stopped" };
+  }
   const triage = await triageInbound({ phone, body: text });
 
   // Triage 사용량 적재 — ai_usage_daily + inbound 메시지 행에 토큰 컬럼 채우기.

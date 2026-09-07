@@ -114,7 +114,7 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
   const { data: candidate, error } = await input.supabase.from("job_candidates")
     .select("applicant_id, job_id").eq("id", input.candidate_id).single();
   if (error || !candidate?.applicant_id || !candidate?.job_id) return { ok: false, error: "reply claim candidate lookup failed" };
-  const mode = await getAgentMode(input.supabase, input.received_at ? { applicantId: candidate.applicant_id, receivedAt: input.received_at } : undefined);
+  const mode = await getAgentMode(input.supabase, input.received_at ? { applicantId: candidate.applicant_id, receivedAt: input.received_at, jobIds: [candidate.job_id] } : undefined);
   if (mode === "off") return { ok: true, skipped: "agent kill-switch ON — global pause" };
   // 먼저 답장 텀과 연속 문자 병합을 마친다. 대기 중 잠금을 잡으면 최신 핸들러도
   // busy로 종료되어 두 문자 모두 응답되지 않는다. 잠금 안에서는 더 이상 양보하지 않는다.
@@ -231,7 +231,9 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   // 전역 모드 스위치 — off(='1')면 어떤 단계든 상관없이 즉시 종료(기존 kill-switch와 동일).
   // draft면 아래에서 발송·전이 대신 초안(message_drafts)만 만든다. simulate(연습 빙의)는 모드 무시.
-  const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase, received_at ? { applicantId: jc.applicant_id as number, receivedAt: received_at } : undefined);
+  let automationScope = received_at ? { applicantId: jc.applicant_id as number, receivedAt: received_at, jobIds: [jc.job_id as number] } : undefined;
+  const canAutomate = async () => await getAgentMode(supabase, automationScope, true) === "auto";
+  const mode: AgentMode = simulate ? "auto" : await getAgentMode(supabase, automationScope);
   if (mode === "off") {
     return { ok: true, skipped: "agent kill-switch ON — global pause" };
   }
@@ -339,6 +341,17 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     const recent = await loadConsultationHistory(supabase, applicant.id, {
       id: inbound_message_id, body: inbound_text, created_at: received_at ?? new Date().toISOString(),
     }, jobs);
+    if (!simulate && mode === "auto") {
+      // 상담 일부만 잘라 처리하지 않는다. 모든 공고와 미응답 원문이 검수 범위 안이어야 한다.
+      const jobIds = [...new Set([jc.job_id as number, ...jobs.map((item) => item.job_id)])];
+      automationScope = received_at ? { applicantId: applicant.id, receivedAt: received_at, jobIds } : undefined;
+      if (!await canAutomate()) return { ok: true, skipped: "consultation jobs outside test scope" };
+      for (const source of recent.sourceMessages) {
+        if (await getAgentMode(supabase, { applicantId: applicant.id, receivedAt: source.created_at, jobIds }) !== "auto") {
+          return { ok: true, skipped: "unanswered source outside test window" };
+        }
+      }
+    }
     history = recent.history;
     const enabled = jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id);
     otherActiveJobs = jobs.filter((j) => j.job_id !== job.id && !j.expired)
@@ -354,7 +367,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
         inbound_message_id, job_id: null, draft_text: "문의 내용을 매니저가 확인한 뒤 안내드릴게요.",
         status: "need_info", missing_info: reason, reasoning: `${COPILOT_DRAFT_MARKER} ${reason}` });
     } else {
-      await applyTransition({ supabase, candidate_id: jc.id, applicant_id: applicant.id, applicant_name: applicant.name,
+      await applyTransition({ canAutomate, supabase, candidate_id: jc.id, applicant_id: applicant.id, applicant_name: applicant.name,
         applicant_phone: applicant.phone, applicant_branch: applicant.branch1 ?? null, applicant_work_hours: applicant.work_hours ?? null,
         job_id: jc.job_id, job, current_stage: stageName, state_update: state,
         transition: { kind: "pause", category: "cross_job", reason, suggestedAction: "공고 노출과 대화 조회 상태를 확인한 뒤 직접 답해 주세요." }, simulate });
@@ -397,7 +410,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   }
 
   // 모델 응답을 기다리는 동안 검수가 만료되거나 매니저가 중단했다면 발송·상태 변경을 멈춘다.
-  if (!simulate && await getAgentMode(supabase, received_at ? { applicantId: applicant.id, receivedAt: received_at } : undefined, true) !== mode) {
+  if (!simulate && await getAgentMode(supabase, automationScope, true) !== mode) {
     return { ok: true, skipped: "agent mode changed during generation — response discarded" };
   }
 
@@ -649,6 +662,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       handedOff = safeTransition.kind === "pause";
       try {
         await applyTransition({
+          canAutomate,
           supabase,
           candidate_id: jc.id,
           applicant_id: applicant.id,
@@ -702,6 +716,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     let sendOk = simulate;
     let sendMessageId: string | null = null;
     if (!simulate) {
+      if (!await canAutomate()) return { ok: true, skipped: "agent stopped before SMS send" };
       const send = await sendSms(applicant.phone, result.reply_text);
       sendOk = send.success;
       sendMessageId = send.messageId ?? null;
@@ -794,6 +809,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
 
   // 5) Transition + state 저장 + 자동 발송
   const apply = await applyTransition({
+    canAutomate,
     supabase,
     candidate_id: jc.id,
     applicant_id: applicant.id,

@@ -218,7 +218,10 @@ export async function runInterestEngage(params: {
   });
   if (recovery) return recovery;
 
-  const mode = params.mode ?? (await getAgentMode(supabase));
+  // 호출자가 이전에 읽은 auto 값으로 현재 OFF를 덮어쓰지 않는다. off/draft는 범위를 줄이는 데만 쓴다.
+  const currentMode = await getAgentMode(supabase, undefined, true);
+  const mode = currentMode === "off" || params.mode === "off" ? "off"
+    : currentMode === "draft" || params.mode === "draft" ? "draft" : "auto";
   if (mode === "off") return { action: "off" };
 
   const [{ data: applicantRow }, { data: jobRow }, { data: jcRow }] = await Promise.all([

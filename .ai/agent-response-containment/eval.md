@@ -1,0 +1,9 @@
+# Evaluation
+- Server regressions: `node --experimental-strip-types --test lib/agent/*.test.ts lib/admin/agent-mode*.test.ts lib/apply-job-flow.test.ts lib/pool-engage-lock-order.test.ts` — 237 passed, 0 failed, 1 skipped (optional local PostgreSQL deadlock audit; no database migration in this change).
+- Red → green: legacy/missing global settings; activation API; reminder OFF; omitted/invalid job scope; cross-job context and pre-session unanswered source; stale engagement mode; expiry before transition/template send. Active, closed, expired, missing and system job settings are covered.
+- Browser/build: `npx --no-install playwright test --config=playwright.consultation.config.ts` — 10 passed. Config builds production assets before starting the isolated local app. Covers session state, scoped start/confirmation/stop and consultation history at 390/1280px.
+- Responsive defect reproduced during verification: fixed-width brain sidebar collapsed the narrow content area. Mobile now places navigation above content. Assertions cover visible controls, panel width and no document overflow; screenshots `/tmp/ong-containment-390.png` and `/tmp/ong-containment-1280.png` visually checked.
+- Browser fixture uses local authentication/API responses and blocks unexpected external requests; no production activation, SMS, Slack or queue replay performed.
+- `git diff --check` passed. Existing Next workspace-root warning remains; it does not prevent build/test completion.
+- Operational read check: global OFF and existing manual pause remain; no new outbound message on the affected conversation. Private incident evidence is excluded from this public repository.
+- Limits: code changes do not revoke credentials held by existing deployments. Production rollout and infrastructure credential separation remain distinct from code verification. No live applicant pilot was started.

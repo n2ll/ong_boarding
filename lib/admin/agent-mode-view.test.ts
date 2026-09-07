@@ -253,7 +253,7 @@ test("operator copy claims automatic replies only for a current auto snapshot", 
 
 test("a limited test is visibly distinct from a global shutdown", async () => {
   const { agentModeView, agentModePresentation } = await loadModule();
-  const test_session = { mode: "test", applicant_id: 7, started_at: new Date(Date.now()-1000).toISOString(), expires_at: new Date(Date.now()+60000).toISOString() };
+  const test_session = { mode: "test", applicant_id: 7, job_ids: [11], started_at: new Date(Date.now()-1000).toISOString(), expires_at: new Date(Date.now()+60000).toISOString() };
   const view = agentModeView!({ data: { mode: "off", disabled: true, env_forced: false, test_session } });
   assert.match(agentModePresentation!(view).label, /테스트 1명/);
   assert.equal(agentModePresentation!(view).claimsAutomatic, false);
@@ -261,7 +261,7 @@ test("a limited test is visibly distinct from a global shutdown", async () => {
 
 test("conversation status distinguishes the test recipient from other applicants", async () => {
   const { agentModeView, agentModePresentation } = await loadModule();
-  const test_session = { mode: "test", applicant_id: 7, started_at: new Date(Date.now()-1000).toISOString(), expires_at: new Date(Date.now()+60000).toISOString() };
+  const test_session = { mode: "test", applicant_id: 7, job_ids: [11], started_at: new Date(Date.now()-1000).toISOString(), expires_at: new Date(Date.now()+60000).toISOString() };
   const data = { mode: "off", disabled: true, env_forced: false, test_session };
   const view = agentModeView!({ data });
   assert.equal(agentModePresentation!(view, 7).label, "이 지원자는 자동 응대 검수 대상");
