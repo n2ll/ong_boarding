@@ -321,6 +321,7 @@ async function handleClaimedAmbiguousInbound(
     receivedAt?: string;
     inboundMessageId?: string;
     sendSms: (phone: string, text: string) => Promise<{ success: boolean; messageId?: string | null; error?: string; failureKind?: "declared" | "unknown" }>;
+    canRespond?: () => Promise<boolean>;
     notify?: (text: string) => Promise<unknown>;
   }
 ): Promise<{ asked: boolean; pausedCandidates: number; delivery_uncertain?: boolean }> {
@@ -365,6 +366,7 @@ async function handleClaimedAmbiguousInbound(
       ...lines,
       `따옴표 안 낱말을 그대로 보내주시면 그 자리 기준으로 안내드릴게요.`,
     ].join("\n");
+    if (args.canRespond && !await args.canRespond()) return { asked: false, pausedCandidates: 0 };
     const r = await args.sendSms(phone, text);
     if (r.success) {
       const { error: recordError } = await supabase.from("messages").insert({
@@ -396,6 +398,8 @@ async function handleClaimedAmbiguousInbound(
     deliveryUncertain = r.failureKind !== "declared";
     console.error("[inbound-routing] 되묻기 발송 실패", r.error);
   }
+
+  if (!sendFailed && mode === "auto" && args.canRespond && !await args.canRespond()) return { asked: false, pausedCandidates: 0 };
 
   // 되묻지 못했거나 이미 되물었다 → 매니저에게 넘긴다(활성 후보 전부 보류).
   // **직전 단계를 행마다 남긴다** — 없으면 'AI 재개'가 exploration으로 되돌려 온보딩 안내가 다시 나간다

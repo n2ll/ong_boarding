@@ -165,6 +165,7 @@ export async function POST(req: NextRequest) {
       simulate,
     });
 
+    if (apply.blocked) return NextResponse.json({ error: "자동 안내가 중지되어 단계를 진행하지 않았습니다. 수동으로 안내해주세요." }, { status: 409 });
     return NextResponse.json({
       ok: true,
       from_stage: currentStage,
