@@ -1,0 +1,4 @@
+- [x] Update existing four-stage request/usage regression expectations; confirm failure on Sonnet.
+- [x] Change four model constants and visible/current model descriptions.
+- [x] Existing stage tests and final build pass. Two synthetic cases pass after fixing the observed nested-object ambiguity; no SMS or applicant data.
+- [ ] Merge and verify deployment; prepare pilot intake from real schedule information.

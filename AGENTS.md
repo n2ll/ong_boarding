@@ -35,7 +35,7 @@ Next.js 14 (App Router) · React 18 · TypeScript(strict) · Tailwind v4 · Radi
 - Supabase: 클라이언트=`getBrowserClient()`(anon), 서버=`createServiceClient()`(service role, 서버 전용).
 - API 라우트: `force-dynamic`. Claude 호출 시 `ai_usage_daily` 적재. 발송 후 `messages` INSERT.
 - UI: 토큰(`styles/theme.css`) 사용, `focus-visible` 유지, 파괴적 액션은 확인 모달, 알림은 Sonner 토스트.
-- 에이전트 stage: `exploration → screening → onboarding → active`(+`paused`/`abort`). 모델은 응대=Sonnet 4.6 / 분류=Haiku 4.5.
+- 에이전트 stage: `exploration → screening → onboarding → active`(+`paused`/`abort`). 모델은 응대·분류=Haiku 4.5 / 공고 생성·추출=Sonnet 4.6.
 - 마이그레이션: `YYYY-MM-설명.sql` 누적 추가. 기존 파일 사후 수정 금지.
 - 훅: `useState`/`useEffect` 등은 **컴포넌트 맨 위, 모든 조기 return보다 앞**에서 선언한다(쓰는 곳 옆이 아니라). `npm run build`가 `react-hooks/rules-of-hooks`로 막는다 — 이 규칙은 스타일이 아니라 화면이 죽는 것을 막는 것(React #310). `.eslintrc.cjs`에 취향 규칙을 추가하지 말 것.
 - 시크릿은 `.env.local`에만. 문서/코드/커밋에 실제 값 금지.

@@ -1,0 +1,6 @@
+- Existing four-stage request/usage tests: expected Haiku first; 12 failed on Sonnet, then all 26 passed after the model change.
+- Initial synthetic Haiku condition question was blocked correctly: consultation was a string and mode/job_ids appeared at the root despite the nested schema. Three diagnostic calls in total before the prompt fix; no SMS.
+- Added an explicit nested JSON object example. Same two synthetic cases then passed: distinct job times/pay, and separate interest/availability source IDs. Both stay in the current stage; no applicant data used and no SMS sent. Two successful calls used 16,968 input and 855 output tokens; usage recorded as recovery_healthcheck.
+- This is a bounded model smoke check, not proof of equal Sonnet quality across all conversations. Existing malformed-output pause guards remain active.
+- Model reference: https://platform.claude.com/docs/en/models/overview .
+- Final shared prompt verification: all 26 existing stage tests pass; npm run build passes with existing lint warnings. git diff --check passes. General automation stays OFF; no schema migration.

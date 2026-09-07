@@ -1199,14 +1199,14 @@ export function AgentBrain() {
                   </div>
                 </div>
 
-                {/* 실제로는 Claude(응대 Sonnet / 분류 Haiku)로 동작하는데 화면에는 존재하지 않는 모델명
+                {/* 실제로는 Claude Haiku(응대·분류)로 동작하는데 화면에는 존재하지 않는 모델명
                     (Ongbot-Core·GPT-4o)이 선택지로 있었다 — 비활성이라도 "우리가 GPT를 쓴다"는 오정보가 된다.
                     목업을 지우고 현재 사실만 적는다. */}
                 <div className="rounded-2xl border border-border-strong bg-background p-5 space-y-3">
                   <div>
                     <div className="text-[14px] font-bold text-gray-700 mb-1">지금 쓰는 AI</div>
                     <p className="text-[13px] text-muted-foreground leading-relaxed">
-                      지원자 응대는 Claude Sonnet, 문자 분류는 Claude Haiku로 동작해요. 모델을 화면에서 바꾸는 기능은 아직 없어요(변경이 필요하면 개발팀에 요청).
+                      지원자 응대와 문자 분류는 Claude Haiku 4.5로 동작해요. 모델을 화면에서 바꾸는 기능은 아직 없어요(변경이 필요하면 개발팀에 요청).
                     </p>
                   </div>
                   <div>
