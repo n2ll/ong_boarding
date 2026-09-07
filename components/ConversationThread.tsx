@@ -1569,8 +1569,8 @@ export function ConversationThread({
               </button>
             ))}
           </div>
-          <div className="flex items-end gap-3">
-            <div className={`min-w-0 flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
+          <div className="flex flex-wrap items-end justify-end gap-3">
+            <div className={`w-full min-w-0 sm:w-auto sm:flex-1 border-2 rounded-2xl overflow-hidden bg-background focus-within:bg-input-background ${isLMS ? "border-error" : "border-border-strong focus-within:border-brand-yellow"}`}>
               <textarea
                 aria-label="지원자에게 보낼 문자"
                 aria-describedby="sms-job-context"

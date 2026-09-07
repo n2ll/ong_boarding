@@ -94,3 +94,52 @@ test("두뇌 요약과 검수 중단 확인이 제한 범위를 설명한다", a
   expect(state.errors).toEqual([]);
   expect(state.blocked).toEqual([]);
 });
+
+test.describe("문자 입력창 반응형 검수", () => {
+  test.use({ hasTouch: true });
+  for (const viewport of [
+    { width: 375, height: 667 },
+    { width: 390, height: 844 },
+    { width: 768, height: 900 },
+    { width: 1280, height: 900 },
+  ]) test(`문자 발송 버튼은 메뉴에 가리지 않고 한 번만 발송한다 (${viewport.width}px)`, async ({ page, baseURL }) => {
+    await page.setViewportSize(viewport);
+    const state = await installStatusFixtures(page, baseURL!, { target: 8 });
+    const sent: unknown[] = [];
+    await page.route("**/api/admin/messages/send", async (route) => {
+      sent.push(route.request().postDataJSON());
+      await route.fulfill({ json: { success: true, status: "sent", paused: true } });
+    });
+    await page.goto("/live");
+    await page.getByRole("button", { name: /^상 상담검수/ }).click();
+    const input = page.getByRole("textbox", { name: "지원자에게 보낼 문자" });
+    await input.fill("로컬 버튼 검수");
+    const send = page.getByRole("button", { name: /^문자(만)? 발송$/ });
+    await expect(send).toBeEnabled();
+    await send.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `/tmp/sms-composer-${viewport.width}.png`, animations: "disabled" });
+    const inputBox = (await input.boundingBox())!;
+    expect(inputBox.width).toBeGreaterThanOrEqual(Math.min(280, viewport.width - 64));
+    const box = (await send.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    expect(await send.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    })).toBe(true);
+    // 실제 좌표를 눌러 고정 메뉴가 클릭을 가로채는지도 확인한다.
+    if (viewport.width === 390) {
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    } else {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await expect.poll(() => sent.length).toBe(1);
+    expect(sent[0]).toMatchObject({ applicant_id: 7, job_id: 11, body: "로컬 버튼 검수" });
+    await expect(input).toHaveValue("");
+    await expect(page).toHaveURL(/\/live$/);
+    expect(state.errors).toEqual([]);
+    expect(state.blocked).toEqual([]);
+    expect(state.writes).toEqual([]);
+  });
+});
