@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
+import { getAgentMode } from "@/lib/agent/kill-switch";
 import { sendNotification, sendSms } from "@/lib/solapi";
 import { geocodeAddress } from "@/lib/kakao-geocode";
 import { ensureBaeminSystemJob } from "@/lib/agent/baemin-job";
@@ -945,7 +946,7 @@ export async function POST(req: NextRequest) {
       if (initialMessagePlan === "replay") {
         sendBody = existingInitialMessageRequest!.body;
         sentByLabel = existingInitialMessageRequest!.sent_by;
-      } else if (insertedLegacyBmartIntake) {
+      } else if (insertedLegacyBmartIntake && await getAgentMode(supabase, undefined, true) === "auto") {
         // 배민 비마트 임시중단 기간엔 폼에서 이미 받은 명시적 문자 선택을 그대로 존중한다.
         // 편집 가능한 과거 baemin_start는 미동의자에게 재동의를 묻거나 미래 안내를 약속할 수 있어 쓰지 않는다.
         // 플래그가 꺼져 있으면(=재개) 배민도 평시대로 danggeun_start를 공유한다.

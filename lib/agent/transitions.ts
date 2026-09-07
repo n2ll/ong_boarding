@@ -8,6 +8,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getAgentMode } from "./kill-switch";
 import { sendNotification } from "../solapi";
 import { sendSlackPausedAlert } from "../slack";
 import { getSystemMessage, fillTemplate } from "./system-messages";
@@ -43,6 +44,8 @@ interface ApplyTransitionInput {
   transition: StageTransition;
   /** true면 SOLAPI 발송과 Slack 알림 건너뛰고 DB outbound 기록만 — 연습용 빙의 모드. */
   simulate?: boolean;
+  /** 라우터가 검수 대상·공고·인입 시각을 묶어 전달하는 직전 재검증. */
+  canAutomate?: () => Promise<boolean>;
 }
 
 export interface ApplyTransitionResult {
@@ -50,6 +53,7 @@ export interface ApplyTransitionResult {
   auto_sent_messages: number;       // advance 시 자동 발송된 메시지 수
   /** 발송 여부 또는 발송 기록을 확인할 수 없어 대화 발송 잠금을 유지해야 함. */
   delivery_uncertain?: boolean;
+  blocked?: boolean;
 }
 
 export async function applyTransition(input: ApplyTransitionInput): Promise<ApplyTransitionResult> {
@@ -67,8 +71,14 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
     simulate = false,
   } = input;
 
+  const canAutomate = input.canAutomate ?? (async () => await getAgentMode(supabase, undefined, true) === "auto");
+  if (!simulate && !await canAutomate()) {
+    return { next_stage: current_stage, auto_sent_messages: 0, blocked: true };
+  }
+
   // 연습용 빙의 모드에선 실제 SMS·Slack 발송을 건너뛰고 fake-success로 처리해
   // DB outbound 기록과 체크리스트 갱신은 그대로 진행되게 한다.
+  let automationStopped = false;
   const maybeSendNotification: typeof sendNotification = simulate
     ? async () => ({
         success: true,
@@ -76,7 +86,13 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
         messageId: undefined,
         templateId: undefined,
       })
-    : sendNotification;
+    : async (...args) => {
+      if (!await canAutomate()) {
+        automationStopped = true;
+        return { success: false, failureKind: "declared", error: "자동 응대 허용 범위 종료", via: "sms" };
+      }
+      return sendNotification(...args);
+    };
 
   // 직전 outbound와 동일 본문이 이미 발송된 상태면 중복 발송 방지.
   // 시뮬 모드 등에서 transitions가 두 번 도는 케이스 가드.
@@ -475,6 +491,8 @@ export async function applyTransition(input: ApplyTransitionInput): Promise<Appl
       break;
     }
   }
+
+  if (automationStopped) return { next_stage: current_stage, auto_sent_messages: 0, blocked: true };
 
   // 안내 발송과 기록이 실패한 경우 스크리닝 완료 상태를 먼저 남기지 않는다.
   if (transition.kind === "advance" && transition.to === "onboarding" && !criticalSendFailure) {

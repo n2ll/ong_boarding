@@ -1,4 +1,4 @@
-import type { AgentTestSession } from "../agent/kill-switch";
+import { parseAgentTestSession, type AgentTestSession } from "../agent/kill-switch.ts";
 
 export type AdminAgentMode = "auto" | "draft" | "off";
 
@@ -75,12 +75,12 @@ export function agentModeView(input: {
       : { state: "error", mode: null };
   }
 
+  const testSession = !snapshot.override && isAdminAgentModeResponse(input.data)
+    ? parseAgentTestSession(JSON.stringify(input.data.test_session)) : null;
   return {
     state: input.error ? "stale" : "ready",
     mode: snapshot.effectiveMode,
-    ...(!snapshot.override && isAdminAgentModeResponse(input.data) && input.data.test_session
-      && Date.parse(input.data.test_session.expires_at) > Date.now()
-      ? { testSession: input.data.test_session } : {}),
+    ...(testSession ? { testSession } : {}),
   };
 }
 
@@ -156,7 +156,7 @@ export function agentModePresentation(view: AdminAgentModeView, applicantId?: nu
       label: applicantId === undefined ? "테스트 1명만 자동 응대"
         : isOtherApplicant ? "이 지원자 AI 중지됨" : "이 지원자는 자동 응대 검수 대상",
       detail: isOtherApplicant ? "검수 대상 1명 외 자동 응대 중지 · 수동 응대 가능"
-        : `일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`,
+        : `선택 공고 ${view.testSession.job_ids.length}개 · 일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`,
       canRetry: false,
       claimsAutomatic: false,
     };

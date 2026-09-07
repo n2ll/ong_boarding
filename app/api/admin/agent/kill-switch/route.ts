@@ -2,12 +2,12 @@
  * GET  /api/admin/agent/kill-switch
  *   → { mode: 'auto'|'draft'|'off', disabled: boolean, updated_at, env_forced }
  * POST /api/admin/agent/kill-switch
- *   body: { mode: 'auto'|'draft'|'off' } — 전역 AI 응답 3단 전환
+ *   body: { mode: 'draft'|'off' } 또는 { mode: 'test', phone, job_ids }.
  *   → GET과 같은 완전한 상태 snapshot. 클라이언트가 환경 강제 중지를 임의 추정하지 않게 한다.
- *   (하위호환: 구형 { disabled: boolean }도 수용 — true→off, false→auto)
+ *   구형 전체 재개(auto/disabled:false)는 409. disabled:true는 OFF.
  *
  * 전역 AI 응답 모드를 prompt_examples(category='system_message', title='agent_kill_switch')
- * body 값으로 저장한다. '0'=auto, 'draft'=코파일럿(초안만), '1'=off. 알 수 없는 값은 안전상 off.
+ * 'draft'=초안만, '1'=OFF, 검수 JSON=제한된 새 인입. 구형 '0'과 빈 설정도 OFF.
  * router.runAgentForCandidate가 처리 시작 전 getAgentMode()로 이 값을 확인한다.
  *
  * 주의: 환경변수 AGENT_DISABLED=1이 별도로 걸려 있으면 이 토글과 무관하게 항상 중단된다.
@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { invalidateKillSwitchCache, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
+import { invalidateKillSwitchCache, isValidTestJobIds, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
 import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +62,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown };
+    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown };
 
     let mode: AgentMode;
     const testing = payload.mode === "test";
@@ -86,6 +86,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 구형 UI/스크립트의 전체 재개 요청도 실제 저장 전에 차단한다.
+    if (mode === "auto") return NextResponse.json({ error: "전체 자동 응대는 잠겨 있습니다. 공고와 테스트 대상을 선택해 제한 검수를 사용해주세요." }, { status: 409 });
+    if (testing && !isValidTestJobIds(payload.job_ids)) return NextResponse.json({ error: "검수할 공고를 1~3개 선택해주세요." }, { status: 400 });
     const supabase = createServiceClient();
     let body = MODE_TO_BODY[mode];
     const updatedAt = new Date().toISOString();
@@ -99,7 +102,14 @@ export async function POST(req: NextRequest) {
       if (!target || !/테스트|test/i.test(target.name ?? "") || target.sms_opt_out_at) {
         return NextResponse.json({ error: "이름에 테스트 표시가 있고 수신거부하지 않은 단일 기존 계정만 검수할 수 있습니다." }, { status: 400 });
       }
-      body = JSON.stringify({ mode: "test", applicant_id: target.id, started_at: updatedAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() });
+      const jobIds = payload.job_ids as number[];
+      const { data: jobs, error: jobsError } = await supabase.from("jobs").select("id,title,status,closes_at").in("id", jobIds);
+      if (jobsError) return NextResponse.json({ error: "검수 공고 조회 실패" }, { status: 500 });
+      if (jobs?.length !== jobIds.length || jobs.some((job) => !job.title?.trim() || job.title.startsWith("__") || job.status !== "active"
+        || (job.closes_at != null && !(Date.parse(job.closes_at) > Date.now())))) {
+        return NextResponse.json({ error: "모집 중인 실제 공고만 검수할 수 있습니다." }, { status: 400 });
+      }
+      body = JSON.stringify({ mode: "test", applicant_id: target.id, job_ids: jobIds, started_at: updatedAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() });
     }
 
     // update-first + 부분 유니크 인덱스로 최초 생성 경쟁에서도 예약 행을 하나만 유지한다.
