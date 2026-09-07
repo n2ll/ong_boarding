@@ -137,7 +137,7 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
   const observations: unknown[] = [];
   const contexts: StageContext[] = [];
   const rpcCalls: string[] = [];
@@ -217,7 +217,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
         { job_id: 8, title: "강남 공고", branch: "강남", candidate_id: null, stage: null, expired: false },
       ] : [{ job_id: 7, title: "배송 공고", candidate_id: 11, stage: "exploration", expired: false }];
     } },
-    "./consultation-history": { loadConsultationHistory: async () => ({ history: [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: new Date().toISOString() }] }) },
+    "./consultation-history": { loadConsultationHistory: async () => ({ history: [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: input.oldSource ? "2000-01-01T00:00:00Z" : new Date().toISOString() }] }) },
     "./consultation-observations": { saveConsultationObservations: async (_db: unknown, _id: number, values: unknown[]) => {
       if (input.observationFails) throw new Error("event storage failed");
       observations.push(...values);
@@ -263,7 +263,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
       }),
     },
     "./kill-switch": {
-      getAgentMode: async (_db: unknown, scope?: { applicantId: number; receivedAt: string }) => input.scoped && (!scope || scope.applicantId !== 1 || !scope.receivedAt) ? "off" : input.stopAfterModel && contexts.length ? "off" : input.mode ?? "auto",
+      getAgentMode: async (_db: unknown, scope?: { applicantId: number; receivedAt: string; jobIds?: number[] }) => input.allowedJobs && (!scope?.jobIds?.length || scope.jobIds.some((id) => !input.allowedJobs!.includes(id)) || Date.parse(scope.receivedAt) < Date.now() - 3600_000) ? "off" : input.scoped && (!scope || scope.applicantId !== 1 || !scope.receivedAt) ? "off" : input.stopAfterModel && contexts.length ? "off" : input.mode ?? "auto",
       COPILOT_DRAFT_MARKER: "[copilot]",
     },
     "./outbound-safety": { detectAutomatedOutboundSafetyViolation: () => null },
@@ -467,5 +467,22 @@ test("router supplies verified applicant and inbound timestamp at every scoped m
   const h = loadRouter({ applicants: [applicant(1)], scoped: true, consultation: consultationEnvelope });
   const result = await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "네", received_at: new Date(Date.now()-120000).toISOString() });
   assert.equal(result.reply_sent, true);
+  assert.equal(h.smsCalls.length, 1);
+});
+
+for (const scenario of [{allowedJobs: [7]}, {allowedJobs: [7,8], oldSource: true}]) {
+  test(`scoped consultation blocks unrelated jobs or historical unanswered source ${JSON.stringify(scenario)}`, async () => {
+    const h = loadRouter({applicants: [applicant(1)], consultation: consultationEnvelope, ...scenario});
+    await h.router.runAgentForCandidate({supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "두 공고 문의", received_at: new Date(Date.now()-60000).toISOString()});
+    assert.equal(h.contexts.length, 0);
+    assert.equal(h.smsCalls.length, 0);
+    assert.equal(h.transitions.length, 0);
+    assert.equal(h.observations.length, 0);
+  });
+}
+test("scoped consultation with every job allowed still responds", async () => {
+  const h = loadRouter({applicants: [applicant(1)], consultation: consultationEnvelope, allowedJobs: [7,8]});
+  await h.router.runAgentForCandidate({supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "두 공고 문의", received_at: new Date(Date.now()-60000).toISOString()});
+  assert.equal(h.contexts.length, 1);
   assert.equal(h.smsCalls.length, 1);
 });

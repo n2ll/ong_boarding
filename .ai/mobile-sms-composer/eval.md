@@ -6,3 +6,4 @@
 - 검증: `npx --no-install playwright test --config=playwright.consultation.config.ts` — 빌드·타입·린트 통과 후 브라우저 12/12 통과. 신규 4개 크기 중 390px는 터치, 나머지는 좌표 클릭 검증. 기존 AI 표시·복수 공고 원문 표시 포함.
 - 수정 전후 화면은 `/tmp/sms-composer-375-before.png`, `/tmp/sms-composer-375.png`; 나머지 크기도 `/tmp/sms-composer-{width}.png`. 직접 이미지 확인 완료.
 - 한계: 실제 모바일 OS 키보드·특정 과거 배포·이전 자동화 클릭 좌표의 문제를 해결했다고 주장하지 않는다.
+- 자동 응대 제한 변경과 통합 후 같은 명령으로 재검증: 두 검수 묶음을 보존해 브라우저 14/14, 빌드·타입·린트 통과. 운영 DB와 실제 발송은 사용하지 않았다.

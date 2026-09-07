@@ -314,6 +314,7 @@ export function AgentBrain() {
   const killOverrideIsCurrent = globalAgentMode.state === "ready" && killEnvForced;
   const [killBusy, setKillBusy] = useState(false);
   const [testPhone, setTestPhone] = useState("");
+  const [testJobIds, setTestJobIds] = useState<number[]>([]);
   const testSession = globalAgentMode.state === "ready" ? globalAgentMode.testSession : undefined;
   const killUpdatedAt = killSnapshot?.updatedAt ?? null;
   const overview = useMemo(() => brainOverview({
@@ -344,6 +345,7 @@ export function AgentBrain() {
           : "bg-card border-border-strong";
 
   const handleChangeKillMode = async (next: BrainMode) => {
+    if (next === "auto") return;
     if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || (next === killMode && !testSession)) return;
     const ok =
       next === "off"
@@ -398,12 +400,12 @@ export function AgentBrain() {
 
 
   const handleStartTest = async () => {
-    if (killBusy || killEnvForced || globalAgentMode.state !== "ready" || killMode !== "off") return;
-    const ok = await confirm({ title: "이 번호로 자동 응대를 검수할까요?", description: `${testPhone}의 테스트 계정만 20분 동안 새 답장에 AI가 실제 문자를 보냅니다. 일반 지원자와 예약 작업은 중지됩니다.`, confirmText: "검수 시작" });
+    if (killBusy || killEnvForced || globalAgentMode.state !== "ready" || killMode !== "off" || !testJobIds.length || testJobIds.some((id) => !ovJobs.some((job) => job.id === id))) return;
+    const ok = await confirm({ title: "이 번호로 자동 응대를 검수할까요?", description: `${testPhone}의 테스트 계정과 선택 공고(${ovJobs.filter((job) => testJobIds.includes(job.id)).map((job) => job.title).join(", ")})만 20분 동안 새 답장에 AI가 실제 문자를 보냅니다. 일반 지원자와 예약 작업은 중지됩니다.`, confirmText: "검수 시작" });
     if (!ok) return;
     setKillBusy(true);
     try {
-      const res = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "test", phone: testPhone }) });
+      const res = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "test", phone: testPhone, job_ids: testJobIds }) });
       const json = await res.json();
       if (!res.ok) { toast.error(json.error || "검수를 시작하지 못했어요."); return; }
       if (!isAdminAgentModeResponse(json)) { toast.error("검수 상태를 확인하지 못했어요."); void mutateKill(); return; }
@@ -628,13 +630,13 @@ export function AgentBrain() {
         </div>
       </section>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col gap-6 lg:flex-row">
         {/* Sidebar Nav */}
-        <div role="tablist" aria-label="에이전트 두뇌 설정" className="flex w-[220px] shrink-0 flex-col gap-5">
+        <div role="tablist" aria-label="에이전트 두뇌 설정" className="flex w-full shrink-0 flex-wrap gap-5 lg:w-[220px] lg:flex-col">
           {BRAIN_TAB_GROUPS.map((group) => (
             <div key={group.label} role="presentation">
               <div className="mb-1.5 px-3 text-[12px] font-extrabold tracking-[0.12em] text-muted-foreground">{group.label}</div>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap gap-1 lg:flex-col">
                 {group.items.map((item) => {
                   const selected = activeTab === item.id;
                   const Icon = item.icon;
@@ -660,7 +662,7 @@ export function AgentBrain() {
         </div>
 
         {/* Content Area */}
-        <div id={`brain-panel-${activeTab}`} role="tabpanel" aria-labelledby={`brain-tab-${activeTab}`} tabIndex={0} className="min-w-0 flex-1 rounded-2xl border border-border-strong bg-card p-7 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <div id={`brain-panel-${activeTab}`} role="tabpanel" aria-labelledby={`brain-tab-${activeTab}`} tabIndex={0} className="min-w-0 flex-1 rounded-2xl border border-border-strong bg-card p-3 sm:p-7 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {activeTab === 'overview' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="mb-2 flex items-center justify-between">
@@ -1057,8 +1059,8 @@ export function AgentBrain() {
           {activeTab === 'mode' && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
               {/* 전역 AI 응답 모드 (실데이터 연동) — 자동 응대 / 코파일럿(초안만) / 완전 중지 */}
-              <div className={`mb-6 rounded-2xl border p-7 shadow-sm transition-colors ${killCardTone}`}>
-                <div className="flex items-start gap-3">
+              <div className={`mb-6 rounded-2xl border p-3 sm:p-7 shadow-sm transition-colors ${killCardTone}`}>
+                <div className="flex flex-col items-start gap-3 sm:flex-row">
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${agentModeCopy.kind === "loading" ? "bg-muted" : agentModeCopy.kind === "stale" ? "bg-warning-soft" : agentModeCopy.kind === "error" || killDisabled ? "bg-error-soft" : killDraft ? "bg-copilot-soft" : "bg-success-soft"}`}>
                     {agentModeCopy.kind === "loading" ? (
                       <Loader2 size={20} className="animate-spin text-muted-foreground motion-reduce:animate-none" />
@@ -1068,8 +1070,8 @@ export function AgentBrain() {
                       <Power size={20} className={agentModeCopy.kind === "stale" ? "text-warning-strong" : agentModeCopy.kind === "error" || killDisabled ? "text-error-strong" : "text-success"} />
                     )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                  <div className="w-full flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-[18px] font-extrabold text-foreground">응답 모드·안전</h2>
                       {agentModeCopy.kind === "loading" ? (
                         <span className="text-[12px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">확인 중…</span>
@@ -1090,7 +1092,7 @@ export function AgentBrain() {
                     {/* 3단 세그먼트 */}
                     <div role="radiogroup" aria-label="AI 전역 응답 모드" className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-[640px]">
                       {([
-                        { id: 'auto' as const, label: '자동 응대', desc: 'AI가 답장을 직접 발송하고 단계도 진행합니다.', icon: <Bot size={15} />, activeCls: 'border-success bg-success-soft ring-1 ring-success', dotCls: 'text-success-strong' },
+                        { id: 'auto' as const, label: '자동 응대', desc: '전체 자동 재개는 잠겨 있습니다. 아래에서 공고와 테스트 대상을 선택해주세요.', icon: <Bot size={15} />, activeCls: 'border-success bg-success-soft ring-1 ring-success', dotCls: 'text-success-strong' },
                         { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-copilot bg-copilot-soft ring-1 ring-copilot', dotCls: 'text-copilot-strong' },
                         { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-error bg-error-soft ring-1 ring-error', dotCls: 'text-error-strong' },
                       ]).map((opt) => {
@@ -1102,7 +1104,7 @@ export function AgentBrain() {
                             role="radio"
                             aria-checked={active}
                             onClick={() => handleChangeKillMode(opt.id)}
-                            disabled={globalAgentMode.state !== "ready" || killBusy || killEnvForced}
+                            disabled={opt.id === "auto" || globalAgentMode.state !== "ready" || killBusy || killEnvForced}
                             title={killOverrideIsCurrent
                               ? `저장된 선택은 ${MODE_LABEL[killMode ?? opt.id]}이지만 환경변수로 실제 AI는 중단되어 있습니다`
                               : globalAgentMode.state === "stale"
@@ -1126,17 +1128,31 @@ export function AgentBrain() {
                       <div className="mt-4 rounded-xl border border-border-strong p-3 text-sm">
                         {testSession ? (
                           <>
-                            <p role="status">테스트 계정 1명만 새 답장에 자동 응대합니다. 일반 지원자와 예약 작업은 중지됩니다.</p>
+                            <p role="status">테스트 계정 1명 · 선택 공고 {testSession.job_ids.length}개만 새 답장에 자동 응대합니다. 일반 지원자와 예약 작업은 중지됩니다.</p>
                             <p className="mt-1 text-muted-foreground">종료: {new Date(testSession.expires_at).toLocaleString("ko-KR")}</p>
                             <button type="button" disabled={killBusy} onClick={() => handleChangeKillMode("off")} className="mt-2 rounded-lg border px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring">검수 중단</button>
                           </>
                         ) : (
                           <>
                             <label htmlFor="agent-test-phone" className="block font-bold">자동 응대 검수용 전화번호</label>
-                            <p className="my-2 text-muted-foreground">테스트 표시가 있는 기존 계정 1명에게만 20분간 실제 답장을 보냅니다.</p>
+                            <p className="my-2 text-muted-foreground">테스트 표시가 있는 기존 계정 1명과 선택 공고에만 20분간 실제 답장을 보냅니다. 개별 중지한 후보는 그대로 중지됩니다.</p>
+                            <fieldset className="mb-3 space-y-2">
+                              <legend className="mb-2 font-bold">검수할 공고 (최대 3개)</legend>
+                              {ovJobsError ? <p role="alert">공고 목록을 불러오지 못했습니다.</p> : ovJobs.map((job) => (
+                                <label key={job.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border-strong px-3 py-2">
+                                  <input type="checkbox" checked={testJobIds.includes(job.id)}
+                                    disabled={killBusy || (!testJobIds.includes(job.id) && testJobIds.length >= 3)}
+                                    onChange={(event) => setTestJobIds((ids) => event.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))}
+                                    className="size-4 shrink-0 accent-primary focus-visible:ring-2 focus-visible:ring-ring" />
+                                  <span>{job.title}</span>
+                                </label>
+                              ))}
+                              {!ovJobsError && ovJobs.length === 0 && <p className="text-muted-foreground">모집 중인 공고가 필요합니다.</p>}
+                              <p className="text-muted-foreground">다른 공고나 검수 시작 전 미응답 문자가 섞인 대화는 직접 응대해주세요.</p>
+                            </fieldset>
                             <div className="flex flex-wrap gap-2">
-                              <input id="agent-test-phone" type="tel" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} className="rounded-lg border bg-background px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring" />
-                              <button type="button" disabled={killBusy || !testPhone.trim()} onClick={handleStartTest} className="rounded-lg border px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">20분 검수 시작</button>
+                              <input id="agent-test-phone" type="tel" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} className="min-w-0 max-w-full rounded-lg border bg-background px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring" />
+                              <button type="button" disabled={killBusy || !testPhone.trim() || !testJobIds.length || Boolean(ovJobsError) || testJobIds.some((id) => !ovJobs.some((job) => job.id === id))} onClick={handleStartTest} className="rounded-lg border px-3 py-2 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">20분 검수 시작</button>
                             </div>
                           </>
                         )}

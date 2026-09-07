@@ -20,7 +20,7 @@ const compiled = ts.transpileModule(
   { compilerOptions: { esModuleInterop: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 
-function harness(failure?: Failure) {
+function harness(failure?: Failure, canAutomate = async () => true) {
   const writes: Write[] = [];
   const sends: string[] = [];
   const alerts: Row[] = [];
@@ -55,6 +55,7 @@ function harness(failure?: Failure) {
   }
 
   const modules: Record<string, unknown> = {
+    "./kill-switch": { getAgentMode: async () => "off" },
     "../solapi": {
       async sendNotification(_phone: string, template: string) {
         sends.push(template);
@@ -90,6 +91,7 @@ function harness(failure?: Failure) {
   });
   const transitions = compiledModule.exports as {
     applyTransition(input: {
+      canAutomate?: () => Promise<boolean>;
       supabase: unknown;
       candidate_id: number;
       applicant_id: number;
@@ -108,6 +110,7 @@ function harness(failure?: Failure) {
     run(path: Path) {
       return transitions.applyTransition({
         supabase: { from: (table: string) => new Query(table) },
+        canAutomate,
         candidate_id: 10, applicant_id: 20, applicant_name: "테스트 지원자",
         applicant_phone: "01000000000", job_id: 30,
         job: { title: "테스트 배송", client_type: path === "handoff" ? "general" : "baemin_bmart" },
@@ -178,3 +181,25 @@ test("failure before attempting a provider send is not delivery uncertainty", as
   assert.equal(result.next_stage, "paused");
   assert.deepEqual(fixture.sends, []);
 });
+
+for (const path of ["screening", "handoff", "guide"] as const) {
+  test(`${path}: scope closed before transition causes no messages or state writes`, async () => {
+    const h = harness(undefined, async () => false);
+    const result = await h.run(path);
+    assert.equal(result.auto_sent_messages, 0);
+    assert.equal(h.sends.length, 0);
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.alerts.length, 0);
+  });
+}
+
+for (const path of ["screening", "handoff", "guide"] as const) {
+  test(`${path}: expiration while preparing a template prevents provider and state writes`, async () => {
+    let checks = 0;
+    const h = harness(undefined, async () => ++checks === 1);
+    await h.run(path);
+    assert.equal(h.sends.length, 0);
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.alerts.length, 0);
+  });
+}

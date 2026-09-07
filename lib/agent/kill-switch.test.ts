@@ -14,19 +14,19 @@ function fakeClient(result: { data: unknown; error: unknown }) {
 async function loadKillSwitch() {
   const modulePath = "./kill-switch.ts";
   return await import(modulePath) as {
-    getAgentMode: (client: never, scope?: { applicantId: number; receivedAt: string }) => Promise<"auto" | "draft" | "off">;
+    getAgentMode: (client: never, scope?: { applicantId: number; receivedAt: string; jobIds?: number[] }) => Promise<"auto" | "draft" | "off">;
     invalidateKillSwitchCache: () => void;
     parseAgentMode: (body: string | null | undefined) => "auto" | "draft" | "off";
   };
 }
 
-test("only known empty or zero values enable automatic mode", async () => {
+test("legacy global auto and missing values fail closed", async () => {
   const { parseAgentMode } = await loadKillSwitch();
 
-  assert.equal(parseAgentMode(undefined), "auto");
-  assert.equal(parseAgentMode(null), "auto");
-  assert.equal(parseAgentMode(""), "auto");
-  assert.equal(parseAgentMode(" 0 "), "auto");
+  assert.equal(parseAgentMode(undefined), "off");
+  assert.equal(parseAgentMode(null), "off");
+  assert.equal(parseAgentMode(""), "off");
+  assert.equal(parseAgentMode(" 0 "), "off");
   assert.equal(parseAgentMode("draft"), "draft");
   assert.equal(parseAgentMode("1"), "off");
   assert.equal(parseAgentMode("garbage"), "off");
@@ -43,12 +43,12 @@ test("ambiguous duplicate kill-switch rows fail closed instead of silently enabl
   assert.equal(await getAgentMode(client as never), "off");
 });
 
-test("a missing kill-switch row keeps the intentional default auto behavior", async () => {
+test("a missing kill-switch row fails closed", async () => {
   const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
   invalidateKillSwitchCache();
   const client = fakeClient({ data: [], error: null });
 
-  assert.equal(await getAgentMode(client as never), "auto");
+  assert.equal(await getAgentMode(client as never), "off");
 });
 
 test("a malformed stored kill-switch value fails closed", async () => {
@@ -83,7 +83,7 @@ test("a thrown database exception fails closed instead of enabling automatic rep
 });
 
 function testBody(start = Date.now() - 1000, end = Date.now() + 60_000) {
-  return JSON.stringify({ mode: "test", applicant_id: 7, started_at: new Date(start).toISOString(), expires_at: new Date(end).toISOString() });
+  return JSON.stringify({ mode: "test", applicant_id: 7, job_ids: [11, 12], started_at: new Date(start).toISOString(), expires_at: new Date(end).toISOString() });
 }
 
 test("test session permits only new inbound from one applicant, including with a shared cache", async () => {
@@ -91,18 +91,18 @@ test("test session permits only new inbound from one applicant, including with a
   invalidateKillSwitchCache();
   const client = fakeClient({ data: [{ body: testBody() }], error: null }) as never;
   const receivedAt = new Date().toISOString();
-  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt }), "auto");
-  assert.equal(await getAgentMode(client, { applicantId: 8, receivedAt }), "off");
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt, jobIds: [11] }), "auto");
+  assert.equal(await getAgentMode(client, { applicantId: 8, receivedAt, jobIds: [11] }), "off");
   assert.equal(await getAgentMode(client), "off", "unscoped cron must remain stopped");
-  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: new Date(Date.now() - 5000).toISOString() }), "off");
-  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: "invalid" }), "off");
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: new Date(Date.now() - 5000).toISOString(), jobIds: [11] }), "off");
+  assert.equal(await getAgentMode(client, { applicantId: 7, receivedAt: "invalid", jobIds: [11] }), "off");
 });
 
 test("expired, future, overly long or malformed test sessions fail closed", async () => {
   const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
   for (const body of [testBody(Date.now()-5000, Date.now()-1000), testBody(Date.now()+1000, Date.now()+5000), testBody(Date.now()-1000, Date.now()+3600_000), '{"mode":"test","applicant_id":7}']) {
     invalidateKillSwitchCache();
-    assert.equal(await getAgentMode(fakeClient({ data: [{ body }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString() }), "off");
+    assert.equal(await getAgentMode(fakeClient({ data: [{ body }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11] }), "off");
   }
 });
 
@@ -111,9 +111,30 @@ test("environment kill switch overrides a valid test session", async () => {
   const before = process.env.AGENT_DISABLED;
   try {
     invalidateKillSwitchCache(); process.env.AGENT_DISABLED = "1";
-    assert.equal(await getAgentMode(fakeClient({ data: [{ body: testBody() }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString() }), "off");
+    assert.equal(await getAgentMode(fakeClient({ data: [{ body: testBody() }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11] }), "off");
   } finally {
     if (before === undefined) delete process.env.AGENT_DISABLED; else process.env.AGENT_DISABLED = before;
     invalidateKillSwitchCache();
+  }
+});
+
+test("test scope requires every job and refuses a missing or unrelated job", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const db = fakeClient({ data: [{ body: testBody() }], error: null }) as never;
+  const scope = { applicantId: 7, receivedAt: new Date().toISOString() };
+  assert.equal(await getAgentMode(db, scope), "off");
+  assert.equal(await getAgentMode(db, {...scope, jobIds: []}), "off");
+  assert.equal(await getAgentMode(db, {...scope, jobIds: [11, 13]}), "off");
+  assert.equal(await getAgentMode(db, {...scope, jobIds: [11, 12]}), "auto");
+});
+
+test("old unscoped test sessions and malformed job scopes are off", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  for (const job_ids of [undefined, [], [11,11], [0], ["11"], [11,12,13,14]]) {
+    invalidateKillSwitchCache();
+    const body = JSON.stringify({...JSON.parse(testBody()), job_ids});
+    const db = fakeClient({ data: [{body}], error: null }) as never;
+    assert.equal(await getAgentMode(db, {applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11]}), "off");
   }
 });

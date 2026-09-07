@@ -2,7 +2,7 @@
  * 전역 AI 응답 모드 스위치 (3단).
  *
  * DB 플래그(`prompt_examples` 안에 category='system_message', title='agent_kill_switch') body 값:
- *  - ''/'0'/행 없음 → 'auto'  : AI 자동 응대 (기존 동작)
+ *  - ''/'0'/행 없음 → 'off'   : 대상 없는 전역 자동 재개 금지
  *  - '1'            → 'off'   : 완전 중지 (기존 kill-switch ON과 100% 동일)
  *  - JSON test 세션 → 지정 지원자의 새 인입만 auto, 대상 없는 호출은 off
  *  - 'draft'        → 'draft' : 코파일럿 — AI가 초안(message_drafts)만 만들고 발송·전이는 하지 않음
@@ -28,22 +28,29 @@ export type AgentMode = "auto" | "draft" | "off";
  *   ConversationThread 초안 카드·messages/send의 승인 처리에서 이 마커로 판정) */
 export const COPILOT_DRAFT_MARKER = "[코파일럿]";
 
-export type AgentTestSession = { mode: "test"; applicant_id: number; started_at: string; expires_at: string };
-export type AgentInboundScope = { applicantId: number; receivedAt: string };
+export type AgentTestSession = { mode: "test"; applicant_id: number; job_ids: number[]; started_at: string; expires_at: string };
+export type AgentInboundScope = { applicantId: number; receivedAt: string; jobIds?: number[] };
+
+export function isValidTestJobIds(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 3
+    && value.every((id) => Number.isSafeInteger(id) && id > 0)
+    && new Set(value).size === value.length;
+}
 
 export function parseAgentTestSession(body: string | null | undefined, now = Date.now()): AgentTestSession | null {
   try {
     const value = JSON.parse(body ?? "") as AgentTestSession;
-    if (!value || value.mode !== "test" || !Number.isSafeInteger(value.applicant_id) || value.applicant_id <= 0) return null;
+    if (!value || value.mode !== "test" || !Number.isSafeInteger(value.applicant_id) || value.applicant_id <= 0 || !isValidTestJobIds(value.job_ids)) return null;
     const start = Date.parse(value.started_at), end = Date.parse(value.expires_at);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 30 * 60_000 || now < start || now >= end) return null;
-    return { mode: "test", applicant_id: value.applicant_id, started_at: value.started_at, expires_at: value.expires_at };
+    return { mode: "test", applicant_id: value.applicant_id, job_ids: value.job_ids, started_at: value.started_at, expires_at: value.expires_at };
   } catch { return null; }
 }
 
 function scopedMode(body: string | null | undefined, scope?: AgentInboundScope): AgentMode {
   const session = parseAgentTestSession(body);
-  if (session && scope && scope.applicantId === session.applicant_id) {
+  if (session && scope && scope.applicantId === session.applicant_id
+    && scope.jobIds?.length && scope.jobIds.every((id) => session.job_ids.includes(id))) {
     const received = Date.parse(scope.receivedAt);
     if (received >= Date.parse(session.started_at) && received < Date.parse(session.expires_at) && received <= Date.now()) return "auto";
   }
@@ -57,7 +64,6 @@ const TTL_MS = 5_000; // 안전상 짧게 — 토글 후 5초 이내 반영
 /** DB body 문자열 → 모드. API 라우트와 판정을 공유한다. */
 export function parseAgentMode(body: string | null | undefined): AgentMode {
   const v = (body ?? "").trim();
-  if (v === "" || v === "0") return "auto";
   if (v === "draft") return "draft";
   return "off";
 }
