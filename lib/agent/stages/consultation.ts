@@ -2,7 +2,7 @@ import { buildToneGuide } from "../examples";
 import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
 import type { StageContext, StageResult } from "../types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 const TOOL = {
   name: "consultation_turn",
   description: "안내 가능한 공고의 확인된 조건, 관심·가능 시간 발언 또는 대상 확인을 반환한다.",

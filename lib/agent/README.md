@@ -34,8 +34,8 @@
 
 ## 모델 사용처
 
-- **Sonnet 4.6** — screening / onboarding / exploration / active의 복수 공고 상담 / 공고 생성·추출
-- **Haiku 4.5** — 배민 triage (저비용 분류)
+- **Sonnet 4.6** — 공고 생성·추출
+- **Haiku 4.5** — screening / onboarding / exploration / active의 복수 공고 상담 / 배민 triage (저비용 분류)
 
 ## "확정 뉘앙스 절대 금지"
 

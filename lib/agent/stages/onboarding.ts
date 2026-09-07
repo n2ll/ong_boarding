@@ -25,7 +25,7 @@ import type {
 } from "../types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 const MANAGER_NAME = process.env.AGENT_MANAGER_NAME || "홍석범";
 
 const SYSTEM_PROMPT_BODY = `너는 옹고잉 비마트 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대 에이전트다.

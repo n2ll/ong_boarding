@@ -16,7 +16,7 @@ alwaysApply: true
 - 스타일: **Tailwind CSS v4** (`@tailwindcss/postcss`), 일부 **MUI** + **Emotion**
 - UI 프리미티브: **Radix UI** 기반 **shadcn/ui** (`components/ui/`)
 - 데이터: **Supabase** (Postgres + Database Webhook)
-- AI: **Anthropic Claude** (Sonnet 4.6 응대 / Haiku 4.5 분류)
+- AI: **Anthropic Claude** (Haiku 4.5 응대·분류 / Sonnet 4.6 공고 생성·추출)
 - 외부 연동: **SOLAPI**(SMS·알림톡), **Slack**, **카카오/네이버 지오코딩**, **Google Sheets**
 - 배포: **Vercel** (Cron 포함)
 - import alias: `@/*` → 루트 기준

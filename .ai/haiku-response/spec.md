@@ -1,0 +1,2 @@
+All four response stages use claude-haiku-4-5-20251001; request and usage metadata agree. Admin model copy and current rules match. Job creation remains Sonnet. No DB migration or automatic activation. Existing output validation and manager-only confirmation stay in force. Rollback: revert this model change; keep global OFF.
+Haiku initially promoted nested consultation fields and returned consultation as a string. Add an explicit nested-object example to the shared consultation contract; do not coerce malformed output or weaken server validation.

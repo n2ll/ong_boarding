@@ -24,8 +24,8 @@ alwaysApply: false
 Claude를 호출하는 코드는 응답 `usage`를 받아 **`ai_usage_daily`에 적재**하고, outbound `messages` 행의 토큰 컬럼을 채운다. 헬퍼: `lib/agent/usage.ts`. 새 Claude 호출 경로를 추가하면 이 적재를 빠뜨리지 말 것.
 
 ## 모델 선택
-- **Sonnet 4.6**: screening / onboarding / exploration / 공고 생성·추출.
-- **Haiku 4.5**: 배민 triage(미매칭 SMS 분류, 저비용). 분류·필터 같은 가벼운 작업엔 Haiku를 쓴다.
+- **Sonnet 4.6**: 공고 생성·추출.
+- **Haiku 4.5**: screening / onboarding / exploration / active 복수 공고 상담 / 배민 triage(미매칭 SMS 분류, 저비용). 분류·필터 같은 가벼운 작업엔 Haiku를 쓴다.
 
 ## 시스템 메시지 / 톤
 - 자동 발송 멘트는 `system-messages.ts`에서 키로 조회(`getSystemMessage`), `{{이름}}` placeholder 치환. 문구를 코드에 하드코딩하지 말고 이 경로를 쓴다.

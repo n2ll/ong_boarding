@@ -37,7 +37,7 @@ import type {
 } from "../types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 
 const MANAGER_NAME = process.env.AGENT_MANAGER_NAME || "홍석범";
 

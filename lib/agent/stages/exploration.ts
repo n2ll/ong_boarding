@@ -26,7 +26,7 @@ import type {
 } from "../types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 const MANAGER_NAME = process.env.AGENT_MANAGER_NAME || "홍석범";
 
 // 페르소나 명칭은 공고 종류에 따라 갈린다 — 비마트(기존) / 비마트 외 일반 배송 공고.

@@ -62,6 +62,7 @@ function advancingOutput(consultation: unknown): Record<string, unknown> {
 }
 
 type RequestBody = {
+  model: string;
   tools: Array<{ input_schema: { required: string[] } }>;
   tool_choice: { name: string };
   messages: Array<{ content: string }>;
@@ -159,9 +160,10 @@ for (const stageName of ["exploration", "screening", "onboarding", "active"]) {
     assert.match(result.reply_text ?? "", /13:00~17:00/);
     assert.doesNotMatch(result.reply_text ?? "", /임의 답변/);
     assert.equal(result.consultation.observations[0]?.quote, "새벽 배송은 관심 있어요.");
-    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-sonnet-4-6", ...usage });
+    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-haiku-4-5-20251001", ...usage });
     assert.equal(requests.length, 1, "a consultation needs one Claude request and no Slack request");
     assert.equal(requests[0].url, "https://api.anthropic.com/v1/messages");
+    assert.equal(requests[0].body.model, "claude-haiku-4-5-20251001");
     assert.ok(requests[0].body.tools[0].input_schema.required.includes("consultation"));
     assert.match(requests[0].body.messages[0].content, /낮 배송/);
     assert.match(requests[0].body.messages[0].content, /inbound-1/);
@@ -175,7 +177,7 @@ for (const stageName of ["exploration", "screening", "onboarding", "active"]) {
     assert.equal(result.transition.kind, "pause");
     assert.equal(result.reply_text, null);
     assertNoProgress(result, before, ctx);
-    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-sonnet-4-6", ...usage });
+    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-haiku-4-5-20251001", ...usage });
     assert.equal(requests.length, 1);
   });
 
@@ -187,7 +189,7 @@ for (const stageName of ["exploration", "screening", "onboarding", "active"]) {
     assert.equal(result.transition.kind, "pause");
     assert.equal(result.reply_text, null);
     assertNoProgress(result, before, ctx);
-    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-sonnet-4-6", ...usage });
+    assert.deepEqual(JSON.parse(JSON.stringify(result.usage)), { model: "claude-haiku-4-5-20251001", ...usage });
     assert.equal(requests.length, 1);
   });
 }
