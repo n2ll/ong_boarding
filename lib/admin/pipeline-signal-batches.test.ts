@@ -4,6 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
+import { parsePoolPreferences, type PoolPreferenceSnapshot } from "../pool-preferences.ts";
 
 type ActiveCheck = {
   configured: boolean;
@@ -13,6 +14,7 @@ type ActiveCheck = {
 };
 
 type PoolEventSummary = {
+  pool_preferences?: PoolPreferenceSnapshot | null;
   last_ping_at: string | null;
   last_link_view_at: string | null;
   last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
@@ -54,6 +56,7 @@ type SignalBatchModule = {
     excludeRecentPing: boolean;
     reactionOnly: boolean;
     sortMode: string;
+    poolPreferences?: boolean;
   }) => boolean;
   pipelineSummaryRowStatus?: (input: {
     state: "idle" | "loading" | "ready" | "error";
@@ -486,7 +489,7 @@ function loadSummaryRoute(events: PoolEvent[], messages: ReplyMessage[] = [], me
         for (const order of this.queryOrders) {
           const a = left[order.column as keyof typeof left];
           const b = right[order.column as keyof typeof right];
-          const compared = String(a).localeCompare(String(b));
+          const compared = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
           if (compared !== 0) return order.ascending ? compared : -compared;
         }
         return 0;
@@ -523,6 +526,7 @@ function loadSummaryRoute(events: PoolEvent[], messages: ReplyMessage[] = [], me
         return { createServiceClient: () => ({ from: (table: string) => new QueryBuilder(table) }) };
       }
       if (specifier === "@/lib/admin/postgrest-pagination") return { fetchAllPostgrestRows };
+      if (specifier === "@/lib/pool-preferences") return { parsePoolPreferences };
       return {};
     },
   });
@@ -601,4 +605,32 @@ test("reply summary reads all inbound pages and fails instead of returning a par
   const failure = await failing.route.POST(request);
   assert.equal(failure.status, 500);
   assert.equal(failure.body.summaryById, undefined);
+});
+
+test("pool preference filters request summaries in every candidate view", async () => {
+  const { pipelineNeedsSummary } = await loadSignalBatchModule();
+  assert.ok(pipelineNeedsSummary);
+  for (const view of ["list", "kanban", "map", "funnel"] as const) {
+    assert.equal(pipelineNeedsSummary({ view, excludeRecentPing: false, reactionOnly: false, sortMode: "recent", poolPreferences: true }), view !== "funnel");
+  }
+});
+
+test("pool summary returns only the latest preferences, including ID ties and invalid latest records", async () => {
+  const at = "2026-09-08T05:00:00Z";
+  const prefs = { kind: "regular", area: "성동구", schedule: "금요일 오후", vehicle: "세단", notice: "하루 전" };
+  const event = (id: number, applicant_id: number, meta: Record<string, unknown>, created_at = at): PoolEvent => ({ id, applicant_id, event_type: "pool_preferences", job_id: null, meta, created_at });
+  const { route } = loadSummaryRoute([
+    event(9, 1, prefs), event(10, 1, { ...prefs, kind: "both" }),
+    event(11, 2, prefs, "2026-09-07T05:00:00Z"), event(12, 2, { kind: "backup" }),
+    event(13, 3, prefs, "2020-01-01T00:00:00Z"),
+  ]);
+  const response = await route.POST({ json: async () => ({ applicantIds: [1, 2, 3, 4] }) });
+  const summary = response.body.summaryById as Record<number, PoolEventSummary>;
+  assert.equal(response.status, 200);
+  assert.equal(summary[1]?.pool_preferences?.kind, "both");
+  assert.equal(summary[1]?.pool_preferences?.updated_at, at);
+  assert.equal(summary[2]?.pool_preferences, null);
+  assert.equal(summary[3]?.pool_preferences?.updated_at, "2020-01-01T00:00:00Z");
+  assert.equal(summary[4], undefined);
+  assert.equal(summary[1].last_reply_at, null);
 });
