@@ -23,6 +23,7 @@ import { poolJobGroups } from "@/lib/pool-job-groups";
 import { POOL_STATUS_DONE_LABEL } from "@/lib/pool-status";
 import { useParams } from "next/navigation";
 import Image from "next/image";
+import { PoolPreferences } from "@/components/PoolPreferences";
 import {
   AlertCircle,
   Bell,
@@ -492,6 +493,8 @@ export default function PoolPage() {
             </p>
           )}
         </header>
+
+        <PoolPreferences key={token} token={token} />
 
         {groupedJobs.activeCount === 0 && (
           <div className="bg-card border border-border-strong rounded-2xl p-6 text-center mb-4 shadow-sm">

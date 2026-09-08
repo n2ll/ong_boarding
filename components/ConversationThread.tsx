@@ -1,4 +1,5 @@
 "use client";
+import { parsePoolPreferences, POOL_PREFERENCE_LABELS } from "@/lib/pool-preferences";
 
 import { Fragment, useState, useEffect, useCallback, useRef } from "react";
 import { Bot, User, Send, AlertTriangle, MessageSquare, Loader2, Wand2, Check, X, Ban, ArrowRight, BriefcaseBusiness, LockKeyhole } from "lucide-react";
@@ -105,6 +106,10 @@ interface PoolEvent {
 function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): string {
   const meta = (ev.meta ?? {}) as { immediate?: unknown; to?: unknown };
   switch (ev.event_type) {
+    case "pool_preferences": {
+      const preferences = parsePoolPreferences(ev.meta);
+      return preferences ? `인력풀 희망 조건 · ${POOL_PREFERENCE_LABELS[preferences.kind]} · ${preferences.area} · ${preferences.schedule} · 차량: ${preferences.vehicle}${preferences.notice ? ` · 사전 연락: ${preferences.notice}` : ""}` : "인력풀 희망 조건 갱신";
+    }
     case "ping_sent":
       return "⚡ 다시 연락 문자 발송";
     case "link_view":
@@ -575,7 +580,7 @@ export function ConversationThread({
   const dedupedEvents: PoolEvent[] = [];
   for (const ev of currentEvents) {
     const last = dedupedEvents[dedupedEvents.length - 1];
-    if (last && ev.event_type !== "job_consultation_observation" && last.event_type === ev.event_type && last.job_id === ev.job_id) {
+    if (last && ev.event_type !== "job_consultation_observation" && ev.event_type !== "pool_preferences" && last.event_type === ev.event_type && last.job_id === ev.job_id) {
       dedupedEvents[dedupedEvents.length - 1] = ev;
     } else {
       dedupedEvents.push(ev);
@@ -1299,7 +1304,7 @@ export function ConversationThread({
                   <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[12px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className={`bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 ${ev.event_type === "job_consultation_observation" ? "max-w-full whitespace-pre-wrap break-words rounded-xl" : "rounded-full"}`} title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className={`bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 ${["job_consultation_observation", "pool_preferences"].includes(ev.event_type) ? "max-w-full whitespace-pre-wrap break-words rounded-xl" : "rounded-full"}`} title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, currentJobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>
