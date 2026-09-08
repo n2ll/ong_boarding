@@ -5,6 +5,7 @@ import { Save, RefreshCw, MessageSquare, Database, Sparkles, SlidersHorizontal, 
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AgentPilotPanel } from "./AgentPilotPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { AGENT_CATEGORY_IDS, getCategory } from "@/lib/agent/handoff-category";
 import { Button } from "@/components/ui/button";
@@ -315,6 +316,7 @@ export function AgentBrain() {
   const [killBusy, setKillBusy] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testJobIds, setTestJobIds] = useState<number[]>([]);
+  const pilotSession = globalAgentMode.state === "ready" ? globalAgentMode.pilotSession : undefined;
   const testSession = globalAgentMode.state === "ready" ? globalAgentMode.testSession : undefined;
   const killUpdatedAt = killSnapshot?.updatedAt ?? null;
   const overview = useMemo(() => brainOverview({
@@ -346,7 +348,7 @@ export function AgentBrain() {
 
   const handleChangeKillMode = async (next: BrainMode) => {
     if (next === "auto") return;
-    if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || (next === killMode && !testSession)) return;
+    if (killBusy || globalAgentMode.state !== "ready" || !killSnapshot || killEnvForced || (next === killMode && !testSession && !pilotSession)) return;
     const ok =
       next === "off"
         ? await confirm({
@@ -503,7 +505,7 @@ export function AgentBrain() {
   const modeSummary = overview.mode.state === "ready" && overview.mode.value
     ? killSnapshot?.override
       ? "환경 강제 중지"
-      : testSession ? agentModeCopy.label : MODE_LABEL[overview.mode.value]
+      : (testSession || pilotSession) ? agentModeCopy.label : MODE_LABEL[overview.mode.value]
     : overview.mode.state === "loading"
       ? "확인 중"
       : overview.mode.state === "stale"
@@ -1081,7 +1083,7 @@ export function AgentBrain() {
                         <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[12px] font-bold text-warning-strong">갱신 실패</span>
                       ) : (
                         <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ${killDisabled ? "bg-error-soft text-error-strong" : killDraft ? "bg-copilot-soft text-copilot-strong" : "bg-success/25 text-success-strong"}`}>
-                          {killOverrideIsCurrent ? "중단됨 (환경변수)" : testSession ? "테스트 1명만 자동 응대" : killDisabled ? "중단됨" : killDraft ? "코파일럿" : "자동 응대"}
+                          {killOverrideIsCurrent ? "중단됨 (환경변수)" : pilotSession ? "선택 대상만 자동 응대" : testSession ? "테스트 1명만 자동 응대" : killDisabled ? "중단됨" : killDraft ? "코파일럿" : "자동 응대"}
                         </span>
                       )}
                     </div>
@@ -1092,11 +1094,11 @@ export function AgentBrain() {
                     {/* 3단 세그먼트 */}
                     <div role="radiogroup" aria-label="AI 전역 응답 모드" className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-[640px]">
                       {([
-                        { id: 'auto' as const, label: '자동 응대', desc: '전체 자동 재개는 잠겨 있습니다. 아래에서 공고와 테스트 대상을 선택해주세요.', icon: <Bot size={15} />, activeCls: 'border-success bg-success-soft ring-1 ring-success', dotCls: 'text-success-strong' },
+                        { id: 'auto' as const, label: '자동 응대', desc: '전체 자동 재개는 잠겨 있습니다. 아래에서 공고와 운영 대상을 선택해주세요.', icon: <Bot size={15} />, activeCls: 'border-success bg-success-soft ring-1 ring-success', dotCls: 'text-success-strong' },
                         { id: 'draft' as const, label: '코파일럿 (초안만)', desc: 'AI는 초안만 작성 — 발송은 매니저 승인 후에만 됩니다.', icon: <Zap size={15} />, activeCls: 'border-copilot bg-copilot-soft ring-1 ring-copilot', dotCls: 'text-copilot-strong' },
                         { id: 'off' as const, label: '완전 중지', desc: 'AI가 아무것도 하지 않습니다. 매니저가 직접 응대합니다.', icon: <Power size={15} />, activeCls: 'border-error bg-error-soft ring-1 ring-error', dotCls: 'text-error-strong' },
                       ]).map((opt) => {
-                        const active = killSnapshot !== null && !testSession && killMode === opt.id;
+                        const active = killSnapshot !== null && !testSession && !pilotSession && killMode === opt.id;
                         return (
                           <button
                             key={opt.id}
@@ -1124,7 +1126,11 @@ export function AgentBrain() {
                       })}
                     </div>
 
-                    {killDisabled && !killEnvForced && (
+                    <AgentPilotPanel jobs={ovJobs} jobsError={Boolean(ovJobsError)} session={pilotSession}
+                      disabled={killBusy || globalAgentMode.state !== "ready" || !killDisabled || Boolean(killEnvForced) || Boolean(testSession)}
+                      onUpdated={() => mutateKill()} />
+
+                    {killDisabled && !killEnvForced && !pilotSession && (
                       <div className="mt-4 rounded-xl border border-border-strong p-3 text-sm">
                         {testSession ? (
                           <>

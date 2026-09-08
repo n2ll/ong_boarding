@@ -4,7 +4,7 @@
  * DB 플래그(`prompt_examples` 안에 category='system_message', title='agent_kill_switch') body 값:
  *  - ''/'0'/행 없음 → 'off'   : 대상 없는 전역 자동 재개 금지
  *  - '1'            → 'off'   : 완전 중지 (기존 kill-switch ON과 100% 동일)
- *  - JSON test 세션 → 지정 지원자의 새 인입만 auto, 대상 없는 호출은 off
+ *  - JSON test/pilot 세션 → 지정 지원자·공고의 새 인입만 auto, 대상 없는 호출은 off
  *  - 'draft'        → 'draft' : 코파일럿 — AI가 초안(message_drafts)만 만들고 발송·전이는 하지 않음
  *  - 그 외 손상값    → 'off'   : 불명확한 상태에서 자동응답을 임의 재개하지 않음
  *  - DB 조회 실패    → 'off'   : 저장된 중지 의도를 확인할 수 없으면 매니저 수동 응대로 전환
@@ -29,6 +29,7 @@ export type AgentMode = "auto" | "draft" | "off";
 export const COPILOT_DRAFT_MARKER = "[코파일럿]";
 
 export type AgentTestSession = { mode: "test"; applicant_id: number; job_ids: number[]; started_at: string; expires_at: string };
+export type AgentPilotSession = { mode: "pilot"; applicant_ids: number[]; job_ids: number[]; started_at: string; expires_at: string };
 export type AgentInboundScope = { applicantId: number; receivedAt: string; jobIds?: number[] };
 
 export function isValidTestJobIds(value: unknown): value is number[] {
@@ -47,9 +48,25 @@ export function parseAgentTestSession(body: string | null | undefined, now = Dat
   } catch { return null; }
 }
 
+export function isValidPilotApplicantIds(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 10
+    && value.every((id) => Number.isSafeInteger(id) && id > 0)
+    && new Set(value).size === value.length;
+}
+
+export function parseAgentPilotSession(body: string | null | undefined, now = Date.now()): AgentPilotSession | null {
+  try {
+    const value = JSON.parse(body ?? "") as AgentPilotSession;
+    if (!value || value.mode !== "pilot" || !isValidPilotApplicantIds(value.applicant_ids) || !isValidTestJobIds(value.job_ids)) return null;
+    const start = Date.parse(value.started_at), end = Date.parse(value.expires_at);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 24 * 3600_000 || now < start || now >= end) return null;
+    return { mode: "pilot", applicant_ids: value.applicant_ids, job_ids: value.job_ids, started_at: value.started_at, expires_at: value.expires_at };
+  } catch { return null; }
+}
+
 function scopedMode(body: string | null | undefined, scope?: AgentInboundScope): AgentMode {
-  const session = parseAgentTestSession(body);
-  if (session && scope && scope.applicantId === session.applicant_id
+  const session = parseAgentTestSession(body) ?? parseAgentPilotSession(body);
+  if (session && scope && (session.mode === "test" ? scope.applicantId === session.applicant_id : session.applicant_ids.includes(scope.applicantId))
     && scope.jobIds?.length && scope.jobIds.every((id) => session.job_ids.includes(id))) {
     const received = Date.parse(scope.receivedAt);
     if (received >= Date.parse(session.started_at) && received < Date.parse(session.expires_at) && received <= Date.now()) return "auto";

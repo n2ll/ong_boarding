@@ -138,3 +138,27 @@ test("old unscoped test sessions and malformed job scopes are off", async () => 
     assert.equal(await getAgentMode(db, {applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11]}), "off");
   }
 });
+
+function pilotBody(patch: Record<string, unknown> = {}) {
+  return JSON.stringify({ mode: "pilot", applicant_ids: [7, 8], job_ids: [11, 12], started_at: new Date(Date.now() - 1000).toISOString(), expires_at: new Date(Date.now() + 3600_000).toISOString(), ...patch });
+}
+
+test("pilot allows selected applicants and jobs but never unscoped cron or old inbound", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const db = fakeClient({ data: [{ body: pilotBody() }], error: null }) as never;
+  const receivedAt = new Date().toISOString();
+  assert.equal(await getAgentMode(db, { applicantId: 8, receivedAt, jobIds: [11, 12] }), "auto");
+  assert.equal(await getAgentMode(db, { applicantId: 9, receivedAt, jobIds: [11] }), "off");
+  assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt, jobIds: [11, 13] }), "off");
+  assert.equal(await getAgentMode(db), "off");
+  assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt: new Date(Date.now() - 10_000).toISOString(), jobIds: [11] }), "off");
+});
+
+test("pilot invalid membership, expiry and excessive duration fail closed", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  for (const patch of [{ applicant_ids: [] }, { applicant_ids: [7, 7] }, { applicant_ids: ["7"] }, { applicant_ids: Array.from({ length: 11 }, (_, i) => i + 1) }, { expires_at: new Date(Date.now() - 100).toISOString() }, { expires_at: new Date(Date.now() + 25 * 3600_000).toISOString() }, { job_ids: [] }]) {
+    invalidateKillSwitchCache();
+    assert.equal(await getAgentMode(fakeClient({ data: [{ body: pilotBody(patch) }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11] }), "off");
+  }
+});

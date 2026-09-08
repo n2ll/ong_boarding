@@ -1,4 +1,4 @@
-import { parseAgentTestSession, type AgentTestSession } from "../agent/kill-switch.ts";
+import { parseAgentTestSession, parseAgentPilotSession, type AgentPilotSession, type AgentTestSession } from "../agent/kill-switch.ts";
 
 export type AdminAgentMode = "auto" | "draft" | "off";
 
@@ -8,6 +8,7 @@ export type AdminAgentModeResponse = {
   env_forced: boolean;
   updated_at?: string | null;
   test_session?: AgentTestSession | null;
+  pilot_session?: AgentPilotSession | null;
 };
 
 export type AdminAgentModeSnapshot = {
@@ -23,7 +24,7 @@ export type AdminAgentModeSnapshot = {
 
 export type AdminAgentModeView =
   | { state: "loading" | "error"; mode: null }
-  | { state: "stale" | "ready"; mode: AdminAgentMode; testSession?: AgentTestSession };
+  | { state: "stale" | "ready"; mode: AdminAgentMode; testSession?: AgentTestSession; pilotSession?: AgentPilotSession };
 
 export type AdminAgentModePresentation = {
   kind: "loading" | "error" | "stale" | AdminAgentMode;
@@ -77,10 +78,13 @@ export function agentModeView(input: {
 
   const testSession = !snapshot.override && isAdminAgentModeResponse(input.data)
     ? parseAgentTestSession(JSON.stringify(input.data.test_session)) : null;
+  const pilotSession = !snapshot.override && isAdminAgentModeResponse(input.data)
+    ? parseAgentPilotSession(JSON.stringify(input.data.pilot_session)) : null;
   return {
     state: input.error ? "stale" : "ready",
     mode: snapshot.effectiveMode,
     ...(testSession ? { testSession } : {}),
+    ...(pilotSession ? { pilotSession } : {}),
   };
 }
 
@@ -147,6 +151,15 @@ export function agentModePresentation(view: AdminAgentModeView, applicantId?: nu
       detail: `이전 확인: ${MODE_NAMES[view.mode]}`,
       canRetry: true,
       claimsAutomatic: false,
+    };
+  }
+  if (view.state === "ready" && view.pilotSession) {
+    const selected = applicantId !== undefined && view.pilotSession.applicant_ids.includes(applicantId);
+    return {
+      kind: "off",
+      label: applicantId === undefined ? `선택 ${view.pilotSession.applicant_ids.length}명 제한 자동 응대` : selected ? "이 지원자는 제한 자동 응대 대상" : "이 지원자 AI 중지됨",
+      detail: `선택 공고 ${view.pilotSession.job_ids.length}개 · ${new Date(view.pilotSession.expires_at).toLocaleString("ko-KR")}까지 · 개별 중지 유지`,
+      canRetry: false, claimsAutomatic: false,
     };
   }
   if (view.state === "ready" && view.testSession) {

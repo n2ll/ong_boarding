@@ -15,8 +15,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { invalidateKillSwitchCache, isValidTestJobIds, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
+import { invalidateKillSwitchCache, isValidTestJobIds, isValidPilotApplicantIds, parseAgentPilotSession, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
 import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
+
+import { loadPilotCandidates } from "@/lib/admin/agent-pilot-targets";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,7 @@ export async function GET() {
     const mode = parseAgentMode(stored?.body as string | null | undefined);
     return NextResponse.json({
       mode,
+      pilot_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentPilotSession(stored?.body),
       test_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentTestSession(stored?.body),
       // 하위호환 — 기존 소비자(disabled boolean)는 '완전 중지'일 때만 true.
       disabled: mode === "off",
@@ -62,11 +65,12 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown };
+    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown; applicant_ids?: unknown; duration_hours?: unknown };
 
     let mode: AgentMode;
     const testing = payload.mode === "test";
-    if (testing) {
+    const piloting = payload.mode === "pilot";
+    if (testing || piloting) {
       mode = "off";
     } else if (payload.mode !== undefined) {
       if (payload.mode !== "auto" && payload.mode !== "draft" && payload.mode !== "off") {
@@ -87,8 +91,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 구형 UI/스크립트의 전체 재개 요청도 실제 저장 전에 차단한다.
-    if (mode === "auto") return NextResponse.json({ error: "전체 자동 응대는 잠겨 있습니다. 공고와 테스트 대상을 선택해 제한 검수를 사용해주세요." }, { status: 409 });
-    if (testing && !isValidTestJobIds(payload.job_ids)) return NextResponse.json({ error: "검수할 공고를 1~3개 선택해주세요." }, { status: 400 });
+    if (mode === "auto") return NextResponse.json({ error: "전체 자동 응대는 잠겨 있습니다. 공고와 대상을 선택해 제한 운영을 사용해주세요." }, { status: 409 });
+    if ((testing || piloting) && !isValidTestJobIds(payload.job_ids)) return NextResponse.json({ error: "검수할 공고를 1~3개 선택해주세요." }, { status: 400 });
     const supabase = createServiceClient();
     let body = MODE_TO_BODY[mode];
     const updatedAt = new Date().toISOString();
@@ -110,6 +114,23 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "모집 중인 실제 공고만 검수할 수 있습니다." }, { status: 400 });
       }
       body = JSON.stringify({ mode: "test", applicant_id: target.id, job_ids: jobIds, started_at: updatedAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() });
+    }
+
+    if (piloting) {
+      if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 시작할 수 없습니다." }, { status: 409 });
+      if (!isValidPilotApplicantIds(payload.applicant_ids) || ![1, 4, 24].includes(payload.duration_hours as number)) return NextResponse.json({ error: "대상을 1~10명, 기간을 1·4·24시간 중 선택해주세요." }, { status: 400 });
+      const jobIds = payload.job_ids as number[];
+      const candidates = await loadPilotCandidates(supabase, jobIds);
+      const applicantIds = payload.applicant_ids;
+      if (applicantIds.some((id) => !candidates.some((candidate) => candidate.applicant_id === id))) return NextResponse.json({ error: "선택한 대상의 상태가 바뀌었습니다. 수신거부·중단 상태를 확인하고 다시 선택해주세요." }, { status: 409 });
+      // 일시정지 후보는 조회 단계에서 제외한다. 새 관심 후보만 준비하며 여기서 문자를 보내지 않는다.
+      const newIds = candidates.filter((candidate) => applicantIds.includes(candidate.applicant_id) && candidate.agent_stage === null).map((candidate) => candidate.id);
+      if (newIds.length) {
+        const { error: prepareError } = await supabase.from("job_candidates").update({ agent_stage: "exploration" }).in("id", newIds).is("agent_stage", null);
+        if (prepareError) return NextResponse.json({ error: "선택 후보를 준비하지 못했습니다." }, { status: 500 });
+      }
+      const startedAt = new Date().toISOString();
+      body = JSON.stringify({ mode: "pilot", applicant_ids: applicantIds, job_ids: jobIds, started_at: startedAt, expires_at: new Date(Date.parse(startedAt) + (payload.duration_hours as number) * 3600_000).toISOString() });
     }
 
     // update-first + 부분 유니크 인덱스로 최초 생성 경쟁에서도 예약 행을 하나만 유지한다.
@@ -163,6 +184,7 @@ export async function POST(req: NextRequest) {
     const storedMode = parseAgentMode(stored?.body);
     return NextResponse.json({
       mode: storedMode,
+      pilot_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentPilotSession(stored?.body),
       test_session: process.env.AGENT_DISABLED === "1" ? null : parseAgentTestSession(stored?.body),
       disabled: storedMode === "off",
       env_forced: process.env.AGENT_DISABLED === "1",
