@@ -1,4 +1,5 @@
 import { requestWithTimeout } from "../request-timeout.ts";
+import type { PoolPreferenceSnapshot } from "../pool-preferences.ts";
 
 const SIGNAL_BATCH_SIZE = 500;
 const SIGNAL_REQUEST_TIMEOUT_MS = 15_000;
@@ -11,6 +12,7 @@ export interface PipelineActiveCheck {
 }
 
 export interface PipelinePoolEventSummary {
+  pool_preferences?: PoolPreferenceSnapshot | null;
   last_ping_at: string | null;
   last_link_view_at: string | null;
   last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
@@ -37,13 +39,15 @@ export function pipelineNeedsSummary(input: {
   excludeRecentPing: boolean;
   reactionOnly: boolean;
   sortMode: string;
+  poolPreferences?: boolean;
 }): boolean {
   if (input.view === "funnel") return false;
   return (
     input.view === "list" ||
     input.excludeRecentPing ||
     input.reactionOnly ||
-    input.sortMode === "reaction_recent"
+    input.sortMode === "reaction_recent" ||
+    input.poolPreferences === true
   );
 }
 

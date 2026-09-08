@@ -27,6 +27,7 @@ import {
 import { distanceToJobKm, jobAnchors, type GeoJob } from "@/lib/geo";
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { normalizeVehicleOwned } from "@/lib/exposure";
+import { matchesPoolPreferences, POOL_PREFERENCE_LABELS, type PoolPreferenceFilter } from "@/lib/pool-preferences";
 import { summarizeLinks, type LiveJobLink } from "@/lib/candidate-links";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,8 @@ function bulkPurposeLabel(purpose: string | null): string {
   return "대량 문자";
 }
 
+const POOL_FILTER_LABELS = { all: "전체", regular: "정기 희망", backup: "백업 희망", unregistered: "미등록" } as const;
+
 interface SavedSegment {
   id: string;
   name: string;
@@ -152,6 +155,8 @@ interface SavedSegment {
   reactionOnly?: boolean;
   optOutOnly?: boolean;
   showExcluded?: boolean;
+  poolPreferenceKind?: PoolPreferenceFilter;
+  poolPreferenceQuery?: string;
 }
 
 // Types
@@ -844,6 +849,8 @@ export function Pipeline() {
   const [excludeRecentPing, setExcludeRecentPing] = useState(false);
   // 반응 있음 필터 — 열람/관심/답장 중 1건이라도 있는 인원만 (summaryById 의존 → base 이후 단계 적용, 순환 방지)
   const [reactionOnly, setReactionOnly] = useState(false);
+  const [poolPreferenceKind, setPoolPreferenceKind] = useState<PoolPreferenceFilter>("all");
+  const [poolPreferenceQuery, setPoolPreferenceQuery] = useState("");
   // 수신거부만 필터 — sms_opt_out_at 있는 카드만 (컴플라이언스 확인용, 카드 자체 속성이라 base 단계 적용)
   const [optOutOnly, setOptOutOnly] = useState(false);
   // 리스트 정렬 — '방치 오래된 순'이 적체 트리아지용 (last_message_at 없음 → 최상단)
@@ -928,7 +935,7 @@ export function Pipeline() {
   useEffect(() => {
     setSelectedRows(new Set());
     setWaitlistJobId(null);
-  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, optOutOnly, sortMode, distanceJobId, query, scopeBranch]);
+  }, [channelFilter, vehicleFilter, slotFilter, statusFilter, availabilityFilter, regionFilter, showExcluded, recentAppliedOnly, geoConfirmedOnly, excludeActive, excludeRecentPing, reactionOnly, poolPreferenceKind, poolPreferenceQuery, optOutOnly, sortMode, distanceJobId, query, scopeBranch]);
 
   // 저장된 대상 묶음(필터 조합 프리셋) — 브라우저(localStorage)에 저장. 자주 쓰는 필터를 1클릭 재적용.
   const [segments, setSegments] = useState<SavedSegment[]>([]);
@@ -963,6 +970,8 @@ export function Pipeline() {
       geoConfirmedOnly,
       recentAppliedOnly,
       reactionOnly,
+      poolPreferenceKind,
+      poolPreferenceQuery: poolPreferenceQuery.trim(),
       optOutOnly,
       showExcluded,
     };
@@ -983,6 +992,8 @@ export function Pipeline() {
     setGeoConfirmedOnly(seg.geoConfirmedOnly ?? false);
     setRecentAppliedOnly(seg.recentAppliedOnly ?? false);
     setReactionOnly(seg.reactionOnly ?? false);
+    setPoolPreferenceKind(seg.poolPreferenceKind && Object.hasOwn(POOL_FILTER_LABELS, seg.poolPreferenceKind) ? seg.poolPreferenceKind : "all");
+    setPoolPreferenceQuery(typeof seg.poolPreferenceQuery === "string" ? seg.poolPreferenceQuery : "");
     setOptOutOnly(seg.optOutOnly ?? false);
     setShowExcluded(seg.showExcluded ?? false);
     toast.info(`'${seg.name}' 대상 묶음을 적용했어요`);
@@ -1214,6 +1225,8 @@ export function Pipeline() {
   if (optOutOnly) conditionLabels.push("수신거부한 분만");
   if (showExcluded) conditionLabels.push("부적합·이탈·기타도 표시");
   if (query.trim()) conditionLabels.push(`검색 "${query.trim()}"`);
+  if (poolPreferenceKind !== "all") conditionLabels.push(`배송 희망: ${POOL_FILTER_LABELS[poolPreferenceKind]}`);
+  if (poolPreferenceQuery.trim()) conditionLabels.push(`희망 조건 검색 "${poolPreferenceQuery.trim()}"`);
 
   const assignExposure = async () => {
     if (!requireFocusedJobReady()) return;
@@ -1478,7 +1491,7 @@ export function Pipeline() {
     (reactionOnly ? 1 : 0) + (optOutOnly ? 1 : 0) + (showExcluded ? 1 : 0);
   const activeFilterCount =
     statusFilter.size + availabilityFilter.size + (vehicleFilter !== "all" ? 1 : 0) + (regionFilter !== "all" ? 1 : 0) +
-    sendPrepCount + moreFilterCount;
+    sendPrepCount + moreFilterCount + (poolPreferenceKind !== "all" ? 1 : 0) + (poolPreferenceQuery.trim() ? 1 : 0);
 
   const resetFilters = () => {
     setChannelFilter(new Set());
@@ -1491,6 +1504,8 @@ export function Pipeline() {
     setExcludeActive(false);
     setExcludeRecentPing(false);
     setReactionOnly(false);
+    setPoolPreferenceKind("all");
+    setPoolPreferenceQuery("");
     setOptOutOnly(false);
     setShowExcluded(false);
   };
@@ -1501,7 +1516,8 @@ export function Pipeline() {
   const needsActiveCheck = view !== "funnel" && excludeActive;
   // 반응 요약은 리스트 배지에 상시 쓰고, 다른 뷰에서도 관련 조건·정렬이 유지되면 계속 조회한다.
   // 조회 필요 조건과 결과 차단 조건이 달라지면 summary가 idle인데 결과가 영구 0명이 될 수 있다.
-  const needsSummary = pipelineNeedsSummary({ view, excludeRecentPing, reactionOnly, sortMode });
+  const poolPreferencesActive = poolPreferenceKind !== "all" || Boolean(poolPreferenceQuery.trim());
+  const needsSummary = pipelineNeedsSummary({ view, excludeRecentPing, reactionOnly, sortMode, poolPreferences: poolPreferencesActive });
 
   const q = query.trim().toLowerCase();
   const sixMonthsAgo = Date.now() - SIX_MONTHS_MS;
@@ -1547,7 +1563,7 @@ export function Pipeline() {
   });
   const signalDependentResultsBlocked = pipelineSignalsBlockResults({
     excludeActive,
-    summaryDependent: excludeRecentPing || reactionOnly || sortMode === "reaction_recent",
+    summaryDependent: excludeRecentPing || reactionOnly || sortMode === "reaction_recent" || poolPreferencesActive,
     activeComplete: activeSignalsComplete,
     summaryComplete: summarySignalsComplete,
   });
@@ -1555,6 +1571,11 @@ export function Pipeline() {
     (needsActiveCheck && activeSignalState === "error") ||
     (needsSummary && summarySignalState === "error");
   const signalLookupPending = signalDependentResultsBlocked && !signalLookupHasError;
+  useEffect(() => {
+    if (!signalDependentResultsBlocked) return;
+    setSelectedRows(new Set());
+    setWaitlistJobId(null);
+  }, [signalDependentResultsBlocked]);
   const pingCutoff = Date.now() - FOURTEEN_DAYS_MS;
   const postFilteredCards = signalDependentResultsBlocked ? [] : baseFilteredCards.filter((c) => {
     if (excludeActive && activeSet.has(Number(c.id))) return false;
@@ -1564,6 +1585,7 @@ export function Pipeline() {
       if (last && new Date(last).getTime() >= pingCutoff) return false;
     }
     if (reactionOnly && lastReactionAt(summary) === null) return false;
+    if (!matchesPoolPreferences(summary?.pool_preferences, poolPreferenceKind, poolPreferenceQuery)) return false;
     return true;
   });
   // 카드별 거리(km) — 정렬 키는 공고가 정한 기준(distance_basis)의 distanceToJobKm.
@@ -2979,12 +3001,30 @@ export function Pipeline() {
           </div>
         )}
 
+        {view !== "funnel" && (
+          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border-strong bg-card px-5 py-2">
+            <label className="flex items-center gap-2 text-[12px] font-bold text-foreground">
+              배송 희망
+              <select value={poolPreferenceKind} onChange={(event) => setPoolPreferenceKind(event.target.value as PoolPreferenceFilter)} className="min-h-11 rounded-md border border-border-strong bg-background px-2 text-[16px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {Object.entries(POOL_FILTER_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="flex min-w-0 flex-1 basis-64 items-center gap-2 text-[12px] font-bold text-foreground">
+              <span className="shrink-0">희망 조건 검색</span>
+              <input type="search" value={poolPreferenceQuery} onChange={(event) => setPoolPreferenceQuery(event.target.value)} placeholder="예: 성동 금요일 세단" className="min-h-11 min-w-0 flex-1 rounded-md border border-border-strong bg-background px-3 text-[16px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            </label>
+            <p className="w-full text-[12px] text-muted-foreground">본인이 남긴 지역·시간·차량·사전 연락 조건에서 검색합니다. 미등록은 의사 미확인 상태이며, 실제 근무 가능 여부는 별도 확인해 주세요.</p>
+          </div>
+        )}
+
         {/* 적용 중 조건 칩 — 트리거 버튼들의 하이라이트만으론 '무엇으로 좁혔는지'가 흩어져 보인다.
             여기서 한 줄로 읽고, ×로 그 조건만 해제한다(전체 해제는 위 '조건 초기화'). */}
         {view !== "funnel" && (activeFilterCount > 0 || query.trim() !== "") && (
           <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border-strong bg-background px-5 py-1.5">
             <span className="text-[12px] font-bold text-muted-foreground shrink-0">적용 중:</span>
             {query.trim() !== "" && <FilterChip label={`검색 "${query.trim()}"`} onClear={() => setQuery("")} />}
+            {poolPreferenceKind !== "all" && <FilterChip label={`배송 희망: ${POOL_FILTER_LABELS[poolPreferenceKind]}`} onClear={() => setPoolPreferenceKind("all")} />}
+            {poolPreferenceQuery.trim() && <FilterChip label={`희망 조건 "${poolPreferenceQuery.trim()}"`} onClear={() => setPoolPreferenceQuery("")} />}
             {statusFilter.size > 0 && (
               <FilterChip
                 label={statusFilter.size <= 2 ? `단계: ${[...statusFilter].join(" · ")}` : `진행 단계 ${statusFilter.size}개`}
@@ -3137,13 +3177,13 @@ export function Pipeline() {
 
         {signalLookupPending && view !== "funnel" && (
           <div role="status" aria-live="polite" className="flex shrink-0 items-center gap-2 border-b border-warning/35 bg-warning-soft px-5 py-2 text-[12px] font-bold text-warning-strong">
-            <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> 조건에 맞는 전원의 활동·반응 이력을 확인하고 있어요. 확인이 끝날 때까지 대상 선택은 잠시 비워둡니다.
+            <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> 조건에 맞는 전원의 활동·반응 이력과 희망 조건을 확인하고 있어요. 확인이 끝날 때까지 대상 선택은 잠시 비워둡니다.
           </div>
         )}
         {signalLookupHasError && (
           <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-error/30 bg-error-soft px-5 py-2 text-[12px] font-semibold text-error-strong">
             <span>
-              활동·반응 이력을 끝까지 확인하지 못했어요. 일부 결과는 사용하지 않았으며, 해당 이력에 의존하는 제외 조건·정렬은 안전하게 비워뒀어요.
+              활동·반응 이력과 희망 조건을 끝까지 확인하지 못했어요. 해당 정보가 필요한 필터·정렬 결과는 확인이 끝날 때까지 비워둡니다.
             </span>
             <Button
               variant="ghost"
@@ -3514,6 +3554,19 @@ export function Pipeline() {
                                   {c.name}
                                   {c.age > 0 && <span className="ml-1 text-[13px] font-medium text-muted-foreground">{c.age}세</span>}
                                 </button>
+                                {summaryRowLookupStatus === "ready" && (summary?.pool_preferences ? (
+                                  <details className="mt-1 max-w-[260px] whitespace-normal text-[12px] text-muted-foreground" onClick={(event) => event.stopPropagation()}>
+                                    <summary className="min-h-8 cursor-pointer rounded py-1 font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                      희망: {POOL_PREFERENCE_LABELS[summary.pool_preferences.kind]} · {new Date(summary.pool_preferences.updated_at).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} 저장
+                                    </summary>
+                                    <dl className="space-y-1 break-words py-1">
+                                      <div><dt className="inline font-semibold">지역: </dt><dd className="inline">{summary.pool_preferences.area}</dd></div>
+                                      <div><dt className="inline font-semibold">요일·시간: </dt><dd className="inline">{summary.pool_preferences.schedule}</dd></div>
+                                      <div><dt className="inline font-semibold">차량: </dt><dd className="inline">{summary.pool_preferences.vehicle}</dd></div>
+                                      {summary.pool_preferences.notice && <div><dt className="inline font-semibold">사전 연락: </dt><dd className="inline">{summary.pool_preferences.notice}</dd></div>}
+                                    </dl>
+                                  </details>
+                                ) : <p className="mt-1 text-[12px] text-muted-foreground">배송 희망 미등록</p>)}
                                 {recommendationMatch && (
                                   <div
                                     className="mt-1 min-w-0"

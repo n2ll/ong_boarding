@@ -11,19 +11,22 @@
  *   last_link_view_at: string | null;  // 마지막 맞춤링크 열람(link_view)
  *   last_interest: { job_id: number | null; at: string; immediate: boolean } | null; // 마지막 관심 클릭(interest_click)
  *   last_reply_at: string | null;      // 마지막 수신 문자 또는 기존 ping_reply 기록
+ *   pool_preferences?: PoolPreferenceSnapshot | null; // 최신 자기 신고 희망 조건
  * }> } // 관련 이벤트 또는 수신 문자가 있는 지원자만 포함.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
+import { parsePoolPreferences, type PoolPreferenceSnapshot } from "@/lib/pool-preferences";
 
 export const dynamic = "force-dynamic";
 
 const MAX_IDS = 500;
-const EVENT_TYPES = ["ping_sent", "link_view", "interest_click", "ping_reply"];
+const EVENT_TYPES = ["ping_sent", "link_view", "interest_click", "ping_reply", "pool_preferences"];
 
 interface SummaryEntry {
+  pool_preferences?: PoolPreferenceSnapshot | null;
   last_ping_at: string | null;
   last_link_view_at: string | null;
   last_interest: { job_id: number | null; at: string; immediate: boolean } | null;
@@ -35,7 +38,7 @@ interface PoolEventRow {
   applicant_id: number;
   job_id: number | null;
   event_type: string;
-  meta: { immediate?: unknown } | null;
+  meta: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -106,6 +109,13 @@ export async function POST(req: NextRequest) {
     });
     const at = ev.created_at;
     switch (ev.event_type) {
+      case "pool_preferences":
+        // 최신 기록이 손상되어도 과거 희망 조건으로 되돌리지 않는다.
+        if (entry.pool_preferences === undefined) {
+          const preferences = parsePoolPreferences(ev.meta);
+          entry.pool_preferences = preferences ? { ...preferences, updated_at: at } : null;
+        }
+        break;
       case "ping_sent":
         if (!entry.last_ping_at) entry.last_ping_at = at;
         break;

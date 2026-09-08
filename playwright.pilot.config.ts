@@ -3,7 +3,7 @@ import base from "./playwright.config";
 const port = 3187;
 export default defineConfig({
   ...base,
-  testMatch: "pool-pilot.spec.ts",
+  testMatch: ["pool-pilot.spec.ts", "pool-preference-matching.spec.ts"],
   use: { ...base.use, baseURL: `http://127.0.0.1:${port}` },
   webServer: {
     ...(base.webServer as object),
