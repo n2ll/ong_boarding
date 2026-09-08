@@ -207,7 +207,7 @@ export function Dashboard() {
     confirmations: "확정 검토",
     sos: "긴급 건",
     interest: "관심 표시",
-    heartbeat: "문자 발송폰",
+    heartbeat: "문자 수신폰",
     replies: "답장 대기",
   };
   const retryUrgentSources = () => {
@@ -510,7 +510,7 @@ export function Dashboard() {
   // 배경색도 여기서 칠하지 않는다 — body의 종이 질감을 덮는다.
   return (
     <PageShell className="min-h-full">
-      {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 발송폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
+      {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 수신폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
       <motion.div initial={{ opacity: 0, scale: 0.99 }} animate={{ opacity: 1, scale: 1 }} className="relative overflow-hidden rounded-panel border border-white/10 bg-foreground px-5 py-5 text-white sm:px-6 lg:px-8 lg:py-6">
         <div className="pointer-events-none absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-brand-yellow/10 to-transparent" />
 
@@ -561,7 +561,7 @@ export function Dashboard() {
               </div>
               {gateway && (
                 <span
-                  title="문자를 실제로 보내고 받는 법인폰 상태예요. 신호가 10분 이상 없으면 문자 수·발신이 멈췄을 수 있어요."
+                  title="수신 문자를 옹보딩으로 전달하는 법인폰 상태예요. 신호가 10분 이상 없으면 답장이 옹보딩에 도착하지 못할 수 있어요."
                   className={`flex items-center gap-1.5 ${gateway.tone === "blocker" ? "text-error-on-dark" : gateway.tone === "attention" ? "text-warning-on-dark" : "text-white/75"}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${gateway.tone === "blocker" ? "bg-error animate-pulse" : gateway.tone === "attention" ? "bg-warning" : "bg-success"}`}></span>
@@ -590,7 +590,7 @@ export function Dashboard() {
                 size="sm"
                 variant="primary"
                 className="rounded-lg shadow-none hover:translate-y-0"
-                title={urgent[0].action === "retry-heartbeat" ? "문자 발송폰 연결 상태를 다시 확인합니다" : "운영 차단을 먼저, 같은 단계에서는 가장 오래 기다린 업무를 엽니다"}
+                title={urgent[0].action === "retry-heartbeat" ? "문자 수신폰 연결 상태를 다시 확인합니다" : "운영 차단을 먼저, 같은 단계에서는 가장 오래 기다린 업무를 엽니다"}
                 isLoading={urgent[0].action === "retry-heartbeat" && heartbeatValidating}
                 onClick={() => {
                   const t = urgent[0];

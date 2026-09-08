@@ -254,7 +254,7 @@ test("an invalid or missing heartbeat timestamp is treated as no signal", async 
     });
 
     assert.equal(result?.tone, "blocker");
-    assert.equal(result?.label, "문자 발송폰 신호 없음");
+    assert.equal(result?.label, "문자 수신폰 신호 없음");
     assert.equal(result?.urgent?.urgency, "blocker");
   }
 });

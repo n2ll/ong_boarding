@@ -101,8 +101,8 @@ export function dashboardGatewayPresentation(input: {
       urgent: {
         urgency: "blocker",
         ageMinutes: null,
-        title: "문자 발송폰 상태를 확인할 수 없어요",
-        desc: "법인폰 연결 상태를 확인하지 못해 문자 송수신 가능 여부를 알 수 없습니다.",
+        title: "문자 수신폰 상태를 확인할 수 없어요",
+        desc: "법인폰 연결 상태를 확인하지 못해 수신 문자가 옹보딩에 전달되는지 알 수 없습니다.",
       },
     };
   }
@@ -113,12 +113,12 @@ export function dashboardGatewayPresentation(input: {
   if (!latest || !Number.isFinite(lastSeenAt)) {
     return {
       tone: "blocker",
-      label: "문자 발송폰 신호 없음",
+      label: "문자 수신폰 신호 없음",
       urgent: {
         urgency: "blocker",
         ageMinutes: null,
-        title: "문자 발송폰 신호가 없어요",
-        desc: "연결된 법인폰을 확인할 수 없어 문자 송수신이 멈췄을 수 있습니다.",
+        title: "문자 수신폰 신호가 없어요",
+        desc: "연결된 법인폰을 확인할 수 없어 수신 문자가 옹보딩에 전달되지 않을 수 있습니다.",
       },
     };
   }
@@ -135,7 +135,7 @@ export function dashboardGatewayPresentation(input: {
       urgent: {
         urgency: "blocker",
         ageMinutes,
-        title: `문자 발송폰이 ${ago}부터 응답하지 않아요`,
+        title: `문자 수신폰이 ${ago}부터 응답하지 않아요`,
         desc: "법인폰 앱과 네트워크 상태를 확인해야 합니다.",
       },
     };
@@ -147,8 +147,8 @@ export function dashboardGatewayPresentation(input: {
       urgent: {
         urgency: "attention",
         ageMinutes,
-        title: `문자 발송 대기 ${pendingCount}건`,
-        desc: "법인폰은 연결돼 있지만 아직 발송되지 않은 문자가 있습니다.",
+        title: `문자폰 처리 대기 ${pendingCount}건`,
+        desc: "법인폰 앱이 대기 건을 보고했습니다. 앱에서 수신 문자 동기화 상태와 대기 내용을 확인해주세요.",
       },
     };
   }
