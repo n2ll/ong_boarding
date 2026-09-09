@@ -54,6 +54,41 @@ for (const scenario of ["eligible", "paused", "opted-out", "prepare-failed"] as 
   });
 }
 
+for (const count of [50, 51]) {
+  test(`pilot activation with ${count} applicants ${count === 50 ? "stores the whitelist" : "is rejected before storage"}`, async () => {
+    const applicantIds = Array.from({ length: count }, (_, i) => i + 1);
+    const writes: Array<{ body: string; updated_at: string }> = [];
+    const api = route("../../app/api/admin/agent/kill-switch/route.ts", {
+      "@/lib/agent/kill-switch": killSwitch,
+      "@/lib/admin/agent-pilot-targets": pilotTargets,
+      "@/lib/supabase": { createServiceClient: () => ({ from(table: string) {
+        if (table === "jobs") return { select() { return this; }, in: async () => ({ data: [{ id: 11, title: "가상 모집", status: "active", closes_at: null }], error: null }) };
+        if (table === "job_candidates") return {
+          select() { return this; }, in() { return this; },
+          limit: async () => ({ data: applicantIds.map((id) => ({ id: id + 100, applicant_id: id, job_id: 11, agent_stage: "exploration",
+            applicants: { id, phone: "01000000000", status: "스크리닝 전", sms_opt_out_at: null } })), error: null }),
+        };
+        if (table === "prompt_examples") return {
+          update(value: { body: string; updated_at: string }) { writes.push(value); return this; },
+          eq() { return this; }, select: async () => ({ data: writes, error: null }),
+        };
+        throw new Error(`unexpected table ${table}`);
+      } }) },
+    });
+    const result = await api.POST({ json: async () => ({ mode: "pilot", job_ids: [11], applicant_ids: applicantIds, duration_hours: 24 }) });
+    assert.equal(result.status, count === 50 ? 200 : 400);
+    assert.equal(writes.length, count === 50 ? 1 : 0);
+    if (count === 50) {
+      const session = JSON.parse(writes[0].body);
+      assert.deepEqual(session.applicant_ids, applicantIds);
+      assert.deepEqual(session.job_ids, [11]);
+      assert.equal(Date.parse(session.expires_at) - Date.parse(session.started_at), 24 * 3600_000);
+      assert.equal(result.body.mode, "off");
+      assert.ok(result.body.pilot_session);
+    }
+  });
+}
+
 for (const payload of [{ mode: "auto" }, { disabled: false }]) {
   test(`global activation ${JSON.stringify(payload)} is rejected before storage`, async () => {
     let dbTouched = false;

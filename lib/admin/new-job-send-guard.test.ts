@@ -7,6 +7,8 @@ import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 import { fetchPhoneMessageIdentityIndex } from "./phone-message-identity.ts";
 import { normalizePhone } from "../ongmanaging.ts";
 import { detectConfirmationNuance } from "../agent/outbound-safety.ts";
+import * as recruitmentAuthorization from "../recruitment-contact-authorization.ts";
+import { smsRecipientBlockReason } from "../sms-consent-policy.ts";
 import {
   bulkBatchRequestFingerprint,
   bulkMessageRequestFingerprint,
@@ -37,6 +39,7 @@ type QueryCall = {
 };
 
 type FakeOptions = {
+  now?: () => number;
   fail?: (call: QueryCall) => string | null;
   rpc?: (call: RpcCall) => { data?: unknown; error?: string } | null;
   smsResult?:
@@ -50,8 +53,8 @@ type RpcCall = {
 };
 
 function valueForColumn(row: Row, column: string): unknown {
-  if (column === "meta->>purpose") {
-    return (row.meta as { purpose?: unknown } | null)?.purpose;
+  if (column.startsWith("meta->>")) {
+    return (row.meta as Row | null)?.[column.slice(7)];
   }
   return row[column];
 }
@@ -253,9 +256,7 @@ function loadRoute(args: {
         purpose === "new_job" || purpose === "campaign" ? "promotional" : "operational"
       ),
       currentJobClosedSmsBody: () => "approved closed",
-      smsRecipientBlockReason: ({ applicant }: { applicant?: { marketingConsent?: boolean } }) => (
-        applicant?.marketingConsent === true ? null : "consent_required"
-      ),
+      smsRecipientBlockReason,
     },
     "@/lib/agent/general-line": {
       isGeneralLineJob: () => false,
@@ -270,6 +271,7 @@ function loadRoute(args: {
     "@/lib/admin/phone-message-identity": { fetchPhoneMessageIdentityIndex },
     "@/lib/ongmanaging": { normalizePhone },
     "@/lib/agent/outbound-safety": { detectConfirmationNuance },
+    "@/lib/recruitment-contact-authorization": recruitmentAuthorization,
     "@/lib/exposure": {
       normalizeRule: (raw: unknown) => raw,
       isExposed: (
@@ -300,7 +302,7 @@ function loadRoute(args: {
   };
 
   runInNewContext(output, {
-    Date: FixedDate,
+    Date: class extends FixedDate { static override now() { return args.options?.now?.() ?? FixedDate.now(); } },
     Number,
     Set,
     Map,
@@ -378,6 +380,148 @@ function campaignRequest() {
       };
     },
   };
+}
+
+function recruitmentAuthorizationEvent(meta: Row = {}): Row {
+  return { id: 901, applicant_id: 1, event_type: "recruitment_contact_authorized", created_at: "2026-08-31T11:00:00.000Z",
+    meta: { basis: "original_recruitment_pool", purpose: "new_job", batch_id: BULK_REQUEST_ID,
+      applicant_phone: "01012345678", job_ids: [7, 8], confirmed_by: "manager",
+      request_fingerprint: bulkBatchRequestFingerprint({ body: "#{이름}님, 새 공고를 확인해 주세요. #{맞춤링크}", subject: "옹고잉 채용 안내", purpose: "new_job", jobId: 7 }),
+      note: "원래 홈페이지 채용풀 신청 목적에 따라 이번 두 공고 연락을 확인함", expires_at: "2026-09-01T11:00:00.000Z", ...meta } };
+}
+
+function legacyRecruitmentDatabase(overrides: Record<string, Row[]> = {}): Record<string, Row[]> {
+  return {
+    jobs: [activeJob({ exposure: "targeted" }), activeJob({ id: 8, exposure: "targeted" })],
+    applicants: [{ ...applicant(), marketing_consent: false, marketing_consent_at: null,
+      source: "homepage", airtable_record_id: "rec-original", airtable_raw: { Name: "지원자" } }],
+    job_exposure_targets: [7, 8].map((job_id) => ({ job_id, applicant_id: 1, mode: "include" })),
+    pool_events: [recruitmentAuthorizationEvent()], messages: [], job_candidates: [], ...overrides,
+  };
+}
+
+function scopedRecruitmentRequest(overrides: Row = {}) {
+  return { json: async () => ({ ...await request().json(), recruitment_job_ids: [7, 8], ...overrides }) };
+}
+
+for (const consent of [false, null]) test(`stored recruitment authorization permits imported ${consent} without changing consent or purpose`, async () => {
+  const database = legacyRecruitmentDatabase();
+  database.applicants[0].marketing_consent = consent;
+  const harness = loadRoute({ database });
+  const response = await harness.route.POST(scopedRecruitmentRequest());
+  assert.equal(response.status, 200);
+  assert.equal(response.body.sent, 1);
+  assert.equal(harness.smsCalls.length, 1);
+  assert.equal(database.applicants[0].marketing_consent, consent);
+  assert.equal(harness.inserted.length, 0);
+  assert.equal(harness.rpcCalls[0]?.args.p_effective_purpose, "new_job");
+});
+
+for (const meta of [{ batch_id: "22222222-2222-4222-8222-222222222222" }, { request_fingerprint: "b".repeat(64) }, { job_ids: [7] }, { applicant_phone: "01099998888" }, { expires_at: NOW }]) {
+  test(`mismatched stored recruitment authorization blocks ${Object.keys(meta)[0]}`, async () => {
+    const harness = loadRoute({ database: legacyRecruitmentDatabase({ pool_events: [recruitmentAuthorizationEvent(meta)] }) });
+    const response = await harness.route.POST(scopedRecruitmentRequest());
+    assert.equal(response.body.sent, 0);
+    assert.equal(harness.smsCalls.length, 0);
+  });
+}
+
+test("missing authorization, import provenance or opt-in keeps consent required", async () => {
+  for (const scenario of ["authorization", "import", "opt-in"] as const) {
+    const database = legacyRecruitmentDatabase();
+    if (scenario === "authorization") database.pool_events = [];
+    if (scenario === "import") database.applicants[0].airtable_raw = null;
+    const harness = loadRoute({ database });
+    const response = await harness.route.POST(scenario === "opt-in" ? request() : scopedRecruitmentRequest());
+    assert.equal(response.body.sent, 0, scenario);
+    assert.equal(harness.smsCalls.length, 0, scenario);
+  }
+});
+
+test("explicit refusal on a duplicate phone row blocks authorized legacy contact", async () => {
+  const database = legacyRecruitmentDatabase();
+  database.applicants.push({ ...applicant(), id: 2, phone: "010-1234-5678" });
+  database.messages.push({ id: 1, applicant_id: 2, direction: "inbound", body: "앞으로 연락하지 마세요", created_at: "2026-08-31T11:30:00.000Z" });
+  const harness = loadRoute({ database });
+  const response = await harness.route.POST(scopedRecruitmentRequest());
+  assert.equal(response.body.sent, 0);
+  assert.equal(harness.smsCalls.length, 0);
+  assert.ok(harness.calls.some((call) => call.table === "messages" && call.inValues.some(([column, ids]) => column === "applicant_id" && ids.includes(2))));
+});
+
+for (const lookup of ["authorization", "history", "import"] as const) test(`legacy ${lookup} lookup failure stops before provider work`, async () => {
+  const harness = loadRoute({ database: legacyRecruitmentDatabase(), options: { fail: (call) => (
+    lookup === "authorization" ? call.table === "pool_events" && call.equals.some(([column, value]) => column === "event_type" && value === "recruitment_contact_authorized")
+      : lookup === "history" ? call.table === "messages" && !call.equals.some(([column]) => column === "direction")
+        : call.table === "applicants" && call.inValues.some(([column]) => column === "id")
+  ) ? "unavailable" : null } });
+  const response = await harness.route.POST(scopedRecruitmentRequest());
+  assert.equal(response.status, 503);
+  assert.equal(harness.smsCalls.length, 0);
+});
+
+test("recruitment scope rejects invalid jobs and other purposes before database work", async () => {
+  for (const overrides of [{ recruitment_job_ids: [] }, { recruitment_job_ids: [8] }, { recruitment_job_ids: [7, 7] }, { recruitment_job_ids: [7, 8, 9, 10] }, { recruitment_job_ids: ["7"] }, { purpose: "campaign" }]) {
+    const harness = loadRoute({ database: legacyRecruitmentDatabase() });
+    const response = await harness.route.POST(scopedRecruitmentRequest(overrides));
+    assert.equal(response.status, 400);
+    assert.equal(harness.calls.length, 0);
+    assert.equal(harness.smsCalls.length, 0);
+  }
+});
+
+test("every recruitment job must remain active internal targeted and explicitly included", async () => {
+  for (const change of ["closed", "external", "all", "missing-include", "exclude"] as const) {
+    const database = legacyRecruitmentDatabase();
+    if (change === "closed") database.jobs[1].status = "closed";
+    if (change === "external") database.jobs[1].recruit_mode = "external";
+    if (change === "all") database.jobs[1].exposure = "all";
+    if (change === "missing-include") database.job_exposure_targets.pop();
+    if (change === "exclude") database.job_exposure_targets[1].mode = "exclude";
+    const harness = loadRoute({ database });
+    const response = await harness.route.POST(scopedRecruitmentRequest());
+    assert.equal(harness.smsCalls.length, 0, change);
+    assert.notEqual(response.body.sent, 1, change);
+  }
+});
+
+test("authorized legacy contact preserves same-phone candidate and opt-out guards", async () => {
+  for (const scenario of ["primary", "other-paused", "opt-out"] as const) {
+    const database = legacyRecruitmentDatabase();
+    database.applicants.push({ ...applicant(), id: 2, phone: "010-1234-5678", ...(scenario === "opt-out" ? { sms_opt_out_at: "2026-08-31T11:30:00.000Z" } : {}) });
+    if (scenario !== "opt-out") database.job_candidates.push({ id: 2, applicant_id: 2, job_id: scenario === "primary" ? 7 : 99, agent_stage: "paused" });
+    const harness = loadRoute({ database });
+    const response = await harness.route.POST(scopedRecruitmentRequest());
+    assert.equal(response.body.sent, 0, scenario);
+    assert.equal(harness.smsCalls.length, 0, scenario);
+  }
+});
+
+for (const change of ["refusal", "opt-out", "authorization", "expiry", "history-failure"] as const) {
+  test(`recruitment ${change} after recipient claim still prevents provider work`, async () => {
+    const database = legacyRecruitmentDatabase();
+    let claimed = false;
+    let now = Date.parse(NOW);
+    const harness = loadRoute({ database, options: {
+      now: () => now,
+      rpc: (call) => {
+        if (call.name === "claim_bulk_message_recipient") {
+          claimed = true;
+          if (change === "refusal") database.messages.push({ id: 1, applicant_id: 1, direction: "inbound", body: "앞으로 연락하지 마세요", created_at: NOW });
+          if (change === "opt-out") database.applicants[0].sms_opt_out_at = NOW;
+          if (change === "authorization") database.pool_events = [];
+          if (change === "expiry") now += 24 * 3600_000;
+        }
+        return null;
+      },
+      fail: (call) => claimed && change === "history-failure" && call.table === "messages" ? "unavailable" : null,
+    } });
+    const response = await harness.route.POST(scopedRecruitmentRequest());
+    assert.equal(claimed, true);
+    assert.equal(response.body.sent, 0);
+    assert.equal(response.body.unknown, 0, "known unsent must not look like a provider timeout");
+    assert.equal(harness.smsCalls.length, 0);
+  });
 }
 
 test("new-job send rejects a missing job id before sending SMS", async () => {

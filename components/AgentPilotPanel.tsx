@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { AgentPilotSession } from "@/lib/agent/kill-switch";
+import { AGENT_PILOT_MAX_APPLICANTS, type AgentPilotSession } from "@/lib/agent/kill-switch";
 import { useConfirm } from "./ConfirmDialog";
 import { toast } from "sonner";
 
@@ -56,13 +56,13 @@ export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated 
       <p className="text-muted-foreground">대상: {session.applicant_ids.map((id) => { const target = targets.find((item) => item.id === id); return target ? `${target.name}(끝 ${target.phone_suffix})` : `대상 #${id} (명단 확인 필요)`; }).join(", ")} · 공고: {session.job_ids.map((id) => jobs.find((job) => job.id === id)?.title ?? `#${id}`).join(", ")}</p>
       <button disabled={unavailable} type="button" onClick={() => void change(true)} className="min-h-11 rounded-lg border border-error px-4 font-bold text-error-strong focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">지금 중단</button>
     </div> : <div className="mt-3 space-y-4 text-sm">
-      <p className="text-muted-foreground">최대 10명·3개 실제 공고에만 새 답장을 보냅니다. 첫 안내 문자와 예약 발송은 실행하지 않습니다.</p>
+      <p className="text-muted-foreground">최대 {AGENT_PILOT_MAX_APPLICANTS}명·3개 실제 공고에만 새 답장을 보냅니다. 첫 안내 문자와 예약 발송은 실행하지 않습니다.</p>
       <fieldset disabled={unavailable} className="space-y-2"><legend className="mb-2 font-bold">1. 운영할 공고</legend>
         {jobsError ? <p role="alert">공고 목록을 확인하지 못했습니다.</p> : jobs.map((job) => <label key={job.id} className="flex min-h-11 items-center gap-2 rounded-lg border p-3"><input type="checkbox" checked={jobIds.includes(job.id)} disabled={!jobIds.includes(job.id) && jobIds.length >= 3} onChange={(event) => setJobIds((ids) => event.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} className="size-4 accent-primary focus-visible:ring-2 focus-visible:ring-ring" />{job.title}</label>)}
         {!jobsError && !jobs.length && <p>실제 모집이 시작되면 공고를 등록한 뒤 선택해주세요. 인력풀 희망 조건은 공고 없이 본인 링크에서 받을 수 있습니다.</p>}
       </fieldset>
-      {jobIds.length > 0 && <fieldset disabled={unavailable || loading} className="space-y-2"><legend className="mb-2 font-bold">2. 이 공고의 후보 선택 ({applicantIds.length}/10명)</legend>
-        {loading ? <p role="status">후보 확인 중…</p> : targets.map((target) => <label key={target.id} className="flex min-h-11 items-center gap-2 rounded-lg border p-3"><input type="checkbox" checked={applicantIds.includes(target.id)} disabled={!applicantIds.includes(target.id) && applicantIds.length >= 10} onChange={(event) => setApplicantIds((ids) => event.target.checked ? [...ids, target.id] : ids.filter((id) => id !== target.id))} className="size-4 accent-primary focus-visible:ring-2 focus-visible:ring-ring" /><span>{target.name} · 전화 끝 {target.phone_suffix}</span></label>)}
+      {jobIds.length > 0 && <fieldset disabled={unavailable || loading} className="space-y-2"><legend className="mb-2 font-bold">2. 이 공고의 후보 선택 ({applicantIds.length}/{AGENT_PILOT_MAX_APPLICANTS}명)</legend>
+        {loading ? <p role="status">후보 확인 중…</p> : targets.map((target) => <label key={target.id} className="flex min-h-11 items-center gap-2 rounded-lg border p-3"><input type="checkbox" checked={applicantIds.includes(target.id)} disabled={!applicantIds.includes(target.id) && applicantIds.length >= AGENT_PILOT_MAX_APPLICANTS} onChange={(event) => setApplicantIds((ids) => event.target.checked ? [...ids, target.id] : ids.filter((id) => id !== target.id))} className="size-4 accent-primary focus-visible:ring-2 focus-visible:ring-ring" /><span>{target.name} · 전화 끝 {target.phone_suffix}</span></label>)}
         {!loading && !error && !targets.length && <p>시작할 후보가 없습니다. 공고에 후보를 추가하거나 관심 접수를 받은 뒤 새로고침해주세요. 개별 중지·수신거부·제외·확정 인력은 선택할 수 없습니다.</p>}
         {error && <p role="alert" className="text-error-strong">{error}</p>}
         <button type="button" onClick={() => setRetry((value) => value + 1)} className="min-h-11 rounded-lg border px-3 focus-visible:ring-2 focus-visible:ring-ring">후보 새로고침</button>

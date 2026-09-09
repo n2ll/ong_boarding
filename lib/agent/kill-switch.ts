@@ -22,6 +22,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AgentMode = "auto" | "draft" | "off";
+export const AGENT_PILOT_MAX_APPLICANTS = 50;
 
 /** 코파일럿 초안 식별 마커 — message_drafts.reasoning 맨 앞에 붙인다.
  *  (message_drafts에 meta 컬럼이 없어 reasoning prefix로 구분.
@@ -49,7 +50,7 @@ export function parseAgentTestSession(body: string | null | undefined, now = Dat
 }
 
 export function isValidPilotApplicantIds(value: unknown): value is number[] {
-  return Array.isArray(value) && value.length > 0 && value.length <= 10
+  return Array.isArray(value) && value.length > 0 && value.length <= AGENT_PILOT_MAX_APPLICANTS
     && value.every((id) => Number.isSafeInteger(id) && id > 0)
     && new Set(value).size === value.length;
 }

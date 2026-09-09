@@ -155,9 +155,19 @@ test("pilot allows selected applicants and jobs but never unscoped cron or old i
   assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt: new Date(Date.now() - 10_000).toISOString(), jobIds: [11] }), "off");
 });
 
+test("a 50-person pilot allows its last selected applicant while other applicants remain off", async () => {
+  const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
+  invalidateKillSwitchCache();
+  const db = fakeClient({ data: [{ body: pilotBody({ applicant_ids: Array.from({ length: 50 }, (_, i) => i + 1) }) }], error: null }) as never;
+  const receivedAt = new Date().toISOString();
+  assert.equal(await getAgentMode(db, { applicantId: 50, receivedAt, jobIds: [11, 12] }), "auto");
+  assert.equal(await getAgentMode(db, { applicantId: 51, receivedAt, jobIds: [11] }), "off");
+  assert.equal(await getAgentMode(db), "off");
+});
+
 test("pilot invalid membership, expiry and excessive duration fail closed", async () => {
   const { getAgentMode, invalidateKillSwitchCache } = await loadKillSwitch();
-  for (const patch of [{ applicant_ids: [] }, { applicant_ids: [7, 7] }, { applicant_ids: ["7"] }, { applicant_ids: Array.from({ length: 11 }, (_, i) => i + 1) }, { expires_at: new Date(Date.now() - 100).toISOString() }, { expires_at: new Date(Date.now() + 25 * 3600_000).toISOString() }, { job_ids: [] }]) {
+  for (const patch of [{ applicant_ids: [] }, { applicant_ids: [7, 7] }, { applicant_ids: ["7"] }, { applicant_ids: Array.from({ length: 51 }, (_, i) => i + 1) }, { expires_at: new Date(Date.now() - 100).toISOString() }, { expires_at: new Date(Date.now() + 25 * 3600_000).toISOString() }, { job_ids: [] }]) {
     invalidateKillSwitchCache();
     assert.equal(await getAgentMode(fakeClient({ data: [{ body: pilotBody(patch) }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11] }), "off");
   }

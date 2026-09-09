@@ -25,6 +25,12 @@ import {
 import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "@/lib/geo";
 import { detectConfirmationNuance } from "@/lib/agent/outbound-safety";
 import {
+  RECRUITMENT_CONTACT_AUTHORIZATION_EVENT,
+  hasExplicitRecruitmentContactRefusal,
+  isLegacyRecruitmentPoolImport,
+  recruitmentContactAuthorizationMatches,
+} from "@/lib/recruitment-contact-authorization";
+import {
   bulkBatchRequestFingerprint,
   bulkMessageRequestFingerprint,
   bulkRecipientIdempotencyKey,
@@ -53,6 +59,7 @@ interface BulkSendBody {
   purpose?: string;
   // purpose와 연관된 공고 id(선택) — 예: '공고 관심자 선택'으로 고른 대기 안내 대상의 공고.
   job_id?: number;
+  recruitment_job_ids?: unknown;
 }
 
 interface MessageApplicant extends ExposureApplicant {
@@ -61,6 +68,10 @@ interface MessageApplicant extends ExposureApplicant {
   access_token: string | null;
   sms_opt_out_at: string | null;
   marketing_consent: boolean | null;
+  marketing_consent_at: string | null;
+  source: string | null;
+  airtable_record_id: string | null;
+  airtable_raw: unknown;
   status: string | null;
 }
 
@@ -134,6 +145,16 @@ export async function POST(req: NextRequest) {
       );
     }
     const bulkRequestId = validatedRequestId.key;
+    let recruitmentJobIds: number[] | null = null;
+    if (data.recruitment_job_ids !== undefined) {
+      const ids = data.recruitment_job_ids;
+      if (purpose !== "new_job" || !Array.isArray(ids) || ids.length < 1 || ids.length > 3
+        || !ids.every((id) => Number.isSafeInteger(id) && id > 0)
+        || new Set(ids).size !== ids.length || !ids.includes(purposeJobId)) {
+        return NextResponse.json({ error: "모집 연락은 주 공고를 포함한 실제 공고 1~3개로 한정해야 합니다." }, { status: 400 });
+      }
+      recruitmentJobIds = ids;
+    }
 
     const requestedCategory = classifyBulkSmsCategory({ purpose, body: text });
     if (requestedCategory === "unknown") {
@@ -159,6 +180,7 @@ export async function POST(req: NextRequest) {
     let newJobIsTargeted = false;
     let newJobAnnouncement: NewJobAnnouncement | null = null;
     const newJobExposureOverrides = new Map<number, ExposureMode>();
+    const recruitmentExposedApplicantIds = new Set<number>();
 
     // 새 공고 안내 대상 모달을 오래 열어둔 사이 공고가 마감되거나 모집 채널이 바뀔 수 있다.
     // 클라이언트가 산정한 대상을 신뢰하지 않고 실제 발송 직전에 pull(/p) 노출 가능 상태를 재확인한다.
@@ -215,6 +237,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (recruitmentJobIds) {
+      const recipientIds = [...new Set(recipients.map((recipient) => recipient.applicant_id)
+        .filter((id): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0))];
+      const [jobResult, exposureResult] = await Promise.all([
+        supabase.from("jobs").select("id, title, status, closes_at, recruit_mode, exposure").in("id", recruitmentJobIds),
+        supabase.from("job_exposure_targets").select("job_id, applicant_id, mode")
+          .in("job_id", recruitmentJobIds).in("applicant_id", recipientIds),
+      ]);
+      if (jobResult.error || exposureResult.error) {
+        return NextResponse.json({ error: "모집 연락 공고와 노출 대상을 확인하지 못했습니다." }, { status: 503 });
+      }
+      if (jobResult.data?.length !== recruitmentJobIds.length || jobResult.data.some((job) => (
+        !job.title?.trim() || job.title.startsWith("__") || job.recruit_mode !== "internal"
+        || job.exposure !== "targeted" || isJobEffectivelyClosed(job.status, job.closes_at)
+      ))) {
+        return NextResponse.json({ error: "모집 연락은 모집 중인 내부 공고의 지정 대상에게만 가능합니다." }, { status: 409 });
+      }
+      for (const applicantId of recipientIds) {
+        if (recruitmentJobIds.every((jobId) => {
+          const rows = exposureResult.data?.filter((row) => row.job_id === jobId && row.applicant_id === applicantId);
+          return rows?.length === 1 && rows[0].mode === "include";
+        })) recruitmentExposedApplicantIds.add(applicantId);
+      }
+    }
+
     // 수신자별 치환 — #{이름}, #{맞춤링크}(무로그인 pull 페이지 /p/[token]).
     // 기존엔 치환 없이 원문 그대로 발송돼 '#{이름}님' 문자가 나갔다.
     // 지원자 정보는 치환 여부와 무관하게 항상 로드 — 수신거부(sms_opt_out_at) 가드용.
@@ -227,11 +274,11 @@ export async function POST(req: NextRequest) {
       if (ids.length > 0) {
         const { data: rows, error: applicantError } = await supabase
           .from("applicants")
-          .select("id, name, phone, access_token, sms_opt_out_at, marketing_consent, status, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
+          .select("id, name, phone, access_token, sms_opt_out_at, marketing_consent, marketing_consent_at, source, airtable_record_id, airtable_raw, status, sido, sigungu, availability, own_vehicle, work_hours, available_slots, lat, lng, applied_at, created_at")
           .in("id", ids);
         if (applicantError) {
           console.error("[bulk-send] applicants lookup failed", applicantError);
-          if (newJobIsTargeted) {
+          if (newJobIsTargeted || recruitmentJobIds) {
             return NextResponse.json(
               { error: "공고 노출 대상 지원자를 확인하지 못했습니다." },
               { status: 503 },
@@ -244,8 +291,12 @@ export async function POST(req: NextRequest) {
             name: (row.name as string | null) ?? null,
             phone: (row.phone as string | null) ?? null,
             access_token: (row.access_token as string | null) ?? null,
-            sms_opt_out_at: (row.sms_opt_out_at as string | null) ?? null,
-            marketing_consent: (row.marketing_consent as boolean | null) ?? null,
+            sms_opt_out_at: row.sms_opt_out_at as string | null,
+            marketing_consent: row.marketing_consent as boolean | null,
+            marketing_consent_at: row.marketing_consent_at as string | null,
+            source: row.source as string | null,
+            airtable_record_id: row.airtable_record_id as string | null,
+            airtable_raw: row.airtable_raw,
             status: (row.status as string | null) ?? null,
             sido: (row.sido as string | null) ?? null,
             sigungu: (row.sigungu as string | null) ?? null,
@@ -325,11 +376,13 @@ export async function POST(req: NextRequest) {
         for (let offset = 0; offset < recipientIdentityApplicantIds.length; offset += APPLICANT_ID_BATCH_SIZE) {
           const batch = recipientIdentityApplicantIds.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
           const candidateRows = await fetchAllPostgrestRows(async (from, to) => {
-            const result = await supabase
+            let query = supabase
               .from("job_candidates")
               .select("id, applicant_id")
-              .eq("job_id", purposeJobId)
-              .in("applicant_id", batch)
+              .in("applicant_id", batch);
+            // 한정 모집 연락은 다른 공고의 후보·중단 관계도 보존한다.
+            if (!recruitmentJobIds) query = query.eq("job_id", purposeJobId);
+            const result = await query
               .order("id", { ascending: true })
               .range(from, to);
             return {
@@ -478,6 +531,48 @@ export async function POST(req: NextRequest) {
       purpose: effectivePurpose,
       jobId: purposeJobId,
     });
+    const authorizedRecruitmentApplicantIds = new Set<number>();
+    if (recruitmentJobIds) {
+      const legacyApplicants = [...infoById].filter(([, info]) => isLegacyRecruitmentPoolImport(info));
+      const legacyPhones = new Set(legacyApplicants.map(([, info]) => normalizePhone(info.phone ?? "")));
+      const historyApplicantIds = recipientIdentityApplicantIds.filter((id) => legacyPhones.has(phoneIdentityIndex.phoneByApplicantId.get(id) ?? ""));
+      try {
+        const authorizations = legacyApplicants.length ? await fetchAllPostgrestRows(async (from, to) => {
+          const result = await supabase.from("pool_events").select("id, applicant_id, event_type, created_at, meta")
+            .eq("event_type", RECRUITMENT_CONTACT_AUTHORIZATION_EVENT).eq("meta->>batch_id", bulkRequestId)
+            .in("applicant_id", legacyApplicants.map(([id]) => id)).order("id", { ascending: true }).range(from, to);
+          return { data: result.data, error: result.error };
+        }, "모집 연락 근거") : [];
+        const historyByPhone = new Map<string, unknown[]>();
+        for (let offset = 0; offset < historyApplicantIds.length; offset += APPLICANT_ID_BATCH_SIZE) {
+          const batch = historyApplicantIds.slice(offset, offset + APPLICANT_ID_BATCH_SIZE);
+          const history = await fetchAllPostgrestRows(async (from, to) => {
+            const result = await supabase.from("messages").select("id, applicant_id, direction, body, created_at")
+              .in("applicant_id", batch).order("id", { ascending: true }).range(from, to);
+            return { data: result.data, error: result.error };
+          }, "모집 연락 거절 이력");
+          for (const message of history) {
+            const phone = phoneIdentityIndex.phoneByApplicantId.get(message.applicant_id);
+            if (!phone) throw new Error("문자 이력의 전화번호를 확인하지 못했습니다.");
+            const rows = historyByPhone.get(phone) ?? [];
+            rows.push(message);
+            historyByPhone.set(phone, rows);
+          }
+        }
+        for (const [applicantId, info] of legacyApplicants) {
+          const phone = normalizePhone(info.phone ?? "");
+          if (!requestedPhones.has(phone) || !historyApplicantIds.includes(applicantId)
+            || hasExplicitRecruitmentContactRefusal(historyByPhone.get(phone) ?? [])) continue;
+          if (authorizations.some((event) => recruitmentContactAuthorizationMatches(event, {
+            purpose: "new_job", batchId: bulkRequestId, applicantId, phone,
+            jobIds: recruitmentJobIds, requestFingerprint: batchFingerprint,
+          }, new Date(Date.now())))) authorizedRecruitmentApplicantIds.add(applicantId);
+        }
+      } catch (authorizationError) {
+        console.error("[bulk-send] recruitment authorization lookup failed", authorizationError);
+        return NextResponse.json({ error: "모집 연락 근거와 거절 이력을 확인하지 못했습니다." }, { status: 503 });
+      }
+    }
     let batchClaimData: unknown;
     try {
       const batchClaim = await supabase.rpc("claim_bulk_message_batch", {
@@ -666,9 +761,10 @@ export async function POST(req: NextRequest) {
       }
       if (
         purpose === "new_job"
-        && phoneIdentity.applicantIds.some((applicantId) => newJobCandidateApplicantIds.has(applicantId))
+        && (phoneIdentity.applicantIds.some((applicantId) => newJobCandidateApplicantIds.has(applicantId))
+          || (recruitmentJobIds && phoneIdentity.currentJobIds.length > 0))
       ) {
-        results.push({ phone, success: false, error: "이미 현재 공고 후보(발송 제외)" });
+        results.push({ phone, success: false, error: recruitmentJobIds ? "기존 공고 관계 있음(발송 제외)" : "이미 현재 공고 후보(발송 제외)" });
         continue;
       }
       if (
@@ -682,9 +778,13 @@ export async function POST(req: NextRequest) {
         results.push({ phone, success: false, error: "공고 노출 대상 아님(발송 제외)" });
         continue;
       }
+      if (recruitmentJobIds && !recruitmentExposedApplicantIds.has(applicantId)) {
+        results.push({ phone, success: false, error: "모집 연락 공고의 지정 대상 아님(발송 제외)" });
+        continue;
+      }
 
       // 신규 일자리·캠페인은 applicant_id와 전화번호가 실제 지원자 행에 일치하고,
-      // marketing_consent=true인 경우만 발송한다. ID 누락·조회 실패·행 누락도 동의 없음으로 차단한다.
+      // 동의가 필요하다. 한정 모집 연락은 저장된 원래 채용 목적 근거만 별도로 확인한다.
       const policyBlock = smsRecipientBlockReason({
         category: smsCategory,
         recipientPhone: phone,
@@ -704,7 +804,7 @@ export async function POST(req: NextRequest) {
         results.push({ phone, success: false, error: "지원자 정보 확인 불가(발송 제외)" });
         continue;
       }
-      if (policyBlock === "consent_required") {
+      if (policyBlock === "consent_required" && !authorizedRecruitmentApplicantIds.has(applicantId)) {
         results.push({
           phone,
           success: false,
@@ -828,15 +928,47 @@ export async function POST(req: NextRequest) {
           console.error("[bulk-send] unexpected recipient outbox claim", payload);
           return { kind: "error" as const, error: "발송 요청 상태를 확인하지 못했습니다." };
         },
-        send: () => sendSms(
-          phone,
-          personalText,
-          subject,
-          {
+        send: async () => {
+          if (policyBlock === "consent_required" && recruitmentJobIds) {
+            // 순차 발송 대기 중 들어온 거절·중단과 만료된 근거도 공급자 호출 직전에 확인한다.
+            try {
+              const currentIdentity = (await fetchPhoneMessageIdentityIndex(supabase)).byPhone.get(phone);
+              if (!currentIdentity || currentIdentity.hasActiveSmsOptOut || currentIdentity.currentJobIds.length
+                || currentIdentity.applicantStatuses.some((status) => NEW_JOB_EXCLUDED_STATUS.has(status))) throw new Error("수신 상태 변경");
+              const [currentApplicant, currentCandidates, authorizations, history] = await Promise.all([
+                supabase.from("applicants").select("id, phone, source, airtable_record_id, airtable_raw, marketing_consent, marketing_consent_at, sms_opt_out_at")
+                  .eq("id", applicantId).maybeSingle(),
+                supabase.from("job_candidates").select("id").in("applicant_id", currentIdentity.applicantIds),
+                fetchAllPostgrestRows(async (from, to) => {
+                  const result = await supabase.from("pool_events").select("id, applicant_id, event_type, created_at, meta")
+                    .eq("event_type", RECRUITMENT_CONTACT_AUTHORIZATION_EVENT).eq("meta->>batch_id", bulkRequestId)
+                    .eq("applicant_id", applicantId).order("id", { ascending: true }).range(from, to);
+                  return { data: result.data, error: result.error };
+                }, "최종 모집 연락 근거"),
+                fetchAllPostgrestRows(async (from, to) => {
+                  const result = await supabase.from("messages").select("id, applicant_id, direction, body, created_at")
+                    .in("applicant_id", currentIdentity.applicantIds).order("id", { ascending: true }).range(from, to);
+                  return { data: result.data, error: result.error };
+                }, "최종 모집 연락 거절 이력"),
+              ]);
+              if (currentApplicant.error || currentCandidates.error || !Array.isArray(currentCandidates.data)
+                || currentCandidates.data.length || !isLegacyRecruitmentPoolImport(currentApplicant.data)
+                || normalizePhone(currentApplicant.data?.phone ?? "") !== phone
+                || hasExplicitRecruitmentContactRefusal(history)
+                || !authorizations.some((event) => recruitmentContactAuthorizationMatches(event, {
+                  purpose: "new_job", batchId: bulkRequestId, applicantId, phone,
+                  jobIds: recruitmentJobIds, requestFingerprint: batchFingerprint,
+                }, new Date(Date.now())))) throw new Error("모집 연락 근거 변경");
+            } catch (recheckError) {
+              console.error("[bulk-send] recruitment authorization recheck blocked", recheckError);
+              return { success: false as const, failureKind: "declared" as const, error: "발송 직전 모집 연락 근거·수신 상태를 확인하지 못해 문자를 보내지 않았습니다." };
+            }
+          }
+          return sendSms(phone, personalText, subject, {
             clientRequestId: recipientKey,
             timeoutMs: BULK_SMS_PROVIDER_TIMEOUT_MS,
-          },
-        ),
+          });
+        },
         markUnknown: async (error) => {
           const marked = await supabase.rpc("record_bulk_message_provider_result", {
             p_recipient_key: recipientKey,

@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { invalidateKillSwitchCache, isValidTestJobIds, isValidPilotApplicantIds, parseAgentPilotSession, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
+import { AGENT_PILOT_MAX_APPLICANTS, invalidateKillSwitchCache, isValidTestJobIds, isValidPilotApplicantIds, parseAgentPilotSession, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
 import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
 
 import { loadPilotCandidates } from "@/lib/admin/agent-pilot-targets";
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
 
     if (piloting) {
       if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 시작할 수 없습니다." }, { status: 409 });
-      if (!isValidPilotApplicantIds(payload.applicant_ids) || ![1, 4, 24].includes(payload.duration_hours as number)) return NextResponse.json({ error: "대상을 1~10명, 기간을 1·4·24시간 중 선택해주세요." }, { status: 400 });
+      if (!isValidPilotApplicantIds(payload.applicant_ids) || ![1, 4, 24].includes(payload.duration_hours as number)) return NextResponse.json({ error: `대상을 1~${AGENT_PILOT_MAX_APPLICANTS}명, 기간을 1·4·24시간 중 선택해주세요.` }, { status: 400 });
       const jobIds = payload.job_ids as number[];
       const candidates = await loadPilotCandidates(supabase, jobIds);
       const applicantIds = payload.applicant_ids;
