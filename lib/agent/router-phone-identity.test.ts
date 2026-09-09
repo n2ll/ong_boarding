@@ -5,7 +5,8 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { readConsultationResult } from "./multi-job-consultation.ts";
-import type { StageContext } from "./types";
+import type { ConversationTurn, StageContext, StageResult } from "./types";
+import { canSkipConversationProcessing, shouldSuppressConversationReply } from "./conversation-closing.ts";
 import { fetchPhoneMessageIdentityIndex } from "../admin/phone-message-identity.ts";
 import {
   hasFutureJobPromotion,
@@ -107,6 +108,8 @@ type RouterModule = {
     inbound_message_id: string;
     inbound_text: string;
     received_at?: string;
+    simulate?: boolean;
+    forceDraft?: boolean;
   }): Promise<{ ok: boolean; reply_sent?: boolean; skipped?: string; delivery_uncertain?: boolean }>;
 };
 
@@ -137,12 +140,13 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean; history?: ConversationTurn[]; stageResult?: StageResult }) {
   const observations: unknown[] = [];
   const contexts: StageContext[] = [];
   const rpcCalls: string[] = [];
   const smsCalls: Array<{ phone: string; body: string }> = [];
   const transitions: Transition[] = [];
+  const stateUpdates: unknown[] = [];
   const selectedApplicant = input.applicants[0];
   const database: Record<string, Row[]> = {
     applicants: input.applicants,
@@ -188,6 +192,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     name: "exploration",
     async process(ctx: StageContext) {
       contexts.push(ctx);
+      if (input.stageResult) return structuredClone(input.stageResult);
       if (input.consultation) return readConsultationResult({ consultation: input.consultation }, ctx, "성수는 월요일 가능하고 강남은 주말 가능해요") ?? {
         reply_text: "잘못된 기존 단계 응답", state_update: {}, transition: { kind: "advance", to: "screening", reason: "wrong" },
       };
@@ -210,6 +215,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
   const compiledModule = { exports: {} as Record<string, unknown> };
   const stubs: Record<string, Record<string, unknown>> = {
     "./conversation-reply-claim": { withConversationReplyClaim },
+    "./conversation-closing": { canSkipConversationProcessing, shouldSuppressConversationReply },
     "./consultation-context": { loadConsultationJobs: async () => {
       if (input.contextFails) throw new Error("exposure unavailable");
       return input.consultation ? [
@@ -217,7 +223,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
         { job_id: 8, title: "강남 공고", branch: "강남", candidate_id: null, stage: null, expired: false },
       ] : [{ job_id: 7, title: "배송 공고", candidate_id: 11, stage: "exploration", expired: false }];
     } },
-    "./consultation-history": { loadConsultationHistory: async () => ({ history: [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: input.oldSource ? "2000-01-01T00:00:00Z" : new Date().toISOString() }] }) },
+    "./consultation-history": { loadConsultationHistory: async () => ({ history: input.history ?? [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: input.oldSource ? "2000-01-01T00:00:00Z" : new Date().toISOString() }] }) },
     "./consultation-observations": { saveConsultationObservations: async (_db: unknown, _id: number, values: unknown[]) => {
       if (input.observationFails) throw new Error("event storage failed");
       observations.push(...values);
@@ -242,8 +248,9 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     "./system-messages": { getSystemMessage: async () => null },
     "./checklist": { mergeAgentState: (state: Row, patch: Row) => ({ ...state, ...patch }) },
     "./transitions": {
-      applyTransition: async ({ transition }: { transition: Transition }) => {
+      applyTransition: async ({ transition, state_update }: { transition: Transition; state_update: unknown }) => {
         transitions.push(transition);
+        stateUpdates.push(state_update);
         return { next_stage: "exploration", auto_sent_messages: 0, delivery_uncertain: input.transitionUncertain };
       },
     },
@@ -294,6 +301,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     supabase,
     smsCalls,
     transitions,
+    stateUpdates,
     rpcCalls,
     database,
     observations,
@@ -485,4 +493,92 @@ test("scoped consultation with every job allowed still responds", async () => {
   await h.router.runAgentForCandidate({supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "두 공고 문의", received_at: new Date(Date.now()-60000).toISOString()});
   assert.equal(h.contexts.length, 1);
   assert.equal(h.smsCalls.length, 1);
+});
+
+const closingHistory: ConversationTurn[] = [{ direction: "outbound", body: "일정은 매니저가 확인하고 안내드릴게요.", created_at: "2026-09-09T00:00:00Z" }];
+const closingStageResult: StageResult = {
+  reply_text: "그럼 운행 가능한 차종도 알려주세요.", reasoning: "fixture follow-up",
+  state_update: { meta: { general_screening: { 시작가능일: "22일" }, last_run_at: "2026-09-09T00:01:00Z" } },
+  transition: { kind: "advance", to: "screening", reason: "fixture collected information" },
+  applicant_patch: { available_date: "22일" },
+};
+for (const options of [{}, { simulate: true }, { forceDraft: true }, { mode: "draft" }]) {
+  test(`conversation closing stops replies, drafts and automatic announcements: ${JSON.stringify(options)}`, async () => {
+    const h = loadRouter({ applicants: [applicant(1)], stageResult: closingStageResult, ...options });
+    await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "22일 가능합니다. 제가 연락드릴게요", ...options });
+    assert.equal(h.contexts.length, 1, "one stage call preserves the received information");
+    assert.equal(h.smsCalls.length, 0);
+    assert.equal(h.database.message_drafts.length, 0);
+    assert.equal(h.transitions.some((transition) => transition.kind === "advance"), false);
+    if (!("mode" in options)) {
+      assert.equal(h.transitions[0]?.kind, "stay");
+      assert.deepEqual(h.stateUpdates[0], closingStageResult.state_update);
+    }
+    if (!("mode" in options) && !("forceDraft" in options)) {
+      assert.equal(h.database._updates.some((row) => row.table === "applicants" && row.available_date === "22일"), true);
+    }
+  });
+}
+test("a final acknowledgement is silent but a real answer or reopened question receives a reply", async () => {
+  const ordinary: StageResult = { ...closingStageResult, transition: { kind: "stay" } };
+  for (const [inbound, history, sent] of [
+    ["네 감사합니다", closingHistory, 0],
+    ["네", [{ ...closingHistory[0], body: "22일 운행 가능하세요?" }], 1],
+    ["교육 장소가 어디인가요?", [...closingHistory, { ...closingHistory[0], direction: "inbound", body: "제가 연락드릴게요" }], 1],
+  ] as const) {
+    const h = loadRouter({ applicants: [applicant(1)], stageResult: ordinary, history: [...history] });
+    await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: inbound });
+    assert.equal(h.smsCalls.length, sent);
+    assert.equal(h.contexts.length, sent === 0 ? 0 : 1);
+  }
+});
+test("closing does not erase an explicit job refusal or validated consultation observations", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], stageResult: { ...closingStageResult, transition: { kind: "abort", reason: "현재 공고 불가" } } });
+  await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "이 공고는 불가능해요. 제가 연락드릴게요" });
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions[0].kind, "abort");
+  const consultation = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope });
+  await consultation.router.runAgentForCandidate({ supabase: consultation.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "성수는 월요일 가능하고 강남은 주말 가능해요. 제가 연락드릴게요" });
+  assert.equal(consultation.smsCalls.length, 0);
+  assert.equal(consultation.observations.length, 2);
+});
+test("conversation end is not an SMS opt-out", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], stageResult: { ...closingStageResult, transition: { kind: "stay" } } });
+  await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "나중에요" });
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal((h.database._updates ?? []).some((row) => "sms_opt_out_at" in row), false);
+  assert.equal(h.database.pool_events.length, 0);
+});
+
+test("auto-sent audit draft includes the required applicant phone", async () => {
+  const h = loadRouter({ applicants: [applicant(1)] });
+  const result = await run(h.router, h.supabase);
+  assert.equal(result.reply_sent, true);
+  assert.equal(h.database.message_drafts[0]?.applicant_phone, "01012345678");
+});
+
+
+for (const options of [{}, { simulate: true }, { forceDraft: true }, { mode: "draft" }]) {
+  test(`pure closing skips the model and cannot pause a multi-job conversation: ${JSON.stringify(options)}`, async () => {
+    const h = loadRouter({ applicants: [applicant(1)], consultation: { ...consultationEnvelope, job_ids: [] }, ...options });
+    await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "제가 연락드릴게요", ...options });
+    assert.equal(h.contexts.length, 0);
+    assert.equal(h.smsCalls.length, 0);
+    assert.equal(h.database.message_drafts.length, 0);
+    assert.equal((h.database._updates ?? []).length, 0, "no profile, candidate interest or message-job changes");
+    assert.equal(h.observations.length, 0);
+    if (!("mode" in options)) {
+      assert.equal(h.transitions[0]?.kind, "stay");
+      const state = h.stateUpdates[0] as { meta?: { last_run_at?: string } };
+      assert.equal(Number.isFinite(Date.parse(state.meta?.last_run_at ?? "")), true, "processed stamp prevents sweeper repeats");
+    } else assert.equal(h.transitions.length, 0, "global draft retains its no state writes contract");
+  });
+}
+test("information before a pure closing still gets processed once", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], stageResult: closingStageResult,
+    history: [...closingHistory, { ...closingHistory[0], direction: "inbound", body: "22일 가능합니다" }] });
+  await h.router.runAgentForCandidate({ supabase: h.supabase, candidate_id: 11, inbound_message_id: "inbound-1", inbound_text: "제가 연락드릴게요" });
+  assert.equal(h.contexts.length, 1);
+  assert.equal(h.smsCalls.length, 0);
+  assert.deepEqual(h.stateUpdates[0], closingStageResult.state_update);
 });

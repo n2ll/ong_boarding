@@ -376,3 +376,74 @@ test("an explicit remaining job name resolves an earlier ambiguous followup with
   context.consultation!.ambiguousFollowup = true;
   assert.equal(read({ mode: "current", job_ids: [11] }, context, text), null);
 });
+
+test("training questions use the job's explicit training facts instead of delivery hours", () => {
+  const context = ctx();
+  const text = "네 교육일정과 시간, 교육비도 궁금합니다";
+  context.consultation!.sourceMessages[0].body = text;
+  context.consultation!.jobs[0].ai_facts = "다른 운영 참고.\n선탑·교육: 앱 사용과 업무를 익히는 동승교육. 9월 셋째 주 예정, 소요시간 확인 후 안내. 교육비 3만 원은 백업 대금에 합산해 익월 5일 지급.\n다른 내부 참고.";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["선탑·교육"] }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /9월 셋째 주/);
+  assert.match(result.reply_text, /소요시간 확인 후 안내/);
+  assert.match(result.reply_text, /3만 원.*익월 5일/);
+  assert.doesNotMatch(result.reply_text, /09:00~12:00|다른 내부 참고/);
+});
+
+test("a model cannot answer a training-only question with delivery hours and pay", () => {
+  const context = ctx();
+  const text = "네 교육일정과 시간, 교육비도 궁금합니다";
+  context.consultation!.sourceMessages[0].body = text;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["근무시간", "급여"] }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+});
+
+test("unregistered training details cannot be inferred from delivery facts", () => {
+  const context = ctx();
+  context.consultation!.jobs[0].ai_facts = "배송시간 09:00~12:00. 교육비는 임의로 계산하지 말 것.";
+  const text = "선탑 시간은요?";
+  context.consultation!.sourceMessages[0].body = text;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["선탑·교육"] }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /선탑·교육: 매니저 확인 필요/);
+  assert.doesNotMatch(result.reply_text, /09:00~12:00/);
+});
+
+test("agreeing to training does not block a separate delivery pay question", () => {
+  const context = ctx();
+  const text = "교육은 가능합니다. 배송 대금은 얼마인가요?";
+  context.consultation!.sourceMessages[0].body = text;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["급여"] }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /70,000/);
+});
+
+test("malformed training answer fields are rejected without throwing", () => {
+  const context = ctx();
+  const text = "교육시간 궁금합니다";
+  context.consultation!.sourceMessages[0].body = text;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: "근무시간" }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+});
+
+test("an empty training header never exposes the following internal note", () => {
+  const context = ctx();
+  const text = "교육 시간은요?";
+  context.consultation!.sourceMessages[0].body = text;
+  context.consultation!.jobs[0].ai_facts = "선탑·교육:\n내부 메모: 협의 중인 비공개 장소";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["선탑·교육"] }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /매니저 확인 필요/);
+  assert.doesNotMatch(result.reply_text, /내부 메모|비공개 장소/);
+});
+
+test("training-only questions with a verb cannot be substituted with delivery facts", () => {
+  const context = ctx();
+  const text = "교육을 받는 시간과 비용이 궁금해요";
+  context.consultation!.sourceMessages[0].body = text;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["근무시간", "급여"] }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+});

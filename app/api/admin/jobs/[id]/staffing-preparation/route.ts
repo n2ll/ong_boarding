@@ -3,9 +3,15 @@ import { createServiceClient } from "@/lib/supabase";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 import {
   STAFFING_PREPARATION_EVENT,
+  STAFFING_OBSERVATION_EVENT,
+  buildStaffingSuggestions,
+  type StaffingSourceMessage,
+  type StaffingPrimaryCandidate,
   parseStaffingPreparation,
   type StaffingPreparationSnapshot,
 } from "@/lib/admin/staffing-preparation";
+
+import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -36,19 +42,68 @@ export async function GET(_req: NextRequest, context: Context) {
       return { data: result.data as Array<{ applicant_id: number }> | null, error: result.error };
     }, "공고 후보");
     const applicantIds = [...new Set(candidates.map((row) => row.applicant_id))];
-    const latest = new Map<number, PreparationEvent>();
+    const allEvents: PreparationEvent[] = [];
+    const links: Array<{ applicant_id: number; job_id: number }> = [];
     for (let offset = 0; offset < applicantIds.length; offset += 250) {
       const ids = applicantIds.slice(offset, offset + 250);
-      const events = await fetchAllPostgrestRows(async (from, to) => {
-        const result = await db.from("pool_events").select(EVENT_COLUMNS).eq("job_id", jobId)
-          .eq("event_type", STAFFING_PREPARATION_EVENT).in("applicant_id", ids)
+      allEvents.push(...await fetchAllPostgrestRows(async (from, to) => {
+        const result = await db.from("pool_events").select(EVENT_COLUMNS)
+          .in("event_type", [STAFFING_PREPARATION_EVENT, STAFFING_OBSERVATION_EVENT]).in("applicant_id", ids)
           .order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
         return { data: result.data as PreparationEvent[] | null, error: result.error };
-      }, "운영 준비 기록");
-      // 손상된 최신 기록도 그대로 표시한다. 과거의 유효한 기록으로 되돌아가지 않는다.
-      for (const event of events) if (!latest.has(event.applicant_id)) latest.set(event.applicant_id, event);
+      }, "운영 준비·수신 관찰 기록"));
+      links.push(...await fetchAllPostgrestRows(async (from, to) => {
+        const result = await db.from("job_candidates").select("id, applicant_id, job_id").in("applicant_id", ids)
+          .order("id", { ascending: true }).range(from, to);
+        return { data: result.data as typeof links | null, error: result.error };
+      }, "후보의 다른 공고"));
     }
-    return NextResponse.json({ preparations: applicantIds.map((id) => snapshot(id, latest.get(id))) });
+    const jobIds = [...new Set([jobId, ...links.map((link) => link.job_id)])];
+    type Job = { id: number; title: string; start_date: string | null; work_period: string | null; client: unknown };
+    const jobs: Job[] = [];
+    for (let offset = 0; offset < jobIds.length; offset += 250) {
+      jobs.push(...await fetchAllPostgrestRows(async (from, to) => {
+        const result = await db.from("jobs").select("id, title, start_date, work_period, client:clients(client_type)")
+          .in("id", jobIds.slice(offset, offset + 250)).order("id", { ascending: true }).range(from, to);
+        return { data: result.data as Job[] | null, error: result.error };
+      }, "배차 준비 공고"));
+    }
+    const currentJob = jobs.find((job) => job.id === jobId);
+    if (!currentJob) return NextResponse.json({ error: "공고를 확인하지 못했습니다." }, { status: 404 });
+    const observations = allEvents.filter((event) => event.job_id === jobId && event.event_type === STAFFING_OBSERVATION_EVENT);
+    const observedApplicantIds = [...new Set(observations.map((event) => event.applicant_id))];
+    const messages: StaffingSourceMessage[] = [];
+    for (let offset = 0; offset < observedApplicantIds.length; offset += 250) {
+      messages.push(...await fetchAllPostgrestRows(async (from, to) => {
+        // Later refusals may have no AI observation. Read actual inbound history as well as the quoted source.
+        const result = await db.from("messages").select("id, applicant_id, direction, body, created_at")
+          .in("applicant_id", observedApplicantIds.slice(offset, offset + 250)).eq("direction", "inbound")
+          .order("id", { ascending: true }).range(from, to);
+        return { data: result.data as StaffingSourceMessage[] | null, error: result.error };
+      }, "관찰 수신 원문과 후속 답장"));
+    }
+    const memberships = new Set(links.map((link) => `${link.applicant_id}:${link.job_id}`));
+    const latest = new Map<string, PreparationEvent>();
+    // 손상된 최신 기록도 그대로 표시한다. 과거의 유효한 기록으로 되돌아가지 않는다.
+    for (const event of allEvents.filter((row) => row.event_type === STAFFING_PREPARATION_EVENT)) {
+      const key = `${event.applicant_id}:${event.job_id}`;
+      if (!latest.has(key)) latest.set(key, event);
+    }
+    const primaryCandidates: StaffingPrimaryCandidate[] = [];
+    let conflictCheckIncomplete = links.some((link) => !jobs.some((job) => job.id === link.job_id));
+    for (const [key, event] of latest) {
+      if (event.job_id === jobId || !memberships.has(key)) continue;
+      const job = jobs.find((item) => item.id === event.job_id);
+      if (!job || !isGeneralLineJob({ title: job.title, client_type: joinedClientType(job.client) })) continue;
+      const preparation = parseStaffingPreparation(event.meta);
+      if (!preparation) { conflictCheckIncomplete = true; continue; }
+      for (const day of preparation.dates.filter((day) => day.role === "primary_candidate")) {
+        primaryCandidates.push({ applicant_id: event.applicant_id, job_id: job.id, job_title: job.title, date: day.date });
+      }
+    }
+    return NextResponse.json({ preparations: applicantIds.map((id) => snapshot(id, latest.get(`${id}:${jobId}`))),
+      suggestions: buildStaffingSuggestions(observations, messages, currentJob),
+      primary_candidates: primaryCandidates, conflict_check_incomplete: conflictCheckIncomplete });
   } catch (error) {
     console.error("[staffing-preparation GET]", error);
     return NextResponse.json({ error: "운영 준비 기록을 확인하지 못했습니다." }, { status: 503 });

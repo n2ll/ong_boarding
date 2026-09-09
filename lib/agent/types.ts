@@ -144,6 +144,8 @@ export interface ConversationTurn {
  * 에이전트가 다른 공고 문의를 현재 공고 정보로 잘못 답하지 않게 하는 컨텍스트.
  */
 export interface OtherActiveJob {
+  /** 관리자가 명시한 공고별 참고 정보. 선탑 안내는 명시된 전용 줄만 인용한다. */
+  ai_facts?: string | null;
   job_id: number;
   title: string;
   branch: string | null;

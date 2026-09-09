@@ -9,6 +9,7 @@
  */
 
 import { loadConversationExamples, loadPersonaGuidance } from "./agent/examples";
+import { CONVERSATION_CLOSING_GUIDANCE } from "./agent/conversation-closing";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -66,7 +67,7 @@ async function buildSystemPrompt(): Promise<string> {
   const personaSection = persona
     ? `\n\n## 운영자 추가 지침 (관리자 설정 — 안전 규칙은 유지하되 아래 톤·세부 지침을 우선 반영)\n${persona}`
     : "";
-  return SYSTEM_PROMPT_BODY + examplesSection + personaSection;
+  return SYSTEM_PROMPT_BODY + examplesSection + personaSection + "\n\n" + CONVERSATION_CLOSING_GUIDANCE;
 }
 
 const SYSTEM_PROMPT_BODY = `너는 옹고잉(내이루리) 비마트 배송원 채용 매니저 "${MANAGER_NAME}"의 SMS 응대를 돕는 에이전트다.

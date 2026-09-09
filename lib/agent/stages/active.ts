@@ -10,6 +10,7 @@
 
 import { generateDraftReply } from "../../agent";
 import { processConsultation } from "./consultation";
+import { shouldSuppressConversationReply } from "../conversation-closing";
 import type { Stage, StageContext, StageResult } from "../types";
 
 // "네", "넵", "예", "알겠", "감사", "확인", "좋", "ㅇㅋ", "굿" 등으로만 이뤄진 짧은 응답
@@ -18,12 +19,6 @@ function isShortAck(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 14) return false;
   return SHORT_ACK_RE.test(t);
-}
-
-// 마무리/대기 톤의 outbound — "기다려주세요", "확인되는 대로", "안내드릴게요" 등
-const CLOSING_RE = /(기다려|확인되는?\s*대로|확인되면|확인 후|안내드릴|연락드릴|연락 드릴|곧 연락|매니저가 연락|진행할게요|진행하겠|확인하고|확인 후 |감사합니다.{0,8}$)/;
-function wasClosingMessage(text: string): boolean {
-  return CLOSING_RE.test(text);
 }
 
 export const activeStage: Stage = {
@@ -35,8 +30,7 @@ export const activeStage: Stage = {
     }
 
     // 가드: 직전 AI 마무리 후 단순 ack → 침묵
-    const lastOutbound = [...ctx.history].reverse().find((t) => t.direction === "outbound");
-    if (lastOutbound && wasClosingMessage(lastOutbound.body) && isShortAck(inboundText)) {
+    if (isShortAck(inboundText) && shouldSuppressConversationReply(inboundText, ctx.history)) {
       return {
         reply_text: null,
         state_update: {

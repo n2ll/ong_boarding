@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { isGeneralLineJob, joinedClientType } from "../agent/general-line.ts";
 import * as preparationPolicy from "./staffing-preparation.ts";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 
@@ -16,8 +17,8 @@ function event(id: number, meta: unknown = preparation, patch: Row = {}): Row {
   return { id, applicant_id: 1, job_id: 7, event_type: "staffing_preparation", meta, created_at: "2026-09-09T00:00:00.000Z", ...patch };
 }
 
-function harness(input: { events?: Row[]; candidates?: Row[]; fail?: (table: string, write: boolean, from?: number) => boolean } = {}) {
-  const database: Record<string, Row[]> = { pool_events: input.events ?? [], job_candidates: input.candidates ?? [{ id: 11, job_id: 7, applicant_id: 1 }, { id: 12, job_id: 7, applicant_id: 2 }] };
+function harness(input: { events?: Row[]; candidates?: Row[]; jobs?: Row[]; messages?: Row[]; fail?: (table: string, write: boolean, from?: number) => boolean } = {}) {
+  const database: Record<string, Row[]> = { jobs: input.jobs ?? [{ id: 7, title: "일반 A", start_date: "2027-04-20", work_period: "단기", client: null }], messages: input.messages ?? [], pool_events: input.events ?? [], job_candidates: input.candidates ?? [{ id: 11, job_id: 7, applicant_id: 1 }, { id: 12, job_id: 7, applicant_id: 2 }] };
   const writes: Array<{ table: string; row: Row }> = [];
   class Query {
     private table: string;
@@ -56,6 +57,7 @@ function harness(input: { events?: Row[]; candidates?: Row[]; fail?: (table: str
     "next/server": { NextResponse: { json: (body: unknown, init?: { status: number }) => ({ body, status: init?.status ?? 200 }) } },
     "@/lib/supabase": { createServiceClient: () => ({ from: (table: string) => new Query(table) }) },
     "@/lib/admin/staffing-preparation": preparationPolicy,
+    "@/lib/agent/general-line": { isGeneralLineJob, joinedClientType },
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
   };
   const routePath = new URL("../../app/api/admin/jobs/[id]/staffing-preparation/route.ts", import.meta.url);
@@ -151,4 +153,62 @@ test("GET reads the complete history and fails closed when a later page is unava
   assert.equal(((response.body.preparations as Row[])[0].preparation as Row).note, "1001");
   const failing = harness({ events, fail: (table, write, from) => table === "pool_events" && !write && from === 1000 });
   assert.equal((await failing.route.GET({}, context())).status, 503);
+});
+
+
+const source = { id: "sms-1", applicant_id: 1, direction: "inbound", body: "22일 가능", created_at: "2027-04-09T00:00:00Z" };
+const observed = event(20, { source: "inbound_sms", source_message_id: source.id, source_created_at: source.created_at,
+  observations: [{ kind: "availability", quote: source.body }] }, { event_type: "job_consultation_observation" });
+const primary = { ...preparation, dates: [{ date: "2027-04-22", availability: "available", role: "primary_candidate" }] };
+
+test("GET links verified suggestions without writing or changing saved manager dates, and hides unlinked evidence", async () => {
+  const h = harness({ events: [event(1), observed, { ...observed, id: 21, applicant_id: 999 }], messages: [source] });
+  const response = await h.route.GET({}, context());
+  assert.equal(response.status, 200);
+  const suggestions = response.body.suggestions as Row[];
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].date, "2027-04-22");
+  assert.equal(suggestions[0].source_message_id, "sms-1");
+  assert.equal(((response.body.preparations as Row[])[0].preparation as Row).note, preparation.note);
+  assert.deepEqual(h.writes, []);
+});
+
+test("cross-job primary warnings use linked real general jobs and latest preparation only", async () => {
+  const h = harness({
+    candidates: [7, 8, 9, 10, 11, 12].map((job_id) => ({ id: job_id, job_id, applicant_id: 1 })),
+    jobs: [
+      { id: 7, title: "A", start_date: "2027-04-20", work_period: "단기", client: null },
+      { id: 8, title: "일반 B", client: { client_type: "general" } },
+      { id: 9, title: "__system", client: null },
+      { id: 10, title: "비마트", client: [{ client_type: "baemin_bmart" }] },
+      { id: 11, title: "해제된 일반 C", client: null },
+      { id: 12, title: "손상된 일반 D", client: null },
+    ],
+    events: [event(1, primary), ...[8, 9, 10, 11, 12, 99].map((job_id) => event(job_id, primary, { job_id })),
+      event(30, { ...primary, dates: [] }, { job_id: 11 }), event(31, null, { job_id: 12 })],
+  });
+  const response = await h.route.GET({}, context());
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify(response.body.primary_candidates)), [{ applicant_id: 1, job_id: 8, job_title: "일반 B", date: "2027-04-22" }]);
+  assert.equal(response.body.conflict_check_incomplete, true);
+  assert.deepEqual(h.writes, []);
+});
+
+test("evidence/job lookup errors are not reported as absent suggestions or conflict-free", async () => {
+  for (const table of ["jobs", "messages"]) {
+    const h = harness({ events: [observed], messages: [source], fail: (name) => name === table });
+    assert.equal((await h.route.GET({}, context())).status, 503);
+    assert.deepEqual(h.writes, []);
+  }
+});
+
+test("GET reads later actual inbound even when no consultation observation was written for its refusal", async () => {
+  const h = harness({ events: [observed], messages: [source, { ...source, id: "sms-new", body: "22일 불가", created_at: "2027-04-10T00:00:00Z" }] });
+  const response = await h.route.GET({}, context());
+  assert.equal(response.status, 200);
+  const suggestion = (response.body.suggestions as Row[])[0];
+  assert.equal(suggestion.date, null);
+  assert.equal(suggestion.availability, "unknown");
+  assert.match(suggestion.reason as string, /22일 불가/);
+  assert.deepEqual(h.writes, []);
 });
