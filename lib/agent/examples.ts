@@ -11,6 +11,7 @@
  */
 
 import { createServiceClient } from "@/lib/supabase";
+import { CONVERSATION_CLOSING_GUIDANCE } from "./conversation-closing";
 
 interface CachedCategory {
   text: string;
@@ -216,6 +217,7 @@ export async function buildToneGuide(
     );
   }
 
+  lines.push("", CONVERSATION_CLOSING_GUIDANCE);
   return lines.join("\n");
 }
 

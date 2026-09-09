@@ -44,3 +44,85 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
   dates.sort((a, b) => a.date.localeCompare(b.date));
   return { source: "manager", dates, training_availability: data.training_availability.trim(), note: data.note.trim() };
 }
+
+export const STAFFING_OBSERVATION_EVENT = "job_consultation_observation";
+export type StaffingEvidenceEvent = { id: number; applicant_id: number; job_id: number; event_type: string; meta: unknown; created_at: string };
+export type StaffingSourceMessage = { id: string; applicant_id: number; direction: string; body: string; created_at: string };
+export type StaffingSuggestion = {
+  applicant_id: number; event_id: number; source_message_id: string | null; source_created_at: string | null;
+  quote: string; date: string | null; availability: "available" | "unavailable" | "unknown"; reason: string | null;
+};
+export type StaffingPrimaryCandidate = { applicant_id: number; job_id: number; job_title: string; date: string };
+
+type SuggestionJob = { id: number; start_date: string | null; work_period: string | null };
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+function validDay(value: string): boolean {
+  const stamp = Date.parse(`${value}T00:00:00.000Z`);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value;
+}
+/** Deliberately accepts only a complete, single-date statement. Other replies remain visible for review. */
+function resolveReply(body: string, receivedAt: string, job: SuggestionJob): Pick<StaffingSuggestion, "date" | "availability"> | null {
+  // A standalone selection such as “1, 3번” is not an availability clause. Never drop other lines.
+  const statement = body.split(/\r?\n/).filter((line) => !/^\s*\d+(?:번)?(?:\s*[,，·]\s*\d+(?:번)?)*번\s*$/.test(line)).join("\n");
+  const text = statement.replace(/\s/g, "").replace(/^[네예][,.]?/, "").replace(/[.!。]+$/, "");
+  const match = text.match(/^(?:(\d{4})[-/.년])?(?:(\d{1,2})[-/.월])?(\d{1,2})일?(?:에는|은|에|만)?(?:근무|배송)?(가능(?:합니다|해요|해|하다)?|불가(?:합니다)?|불가능(?:합니다|해요)?|가능하지않(?:습니다|아요)|안(?:됩니다|돼요)|못합니다|어렵습니다)$/);
+  if (!match || (!match[1] && !match[2] && !/^\d{1,2}일/.test(text)) || !job.start_date || !validDay(job.start_date) || !Number.isFinite(Date.parse(receivedAt))) return null;
+  const receivedDay = new Date(Date.parse(receivedAt) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // No structured end date exists. Cross-month/year or one-day conflicts need manager interpretation.
+  if (receivedDay.slice(0, 7) !== job.start_date.slice(0, 7)) return null;
+  const year = match[1] ?? job.start_date.slice(0, 4);
+  const month = (match[2] ?? job.start_date.slice(5, 7)).padStart(2, "0");
+  const date = `${year}-${month}-${match[3].padStart(2, "0")}`;
+  if (!validDay(date) || date.slice(0, 7) !== job.start_date.slice(0, 7) || date < job.start_date || date < receivedDay
+    || (job.work_period === "하루" && date !== job.start_date)) return null;
+  return { date, availability: /^가능(?:합니다|해요|해|하다)?$/.test(match[4]) ? "available" : "unavailable" };
+}
+
+/** Latest observation per applicant only: ambiguous/malformed newer evidence must not revive an old positive reply. */
+export function buildStaffingSuggestions(events: StaffingEvidenceEvent[], messages: StaffingSourceMessage[], job: SuggestionJob): StaffingSuggestion[] {
+  const latest = new Map<number, StaffingEvidenceEvent>();
+  const sourceTime = (event: StaffingEvidenceEvent) => {
+    const at = record(event.meta).source_created_at;
+    return typeof at === "string" && Number.isFinite(Date.parse(at)) ? Date.parse(at) : Date.parse(event.created_at);
+  };
+  for (const event of [...events].filter((item) => item.job_id === job.id && item.event_type === STAFFING_OBSERVATION_EVENT)
+    .sort((a, b) => sourceTime(b) - sourceTime(a) || b.id - a.id)) {
+    if (!latest.has(event.applicant_id)) latest.set(event.applicant_id, event);
+  }
+  const sources = new Map(messages.map((message) => [message.id, message]));
+  return [...latest.values()].flatMap((event) => {
+    const meta = record(event.meta);
+    const observations = Array.isArray(meta.observations) ? meta.observations.map(record) : [];
+    const available = observations.filter((item) => item.kind === "availability");
+    if (observations.length && !available.length) return [];
+    const quotes = available.map((item) => typeof item.quote === "string" ? item.quote : "");
+    const sourceId = typeof meta.source_message_id === "string" ? meta.source_message_id : null;
+    const sourceAt = typeof meta.source_created_at === "string" ? meta.source_created_at : null;
+    const source = sourceId ? sources.get(sourceId) : undefined;
+    const suggestion: StaffingSuggestion = { applicant_id: event.applicant_id, event_id: event.id,
+      source_message_id: sourceId, source_created_at: sourceAt, quote: quotes.filter(Boolean).join(" / "),
+      date: null, availability: "unknown", reason: "날짜·근무 가능 여부를 원문에서 확인해주세요." };
+    if (meta.source !== "inbound_sms" || !source || source.applicant_id !== event.applicant_id || source.direction !== "inbound"
+      || !sourceAt || !Number.isFinite(Date.parse(sourceAt)) || Date.parse(source.created_at) !== Date.parse(sourceAt)
+      || !quotes.length || quotes.some((quote) => !quote || !source.body.includes(quote))) {
+      return [{ ...suggestion, reason: "관찰과 수신 원문이 일치하는지 확인이 필요합니다." }];
+    }
+    // Full source body, rather than an AI-cropped positive quote, decides whether a simple statement is safe to suggest.
+    suggestion.quote = source.body;
+    const laterReply = messages.filter((message) => message.applicant_id === event.applicant_id && message.direction === "inbound"
+      && message.id !== source.id && Date.parse(message.created_at) >= Date.parse(sourceAt))
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+    if (laterReply) return [{ ...suggestion, reason: `이후 새 답장이 있어 확인이 필요합니다. 최신 답장: “${laterReply.body}”` }];
+    const resolved = resolveReply(source.body, sourceAt, job);
+    return [{ ...suggestion, ...(resolved ?? {}), reason: resolved ? null : suggestion.reason }];
+  });
+}
+
+/** Explicit manager action adds a candidate date; any existing date (including unknown) remains untouched. */
+export function applyStaffingSuggestion(preparation: StaffingPreparation, suggestion: StaffingSuggestion): StaffingPreparation {
+  if (!suggestion.date || suggestion.availability === "unknown" || preparation.dates.some((day) => day.date === suggestion.date)
+    || preparation.dates.length >= STAFFING_PREPARATION_LIMITS.dates) return preparation;
+  return { ...preparation, dates: [...preparation.dates, { date: suggestion.date, availability: suggestion.availability, role: "unassigned" }] };
+}

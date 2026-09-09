@@ -14,6 +14,7 @@
  */
 
 import { withConversationReplyClaim } from "./conversation-reply-claim";
+import { canSkipConversationProcessing, shouldSuppressConversationReply } from "./conversation-closing";
 import { loadPendingAgentReply } from "./pending-reply";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
@@ -407,7 +408,33 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     return { ok: true, skipped: "baemin suspended — non-screening stage parked to paused" };
   }
 
+  if (canSkipConversationProcessing(cleanInbound, history)) {
+    // 종료만 있는 턴을 모델에 보내면 빈 상담 대상이 검증 실패(pause)가 될 수 있다.
+    // 상태에 처리 시각만 남겨 sweeper 재처리를 막고, 새 질문은 기존 stage에서 다시 받는다.
+    if (!simulate && await getAgentMode(supabase, automationScope, true) !== mode) {
+      return { ok: true, skipped: "agent mode changed before conversation closing" };
+    }
+    const reasoning = "대화 종료·마지막 확인 — 추가 답장 없이 대기";
+    if (!draftMode || perCallDraft) {
+      await applyTransition({
+        canAutomate, supabase, candidate_id: jc.id, applicant_id: applicant.id,
+        applicant_name: applicant.name, applicant_phone: applicant.phone,
+        applicant_branch: applicant.branch1 ?? null, applicant_work_hours: applicant.work_hours ?? null,
+        job_id: jc.job_id, job, current_stage: stageName,
+        state_update: { ...state, meta: { ...state.meta, last_run_at: new Date().toISOString(), last_reasoning: reasoning } },
+        transition: { kind: "stay" }, simulate,
+      });
+    }
+    return { ok: true, skipped: "conversation closing", reply_sent: false, draft_created: false, next_stage: stageName, reasoning };
+  }
+  const suppressConversationReply = shouldSuppressConversationReply(cleanInbound, history);
   const result = await stage.process(ctx, cleanInbound);
+  if (suppressConversationReply) {
+    // 정보·거절·검증된 상담 관찰은 처리하되, 종료 뒤 후속 질문과 전이 자동 안내는 보내지 않는다.
+    result.reply_text = null;
+    if (result.transition.kind === "advance") result.transition = { kind: "stay" };
+    result.reasoning = `${result.reasoning ?? ""}\n[대화 종료·마지막 확인: 추가 답장 생략]`;
+  }
 
   // Claude 사용량 → ai_usage_daily 적재. stage 이름 = purpose.
   if (result.usage?.model) {
@@ -584,7 +611,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   }
   const consultationReviewReason = consultation && result.transition.kind === "pause" ? result.transition.reason : null;
   // 검증 실패도 전역 draft에서 보이지 않는 미처리 문자로 남기지 않는다.
-  const draftText = result.reply_text || (consultationReviewReason ? "문의 내용을 매니저가 확인한 뒤 안내드릴게요." : null);
+  const draftText = suppressConversationReply ? null : result.reply_text || (consultationReviewReason ? "문의 내용을 매니저가 확인한 뒤 안내드릴게요." : null);
   const responseJobId = consultationReviewReason || result.consultation ? null : jc.job_id;
   if (result.consultation) {
     result.reasoning = `${result.reasoning ?? ""}\n[복수 공고 상담: ${result.consultation.job_ids.join(", ")}]`;
@@ -771,8 +798,9 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
         const reasoningWithTransition = transitionLabel
           ? `[${transitionLabel}]\n${result.reasoning ?? ""}`
           : (result.reasoning ?? "");
-        await supabase.from("message_drafts").insert({
+        const { error: auditError } = await supabase.from("message_drafts").insert({
           applicant_id: applicant.id,
+          applicant_phone: applicant.phone,
           inbound_message_id,
           job_id: responseJobId,
           draft_text: result.reply_text,
@@ -781,6 +809,8 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
           used_message_id: outboundId,
           resolved_at: new Date().toISOString(),
         });
+        // 발송 원장은 이미 저장됐다. 보조 판단 이력 실패로 SMS를 다시 보내면 안 된다.
+        if (auditError) console.error("[router] auto-sent reasoning insert failed", auditError);
       }
     }
   }

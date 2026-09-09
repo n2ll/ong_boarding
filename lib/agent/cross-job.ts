@@ -34,6 +34,8 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
     ["근무기간", (j.work_period ?? "").trim() || null],
     ["시작일", (j.start_date ?? "").trim() || null],
     ["급여", jobPayLabel(j) || null],
+    // 자유문장 전체나 배송시간에서 교육 조건을 추측하지 않는다. 관리자가 작성한 안내 줄만 쓴다.
+    ["선탑·교육", j.ai_facts?.match(/^선탑·교육:[ \t]*([^\r\n]+)$/m)?.[1]?.trim() || null],
     // **상세 주소는 싣지 않는다** — 집결지 상세는 확정 후 매니저가 안내하는 값이다.
     // 지원자 카드(/p/[token])와 같은 함수로 '서울 서초구'까지만(lib/geo.coarseArea).
     ["집결지(대략)", coarseArea(j.pickup_address) || null],
@@ -106,7 +108,7 @@ export function crossJobSystemSuffix(jobs?: OtherActiveJob[]): string {
 }
 
 /** 블록에 실리는 항목명 — tool enum과 백스톱이 같은 이름을 쓴다. */
-export const CROSS_JOB_FIELD_NAMES = ["근무시간", "근무기간", "시작일", "급여", "집결지(대략)", "본인 차량"] as const;
+export const CROSS_JOB_FIELD_NAMES = ["근무시간", "근무기간", "시작일", "급여", "선탑·교육", "집결지(대략)", "본인 차량"] as const;
 
 /** 각 stage의 *_turn tool input_schema.properties에 그대로 spread. */
 export const crossJobToolProperties = {
