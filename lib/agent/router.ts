@@ -14,6 +14,7 @@
  */
 
 import { withConversationReplyClaim } from "./conversation-reply-claim";
+import { loadPendingAgentReply } from "./pending-reply";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "../solapi";
 import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
@@ -75,6 +76,8 @@ export interface RunAgentInput {
   forceDraft?: boolean;
   /** 처리 이력의 후보만 정해졌으며, 지원 단계 진행은 금지된 상담 턴. */
   consultation_only?: boolean;
+  /** 관리자 대기 답장 재처리: 잠금 획득 후에도 미응답 상태를 확인한다. */
+  onlyIfUnanswered?: boolean;
 }
 
 const REPLY_DELAY_MS = 60_000;       // 인입 시각 기준 답장 목표 지연 (1분)
@@ -136,7 +139,13 @@ export async function runAgentForCandidate(input: RunAgentInput): Promise<RunAge
     inboundMessageId: input.inbound_message_id,
     retainClaim: (result: RunAgentResult) => result.delivery_uncertain === true,
     rpc: (name, params) => input.supabase.rpc(name, params),
-    run: () => runClaimedAgentForCandidate(input),
+    run: async () => {
+      if (input.onlyIfUnanswered) {
+        const pending = await loadPendingAgentReply(input.supabase, candidate.applicant_id, input.inbound_message_id);
+        if (!pending.ok) return { ok: true, skipped: pending.error };
+      }
+      return runClaimedAgentForCandidate(input);
+    },
   });
   return claimed.executed ? claimed.result : { ok: true, skipped: `conversation reply ${claimed.reason}` };
 }

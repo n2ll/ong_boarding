@@ -168,8 +168,8 @@ test("번호 답장은 실제 안내의 번호로 두 공고에 연결하며 원
   const context = numberedContext();
   const text = context.consultation!.sourceMessages[0].body;
   const result = read({ mode: "answer", job_ids: [11, 33], observations: [11, 33].map((job_id) => ({ job_id, source_message_id: "m1", kind: "availability", quote: text })) }, context, text);
-  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11, 33]);
-  assert.ok(result.consultation.observations.every((item) => item.quote === text));
+  assert.deepEqual(result.consultation.observations.map((item: { job_id: number }) => item.job_id), [11, 33]);
+  assert.ok(result.consultation.observations.every((item: { quote: string }) => item.quote === text));
   assert.equal(result.transition.kind, "stay");
   assert.deepEqual(result.state_update.screening, context.state.screening);
   assert.equal(result.applicant_patch, undefined);
@@ -221,7 +221,7 @@ test("번호 선택과 별도로 이름을 명시한 공고의 질문도 함께 
     { job_id: 11, source_message_id: "m1", kind: "availability", quote: "1번 22일 가능" },
   ] }, context, text);
   assert.equal(result.transition.kind, "stay");
-  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11]);
+  assert.deepEqual(result.consultation.observations.map((item: { job_id: number }) => item.job_id), [11]);
   assert.match(result.reply_text, /13:00~17:00/);
 });
 
@@ -246,7 +246,7 @@ test("실제 번호 안내가 있을 때 '1번 공고'는 안내 번호로 해�
   const context = numberedContext(text);
   const result = read({ mode: "answer", job_ids: [11], observations: [{ job_id: 11, source_message_id: "m1", kind: "availability", quote: text }] }, context, text);
   assert.equal(result.transition.kind, "stay");
-  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11]);
+  assert.deepEqual(result.consultation.observations.map((item: { job_id: number }) => item.job_id), [11]);
 });
 
 test("a past interest quote attached to the new question's source ID cannot be sent or recorded", () => {

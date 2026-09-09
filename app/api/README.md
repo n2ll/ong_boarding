@@ -35,6 +35,7 @@ Next.js App Router의 route handlers. 모두 `route.ts` 파일.
 - `messages/[applicantId]/` — 특정 지원자 메시지 히스토리
 - `messages/send/` — 매니저 직접 발송 (대화창 입력)
 - `messages/bulk-send/` — 추천 후보 일괄 시작 멘트 발송
+- `messages/recruitment-contact-authorization/` — 기존 모집 연락 근거 검토/24시간 한정 승인 (대상·공고·본문·배치에 한정, 실제 동의 필드·발송 변경 없음)
 - `drafts/[id]/` — AI 초안 승인/거절
 - `ongmanaging/active-check/` — 재컨택 전 옹매니징(별도 Supabase) 활성 계약 대조 — 미구성 시 `configured: false` 200
 

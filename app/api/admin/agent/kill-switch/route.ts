@@ -65,11 +65,15 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown; applicant_ids?: unknown; duration_hours?: unknown };
+    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown; applicant_ids?: unknown; duration_hours?: unknown; require_inactive?: unknown; expected_updated_at?: unknown };
 
     let mode: AgentMode;
     const testing = payload.mode === "test";
     const piloting = payload.mode === "pilot";
+    if (payload.require_inactive !== undefined && (payload.require_inactive !== true || !piloting
+      || (payload.expected_updated_at !== null && typeof payload.expected_updated_at !== "string"))) {
+      return NextResponse.json({ error: "현재 자동 응대 설정을 다시 확인해주세요." }, { status: 400 });
+    }
     if (testing || piloting) {
       mode = "off";
     } else if (payload.mode !== undefined) {
@@ -96,6 +100,8 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient();
     let body = MODE_TO_BODY[mode];
     const updatedAt = new Date().toISOString();
+    let pilotGuardSnapshot: { body: string; updated_at: string | null } | null = null;
+    let deferredPilotCandidateIds: number[] = [];
     if (testing) {
       if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 검수를 시작할 수 없습니다." }, { status: 409 });
       const phone = typeof payload.phone === "string" ? payload.phone.replace(/[^0-9]/g, "") : "";
@@ -119,13 +125,24 @@ export async function POST(req: NextRequest) {
     if (piloting) {
       if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 시작할 수 없습니다." }, { status: 409 });
       if (!isValidPilotApplicantIds(payload.applicant_ids) || ![1, 4, 24].includes(payload.duration_hours as number)) return NextResponse.json({ error: `대상을 1~${AGENT_PILOT_MAX_APPLICANTS}명, 기간을 1·4·24시간 중 선택해주세요.` }, { status: 400 });
+      if (payload.require_inactive === true) {
+        const current = await supabase.from("prompt_examples").select("body, updated_at").eq("category", CATEGORY).eq("title", TITLE).limit(2);
+        if (current.error) return NextResponse.json({ error: "현재 자동 응대 설정을 확인하지 못했습니다." }, { status: 503 });
+        const row = current.data?.length === 1 ? current.data[0] : null;
+        if (!row || typeof row.body !== "string" || (row.updated_at ?? null) !== payload.expected_updated_at
+          || parseAgentMode(row.body) !== "off" || parseAgentPilotSession(row.body) || parseAgentTestSession(row.body)) {
+          return NextResponse.json({ error: "자동 응대 설정이 바뀌었거나 이미 운영 중입니다. 현재 설정을 다시 확인해주세요." }, { status: 409 });
+        }
+        pilotGuardSnapshot = { body: row.body, updated_at: row.updated_at ?? null };
+      }
       const jobIds = payload.job_ids as number[];
       const candidates = await loadPilotCandidates(supabase, jobIds);
       const applicantIds = payload.applicant_ids;
       if (applicantIds.some((id) => !candidates.some((candidate) => candidate.applicant_id === id))) return NextResponse.json({ error: "선택한 대상의 상태가 바뀌었습니다. 수신거부·중단 상태를 확인하고 다시 선택해주세요." }, { status: 409 });
       // 일시정지 후보는 조회 단계에서 제외한다. 새 관심 후보만 준비하며 여기서 문자를 보내지 않는다.
       const newIds = candidates.filter((candidate) => applicantIds.includes(candidate.applicant_id) && candidate.agent_stage === null).map((candidate) => candidate.id);
-      if (newIds.length) {
+      if (pilotGuardSnapshot) deferredPilotCandidateIds = newIds;
+      else if (newIds.length) {
         const { error: prepareError } = await supabase.from("job_candidates").update({ agent_stage: "exploration" }).in("id", newIds).is("agent_stage", null);
         if (prepareError) return NextResponse.json({ error: "선택 후보를 준비하지 못했습니다." }, { status: 500 });
       }
@@ -134,12 +151,16 @@ export async function POST(req: NextRequest) {
     }
 
     // update-first + 부분 유니크 인덱스로 최초 생성 경쟁에서도 예약 행을 하나만 유지한다.
-    const { data: updatedRows, error: updateError } = await supabase
+    let updateQuery = supabase
       .from("prompt_examples")
       .update({ body, updated_at: updatedAt })
       .eq("category", CATEGORY)
-      .eq("title", TITLE)
-      .select("body, updated_at");
+      .eq("title", TITLE);
+    if (pilotGuardSnapshot) {
+      updateQuery = updateQuery.eq("body", pilotGuardSnapshot.body);
+      updateQuery = pilotGuardSnapshot.updated_at === null ? updateQuery.is("updated_at", null) : updateQuery.eq("updated_at", pilotGuardSnapshot.updated_at);
+    }
+    const { data: updatedRows, error: updateError } = await updateQuery.select("body, updated_at");
     if (updateError) {
       console.error("[kill-switch POST update]", updateError);
       return NextResponse.json({ error: updateError.message }, { status: 500 });
@@ -148,6 +169,8 @@ export async function POST(req: NextRequest) {
       console.error("[kill-switch POST] duplicate control rows detected");
       return NextResponse.json({ error: "AI 응답 모드 저장 상태가 중복되어 확인이 필요합니다." }, { status: 409 });
     }
+    // CAS 실패는 후보 준비보다 먼저 끝낸다. 활성 세션을 insert/retry로 덮어쓰지 않는다.
+    if (pilotGuardSnapshot && !updatedRows?.length) return NextResponse.json({ error: "자동 응대 설정이 변경되었습니다. 현재 설정을 다시 확인해주세요." }, { status: 409 });
 
     let stored = updatedRows?.[0] as { body?: string; updated_at?: string } | undefined;
     if (!stored) {
@@ -176,6 +199,24 @@ export async function POST(req: NextRequest) {
       } else {
         console.error("[kill-switch POST insert]", insertError);
         return NextResponse.json({ error: insertError.message }, { status: 500 });
+      }
+    }
+
+    if (pilotGuardSnapshot && deferredPilotCandidateIds.length) {
+      let prepared = false;
+      try {
+        const result = await supabase.from("job_candidates").update({ agent_stage: "exploration" }).in("id", deferredPilotCandidateIds).is("agent_stage", null);
+        prepared = !result.error;
+      } catch (error) { console.error("[kill-switch pilot] prepare request", error); }
+      if (!prepared) {
+        // 방금 저장한 세션만 복구한다. 다른 관리자의 새 설정은 덮어쓰지 않는다.
+        invalidateKillSwitchCache();
+        try {
+          const restored = await supabase.from("prompt_examples").update({ body: pilotGuardSnapshot.body, updated_at: new Date().toISOString() })
+            .eq("category", CATEGORY).eq("title", TITLE).eq("body", body).eq("updated_at", updatedAt).select("body");
+          if (restored.error || restored.data?.length !== 1) console.error("[kill-switch pilot] prepare rollback needs review", restored.error);
+        } catch (error) { console.error("[kill-switch pilot] prepare rollback request", error); }
+        return NextResponse.json({ error: "후보를 준비하지 못했습니다. 현재 자동 응대 설정을 다시 확인해주세요." }, { status: 500 });
       }
     }
 

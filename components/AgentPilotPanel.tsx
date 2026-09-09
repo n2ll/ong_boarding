@@ -1,21 +1,25 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AGENT_PILOT_MAX_APPLICANTS, type AgentPilotSession } from "@/lib/agent/kill-switch";
 import { useConfirm } from "./ConfirmDialog";
 import { toast } from "sonner";
+import { recruitmentPilotTargets } from "@/lib/admin/recruitment-launch";
 
 type Target = { id: number; name: string; phone_suffix: string; job_ids: number[] };
-export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated }: { jobs: { id: number; title: string }[]; jobsError: boolean; session?: AgentPilotSession; disabled: boolean; onUpdated: () => Promise<unknown> }) {
+export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated, allowedScope, expectedUpdatedAt }: { jobs: { id: number; title: string }[]; jobsError: boolean; session?: AgentPilotSession; disabled: boolean; onUpdated: () => Promise<unknown>; allowedScope?: { jobId: number; applicantIds: number[] }; expectedUpdatedAt?: string | null }) {
   const confirm = useConfirm();
-  const [jobIds, setJobIds] = useState<number[]>([]);
+  const [jobIds, setJobIds] = useState<number[]>(() => allowedScope ? [allowedScope.jobId] : []);
   const [applicantIds, setApplicantIds] = useState<number[]>([]);
   const [hours, setHours] = useState(1);
   const [targets, setTargets] = useState<Target[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const key = (session?.job_ids ?? jobIds).join(",");
+  const scopeJobId = allowedScope?.jobId;
+  const scopeApplicantIds = allowedScope?.applicantIds.join(",") ?? "";
   useEffect(() => {
     const controller = new AbortController();
     setTargets([]); setApplicantIds([]); setError(""); setLoading(Boolean(key));
@@ -23,29 +27,35 @@ export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated 
     fetch(`/api/admin/agent/pilot-targets?job_ids=${key}`, { signal: controller.signal, cache: "no-store" }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "대상 조회 실패");
-      if (!controller.signal.aborted) setTargets(data.targets);
+      if (!controller.signal.aborted) setTargets(scopeJobId === undefined ? data.targets
+        : recruitmentPilotTargets(data.targets, { jobId: scopeJobId, applicantIds: scopeApplicantIds.split(",").map(Number) }));
     }).catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "대상 조회 실패"); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [key, retry]);
+  }, [key, retry, scopeJobId, scopeApplicantIds]);
   const change = async (stop: boolean) => {
-    if (busy || disabled) return;
+    if (busyRef.current || disabled) return;
     const selected = targets.filter((target) => applicantIds.includes(target.id));
     if (!stop && (!selected.length || loading || error || jobsError || jobIds.some((id) => !jobs.some((job) => job.id === id)))) return;
+    if (!stop && allowedScope && (expectedUpdatedAt === undefined || jobIds.length !== 1 || jobIds[0] !== allowedScope.jobId || applicantIds.some(id => !allowedScope.applicantIds.includes(id)))) return;
+    busyRef.current = true; setBusy(true);
     const accepted = await confirm(stop ? { title: "제한 자동 응대를 중단할까요?", description: "선택 대상의 새 답장에도 AI가 자동 응대하지 않습니다.", confirmText: "중단", destructive: true } : {
       title: "선택한 대상만 자동 응대를 시작할까요?",
       description: `${selected.map((target) => `${target.name}(끝 ${target.phone_suffix})`).join(", ")} · ${jobs.filter((job) => jobIds.includes(job.id)).map((job) => job.title).join(", ")} · ${hours}시간. 시작 이후의 새 문자에만 실제 답장을 보냅니다. 개별 중지는 유지하며 첫 안내 문자는 보내지 않습니다.`, confirmText: "제한 자동 응대 시작",
     });
-    if (!accepted) return;
-    setBusy(true);
+    if (!accepted) { busyRef.current = false; setBusy(false); return; }
     try {
-      const response = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(stop ? { mode: "off" } : { mode: "pilot", job_ids: jobIds, applicant_ids: applicantIds, duration_hours: hours }) });
+      const response = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(stop ? { mode: "off" } : { mode: "pilot", job_ids: jobIds, applicant_ids: applicantIds, duration_hours: hours,
+        ...(allowedScope ? { require_inactive: true, expected_updated_at: expectedUpdatedAt } : {}) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "설정 저장 실패");
       await onUpdated();
       toast.success(stop ? "제한 자동 응대를 중단했어요." : "선택한 대상의 새 답장에만 자동 응대합니다.");
-    } catch (reason) { toast.error(reason instanceof Error ? reason.message : "설정 저장 실패"); }
-    finally { setBusy(false); }
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "설정 저장 실패");
+      if (allowedScope) await onUpdated();
+    }
+    finally { busyRef.current = false; setBusy(false); }
   };
   const unavailable = disabled || busy;
   return <section className="mt-4 rounded-xl border border-border-strong bg-card p-4" aria-labelledby="pilot-title">
@@ -58,7 +68,7 @@ export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated 
     </div> : <div className="mt-3 space-y-4 text-sm">
       <p className="text-muted-foreground">최대 {AGENT_PILOT_MAX_APPLICANTS}명·3개 실제 공고에만 새 답장을 보냅니다. 첫 안내 문자와 예약 발송은 실행하지 않습니다.</p>
       <fieldset disabled={unavailable} className="space-y-2"><legend className="mb-2 font-bold">1. 운영할 공고</legend>
-        {jobsError ? <p role="alert">공고 목록을 확인하지 못했습니다.</p> : jobs.map((job) => <label key={job.id} className="flex min-h-11 items-center gap-2 rounded-lg border p-3"><input type="checkbox" checked={jobIds.includes(job.id)} disabled={!jobIds.includes(job.id) && jobIds.length >= 3} onChange={(event) => setJobIds((ids) => event.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} className="size-4 accent-primary focus-visible:ring-2 focus-visible:ring-ring" />{job.title}</label>)}
+        {jobsError ? <p role="alert">공고 목록을 확인하지 못했습니다.</p> : jobs.map((job) => <label key={job.id} className="flex min-h-11 items-center gap-2 rounded-lg border p-3"><input type="checkbox" checked={jobIds.includes(job.id)} disabled={Boolean(allowedScope) || (!jobIds.includes(job.id) && jobIds.length >= 3)} onChange={(event) => setJobIds((ids) => event.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} className="size-4 accent-primary focus-visible:ring-2 focus-visible:ring-ring" />{job.title}</label>)}
         {!jobsError && !jobs.length && <p>실제 모집이 시작되면 공고를 등록한 뒤 선택해주세요. 인력풀 희망 조건은 공고 없이 본인 링크에서 받을 수 있습니다.</p>}
       </fieldset>
       {jobIds.length > 0 && <fieldset disabled={unavailable || loading} className="space-y-2"><legend className="mb-2 font-bold">2. 이 공고의 후보 선택 ({applicantIds.length}/{AGENT_PILOT_MAX_APPLICANTS}명)</legend>

@@ -32,6 +32,7 @@ import {
 } from "@/lib/recruitment-contact-authorization";
 import {
   bulkBatchRequestFingerprint,
+  bulkRecruitmentRecipientFingerprint,
   bulkMessageRequestFingerprint,
   bulkRecipientIdempotencyKey,
   deliverBulkMessage,
@@ -566,6 +567,7 @@ export async function POST(req: NextRequest) {
           if (authorizations.some((event) => recruitmentContactAuthorizationMatches(event, {
             purpose: "new_job", batchId: bulkRequestId, applicantId, phone,
             jobIds: recruitmentJobIds, requestFingerprint: batchFingerprint,
+            recipientFingerprint: bulkRecruitmentRecipientFingerprint(recipients.map(row => ({ ...row, phone: normalizePhone(row.phone ?? "") }))),
           }, new Date(Date.now())))) authorizedRecruitmentApplicantIds.add(applicantId);
         }
       } catch (authorizationError) {
@@ -958,6 +960,7 @@ export async function POST(req: NextRequest) {
                 || !authorizations.some((event) => recruitmentContactAuthorizationMatches(event, {
                   purpose: "new_job", batchId: bulkRequestId, applicantId, phone,
                   jobIds: recruitmentJobIds, requestFingerprint: batchFingerprint,
+                  recipientFingerprint: bulkRecruitmentRecipientFingerprint(recipients.map(row => ({ ...row, phone: normalizePhone(row.phone ?? "") }))),
                 }, new Date(Date.now())))) throw new Error("모집 연락 근거 변경");
             } catch (recheckError) {
               console.error("[bulk-send] recruitment authorization recheck blocked", recheckError);

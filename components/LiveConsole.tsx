@@ -445,6 +445,8 @@ export function LiveConsole() {
   const [kbBody, setKbBody] = useState("");
   const [kbLoading, setKbLoading] = useState(false);
   const [kbSaving, setKbSaving] = useState(false);
+  const [resumingCandidateId, setResumingCandidateId] = useState<number | null>(null);
+  const resumeInFlight = useRef(false);
 
   // 대화 목록은 applicants를 SWR로 — 타 탭과 동일 키라 dedup·캐시(탭 재방문 시 즉시 표시).
   // scope=live — 행은 그대로 전원이고 컬럼만 이 화면이 읽는 11개로 줄인 응답.
@@ -1016,23 +1018,30 @@ export function LiveConsole() {
   };
 
   // AI 재개 — 봇이 다시 응대를 이어받는다. 큐에서 즉시 제거되도록 새로고침.
-  const resumeHandoff = async (h: Handoff) => {
+  const resumeHandoff = async (h: Handoff, replyToLatest = false) => {
+    if (resumeInFlight.current) return;
+    resumeInFlight.current = true;
+    setResumingCandidateId(h.candidate_id);
     try {
       const res = await fetch("/api/admin/agent/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicant_id: h.applicant_id, job_id: h.job_id }),
+        body: JSON.stringify({ applicant_id: h.applicant_id, job_id: h.job_id, reply_to_latest: replyToLatest }),
       });
       if (!res.ok) {
         // 서버가 이유를 준다(예: 진행 중 공고가 여러 개 → 골라 달라). 삼키면 원인을 알 수 없다.
         const json = await res.json().catch(() => null);
         toast.error(json?.error || "재개에 실패했어요.");
+        handleChanged();
         return;
       }
-      toast.success(`${h.applicant_name}님 — AI 응대를 재개했어요.`);
+      toast.success(replyToLatest ? `${h.applicant_name}님 — 대기 문자에 AI가 답장했어요.` : `${h.applicant_name}님 — 다음 수신 문자부터 AI가 응대해요.`);
       handleChanged();
     } catch {
-      toast.error("재개에 실패했어요.");
+      toast.error("처리 결과를 확인하지 못했어요. 대화를 새로고침해 주세요.");
+    } finally {
+      resumeInFlight.current = false;
+      setResumingCandidateId(null);
     }
   };
 
@@ -1464,10 +1473,10 @@ export function LiveConsole() {
                           </div>
                           {h.reason && <div className="text-[12px] text-gray-700 line-clamp-2 leading-snug">{h.reason}</div>}
                         </button>
-                        <div className="flex items-start justify-between gap-2 px-2.5 pb-2 pt-0.5">
+                        <div className="flex flex-col items-start gap-2 px-2.5 pb-2 pt-0.5">
                           {/* AI가 적어둔 '다음 행동'이 말줄임 뒤에 숨지 않게 두 줄까지 편다 */}
                           <span className="text-[12px] font-bold text-muted-foreground line-clamp-2 leading-snug">→ {h.suggested_action}</span>
-                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                          <div className="flex w-full items-center gap-1.5 flex-wrap justify-end">
                             {/* 단가·정책 인계는 매니저 답변을 공고에 반영해 다음부터 AI가 직접 답하게 한다(③-1) */}
                             {!h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
                               <Button size="chip" variant="ghost" onClick={() => openPromote(h)} className="px-2.5 bg-yellow-50 text-warning-strong border border-brand-yellow hover:bg-yellow-100 hover:text-warning-strong">공고에 반영</Button>
@@ -1475,7 +1484,8 @@ export function LiveConsole() {
                             {!["manual", "auto"].includes(h.category) && (
                               <Button size="chip" variant="ghost" onClick={() => openKb(h)} className="px-2.5 bg-success-soft text-success-strong border border-success/25 hover:bg-success-soft hover:text-success-strong">지식 등록</Button>
                             )}
-                            <Button size="chip" variant="ghost" onClick={() => resumeHandoff(h)} className="px-2.5 bg-info-soft text-info-strong border border-info/25 hover:bg-info-soft hover:text-info-strong">AI 재개</Button>
+                            <Button size="chip" variant="ghost" disabled={resumingCandidateId !== null} onClick={() => resumeHandoff(h, true)} className="px-2.5 bg-info-soft text-info-strong border border-info/25 hover:bg-info-soft hover:text-info-strong">{resumingCandidateId === h.candidate_id ? "처리 중…" : "대기 답장 AI 처리"}</Button>
+                            <Button size="chip" variant="ghost" disabled={resumingCandidateId !== null} onClick={() => resumeHandoff(h)} className="px-2.5">이후 응대 재개</Button>
                             {/* 큐의 출구 — 전화·문자로 해결한 건을 닫는다. AI 재개와 달리 봇을 다시 붙이지 않는다. */}
                             <Button size="chip" variant="ghost" onClick={() => openResolve(h)} className="px-2.5 bg-foreground text-white border border-foreground hover:bg-gray-800 hover:text-white">처리 완료</Button>
                           </div>
