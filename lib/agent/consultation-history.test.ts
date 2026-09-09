@@ -131,3 +131,37 @@ test("대화 조회 실패를 비어 있는 상담 기록으로 바꾸지 않는
   const { supabase } = client([], true);
   await assert.rejects(loadConsultationHistory(supabase, 7, message(1, "문의"), jobs), /history failed/);
 });
+
+test("대량 안내의 번호와 허용 공고명만 참고로 보존하고 답변 경계로 쓰지 않는다", async () => {
+  const current = message(4, "1, 2번\n22일 가능");
+  const { supabase } = client([
+    message(1, "먼저 보낸 미응답 문자"),
+    message(2, "① 용산: 하루 70,000원\n비공개 상세 조건\n② 강남: 하루 80,000원", { direction: "outbound", sent_by: "system-bulk" }),
+    current,
+  ]);
+  const result = await loadConsultationHistory(supabase, 7, current, jobs);
+  assert.deepEqual(result.numberedReferences, [{
+    source_message_id: "message-002", created_at: "2026-09-06T00:00:02.000Z",
+    options: [{ number: 1, job_id: 11, label: "용산" }, { number: 2, job_id: 22, label: "강남" }],
+  }]);
+  assert.deepEqual(result.history.map((turn) => turn.body), ["먼저 보낸 미응답 문자"]);
+  assert.deepEqual(result.sourceMessages.map((row) => row.id), ["message-001", "message-004"]);
+  assert.equal(result.ambiguousFollowup, false);
+  assert.doesNotMatch(JSON.stringify(result), /비공개|70,000|80,000/);
+});
+
+for (const excluded of ["outside", "paused", "expired", "ambiguous"] as const) {
+  test(`번호 안내의 대상이 현재 상담 범위를 벗어나면 과거 번호를 추측하지 않는다: ${excluded}`, async () => {
+    const current = message(4, "1번 가능");
+    const available = jobs.map((job) => ({ ...job }));
+    if (excluded === "paused") available[1].stage = "paused";
+    if (excluded === "expired") available[1].expired = true;
+    if (excluded === "ambiguous") available[1].title = "용산 강남 배송";
+    const { supabase } = client([
+      message(1, "① 용산: 이전 조건\n② 강남: 이전 조건", { direction: "outbound", sent_by: "system-bulk" }),
+      message(2, `① 용산: 새 조건\n② ${excluded === "outside" ? "범위밖" : "강남"}: 새 조건`, { direction: "outbound", sent_by: "system-bulk" }), current,
+    ]);
+    const result = await loadConsultationHistory(supabase, 7, current, available);
+    assert.deepEqual(result.numberedReferences, []);
+  });
+}

@@ -56,6 +56,7 @@ Next.js App Router의 route handlers. 모두 `route.ts` 파일.
 - `jobs/`, `jobs/[id]/` — 공고 CRUD
 - `jobs/[id]/dispatch/` — 공고 → 추천 후보에게 일괄 발송
 - `jobs/[id]/candidates/` — 공고 후보 풀
+- `jobs/[id]/staffing-preparation/` — 날짜별 가능 여부·본담당/예비 후보·선탑 가능시간 GET/POST (준비 기록만 저장, 확정·발송 없음)
 - `recommend/` — 공고 텍스트 → 픽업 주소 추출 + 후보 ranking
 - `recommend/generate/` — 거친 메모 → 공고문 생성 (Claude)
 

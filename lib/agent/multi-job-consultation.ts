@@ -10,10 +10,11 @@ const OBSERVATION_QUESTION = /[?？]|(?:나요|까요|습니까|[는한인]가�
 const NEGATIVE_INTEREST = /관심(?:이|은|도)?\s*(?:없|안\s*있)|(?:지원|신청|참여)(?:하고)?\s*싶지\s*않|(?:지원|신청|참여)(?:하)?지\s*않|(?:지원|신청|참여)(?:은|는)?\s*안\s*(?:해|하)/;
 const NEGATIVE_AVAILABILITY = /불가능|불가(?:합|해|예|에|요|[.!?\s]|$)|가능하?지\s*않|못\s*(?:가|하|해|나|오)|안\s*(?:돼|되)|어렵(?!지\s*않)|어려워/;
 
-function mentionedJobs(text: string, jobs: ConsultationJob[]): number[] {
+function mentionedJobs(text: string, jobs: ConsultationJob[], hasNumberedReference = false): number[] {
   const names = matchJobsByText(text, jobs);
   // 공고 번호는 날짜·시간과 구별되는 명시적 표기만 사용한다. 미노출 번호도 current 판정을 막는다.
   const references = [...text.matchAll(/#\s*(\d+)|공고\s*(?:번호\s*)?(\d+)(?![\d년월일시])|(\d+)\s*번\s*공고/g)]
+    .filter((match) => !hasNumberedReference || !match[3])
     .map((match) => Number(match[1] ?? match[2] ?? match[3]));
   return [...new Set([...names, ...references])];
 }
@@ -24,6 +25,25 @@ function observationEvidence(source: string, quote: string): string {
     .flatMap((sentence) => sentence.split(/(?:하고(?!\s*싶)|지만|는데|없고|있고|되고)\s+/))
     .filter((clause) => clause.includes(quote));
   return clauses.length === 1 ? clauses[0].trim() : quote;
+}
+
+function numberedJobs(text: string, ctx: StageContext): number[] | null | undefined {
+  // 번호 안내가 없을 때 '22번 공고'는 기존 DB ID 계약이다. '22일'은 날짜다.
+  const references = ctx.consultation!.numberedReferences ?? [];
+  const numbers = [...text.matchAll(/(\d{1,2}(?:\s*(?:[,·]|와|과|하고|및)\s*\d{1,2})*)\s*번(\s*공고)?/g)]
+    .filter((match) => references.length > 0 || !match[2])
+    .flatMap((match) => (match[1].match(/\d+/g) ?? []).map(Number));
+  for (const match of text.matchAll(/[①-⑳]/g)) numbers.push(match[0].charCodeAt(0) - "①".charCodeAt(0) + 1);
+  if (!numbers.length) return undefined;
+  if (references.length !== 1) return null;
+  const reference = references[0];
+  const ids: number[] = [];
+  for (const number of numbers) {
+    const options = reference.options.filter((option) => option.number === number);
+    if (options.length !== 1 || !ctx.consultation!.jobs.some((job) => job.job_id === options[0].job_id && !job.expired && job.stage !== "paused" && job.stage !== "abort")) return null;
+    ids.push(options[0].job_id);
+  }
+  return [...new Set(ids)];
 }
 
 export function consultationSystemSuffix(ctx: StageContext): string {
@@ -39,12 +59,13 @@ export function consultationSystemSuffix(ctx: StageContext): string {
 - mode=answer: 다른 공고/여러 공고의 조건 문의, 비교, 공고별 관심·가능 시간 발언. job_ids에 대상들을 넣고 answers에는 이번에 질문한 항목만 넣어라. 조건 값이나 계산 결과를 작성하지 마라. 서버가 해당 공고의 등록 값으로 답한다.
 - answers와 observations는 서로 독립이며 빈 배열이 정상이다. 시간만 물으면 answers에는 근무시간만, observations=[]다. 관심·가능 시간만 말하고 조건을 묻지 않으면 answers=[]다. 목록의 missing은 미등록 항목 표시일 뿐 안내·수집할 체크리스트가 아니다. 묻지 않은 missing 항목을 답변에 추가하거나 이를 이유로 handoff하지 마라.
 - 질문에 해당하는 항목이 answers.fields 목록에 없으면 비슷한 항목으로 바꾸지 마라. 예를 들어 주차비·유류비 지원 여부는 본인 차량 보유 여부가 아니다. 지원되지 않는 조건 질문은 consultation.reason에 적고 consultation.mode="handoff"로 반환하되, 답할 수 있는 다른 질문의 항목만 answers에 넣어라. FAQ에서 답을 알아도 이 목록에 없는 자유문장은 전송되지 않는다. reason에 이를 이미 안내했다고 쓰지 말고, 아직 답하지 않은 질문으로 관리자에게 전달하라.
-- observations: 이번 미응답 수신 문자에 명시한 긍정 관심(interest) 또는 본인의 가능 시간(availability)만 공고별로 기록한다. source_message_id와 실제 원문의 연속된 quote가 필수다. 공고명과 긍정 의사 전체를 보존하고 다른 공고의 절을 섞지 마라. 단순히 공고를 질문한 것은 관심 표시가 아니다. '각각 몇 시에 일하나요?' 같은 순수 질문은 반드시 observations=[]다. 질문/가정/부정/인용된 타인 발언을 기록하지 마라. 과거 대화의 발언을 새로 기록하지 마라.
+- observations: 이번 미응답 수신 문자에 명시한 긍정 관심(interest) 또는 본인의 가능 시간(availability)만 공고별로 기록한다. source_message_id는 source_messages의 id를 그대로 복사하고 quote는 그 body의 연속된 원문을 그대로 복사한다. 원문에 있는 공고명과 긍정 의사를 보존하되 없는 공고명을 덧붙이거나 번호를 공고명으로 바꾸지 마라. 띄어쓰기·쉼표·줄바꿈도 바꾸지 말고 다른 절을 이어 붙이지 마라. 예를 들어 원문이 '1, 3번\\n22일 가능'이면 quote는 같은 줄바꿈을 포함한 전체 원문 또는 '22일 가능'이다. 단순히 공고를 질문한 것은 관심 표시가 아니다. '각각 몇 시에 일하나요?' 같은 순수 질문은 반드시 observations=[]다. 질문/가정/부정/인용된 타인 발언을 기록하지 마라. 과거 대화의 발언을 새로 기록하지 마라.
 - 'A는 월요일 가능합니다. B는 금요일 가능합니다'는 공고별 availability 관찰 2건, answers=[], mode=answer다. '둘 다 관심 있어요'도 interest 관찰이며 근무 확정 요청이 아니다. 상담 원문 기록에 현재 공고의 체크리스트·평일 전체 근무·요일 부분 제한 규칙을 적용하지 마라. 지원자가 실제로 요일 조정·병행 근무·배정 판단을 요청한 경우에만 해당 사유로 handoff한다.
 - mode=clarify: '네 가능해요' 등 대상이나 필요한 안내 항목이 실제로 모호할 때만. job_ids에 관련 후보를 넣고 answers/observations는 비운다. 공고와 질문 항목이 명확한 A/B 질문은 answer로 함께 답하라. 공고는 명확하고 조건만 불명확하면 어떤 조건이 궁금한지 물어라. 명확한 A/B 질문을 '어느 공고인지' 되묻지 마라.
 - mode=handoff: 동시 근무 가능 여부, 확정/배정, 상세 주소/연락처, 조건 협의 등 관리자의 판단이 필요한 경우. 확인된 조건은 answers로 함께 안내하고 reason에 관리자 확인 사유를 적는다.
 - 목록에 없는 공고를 추측하거나 현재 공고의 조건을 다른 공고에 대입하지 마라. 알려진 공고가 없으면 handoff, job_ids=[]로 반환한다.
 - '둘 다/각각/두 번째'는 최근 대화에서 대상을 찾되 불명확하면 clarify. 최근 여러 공고를 함께 안내한 뒤의 짧은 긍정을 현재 공고 체크리스트로 처리하지 마라.
+- '1, 3번' 같은 안내 번호는 numbered_references의 number와 job_id 대응으로만 해석한다. jobs의 배열 순서나 DB 공고 ID로 추측하지 마라. 대응 근거가 없거나 해당 번호가 없으면 mode=clarify로 공고명을 재확인하고 observations=[]로 반환한다. numbered_references는 과거 안내의 번호 참고자료일 뿐 답변한 상담 이력이나 새 관찰 원문이 아니다.
 - 상담 모드에서는 기존 reply_text/checklist_update/collected/applicant_patch/transition을 실행하지 않는다. 답변은 서버가 구성한다. 근무 확정은 매니저만 한다.
 `;
 }
@@ -55,6 +76,7 @@ export function formatConsultationContext(ctx: StageContext): string {
     current_job_id: ctx.job?.id ?? null,
     consultation_only: ctx.consultation!.force,
     ambiguous_followup: ctx.consultation!.ambiguousFollowup,
+    numbered_references: ctx.consultation!.numberedReferences ?? [],
     jobs: ctx.consultation!.jobs.map((job) => ({
       job_id: job.job_id, title: job.title, branch: job.branch, expired: job.expired,
       facts: Object.fromEntries(facts(job).known), missing: facts(job).missing,
@@ -88,8 +110,8 @@ export function withConsultationTool<T>(tool: T, ctx: StageContext): T {
           job_id: { type: "integer" }, fields: { type: "array", items: { type: "string", enum: [...CROSS_JOB_FIELD_NAMES] } },
         }, required: ["job_id", "fields"] } },
         observations: { type: "array", description: "명시한 긍정 관심·본인의 가능 시간 원문만. 순수 질문은 반드시 []. 질문했다는 이유로 interest를 만들지 않는다.", items: { type: "object", additionalProperties: false, properties: {
-          job_id: { type: "integer" }, source_message_id: { type: "string" },
-          kind: { type: "string", enum: ["interest", "availability"] }, quote: { type: "string" },
+          job_id: { type: "integer" }, source_message_id: { type: "string", description: "source_messages 안의 실제 id를 그대로 복사한다." },
+          kind: { type: "string", enum: ["interest", "availability"] }, quote: { type: "string", description: "해당 source_messages.body의 연속된 원문. 줄바꿈·공백·번호를 보존하며 공고명 추가나 요약 금지." },
         }, required: ["job_id", "source_message_id", "kind", "quote"] } },
         reason: { type: "string" },
       }, required: ["mode", "job_ids", "answers", "observations"],
@@ -114,9 +136,16 @@ export function readConsultationResult(out: { consultation?: unknown }, ctx: Sta
   const jobs = ctx.consultation!.jobs;
   if (ids.some((id) => !Number.isSafeInteger(id) || !jobs.some((job) => job.job_id === id)) || new Set(ids).size !== ids.length) return blocked(ctx, "허용되지 않은 공고");
   const sourceText = [...ctx.consultation!.sourceMessages.map((m) => m.body), inboundText].join("\n");
-  const named = mentionedJobs(sourceText, jobs);
+  const hasNumberedReference = Boolean(ctx.consultation!.numberedReferences?.length);
+  const named = mentionedJobs(sourceText, jobs, hasNumberedReference);
+  const numbered = numberedJobs(sourceText, ctx);
+  if (numbered === null && mode !== "clarify" && mode !== "handoff") {
+    const availableIds = jobs.filter((job) => !job.expired && job.stage !== "paused" && job.stage !== "abort").map((job) => job.job_id);
+    if (!availableIds.length) return blocked(ctx, "안내 번호의 상담 대상 확인 필요");
+    return readConsultationResult({ consultation: { mode: "clarify", job_ids: availableIds, answers: [], observations: [] } }, ctx, inboundText);
+  }
   if (mode === "current") {
-    if (ctx.consultation!.force || ids.length !== 1 || ids[0] !== ctx.job?.id || answers.length || observations.length ||
+    if (numbered || ctx.consultation!.force || ids.length !== 1 || ids[0] !== ctx.job?.id || answers.length || observations.length ||
       named.some((id) => id !== ctx.job?.id) || PLURAL.test(sourceText) ||
       (ctx.consultation!.ambiguousFollowup && !named.includes(ctx.job?.id ?? -1))) return blocked(ctx, "현재 공고 진행으로 단정할 수 없는 문자");
     return null;
@@ -141,9 +170,14 @@ export function readConsultationResult(out: { consultation?: unknown }, ctx: Sta
   for (const signal of observations) {
     if (!signal || typeof signal !== "object" || !ids.includes(signal.job_id) || !["interest", "availability"].includes(signal.kind) || typeof signal.quote !== "string" || !signal.quote.trim() || signal.quote.length > 800) return blocked(ctx, "의사 기록 형식 오류");
     const source = ctx.consultation!.sourceMessages.find((m) => m.id === signal.source_message_id);
-    if (!source || !source.body.includes(signal.quote)) return blocked(ctx, "수신 문자에 없는 원문");
+    if (!source) return blocked(ctx, "수신 문자 ID 불일치");
+    if (!source.body.includes(signal.quote)) return blocked(ctx, "수신 문자에 없는 원문");
     const evidence = observationEvidence(source.body, signal.quote);
-    const evidenceJobs = mentionedJobs(evidence, jobs);
+    const evidenceJobs = mentionedJobs(evidence, jobs, hasNumberedReference);
+    const sourceNumbers = numberedJobs(source.body, ctx);
+    const evidenceNumbers = numberedJobs(evidence, ctx);
+    const targets = evidenceNumbers === undefined ? sourceNumbers : evidenceNumbers;
+    if (targets === null || (targets && !targets.includes(signal.job_id) && !evidenceJobs.includes(signal.job_id))) return blocked(ctx, "안내 번호와 의사 기록 대상 불일치");
     if (evidenceJobs.length && !evidenceJobs.includes(signal.job_id)) return blocked(ctx, "원문에 명시된 공고와 의사 기록 대상 불일치");
     if (OBSERVATION_QUESTION.test(evidence) || (signal.kind === "interest" ? NEGATIVE_INTEREST : NEGATIVE_AVAILABILITY).test(evidence)) return blocked(ctx, "질문 또는 부정 발언을 긍정 의사로 기록할 수 없음");
     if (jobs.find((j) => j.job_id === signal.job_id)!.expired) return blocked(ctx, "마감 공고의 신규 의사 기록");

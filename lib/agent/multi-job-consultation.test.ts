@@ -155,6 +155,100 @@ function forMessage(text: string): StageContext {
   return context;
 }
 
+function numberedContext(text = "1, 3번\n22일 가능"): StageContext {
+  const context = forMessage(text);
+  context.consultation!.jobs.push({ job_id: 33, candidate_id: 3, title: "용산 배송", branch: "용산", stage: "exploration", expired: false });
+  context.consultation!.numberedReferences = [{ source_message_id: "notice-1", created_at: "2026-09-05T01:00:00Z", options: [
+    { number: 1, job_id: 11, label: "성수" }, { number: 2, job_id: 22, label: "강남" }, { number: 3, job_id: 33, label: "용산" },
+  ] }];
+  return context;
+}
+
+test("번호 답장은 실제 안내의 번호로 두 공고에 연결하며 원문 줄바꿈과 단계를 보존한다", () => {
+  const context = numberedContext();
+  const text = context.consultation!.sourceMessages[0].body;
+  const result = read({ mode: "answer", job_ids: [11, 33], observations: [11, 33].map((job_id) => ({ job_id, source_message_id: "m1", kind: "availability", quote: text })) }, context, text);
+  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11, 33]);
+  assert.ok(result.consultation.observations.every((item) => item.quote === text));
+  assert.equal(result.transition.kind, "stay");
+  assert.deepEqual(result.state_update.screening, context.state.screening);
+  assert.equal(result.applicant_patch, undefined);
+  assert.match(result.reply_text, /매니저가 확인 후 안내/);
+  assert.doesNotMatch(result.reply_text, /확정(?:입니다|됐)|배정(?:됐|되었습니다)/);
+});
+
+test("원문 인용이 정확해도 번호에서 선택하지 않은 공고에는 가용성을 기록하지 않는다", () => {
+  const context = numberedContext();
+  const result = read({ mode: "answer", job_ids: [22], observations: [{ job_id: 22, source_message_id: "m1", kind: "availability", quote: "22일 가능" }] }, context, context.consultation!.sourceMessages[0].body);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.consultation, undefined);
+  assert.match(result.transition.reason, /번호.*대상/);
+});
+
+test("번호 대응 근거가 없으면 모델이 공고 순서를 추측해도 재확인하고 기록하지 않는다", () => {
+  const context = numberedContext();
+  context.consultation!.numberedReferences = [];
+  const result = read({ mode: "answer", job_ids: [11, 33], observations: [{ job_id: 11, source_message_id: "m1", kind: "availability", quote: "22일 가능" }] }, context, context.consultation!.sourceMessages[0].body);
+  assert.equal(result.transition.kind, "stay");
+  assert.equal(result.consultation.clarification, true);
+  assert.deepEqual(result.consultation.observations, []);
+  assert.match(result.reply_text, /어느 공고/);
+});
+
+test("번호 답장은 현재 공고 절차로 진행하지 않는다", () => {
+  const context = numberedContext();
+  assert.equal(read({ mode: "current", job_ids: [11] }, context, context.consultation!.sourceMessages[0].body)?.transition.kind, "pause");
+});
+
+test("수신 문자 ID 오류와 인용 변형을 구분하고 원문 검증을 유지한다", () => {
+  for (const [source_message_id, quote, reason] of [
+    ["wrong-source", "22일 가능", /수신 문자 ID/],
+    ["m1", "1, 3번 22일 가능", /수신 문자에 없는 원문/],
+    ["m1", "성수 22일 가능", /수신 문자에 없는 원문/],
+  ] as const) {
+    const context = numberedContext();
+    const result = read({ mode: "answer", job_ids: [11], observations: [{ job_id: 11, source_message_id, kind: "availability", quote }] }, context, context.consultation!.sourceMessages[0].body);
+    assert.equal(result.transition.kind, "pause");
+    assert.equal(result.reply_text, null);
+    assert.match(result.transition.reason, reason);
+  }
+});
+
+test("번호 선택과 별도로 이름을 명시한 공고의 질문도 함께 답한다", () => {
+  const text = "1번 22일 가능. 강남 근무시간은요?";
+  const context = numberedContext(text);
+  const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 22, fields: ["근무시간"] }], observations: [
+    { job_id: 11, source_message_id: "m1", kind: "availability", quote: "1번 22일 가능" },
+  ] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11]);
+  assert.match(result.reply_text, /13:00~17:00/);
+});
+
+test("번호 근거가 없는 인계 판단도 공고별 가용성을 저장하지 않는다", () => {
+  const context = numberedContext();
+  context.consultation!.numberedReferences = [];
+  const result = read({ mode: "handoff", job_ids: [11], observations: [{ job_id: 11, source_message_id: "m1", kind: "availability", quote: "22일 가능" }] }, context, context.consultation!.sourceMessages[0].body);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.consultation, undefined);
+});
+
+test("연속 수신마다 번호를 검증해 다른 원문의 선택에 긍정 발언을 붙이지 않는다", () => {
+  const context = numberedContext("1번 가능");
+  context.consultation!.sourceMessages.push({ id: "m2", body: "3번 불가", created_at: "2026-09-06T01:00:01Z" });
+  const result = read({ mode: "answer", job_ids: [11, 33], observations: [{ job_id: 33, source_message_id: "m1", kind: "availability", quote: "1번 가능" }] }, context, "3번 불가");
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.consultation, undefined);
+});
+
+test("실제 번호 안내가 있을 때 '1번 공고'는 안내 번호로 해석한다", () => {
+  const text = "1번 공고 22일 가능";
+  const context = numberedContext(text);
+  const result = read({ mode: "answer", job_ids: [11], observations: [{ job_id: 11, source_message_id: "m1", kind: "availability", quote: text }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.deepEqual(result.consultation.observations.map((item) => item.job_id), [11]);
+});
+
 test("a past interest quote attached to the new question's source ID cannot be sent or recorded", () => {
   const text = "성수와 강남의 시간과 급여 알려주세요";
   const context = forMessage(text);
