@@ -84,6 +84,13 @@ export function bulkBatchRequestFingerprint(request: BulkMessageBatch): string {
     .digest("hex");
 }
 
+/** 모집 연락 승인은 정규화된 전체 수신자 집합에만 유효하다(입력 순서는 무관). */
+export function bulkRecruitmentRecipientFingerprint(recipients: Array<{ applicant_id?: number | null; phone: string }>): string {
+  const rows = recipients.map(row => [row.applicant_id ?? null, row.phone] as const)
+    .sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0) || a[1].localeCompare(b[1]));
+  return crypto.createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+}
+
 /** batch id는 제외한다. 새 batch key로 같은 불명 발송을 우회하지 못하게 하는 의도 지문이다. */
 export function bulkMessageRequestFingerprint(request: BulkMessageRequest): string {
   return crypto

@@ -10,6 +10,8 @@ import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { toast } from "sonner";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { RecruitmentLaunchPanel } from "./RecruitmentLaunchPanel";
+import type { RecruitmentTarget } from "@/lib/admin/recruitment-launch";
 import { useConfirm } from "./ConfirmDialog";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
@@ -1003,6 +1005,7 @@ export function Pipeline() {
   // Modals state
   const confirm = useConfirm();
   const [bulkMsgModalOpen, setBulkMsgModalOpen] = useState(false);
+  const [recruitmentLaunch, setRecruitmentLaunch] = useState<{ job: { id: number; title: string }; targets: RecruitmentTarget[] } | null>(null);
   // 재시도 가능한 확정 실패와 발송 여부 불명 상태를 같은 명단·액션으로 섞지 않는다.
   const [bulkFailures, setBulkFailures] = useState<BulkFailureRow[]>([]);
   const retryableBulkFailures = bulkFailures.filter((failure) => failure.kind === "retryable");
@@ -1133,13 +1136,10 @@ export function Pipeline() {
   };
   const openFocusedJobMessageReview = () => {
     if (!requireFocusedJobReady()) return;
+    if (!requireFreshApplicants()) return;
     if (!focusedActiveJob || !focusedExposureReviewReady) return;
-    setWaitlistJobId(null);
-    setNewJobNoticeJobId(focusedActiveJob.id);
-    setBulkFailures([]);
-    setBulkMsgBody(pipelineFocusedJobMessageBody(focusedActiveJob.title));
-    // 작성 모달만 연다. 실제 발송은 기존 최종 확인창에서 매니저가 다시 승인해야 한다.
-    setBulkMsgModalOpen(true);
+    setRecruitmentLaunch({ job: { id: focusedActiveJob.id, title: focusedActiveJob.title },
+      targets: filteredCards.filter(card => selectedRows.has(card.id)).map(card => ({ applicant_id: Number(card.id), name: card.name, phone: card.phone ?? "" })) });
   };
 
   // 공고별 노출 현황(현재 노출 방식·저장된 규칙·규칙 해당 인원·이미 연결된 인원) — 모달을 열 때 한 번 조회.
@@ -4126,6 +4126,10 @@ export function Pipeline() {
             </div>
         </Modal>
       )}
+
+      {recruitmentLaunch && <RecruitmentLaunchPanel job={recruitmentLaunch.job} targets={recruitmentLaunch.targets}
+        initialBody={pipelineFocusedJobMessageBody(recruitmentLaunch.job.title)} onClose={() => setRecruitmentLaunch(null)}
+        onChanged={() => { setSummaryVersion(value => value + 1); void loadApplicants(); }} />}
 
       {/* 2. Bulk Message/Campaign Modal */}
       {bulkMsgModalOpen && (

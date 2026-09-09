@@ -15,6 +15,8 @@ export type RecruitmentContactScope = {
   jobIds: number[];
   /** Existing bulkBatchRequestFingerprint: body, subject, purpose and primary job. */
   requestFingerprint: string;
+  /** New UI approvals bind the complete recipient set; legacy stored events omit this field. */
+  recipientFingerprint?: string;
 };
 
 export type RecruitmentContactAuthorizationEvent = {
@@ -29,6 +31,7 @@ export type RecruitmentContactAuthorizationEvent = {
     applicant_phone: string;
     job_ids: number[];
     request_fingerprint: string;
+    recipient_fingerprint?: string;
     confirmed_by: "manager";
     note: string;
     expires_at: string;
@@ -75,6 +78,8 @@ export function recruitmentContactAuthorizationMatches(
     || meta.applicant_phone !== scope.phone
     || typeof scope.requestFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(scope.requestFingerprint)
     || meta.request_fingerprint !== scope.requestFingerprint
+    || (meta.recipient_fingerprint !== undefined && (typeof scope.recipientFingerprint !== "string"
+      || !/^[0-9a-f]{64}$/.test(scope.recipientFingerprint) || meta.recipient_fingerprint !== scope.recipientFingerprint))
     || !jobIds(scope.jobIds) || !jobIds(meta.job_ids)
     || scope.jobIds.length !== meta.job_ids.length
     || !scope.jobIds.every((id) => (meta.job_ids as number[]).includes(id))

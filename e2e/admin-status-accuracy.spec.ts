@@ -170,3 +170,36 @@ for (const width of [390, 1280]) test(`검수 시작은 공고 선택과 최종 
   expect(state.blocked).toEqual([]);
   await page.screenshot({path: `/tmp/ong-containment-${width}.png`, fullPage: true});
 });
+
+test("대기 답장 처리와 이후 응대 재개를 구분하고 모바일에서 중복 클릭을 막는다", async ({ page, baseURL }) => {
+  const state = await installStatusFixtures(page, baseURL!);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const payloads: unknown[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const h = { candidate_id: 3, applicant_id: 7, job_id: 11, applicant_name: "상담검수", phone: "01000000000", job_title: "상태 검수 배송", branch: "성수",
+    reason: "복수 공고 원문 검토", category: "cross_job", category_label: "공고별 상담", tone: "answerable", suggested_action: "대기 문자를 확인해 주세요.", is_system_job: false, paused_at: new Date().toISOString(), age_days: 0 };
+  await page.route("**/api/admin/agent/handoffs", route => route.fulfill({ json: { handoffs: [h], total: 1 } }));
+  await page.route("**/api/admin/agent/resume", async route => {
+    payloads.push(route.request().postDataJSON());
+    if (payloads.length === 1) await gate;
+    await route.fulfill({ json: { success: true, reply_sent: payloads.length === 1 } });
+  });
+  await page.goto("/live?tab=intervention");
+  const reply = page.getByRole("button", { name: "대기 답장 AI 처리", exact: true });
+  await expect(reply).toBeVisible();
+  await expect(reply).toBeInViewport();
+  await reply.click();
+  await expect(page.getByRole("button", { name: "처리 중…", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이후 응대 재개", exact: true })).toBeDisabled();
+  expect(payloads).toHaveLength(1);
+  release();
+  await expect(page.getByText("상담검수님 — 대기 문자에 AI가 답장했어요.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "이후 응대 재개", exact: true }).click();
+  await expect(page.getByText("상담검수님 — 다음 수신 문자부터 AI가 응대해요.", { exact: true })).toBeVisible();
+  expect(payloads).toEqual([{ applicant_id: 7, job_id: 11, reply_to_latest: true }, { applicant_id: 7, job_id: 11, reply_to_latest: false }]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(state.errors).toEqual([]);
+  expect(state.blocked).toEqual([]);
+  await page.screenshot({ path: "/tmp/ong-pending-reply-mobile.png", fullPage: true });
+});

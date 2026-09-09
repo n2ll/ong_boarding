@@ -11,6 +11,7 @@ import * as recruitmentAuthorization from "../recruitment-contact-authorization.
 import { smsRecipientBlockReason } from "../sms-consent-policy.ts";
 import {
   bulkBatchRequestFingerprint,
+  bulkRecruitmentRecipientFingerprint,
   bulkMessageRequestFingerprint,
   bulkRecipientIdempotencyKey,
   deliverBulkMessage,
@@ -294,6 +295,7 @@ function loadRoute(args: {
     },
     "@/lib/bulk-message-send": {
       bulkBatchRequestFingerprint,
+      bulkRecruitmentRecipientFingerprint,
       bulkMessageRequestFingerprint,
       bulkRecipientIdempotencyKey,
       deliverBulkMessage,
@@ -1560,4 +1562,19 @@ test("cross-notice dedupe on a duplicate applicant row blocks the shared phone",
   assert.equal(response.body.sent, 0);
   assert.match(String((response.body.results as Array<{ error?: string }>)[0]?.error), /24시간/);
   assert.equal(harness.smsCalls.length, 0);
+});
+
+test("UI recruitment approval is bound to the entire normalized recipient set at actual delivery", async () => {
+  for (const changed of [false, true]) {
+    const fingerprintRecipients = [{ applicant_id: 1, phone: "01012345678" }];
+    if (changed) fingerprintRecipients.push({ applicant_id: 2, phone: "01087654321" });
+    const database = legacyRecruitmentDatabase({ pool_events: [recruitmentAuthorizationEvent({
+      recipient_fingerprint: bulkRecruitmentRecipientFingerprint(fingerprintRecipients),
+    })] });
+    const h = loadRoute({ database });
+    const response = await h.route.POST(scopedRecruitmentRequest({ recipients: [{ applicant_id: 1, phone: "010-1234-5678" }] }));
+    assert.equal(response.status, 200);
+    assert.equal(response.body.sent, changed ? 0 : 1);
+    assert.equal(h.smsCalls.length, changed ? 0 : 1);
+  }
 });

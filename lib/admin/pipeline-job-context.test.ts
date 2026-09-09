@@ -260,8 +260,8 @@ test("Pipeline wires the focused job to a visible safe handoff and exposure pick
   assert.match(source, /노출만으로 후보 등록·문자 발송·배정·근무 확정이 이루어지지 않습니다/);
   assert.match(source, /setExposureJobIds\(pipelineExposureJobIdsOnOpen\(/);
   assert.match(source, /pipelineFocusedJobInitialSortMode\(focusedActiveJob\)[\s\S]*?setSortMode\(focusedSortMode\)/);
-  assert.match(source, /setBulkMsgBody\(pipelineFocusedJobMessageBody\(focusedActiveJob\.title\)\)[\s\S]*?setBulkMsgModalOpen\(true\)/);
-  assert.match(source, /setNewJobNoticeJobId\(focusedActiveJob\.id\)[\s\S]*?setBulkMsgModalOpen\(true\)/);
+  assert.match(source, /setRecruitmentLaunch\([\s\S]*?id: focusedActiveJob\.id/);
+  assert.match(source, /<RecruitmentLaunchPanel[\s\S]*?initialBody=\{pipelineFocusedJobMessageBody\(recruitmentLaunch\.job\.title\)\}/);
   assert.match(source, /purpose: bulkMessageContext\.purpose[\s\S]*?job_id: bulkMessageContext\.jobId/);
   assert.match(source, /const closeBulkMessageModal = \(\) => \{[\s\S]*?setNewJobNoticeJobId\(null\)/);
   assert.match(source, /const closeBulkMessageModal = \(\) => \{[\s\S]*?if \(bulkSending\) return/);
