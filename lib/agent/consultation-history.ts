@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ConsultationJob, ConsultationSourceMessage } from "./consultation-types.ts";
+import type { ConsultationJob, ConsultationNumberedReference, ConsultationSourceMessage } from "./consultation-types.ts";
 import type { ConversationTurn } from "./types.ts";
 import { CONVERSATIONAL_SENT_BY, matchJobsByText } from "./inbound-routing.ts";
 
@@ -13,13 +13,35 @@ interface MessageRow extends ConsultationSourceMessage {
   job_id: number | null;
 }
 
+function numberedReferences(rows: MessageRow[], jobs: ConsultationJob[]): ConsultationNumberedReference[] {
+  // 최신 대량 안내가 해석 불가하면 이전 안내의 번호로 대체하지 않는다.
+  const notice = rows.filter((row) => row.direction === "outbound" && row.sent_by === "system-bulk")
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id))[0];
+  const allowed = jobs.filter((job) => !job.expired && job.stage !== "paused" && job.stage !== "abort");
+  if (!notice || !allowed.some((job) => job.job_id === notice.job_id) || ADVERTISEMENT_PREFIX.test(notice.body)) return [];
+  const headings = [...notice.body.matchAll(/^\s*([①-⑳]|\d{1,2}[.)])\s*([^\n:：]+)(?:[:：]|$)/gm)];
+  if (headings.length < 2) return [];
+  const normalize = (text: string) => text.replace(/[^0-9A-Za-z가-힣]/g, "").toLowerCase();
+  const options: ConsultationNumberedReference["options"] = [];
+  for (const heading of headings) {
+    const number = /^[①-⑳]$/.test(heading[1]) ? heading[1].charCodeAt(0) - "①".charCodeAt(0) + 1 : Number.parseInt(heading[1], 10);
+    const label = heading[2].trim();
+    const token = normalize(label);
+    const matches = allowed.filter((job) => token.length >= 2 && normalize(`${job.title} ${job.branch ?? ""}`).includes(token));
+    // 일부 공고만 남기면 같은 번호 안내의 범위·순서를 오해할 수 있다.
+    if (matches.length !== 1 || options.some((option) => option.number === number || option.job_id === matches[0].job_id)) return [];
+    options.push({ number, job_id: matches[0].job_id, label });
+  }
+  return [{ source_message_id: notice.id, created_at: notice.created_at, options }];
+}
+
 /** 공고를 가로지른 실제 상담 문맥과 아직 답하지 않은 수신 원문만 읽는다. */
 export async function loadConsultationHistory(
   supabase: SupabaseClient,
   applicantId: number,
   current: ConsultationSourceMessage,
   jobs: ConsultationJob[],
-): Promise<{ history: ConversationTurn[]; sourceMessages: ConsultationSourceMessage[]; ambiguousFollowup: boolean }> {
+): Promise<{ history: ConversationTurn[]; sourceMessages: ConsultationSourceMessage[]; numberedReferences: ConsultationNumberedReference[]; ambiguousFollowup: boolean }> {
   if (!current.id || typeof current.body !== "string" || !Number.isFinite(Date.parse(current.created_at))) {
     throw new Error("상담 수신 원문이 유효하지 않습니다.");
   }
@@ -53,6 +75,7 @@ export async function loadConsultationHistory(
   return {
     history: rows.map(({ direction, body, created_at }) => ({ direction, body, created_at })),
     sourceMessages,
+    numberedReferences: numberedReferences(data as MessageRow[], jobs),
     ambiguousFollowup: Boolean(lastOutbound && (lastOutbound.job_id == null || matchJobsByText(lastOutbound.body, jobs).length > 1)),
   };
 }

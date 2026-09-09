@@ -13,6 +13,13 @@ export interface ConsultationSourceMessage {
   created_at: string;
 }
 
+/** 과거 안내의 번호 해석만 위한 자료. 과거 조건이나 신규 관찰 원문이 아니다. */
+export interface ConsultationNumberedReference {
+  source_message_id: string;
+  created_at: string;
+  options: { number: number; job_id: number; label: string }[];
+}
+
 export interface ConsultationObservation {
   job_id: number;
   source_message_id: string;

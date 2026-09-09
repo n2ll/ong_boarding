@@ -174,6 +174,7 @@ export interface StageContext {
   consultation?: {
     jobs: import("./consultation-types").ConsultationJob[];
     sourceMessages: import("./consultation-types").ConsultationSourceMessage[];
+    numberedReferences?: import("./consultation-types").ConsultationNumberedReference[];
     force: boolean;
     ambiguousFollowup: boolean;
   };

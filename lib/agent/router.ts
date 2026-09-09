@@ -357,7 +357,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     otherActiveJobs = jobs.filter((j) => j.job_id !== job.id && !j.expired)
       .map((j) => ({ ...j, stage: j.stage ?? "exploration" }));
     if (enabled) {
-      consultation = { jobs, sourceMessages: recent.sourceMessages, ambiguousFollowup: recent.ambiguousFollowup,
+      consultation = { jobs, sourceMessages: recent.sourceMessages, numberedReferences: recent.numberedReferences, ambiguousFollowup: recent.ambiguousFollowup,
         force: input.consultation_only === true || !currentAllowed };
     }
   } catch (error) {

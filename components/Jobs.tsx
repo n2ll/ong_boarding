@@ -6,6 +6,7 @@ import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, Edit2, Megaphone, MoreHorizontal, Play, Pause, PauseCircle, Sparkles, Loader2, Wand2, X, Save, Users, ChevronRight, UserPlus, RefreshCw, AlertTriangle, Link2, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
+import { StaffingPreparationPanel } from "./StaffingPreparationPanel";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
@@ -106,6 +107,7 @@ import {
   type JobAcquisitionPerformanceRow,
 } from "@/lib/admin/job-acquisition-view";
 import { jobTrackingSubmissionLabel } from "@/lib/admin/job-tracking-submissions";
+import { jobCandidateBoardView } from "@/lib/admin/job-candidate-board-view";
 
 const JOB_CREATE_DRAFT_CONFLICT_TOAST_ID = "job-create-draft-conflict";
 
@@ -148,7 +150,7 @@ interface JobRow {
   // status='active'라도 closes_at이 지났으면 실질 마감 — 배지·AI 현황·통계를 이걸로 판단(마감 텍스트와 일치).
   effectivelyClosed: boolean;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
-  interestCount: number;
+  interestCount: number | null;
   // 이 공고의 검증된 추적 링크를 통해 제출된 지원서 수. 집계 실패는 null.
   trackingSubmissionCount: number | null;
 }
@@ -177,7 +179,7 @@ interface ApiJob {
   // 온보딩·활동 단계이지만 아직 매니저 확정 전인 후보 수.
   review_ready_count?: number;
   // pull '관심 있음' 클릭 인원(distinct) — 행 '관심 N' 칩.
-  interest_count?: number;
+  interest_count?: number | null;
   // 검증된 추적 링크를 통한 지원서 제출 수. 집계 실패는 null로 내려온다.
   tracking_submission_count: number | null;
 }
@@ -302,10 +304,6 @@ function SlotKeysField({
   );
 }
 
-// 단계 그룹 표시 순서 — 'interest'는 agent_stage NULL(관심 표시·AI 응대 시작 전)의 가상 키.
-// 관심자가 'AI 탐색 중'으로 오표기되지 않게 exploration과 분리해 최상단에 둔다.
-const STAGE_ORDER = ["interest", "exploration", "screening", "onboarding", "active", "paused", "abort"];
-
 function slotMatch(confirmed: string | null | undefined, key: string): boolean {
   if (!confirmed) return false;
   const day = key.startsWith("평일") ? "평일" : "주말";
@@ -315,7 +313,7 @@ function slotMatch(confirmed: string | null | undefined, key: string): boolean {
 
 // 표시 라벨만 실무 언어로 통일(LiveConsole·ApplicantDetailPanel·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_KO: Record<string, string> = {
-  interest: "관심 표시",
+  unstarted: "시작 전",
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
   active: "활동 중", paused: "수동 응대", abort: "중단",
 };
@@ -716,7 +714,7 @@ function toJobRow(j: ApiJob): JobRow {
     workPeriod: j.work_period ?? null,
     closesAt: j.closes_at ?? null,
     effectivelyClosed: isJobEffectivelyClosed(j.status, j.closes_at),
-    interestCount: j.interest_count ?? 0,
+    interestCount: j.interest_count ?? null,
     trackingSubmissionCount: typeof j.tracking_submission_count === "number"
       ? j.tracking_submission_count
       : null,
@@ -1145,13 +1143,13 @@ export function Jobs() {
     );
   };
 
-  // 미발송 후보에게 공고 본문 일괄 SMS 발송 (스크리닝 시작)
+  // 이 공고의 첫 안내·응답 기록이 없는 후보에게 공고 본문 일괄 SMS 발송
   const dispatchUnsent = async () => {
     if (!candPanel || dispatching) return;
     // 실제 SMS 대량 발송 — 확인 없이 원클릭이면 오클릭 사고. 같은 화면의 마감/새공고 안내처럼 확인 거친다.
     const ok = await confirm({
-      title: `미발송 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
-      description: "이 공고의 미발송 후보 전원에게 공고 본문 문자가 즉시 발송돼요. 되돌릴 수 없어요.",
+      title: `첫 안내 기록 없는 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
+      description: "이 공고의 첫 안내·응답 기록이 없는 후보에게 공고 본문 문자가 즉시 발송돼요. 인재풀에서 보낸 안내는 이 기록에 포함되지 않으니 대화 이력을 먼저 확인하세요. 발송은 되돌릴 수 없어요.",
       confirmText: "발송",
     });
     if (!ok) return;
@@ -1173,7 +1171,7 @@ export function Jobs() {
         return;
       }
       if (json.sent === 0 && json.skipped === 0) {
-        toast.info("발송할 미발송 후보가 없어요");
+        toast.info("현재 스크리닝 문자 발송 대상이 없어요");
       } else {
         const r = json.skip_reasons ?? {};
         const reasons = [
@@ -1290,12 +1288,6 @@ export function Jobs() {
     }
   };
 
-  // 공고별 요약 집계 (단계/확정 슬롯) — agent_stage NULL은 'interest'(관심 표시)로 분리(오표기 방지).
-  const stageCounts = candidates.reduce<Record<string, number>>((acc, c) => {
-    const s = c.agent_stage ?? "interest";
-    acc[s] = (acc[s] ?? 0) + 1;
-    return acc;
-  }, {});
   const confirmedCands = candidates.filter((c) => c.applicants?.status === "확정인력");
   const slotFill = SLOT_KEYS.map((s) => ({
     ...s,
@@ -1317,9 +1309,6 @@ export function Jobs() {
       return ty - tx;
     });
   }, [candidates, candSort]);
-  const stageGroups = STAGE_ORDER
-    .map((stage) => ({ stage, items: sortedCandidates.filter((c) => (c.agent_stage ?? "interest") === stage) }))
-    .filter((g) => g.items.length > 0);
 
   // 헤더 '공고 등록' 버튼 → /jobs?new=1 로 진입하면 실제 작성 모달 자동 오픈 (진입점 일원화)
   // 긴급 건 카드 '공고로 만들기' → /jobs?new=1&line=&region=&vehicle=&period=&capacity= 로 진입하면 등록 폼 프리필
@@ -1382,8 +1371,11 @@ export function Jobs() {
     [jobs]
   );
   // 마감(실질) 공고는 확정 대상에서 제외된다(지원자 상세의 확정 대상 판정과 동일) → 보드에서도 '확정' 버튼을 숨긴다.
-  const boardJobClosed = candPanel ? jobs.find((j) => Number(j.id) === candPanel.jobId)?.effectivelyClosed ?? false : false;
+  const boardJob = candPanel ? jobs.find((j) => Number(j.id) === candPanel.jobId) : undefined;
+  const boardJobClosed = boardJob?.effectivelyClosed ?? false;
   const boardPolicy = jobCandidateBoardPolicy(boardJobClosed);
+  const candidateView = jobCandidateBoardView(sortedCandidates, jobsError ? null : boardJob?.interestCount);
+  const stageGroups = candidateView.groups;
   // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
   const jobsFirstLoad = jobsLoading && !jobsApi;
   const jobListSummary = useMemo(
@@ -3411,7 +3403,9 @@ export function Jobs() {
                     {job.aiInProgress > 0 && (
                       <Badge variant="info">AI 진행 {job.aiInProgress}</Badge>
                     )}
-                    {job.interestCount > 0 && (
+                    {job.interestCount === null ? (
+                      <Badge variant="warning">관심 표시 확인 필요</Badge>
+                    ) : job.interestCount > 0 && (
                       <Badge variant="priority-attention" title="맞춤 공고 링크에서 '관심 있음'을 누른 인원">관심 {job.interestCount}</Badge>
                     )}
                     <Badge
@@ -5036,12 +5030,12 @@ export function Jobs() {
               <div className="px-6 py-4 border-b border-border-strong bg-background shrink-0">
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-[12px] font-bold text-muted-foreground mb-1"><Users size={13} /> 공고별 지원자</div>
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-muted-foreground mb-1"><Users size={13} /> 공고별 후보</div>
                     <h2 id="job-candidate-board-title" className="text-[16px] font-extrabold text-foreground truncate">{candPanel.title}</h2>
                     <div className="text-[12px] text-muted-foreground mt-0.5">
                       {candState === "loading" || (candState === "error" && !candLoaded)
-                        ? "지원 현황 —"
-                        : `${candidates.length}명 지원 · 미발송 ${unsentCount}명`}
+                        ? "연결 후보 현황 —"
+                        : `연결 후보 ${candidateView.linkedCount}명 · ${candidateView.interestCount === null ? "관심 표시 확인 필요" : `관심 표시 ${candidateView.interestCount}명`}`}
                     </div>
                   </div>
                   <Button variant="ghost" size="icon" aria-label="지원자 보드 닫기" onClick={closeCandidateBoard}><X size={20} /></Button>
@@ -5073,8 +5067,9 @@ export function Jobs() {
                       </div>
                     )}
                     <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} disabled={globalAgentMode.state !== "ready"} aria-describedby={agentModeCopy.kind !== "auto" ? "job-dispatch-agent-mode-status" : undefined} className="mt-3 w-full">
-                        {!dispatching && <Sparkles size={15} />} 미발송 {unsentCount}명에게 스크리닝 문자 발송
+                        {!dispatching && <Sparkles size={15} />} 스크리닝 문자 발송 ({unsentCount}명)
                       </Button>
+                    <p className="mt-1.5 text-[12px] text-muted-foreground">이 공고의 첫 안내 기록 없음 {unsentCount}명 · 인재풀에서 보낸 안내는 별도 확인</p>
                   </>
                 )}
               </div>
@@ -5095,7 +5090,9 @@ export function Jobs() {
                     </Button>
                   </div>
                 )}
-                {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">아직 지원자가 없어요</div>}
+                {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
+
+                {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={candPanel.jobId} jobId={candPanel.jobId} candidates={candidates} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">
@@ -5179,8 +5176,8 @@ export function Jobs() {
                     <div>
                       <div className="text-[12px] font-bold text-muted-foreground mb-1.5">진행 단계</div>
                       <div className="flex flex-wrap gap-1.5">
-                        {STAGE_ORDER.filter((s) => stageCounts[s]).map((s) => (
-                          <StageBadge key={s} stage={s} count={stageCounts[s]} />
+                        {stageGroups.map(({ stage, items }) => (
+                          <StageBadge key={stage} stage={stage} label={STAGE_KO[stage]} count={items.length} />
                         ))}
                       </div>
                     </div>
@@ -5225,7 +5222,7 @@ export function Jobs() {
                 {stageGroups.map((group) => (
                   <div key={group.stage} className="space-y-2">
                     <div className="flex items-center gap-2 px-0.5">
-                      <StageBadge stage={group.stage} />
+                      <StageBadge stage={group.stage} label={STAGE_KO[group.stage]} />
                       <span className="text-[12px] text-muted-foreground font-bold">{group.items.length}명</span>
                       <div className="flex-1 h-px bg-muted" />
                     </div>
@@ -5270,7 +5267,7 @@ export function Jobs() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[12px] text-muted-foreground truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{isJobCandidateDispatchable(c.agent_stage, c.sent_at, c.responded_at) && <span className="ml-1 text-warning-strong font-bold">· 미발송</span>}</div>
+                                  <div className="text-[12px] text-muted-foreground truncate">{a?.source ? sourceLabel(a.source) + " · " : ""}{a?.branch1 ?? "-"} · {a?.work_hours ?? "-"}{isJobCandidateDispatchable(c.agent_stage, c.sent_at, c.responded_at) && <span className="ml-1 text-warning-strong font-bold">· 첫 안내 기록 없음</span>}</div>
                                   {metaLine && <div className="text-[12px] text-muted-foreground truncate">{metaLine}</div>}
                                 </div>
                               </div>
