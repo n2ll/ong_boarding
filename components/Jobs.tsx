@@ -691,7 +691,7 @@ function toJobRow(j: ApiJob): JobRow {
     branch: j.branch?.trim() ?? "",
     branchId: j.branch_id ?? null,
     clientId: j.client_id ?? null,
-    role: j.vehicle_required ? "배송원" : "도보 배달",
+    role: j.vehicle_required ? "배송원" : "배송 업무",
     status: j.status === "active" ? "active" : "closed",
     recruitMode: asRecruitMode(j.recruit_mode),
     generalLine: isGeneralLineJob({ title: j.title, client_type: clientType }),

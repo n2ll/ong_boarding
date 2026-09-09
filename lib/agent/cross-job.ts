@@ -37,7 +37,7 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
     // **상세 주소는 싣지 않는다** — 집결지 상세는 확정 후 매니저가 안내하는 값이다.
     // 지원자 카드(/p/[token])와 같은 함수로 '서울 서초구'까지만(lib/geo.coarseArea).
     ["집결지(대략)", coarseArea(j.pickup_address) || null],
-    ["본인 차량", j.vehicle_required == null ? null : j.vehicle_required ? "필요" : "필요 없음"],
+    ["본인 차량", j.vehicle_required == null ? null : j.vehicle_required ? "필요" : "차량 세부 조건은 담당자 확인이 필요해요"],
   ];
   const known: [string, string][] = [];
   const missing: string[] = [];

@@ -656,7 +656,7 @@ export default function PoolPage() {
                   )}
                   <div className="flex gap-2">
                     <dt className="w-[72px] shrink-0 font-bold text-muted-foreground">차량</dt>
-                    <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 없어도 가능"}</dd>
+                    <dd>{job.vehicle_required ? "본인 차량 필요" : "차량 조건은 공고 본문 참고"}</dd>
                   </div>
                   {/* 요건이 어긋난 이유 — 서버 fit 판정(lib/pool-fit)의 문장을 그대로 보여준다(판정 한 곳).
                       카드를 감추지는 않는다 — 차량이 새로 생겼을 수 있고, 판단은 지원자 몫. */}
