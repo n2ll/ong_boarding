@@ -106,6 +106,8 @@ interface PoolEvent {
 function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): string {
   const meta = (ev.meta ?? {}) as { immediate?: unknown; to?: unknown };
   switch (ev.event_type) {
+    case "recruitment_contact_authorized":
+      return "기존 채용풀 모집 안내 · 관리자 확인 (개인 문자 동의와 별도)";
     case "pool_preferences": {
       const preferences = parsePoolPreferences(ev.meta);
       return preferences ? `인력풀 희망 조건 · ${POOL_PREFERENCE_LABELS[preferences.kind]} · ${preferences.area} · ${preferences.schedule} · 차량: ${preferences.vehicle}${preferences.notice ? ` · 사전 연락: ${preferences.notice}` : ""}` : "인력풀 희망 조건 갱신";
