@@ -53,3 +53,14 @@ test("empty review dates allow training-only notes and oversized or malformed da
   }
   for (const value of [null, [], "broken"]) assert.equal(parse(value), null);
 });
+
+test("date confirmation is explicit and valid only for available primary candidates", () => {
+  const day = { date: "2026-09-15", availability: "available", role: "primary_candidate" };
+  assert.deepEqual(parse(preparation({ dates: [{ ...day, confirmation: "confirmed" }] }))?.dates,
+    [{ ...day, confirmation: "confirmed" }]);
+  assert.deepEqual(parse(preparation({ dates: [day] }))?.dates, [day]);
+  for (const patch of [{ confirmation: "automatic" }, { confirmation: "confirmed", role: "reserve_candidate" },
+    { confirmation: "confirmed", role: "unassigned", availability: "unknown" }]) {
+    assert.equal(parse(preparation({ dates: [{ ...day, ...patch }] })), null);
+  }
+});
