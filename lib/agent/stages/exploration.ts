@@ -17,7 +17,7 @@ import { mergeAgentState } from "../checklist";
 import { buildToneGuide, loadLineKnowledge } from "../examples";
 import { crossJobSystemSuffix, formatOtherActiveJobs, crossJobToolProperties } from "../cross-job";
 import { consultationSystemSuffix, formatConsultationConversation, readConsultationResult, withConsultationTool } from "../multi-job-consultation";
-import { buildLineKnowledgeBlock, isGeneralLineJob } from "../general-line";
+import { buildLineKnowledgeBlock, guardGeneralTrainingDateQuestion, isGeneralLineJob } from "../general-line";
 import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import type {
   Stage,
@@ -264,7 +264,7 @@ ${inboundText}`}
         return { ...failResult("no tool_use block"), usage: { model: MODEL, ...(data.usage ?? {}) } };
       }
 
-      const result = readConsultationResult(block.input, ctx, inboundText) ?? toStageResult(block.input, ctx);
+      const result = readConsultationResult(block.input, ctx, inboundText) ?? toStageResult(block.input, ctx, inboundText);
       result.usage = { model: MODEL, ...(data.usage ?? {}) };
       return result;
     } catch (e) {
@@ -274,7 +274,7 @@ ${inboundText}`}
   },
 };
 
-function toStageResult(out: ExplorationToolInput, ctx: StageContext): StageResult {
+function toStageResult(out: ExplorationToolInput, ctx: StageContext, inboundText: string): StageResult {
   const state_update = mergeAgentState(ctx.state, {
     meta: {
       last_run_at: new Date().toISOString(),
@@ -307,7 +307,7 @@ function toStageResult(out: ExplorationToolInput, ctx: StageContext): StageResul
 
   // advance 시: AI 응답("네 좋습니다 바로 안내드릴게요") 발송 생략 →
   // 시스템 자동 안내 묶음(buildScreeningAnnouncement)이 곧바로 발송되며 그게 응답을 겸함.
-  const reply_text = out.transition === "advance" ? null : out.reply_text;
+  const reply_text = out.transition === "advance" ? null : guardGeneralTrainingDateQuestion(out.reply_text, ctx, inboundText);
 
   return {
     reply_text,

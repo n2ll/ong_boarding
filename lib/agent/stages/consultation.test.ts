@@ -123,6 +123,135 @@ function assertNoProgress(result: StageResult, before: StageContext, after: Stag
   assert.equal(result.state_update.meta?.general_screening, undefined);
 }
 
+function trainingContext(): StageContext {
+  const ctx = context();
+  ctx.consultation = undefined;
+  ctx.job!.client_type = "general";
+  ctx.job!.ai_facts = "백업 일정: 9/21~9/23.\n선탑·교육: 앱 사용과 업무 파악 목적, 예상 2시간. 9월 셋째 주 전후로 조율하며 정확한 날짜는 매니저 확인 후 안내.";
+  ctx.state.meta = { general_screening: { 차종: "SUV", 시작가능일: "9/21~9/23" } };
+  return ctx;
+}
+
+async function trainingReply(reply: string, ctx = trainingContext(), inboundText = "선탑 교육을 받고 싶습니다") {
+  const { stage, requests } = harness("screening", {
+    reply_text: reply, transition: "stay", checklist_update: {}, reasoning: "선탑 가능일 확인",
+  });
+  const result = await stage.process(ctx, inboundText);
+  assert.equal(requests.length, 1, "date validation must not add a model call");
+  assert.equal(requests[0].body.model, "claude-haiku-4-5-20251001");
+  return result;
+}
+
+test("general screening does not turn a training week and backup dates into proposed education dates", async () => {
+  const result = await trainingReply("감사합니다! 예상 소요시간은 2시간 전후이며, 9월 셋째 주(21~23일) 중 가능한 날짜와 시간대를 알려주시겠어요?");
+  assert.doesNotMatch(result.reply_text ?? "", /21|23|셋째/);
+  assert.match(result.reply_text ?? "", /2시간/);
+  assert.match(result.reply_text ?? "", /선탑 가능한 날짜와 시간대를 알려주시겠어요/);
+  assert.equal(result.transition.kind, "stay");
+  assert.equal(result.state_update.meta?.general_screening?.선탑_가능시간, undefined);
+});
+
+test("training date validation is independent of the month and ignores previous AI suggestions", async () => {
+  const ctx = trainingContext();
+  ctx.job!.ai_facts = "선탑·교육: 11월 둘째 주 전후 조율, 정확한 날짜는 미정.";
+  ctx.history = [{ direction: "outbound", body: "선탑은 11/9~11/11 중 가능하세요?", created_at: "2026-10-01T00:00:00Z" }];
+  const result = await trainingReply("11/9~11/11 중 선탑 가능한 날짜를 알려주세요.", ctx);
+  assert.doesNotMatch(result.reply_text ?? "", /11\/9|11\/11/);
+  assert.match(result.reply_text ?? "", /선탑 가능한 날짜와 시간대/);
+});
+
+test("backup dates in the current applicant message do not become training date evidence", async () => {
+  const result = await trainingReply("선탑은 21~23일 중 언제 가능하세요?", trainingContext(), "백업은 21~23일 가능하고 선탑도 받고 싶어요");
+  assert.doesNotMatch(result.reply_text ?? "", /21|23/);
+});
+
+for (const evidence of ["job", "applicant", "collected", "answer"] as const) {
+  test(`general screening preserves an explicit training date from ${evidence}`, async () => {
+    const ctx = trainingContext();
+    let inboundText = "선탑 교육을 받고 싶습니다";
+    if (evidence === "job") ctx.job!.ai_facts = "선탑·교육: 9월 16일 교육 진행 가능, 정확한 시간은 매니저 조율.";
+    if (evidence === "applicant") inboundText = "선탑은 9/16 오전 가능해요";
+    if (evidence === "collected") ctx.state.meta!.general_screening!.선탑_가능시간 = "9/16 오전";
+    if (evidence === "answer") {
+      ctx.history = [{ direction: "outbound", body: "선탑 가능한 날짜와 시간대를 알려주시겠어요?", created_at: "2026-09-01T00:00:00Z" }];
+      inboundText = "9/16 오전 가능해요";
+    }
+    const reply = "선탑은 말씀하신 9월 16일에 가능하신가요?";
+    assert.equal((await trainingReply(reply, ctx, inboundText)).reply_text, reply);
+  });
+}
+
+test("a known training date does not authorize a different month", async () => {
+  const ctx = trainingContext();
+  ctx.state.meta!.general_screening!.선탑_가능시간 = "9/16 오전";
+  const result = await trainingReply("선탑은 10월 16일에 가능하세요?", ctx);
+  assert.doesNotMatch(result.reply_text ?? "", /10월/);
+});
+
+test("ordinary delivery date questions retain the general screening policy", async () => {
+  const reply = "백업은 9/21~9/23에 가능하신가요?";
+  assert.equal((await trainingReply(reply, trainingContext(), "백업 시작일을 알려주세요")).reply_text, reply);
+});
+
+test("B mart education questions retain their existing policy", async () => {
+  const ctx = trainingContext();
+  ctx.job!.client_type = "baemin_bmart";
+  const reply = "교육은 9월 16일에 가능하신가요?";
+  assert.equal((await trainingReply(reply, ctx)).reply_text, reply);
+});
+
+test("training validation preserves line breaks when no unsupported date was proposed", async () => {
+  const reply = "선탑은 약 2시간입니다.\n가능한 날짜와 시간대를 알려주세요.";
+  assert.equal((await trainingReply(reply)).reply_text, reply);
+});
+
+test("a delivery date question remains intact even alongside a training explanation", async () => {
+  const reply = "선탑은 약 2시간입니다. 백업은 9/21~9/23에 가능하세요?";
+  assert.equal((await trainingReply(reply)).reply_text, reply);
+});
+
+test("an invented ISO training date also becomes an open question", async () => {
+  const result = await trainingReply("선탑은 2026-11-09에 가능하세요?");
+  assert.doesNotMatch(result.reply_text ?? "", /2026-11-09/);
+  assert.match(result.reply_text ?? "", /선탑 가능한 날짜와 시간대/);
+});
+
+test("single-job exploration also rejects an invented training date", async () => {
+  const { stage, requests } = harness("exploration", {
+    reply_text: "예상 소요시간은 2시간이며 9월 셋째 주(21~23일) 중 선탑 가능한 날짜를 알려주세요.",
+    transition: "stay", intent_signal: "uncertain", reasoning: "선탑 가능일 확인",
+  });
+  const result = await stage.process(trainingContext(), "선탑 교육을 받고 싶습니다");
+  assert.doesNotMatch(result.reply_text ?? "", /21|23|셋째/);
+  assert.match(result.reply_text ?? "", /2시간/);
+  assert.match(result.reply_text ?? "", /선탑 가능한 날짜와 시간대/);
+  assert.equal(requests.length, 1);
+  assert.equal(result.transition.kind, "stay");
+});
+
+test("multi-job training answers ignore invented model dates and retain registered education facts", async () => {
+  const ctx = context();
+  ctx.job!.client_type = "general";
+  ctx.consultation!.sourceMessages[0].body = "새벽 배송 교육은 언제인가요?";
+  ctx.consultation!.jobs[0].ai_facts = "선탑·교육: 예상 2시간, 9월 셋째 주 전후 조율. 정확한 날짜는 매니저 확인 후 안내.";
+  const { stage } = harness("exploration", {
+    reply_text: "9월 21~23일에 교육이 진행됩니다.", transition: "stay", intent_signal: "uncertain", reasoning: "교육 안내",
+    consultation: { mode: "answer", job_ids: [10], answers: [{ job_id: 10, fields: ["선탑·교육"] }], observations: [] },
+  });
+  const result = await stage.process(ctx, "새벽 배송 교육은 언제인가요?");
+  assert.doesNotMatch(result.reply_text ?? "", /21|23/);
+  assert.match(result.reply_text ?? "", /2시간.*셋째 주/);
+  assert.ok(result.consultation);
+});
+
+test("the open training question retains an approximate duration expressed in equivalent wording", async () => {
+  const ctx = trainingContext();
+  ctx.job!.ai_facts = "선탑·교육: 앱과 업무를 파악하는 약 2시간의 교육. 날짜는 매니저 조율.";
+  const result = await trainingReply("예상 2시간 전후이며, 선탑은 21~23일 중 언제 가능하세요?", ctx);
+  assert.doesNotMatch(result.reply_text ?? "", /21|23/);
+  assert.match(result.reply_text ?? "", /약 2시간/);
+});
+
 for (const stageName of ["exploration", "screening", "onboarding", "active"]) {
   test(`${stageName}: separates historical statements from the unanswered batch at the end of the prompt`, async () => {
     const ctx = context();

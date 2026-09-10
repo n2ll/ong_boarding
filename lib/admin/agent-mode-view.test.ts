@@ -26,7 +26,7 @@ type AgentModeViewModule = {
   }>) => Promise<AgentModeView>;
   agentModeAllowsManualSend?: (view: AgentModeView) => boolean;
   agentModeResumeTarget?: (view: AgentModeView) => "auto" | "draft" | null;
-  agentModePresentation?: (view: AgentModeView, applicantId?: number) => {
+  agentModePresentation?: (view: AgentModeView, applicantId?: number, jobId?: number) => {
     kind: "loading" | "error" | "stale" | AgentMode;
     label: string;
     detail: string | null;
@@ -277,3 +277,30 @@ test("conversation status distinguishes the test recipient from other applicants
     assert.equal(agentModePresentation!(invalidView, 7).claimsAutomatic, false);
   }
 });
+
+
+for (const sessionKind of ["pilot", "test"] as const) {
+  test(`candidate board only advertises ${sessionKind} replies for an included job`, async () => {
+    const { agentModeView, agentModePresentation } = await loadModule();
+    const session = { mode: sessionKind, applicant_id: 7, applicant_ids: [7, 8], job_ids: [11],
+      started_at: new Date(Date.now() - 1000).toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() };
+    const data = { mode: "off", disabled: true, env_forced: false, [`${sessionKind}_session`]: session };
+    const view = agentModeView!({ data });
+    const included = agentModePresentation!(view, undefined, 11);
+    assert.match(included.label, /이 공고/);
+    assert.match(included.label, /(?:제한 자동 응대|테스트 1명)/);
+    assert.match(included.detail!, /개별 중지 유지/);
+    assert.equal(included.kind, "off", "display never changes the global send mode");
+    assert.equal(included.claimsAutomatic, false);
+    const excluded = agentModePresentation!(view, undefined, 12);
+    assert.equal(excluded.label, "AI 전역 중지됨");
+    assert.equal(excluded.detail, null);
+    for (const invalidView of [
+      agentModeView!({ data, error: new Error("offline") }),
+      agentModeView!({ data: { ...data, env_forced: true } }),
+      agentModeView!({ data: { ...data, [`${sessionKind}_session`]: { ...session, expires_at: new Date(Date.now() - 1).toISOString() } } }),
+    ]) {
+      assert.doesNotMatch(agentModePresentation!(invalidView, undefined, 11).label, /이 공고|제한 자동 응대|테스트 1명/);
+    }
+  });
+}

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
+import { createServerClient } from "@supabase/ssr";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 import {
   STAFFING_PREPARATION_EVENT,
+  STAFFING_PREPARATION_LIMITS,
+  type StaffingPreparationActor,
   STAFFING_OBSERVATION_EVENT,
   buildStaffingSuggestions,
   type StaffingSourceMessage,
@@ -25,10 +29,17 @@ async function jobIdFrom(context: Context): Promise<number | null> {
   return /^[1-9]\d*$/.test(id) && Number.isSafeInteger(value) ? value : null;
 }
 
-function snapshot(applicantId: number, event?: PreparationEvent): StaffingPreparationSnapshot {
+function author(event?: PreparationEvent): StaffingPreparationActor | null {
+  const meta = event?.meta as { actor?: StaffingPreparationActor } | null;
+  return typeof meta?.actor?.account_id === "string" && typeof meta.actor.name === "string" ? meta.actor : null;
+}
+
+function snapshot(applicantId: number, event?: PreparationEvent, history: PreparationEvent[] = event ? [event] : []): StaffingPreparationSnapshot {
   const preparation = event ? parseStaffingPreparation(event.meta) : null;
   return { applicant_id: applicantId, preparation, event_id: event?.id ?? null,
-    updated_at: event?.created_at ?? null, invalid: Boolean(event && !preparation) };
+    updated_at: event?.created_at ?? null, invalid: Boolean(event && !preparation), actor: author(event),
+    history: history.map((row) => ({ event_id: row.id, updated_at: row.created_at, actor: author(row),
+      preparation: parseStaffingPreparation(row.meta), invalid: !parseStaffingPreparation(row.meta) })) };
 }
 
 export async function GET(_req: NextRequest, context: Context) {
@@ -101,7 +112,7 @@ export async function GET(_req: NextRequest, context: Context) {
         primaryCandidates.push({ applicant_id: event.applicant_id, job_id: job.id, job_title: job.title, date: day.date });
       }
     }
-    return NextResponse.json({ preparations: applicantIds.map((id) => snapshot(id, latest.get(`${id}:${jobId}`))),
+    return NextResponse.json({ preparations: applicantIds.map((id) => snapshot(id, latest.get(`${id}:${jobId}`), allEvents.filter((row) => row.event_type === STAFFING_PREPARATION_EVENT && row.job_id === jobId && row.applicant_id === id))),
       suggestions: buildStaffingSuggestions(observations, messages, currentJob),
       primary_candidates: primaryCandidates, conflict_check_incomplete: conflictCheckIncomplete });
   } catch (error) {
@@ -123,30 +134,68 @@ export async function POST(req: NextRequest, context: Context) {
     const applicantId = body.applicant_id;
     const actionKey = typeof body.action_key === "string" ? body.action_key.trim().toLowerCase() : "";
     const preparation = parseStaffingPreparation({ ...body, source: "manager" });
+    const baseEventId = body.base_event_id;
+    const actorName = typeof body.actor_name === "string" ? body.actor_name.trim() : "";
     if (typeof applicantId !== "number" || !Number.isSafeInteger(applicantId) || applicantId <= 0
-      || !UUID.test(actionKey) || !preparation) {
-      return NextResponse.json({ error: "후보·요청 키·날짜별 가능 여부를 확인해주세요. 날짜는 31개, 교육 메모는 240자, 운영 메모는 1000자까지입니다." }, { status: 400 });
+      || !UUID.test(actionKey) || !preparation || !actorName || actorName.length > STAFFING_PREPARATION_LIMITS.actor
+      || (baseEventId !== null && (typeof baseEventId !== "number" || !Number.isSafeInteger(baseEventId) || baseEventId <= 0))) {
+      return NextResponse.json({ error: "작성자·후보·편집 기준 기록·선탑 정보를 확인해주세요. 날짜는 31개, 선탑 정보는 각 240자, 팀 메모는 1000자까지입니다." }, { status: 400 });
     }
+    // Middleware handles session refresh; author attribution must use a verified account, never a submitted account ID.
+    const auth = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} },
+    });
+    const { data: { user }, error: authError } = await auth.auth.getUser();
+    if (authError || !user) return NextResponse.json({ error: "로그인 상태를 확인한 뒤 다시 저장해주세요." }, { status: 401 });
+    const actor: StaffingPreparationActor = { account_id: user.id, name: actorName };
     const db = createServiceClient();
     const candidate = await db.from("job_candidates").select("id").eq("job_id", jobId).eq("applicant_id", applicantId).maybeSingle();
     if (candidate.error) throw candidate.error;
     if (!candidate.data) return NextResponse.json({ error: "이 공고에 연결된 후보만 준비 내용을 저장할 수 있습니다." }, { status: 404 });
-    // append-only 검토 기록. 기존 action_key unique index가 같은 요청의 동시 INSERT를 막는다.
-    // 다른 키의 편집은 모두 보존하며 GET의 created_at/id 순서로 최신 값을 표시한다.
+    const readHistory = () => fetchAllPostgrestRows(async (from, to) => {
+      const result = await db.from("pool_events").select(EVENT_COLUMNS).eq("applicant_id", applicantId).eq("job_id", jobId)
+        .eq("event_type", STAFFING_PREPARATION_EVENT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+      return { data: result.data as PreparationEvent[] | null, error: result.error };
+    }, "선탑·팀 기록");
+    const isRetry = (row: PreparationEvent) => {
+      const meta = row.meta as Record<string, unknown>;
+      const savedActor = author(row);
+      return row.applicant_id === applicantId && row.job_id === jobId && row.event_type === STAFFING_PREPARATION_EVENT
+        && meta.request_key === actionKey && meta.base_event_id === baseEventId
+        && savedActor?.account_id === actor.account_id && savedActor.name === actor.name
+        && JSON.stringify(parseStaffingPreparation(row.meta)) === JSON.stringify(preparation);
+    };
+    // Check a committed request before its base version: a lost response may be retried after a teammate's later edit.
+    const previous = await db.from("pool_events").select(EVENT_COLUMNS).eq("meta->>request_key", actionKey).maybeSingle();
+    if (previous.error) throw previous.error;
+    if (previous.data) {
+      const row = previous.data as PreparationEvent;
+      if (!isRetry(row)) return NextResponse.json({ error: "같은 요청 키를 다른 준비 내용에 사용할 수 없습니다." }, { status: 409 });
+      return NextResponse.json({ ...snapshot(applicantId, row, await readHistory()), deduplicated: true });
+    }
+    const history = await readHistory();
+    const conflict = (rows: PreparationEvent[]) => NextResponse.json({ conflict: true,
+      error: "동료가 먼저 기록을 저장했어요. 최신 기록과 내 입력을 비교한 뒤 다시 정리해주세요.",
+      latest: snapshot(applicantId, rows[0], rows) }, { status: 409 });
+    if ((history[0]?.id ?? null) !== baseEventId) return conflict(history);
+    // One successor per base version, enforced by the existing unique action_key index, including concurrent INSERTs.
+    // Keep the client's retry key in metadata; all old event rows stay intact and new saves append their own notes.
+    const hash = createHash("sha256").update(`staffing-preparation:${jobId}:${applicantId}:${baseEventId ?? "initial"}`).digest("hex");
+    const versionKey = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     const inserted = await db.from("pool_events").insert({ applicant_id: applicantId, job_id: jobId,
-      event_type: STAFFING_PREPARATION_EVENT, action_key: actionKey, meta: preparation }).select(EVENT_COLUMNS).single();
+      event_type: STAFFING_PREPARATION_EVENT, action_key: versionKey,
+      meta: { ...preparation, actor, request_key: actionKey, base_event_id: baseEventId } }).select(EVENT_COLUMNS).single();
     if (inserted.error?.code === "23505") {
-      const existing = await db.from("pool_events").select(EVENT_COLUMNS).eq("action_key", actionKey).maybeSingle();
+      const existing = await db.from("pool_events").select(EVENT_COLUMNS).eq("action_key", versionKey).maybeSingle();
       if (existing.error) throw existing.error;
+      const rows = await readHistory();
       const row = existing.data as PreparationEvent | null;
-      if (!row || row.applicant_id !== applicantId || row.job_id !== jobId || row.event_type !== STAFFING_PREPARATION_EVENT
-        || JSON.stringify(parseStaffingPreparation(row.meta)) !== JSON.stringify(preparation)) {
-        return NextResponse.json({ error: "같은 요청 키를 다른 준비 내용에 사용할 수 없습니다." }, { status: 409 });
-      }
-      return NextResponse.json({ ...snapshot(applicantId, row), deduplicated: true });
+      if (!row || !isRetry(row)) return conflict(rows);
+      return NextResponse.json({ ...snapshot(applicantId, row, rows), deduplicated: true });
     }
     if (inserted.error || !inserted.data) throw inserted.error ?? new Error("missing saved event");
-    return NextResponse.json({ ...snapshot(applicantId, inserted.data as PreparationEvent), deduplicated: false });
+    const saved = inserted.data as PreparationEvent;
+    return NextResponse.json({ ...snapshot(applicantId, saved, [saved, ...history]), deduplicated: false });
   } catch (error) {
     console.error("[staffing-preparation POST]", error);
     return NextResponse.json({ error: "운영 준비 기록을 저장하지 못했습니다. 같은 요청으로 다시 시도해주세요." }, { status: 503 });

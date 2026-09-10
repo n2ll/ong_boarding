@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import * as crypto from "node:crypto";
 import { isGeneralLineJob, joinedClientType } from "../agent/general-line.ts";
 import * as preparationPolicy from "./staffing-preparation.ts";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
@@ -12,12 +13,12 @@ type Response = { status: number; body: Record<string, unknown> };
 const KEY = "11111111-1111-4111-8111-111111111111";
 const preparation = { source: "manager", dates: [{ date: "2026-09-15", availability: "available", role: "reserve_candidate" }], training_availability: "유급 교육 가능", note: "후보 검토" };
 const context = (id = "7") => ({ params: Promise.resolve({ id }) });
-const request = (patch: Row = {}) => ({ json: async () => ({ applicant_id: 1, action_key: KEY, ...preparation, ...patch }) });
+const request = (patch: Row = {}) => ({ cookies: { getAll: () => [] }, json: async () => ({ applicant_id: 1, action_key: KEY, base_event_id: null, actor_name: "김운영", ...preparation, ...patch }) });
 function event(id: number, meta: unknown = preparation, patch: Row = {}): Row {
   return { id, applicant_id: 1, job_id: 7, event_type: "staffing_preparation", meta, created_at: "2026-09-09T00:00:00.000Z", ...patch };
 }
 
-function harness(input: { events?: Row[]; candidates?: Row[]; jobs?: Row[]; messages?: Row[]; fail?: (table: string, write: boolean, from?: number) => boolean } = {}) {
+function harness(input: { authenticated?: boolean; events?: Row[]; candidates?: Row[]; jobs?: Row[]; messages?: Row[]; fail?: (table: string, write: boolean, from?: number) => boolean } = {}) {
   const database: Record<string, Row[]> = { jobs: input.jobs ?? [{ id: 7, title: "일반 A", start_date: "2027-04-20", work_period: "단기", client: null }], messages: input.messages ?? [], pool_events: input.events ?? [], job_candidates: input.candidates ?? [{ id: 11, job_id: 7, applicant_id: 1 }, { id: 12, job_id: 7, applicant_id: 2 }] };
   const writes: Array<{ table: string; row: Row }> = [];
   class Query {
@@ -27,7 +28,7 @@ function harness(input: { events?: Row[]; candidates?: Row[]; jobs?: Row[]; mess
     private insertRow: Row | null = null;
     constructor(table: string) { this.table = table; }
     select() { return this; }
-    eq(key: string, value: unknown) { this.filters.push((row) => row[key] === value); return this; }
+    eq(key: string, value: unknown) { this.filters.push((row) => (key.startsWith("meta->>") ? (row.meta as Row)?.[key.slice(7)] : row[key]) === value); return this; }
     in(key: string, values: unknown[]) { this.filters.push((row) => values.includes(row[key])); return this; }
     order(key: string, options: { ascending: boolean }) { this.orders.push([key, options.ascending]); return this; }
     insert(row: Row) { this.insertRow = row; return this; }
@@ -54,6 +55,8 @@ function harness(input: { events?: Row[]; candidates?: Row[]; jobs?: Row[]; mess
   }
   const exports: Record<string, (req: unknown, context: unknown) => Promise<Response>> = {};
   const modules: Record<string, unknown> = {
+    "node:crypto": crypto,
+    "@supabase/ssr": { createServerClient: () => ({ auth: { getUser: async () => ({ data: { user: input.authenticated === false ? null : { id: "verified-account", email: "manager@example.test" } }, error: null }) } }) },
     "next/server": { NextResponse: { json: (body: unknown, init?: { status: number }) => ({ body, status: init?.status ?? 200 }) } },
     "@/lib/supabase": { createServiceClient: () => ({ from: (table: string) => new Query(table) }) },
     "@/lib/admin/staffing-preparation": preparationPolicy,
@@ -62,7 +65,7 @@ function harness(input: { events?: Row[]; candidates?: Row[]; jobs?: Row[]; mess
   };
   const routePath = new URL("../../app/api/admin/jobs/[id]/staffing-preparation/route.ts", import.meta.url);
   runInNewContext(ts.transpileModule(readFileSync(routePath, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
-    { exports, require: (name: string) => modules[name] ?? {}, console: { error() {} }, Date, Map, Set });
+    { exports, require: (name: string) => modules[name] ?? {}, console: { error() {} }, Date, Map, Set, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "http://auth.example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "fixture" } } });
   return { route: exports, database, writes };
 }
 
@@ -95,7 +98,9 @@ test("POST appends only manager review metadata and never changes candidate or a
   assert.equal(response.status, 200);
   assert.equal(response.body.deduplicated, false);
   assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
-  assert.deepEqual(JSON.parse(JSON.stringify(h.writes[0].row.meta)), preparation);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.writes[0].row.meta)), { ...preparation,
+    training: { status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" },
+    actor: { account_id: "verified-account", name: "김운영" }, request_key: KEY, base_event_id: null });
   assert.equal(h.writes[0].row.job_id, 7);
   assert.equal(h.writes[0].row.applicant_id, 1);
   assert.equal(h.database.job_candidates[0].agent_stage, undefined);
@@ -118,9 +123,20 @@ test("a reused action key with different content or scope returns conflict witho
   assert.equal(h.writes.length, 1);
 });
 
+test("retry accepts the same actor after JSONB changes its key order", async () => {
+  const h = harness();
+  assert.equal((await h.route.POST(request(), context())).status, 200);
+  const meta = h.database.pool_events[0].meta as Row;
+  meta.actor = { name: "김운영", account_id: "verified-account" };
+  const retry = await h.route.POST(request(), context());
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.deduplicated, true);
+  assert.equal(h.writes.length, 1);
+});
+
 test("different action keys preserve history and a valid explicit reset can replace a malformed latest row", async () => {
   const h = harness({ events: [event(1, { broken: true })] });
-  const response = await h.route.POST(request({ dates: [], training_availability: "", note: "" }), context());
+  const response = await h.route.POST(request({ base_event_id: 1, dates: [], training_availability: "", note: "" }), context());
   assert.equal(response.status, 200);
   assert.equal(h.database.pool_events.length, 2);
   assert.equal((response.body.preparation as Row).note, "");
@@ -211,4 +227,72 @@ test("GET reads later actual inbound even when no consultation observation was w
   assert.equal(suggestion.availability, "unknown");
   assert.match(suggestion.reason as string, /22일 불가/);
   assert.deepEqual(h.writes, []);
+});
+
+
+test("team changes retain prior notes, author and training progress scoped to the candidate's job", async () => {
+  const h = harness({ events: [event(1, { ...preparation, note: "처음 연락" }), event(2, { ...preparation, note: "다른 공고 메모" }, { job_id: 8 })] });
+  const training = { status: "completed", backup_intent: "declined", scheduled_at: "2026-09-15T07:30:00+09:00", first_loading_location: "첫 상차 교육장", linked_pro: "담당 프로" };
+  const saved = await h.route.POST(request({ base_event_id: 1, training, note: "선탑 후 본인 백업 진행 안 함", actor: { account_id: "spoofed" } }), context());
+  assert.equal(saved.status, 200);
+  assert.equal(((saved.body.preparation as Row).training as Row)?.backup_intent, "declined");
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.body.actor)), { account_id: "verified-account", name: "김운영" });
+  const result = await h.route.GET({}, context());
+  const history = ((result.body.preparations as Row[])[0].history ?? []) as Row[];
+  assert.equal(history.length, 2);
+  assert.equal((history[1].preparation as Row).note, "처음 연락");
+  assert.equal(history[1].actor, null);
+  assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
+});
+
+test("different editors racing on one base preserve the winner and return conflict to the other", async () => {
+  const h = harness({ events: [event(1)] });
+  const responses = await Promise.all([
+    h.route.POST(request({ base_event_id: 1, note: "A가 조율 중" }), context()),
+    h.route.POST(request({ base_event_id: 1, action_key: "22222222-2222-4222-8222-222222222222", actor_name: "이운영", note: "B가 완료 확인" }), context()),
+  ]);
+  assert.deepEqual(responses.map((result) => result.status).sort(), [200, 409]);
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.database.pool_events.length, 2);
+  const loser = responses.find((result) => result.status === 409)!;
+  assert.equal(loser.body.conflict, true);
+  assert.equal((loser.body.latest as Row).event_id, 2);
+});
+
+test("a stale editor cannot overwrite a teammate and retries still return their original committed result", async () => {
+  const h = harness({ events: [event(1)] });
+  const first = await h.route.POST(request({ base_event_id: 1, note: "첫 편집" }), context());
+  const second = await h.route.POST(request({ base_event_id: 2, action_key: "22222222-2222-4222-8222-222222222222", note: "다음 편집" }), context());
+  assert.equal(second.status, 200);
+  const retry = await h.route.POST(request({ base_event_id: 1, note: "첫 편집" }), context());
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.event_id, first.body.event_id);
+  assert.equal(retry.body.deduplicated, true);
+  const stale = await h.route.POST(request({ base_event_id: 1, action_key: "33333333-3333-4333-8333-333333333333", note: "지난 초안" }), context());
+  assert.equal(stale.status, 409);
+  assert.equal(h.writes.length, 2);
+});
+
+test("an attributed save needs an authenticated account, author name and explicit base version", async () => {
+  const h = harness();
+  for (const patch of [{ actor_name: " " }, { actor_name: "가".repeat(81) }, { base_event_id: undefined }, { base_event_id: -1 }]) {
+    assert.equal((await h.route.POST(request(patch), context())).status, 400);
+  }
+  const unauthenticated = harness({ authenticated: false });
+  assert.equal((await unauthenticated.route.POST(request(), context())).status, 401);
+  assert.equal(unauthenticated.writes.length, 0);
+  assert.equal(h.writes.length, 0);
+});
+
+
+test("the initial version rejects concurrent editors but stays independent for each linked candidate", async () => {
+  const h = harness();
+  const responses = await Promise.all([
+    h.route.POST(request({ note: "첫 담당자" }), context()),
+    h.route.POST(request({ action_key: "22222222-2222-4222-8222-222222222222", note: "다른 첫 담당자" }), context()),
+    h.route.POST(request({ applicant_id: 2, action_key: "33333333-3333-4333-8333-333333333333", note: "다른 후보 담당자" }), context()),
+  ]);
+  assert.deepEqual(responses.slice(0, 2).map((result) => result.status).sort(), [200, 409]);
+  assert.equal(responses[2].status, 200);
+  assert.equal(h.writes.length, 2);
 });

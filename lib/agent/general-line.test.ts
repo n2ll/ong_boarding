@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { isGeneralCollectedComplete, mergeGeneralCollected } from "./general-line.ts";
+
+test("pending training intent is neither collected availability nor a completed screening", () => {
+  for (const value of ["(의사 명확함 - 날짜·시간대 대기중)", "미정", "날짜와 시간대 미확인", "가능 시간 확인 대기"]) {
+    const result = mergeGeneralCollected({ 시작가능일: "9/21" }, { 선탑_가능시간: value });
+    assert.equal(result.선탑_가능시간, undefined);
+    assert.equal(isGeneralCollectedComplete(result), false);
+    assert.equal(isGeneralCollectedComplete({ 시작가능일: "9/21", 선탑_가능시간: value }), false);
+    assert.equal(mergeGeneralCollected({ 선탑_가능시간: value }, undefined).선탑_가능시간, undefined);
+  }
+});
+
+test("pending training updates preserve previously collected available times", () => {
+  const previous = { 시작가능일: "9/21", 선탑_가능시간: "화·목 오전" };
+  const result = mergeGeneralCollected(previous, { 선탑_가능시간: "(의사 명확함 - 날짜·시간대 대기중)" });
+  assert.deepEqual(result, previous);
+  assert.equal(isGeneralCollectedComplete(result), true);
+});
+
+test("partially specified training availability survives a pending exact date", () => {
+  const previous = { 시작가능일: "9/21", 선탑_가능시간: "화요일 오전 가능, 정확한 날짜 미정" };
+  assert.deepEqual(mergeGeneralCollected(previous, undefined), previous);
+  assert.equal(isGeneralCollectedComplete(previous), true);
+});
 
 type JobLineInput = {
   title: string;
