@@ -1,0 +1,9 @@
+# 날짜별 수요 검증 — 2026-09-10
+- RED: 기존 capacity 집계에 새 미정/운행 없음/일별 수요 기대를 넣어 모델·API 실패를 확인했다. 신규 화면 E2E도 기존 빌드에서 실패했다.
+- 모델·API: `node --experimental-strip-types --test lib/admin/staffing-demand.test.ts lib/admin/staffing-demand-api.test.ts lib/admin/staffing-date-board.test.ts lib/admin/staffing-date-board-api.test.ts` — 27/27 통과. 최신 수요, 손상/미정, 확정 보존, 전체 페이지 조회, 실패 503, 권한·입력·동시 저장·멱등 재시도 포함.
+- 실제 PostgreSQL 14: 별도 임시 클러스터에서 신규 migration 적용/재적용, 상태·인원 제약, RLS/역할 권한, null/기존 기준 동시 INSERT, request_key 및 공고/날짜 FK를 확인했다. 6/6 통과, 서버 종료. `ONG_STAFFING_DEMAND_AUDIT_DATABASE_URL`이 없으면 integration test는 건너뛴다.
+- 브라우저: 최종 UI 빌드 성공 후 PC 1280px·모바일 390px 수요 저장/실패 입력 보존/동료 변경 409/동일 키 재시도/운행 없음 확정 보존 2/2 통과. 기존 날짜별 후보 확인·확정 이동 2/2도 통과. 외부 연결·미허용 쓰기를 차단한 가상 데이터만 사용했다.
+- `npx tsc --noEmit`, `git diff --check` 통과. E2E 중 input의 긴 접근성 이름을 label/설명으로 분리했고, 비교 테스트의 innerText/textContent 불일치를 바로잡았다.
+- 독립 리뷰: 동일 action_key가 최초 조회 이후 커밋된 경우 409로 잘못 응답하는 경합을 발견해 재조회로 보완했다. 해당 RED→GREEN 포함.
+- 실데이터: 파일럿 날짜별 수요를 추정하거나 입력하지 않았다. 지원자·문자·AI 설정 변경 없음.
+- DB 선행 적용·PR 머지·운영 배포 검수: 대기.

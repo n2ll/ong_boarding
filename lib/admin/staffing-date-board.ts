@@ -1,10 +1,14 @@
 import { isGeneralLineJob, joinedClientType } from "../agent/general-line.ts";
 import { isJobEffectivelyClosed } from "../jobs.ts";
 import { parseStaffingPreparation, STAFFING_PREPARATION_EVENT } from "./staffing-preparation.ts";
+import { parseStaffingDemand, type StaffingDemandEvent } from "./staffing-demand.ts";
 
 export type StaffingDateBoardCell = {
   date: string;
   target: number | null;
+  demand_state: "unknown" | "off" | "operating";
+  demand_event_id: number | null;
+  invalid_demand: boolean;
   confirmed: number;
   reserve: number;
   primary: number;
@@ -53,7 +57,7 @@ export function isStaffingDateBoardJob(job: StaffingDateBoardJob): boolean {
 
 export function buildStaffingDateBoard(input: {
   start: string; end: string; jobs: StaffingDateBoardJob[]; candidates: StaffingDateBoardCandidate[];
-  events: StaffingDateBoardEvent[]; updated_at: string;
+  events: StaffingDateBoardEvent[]; demands?: StaffingDemandEvent[]; updated_at: string;
 }): StaffingDateBoardData {
   const dates = staffingDateBoardDates(input.start, input.end);
   if (!dates) throw new Error("비교 기간은 올바른 날짜로 1~7일을 선택해주세요.");
@@ -71,11 +75,22 @@ export function buildStaffingDateBoard(input: {
     const previous = latest.get(key);
     if (!previous || event.created_at > previous.created_at || (event.created_at === previous.created_at && event.id > previous.id)) latest.set(key, event);
   }
+  const latestDemands = new Map<string, StaffingDemandEvent>();
+  for (const demand of input.demands ?? []) {
+    if (!jobIds.has(demand.job_id) || !dates.includes(demand.work_date)) continue;
+    const key = `${demand.job_id}:${demand.work_date}`;
+    if (!latestDemands.has(key) || latestDemands.get(key)!.id < demand.id) latestDemands.set(key, demand);
+  }
   const boardJobs = jobs.map((job) => {
     const capacity = Number.isSafeInteger(job.capacity) && Number(job.capacity) > 0 ? job.capacity : null;
     return { job_id: job.id, title: job.title, slot: job.slot, start_date: job.start_date, capacity,
-      cells: dates.map((date): StaffingDateBoardCell => ({ date, target: capacity, confirmed: 0, reserve: 0, primary: 0,
-        shortage: capacity, conflicts: [], invalid_records: 0 })) };
+      cells: dates.map((date): StaffingDateBoardCell => {
+        const event = latestDemands.get(`${job.id}:${date}`);
+        const demand = event ? parseStaffingDemand(event) : null;
+        return { date, target: demand?.required_count ?? null, demand_state: demand?.state ?? "unknown",
+          demand_event_id: event?.id ?? null, invalid_demand: !!event && !demand,
+          confirmed: 0, reserve: 0, primary: 0, shortage: null, conflicts: [], invalid_records: 0 };
+      }) };
   });
   const cells = new Map(boardJobs.flatMap((job) => job.cells.map((cell) => [`${job.job_id}:${cell.date}`, cell] as const)));
   const confirmedDates = new Map<string, Array<{ job_id: number; name: string }>>();

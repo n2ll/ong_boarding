@@ -4,6 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import * as boardPolicy from "./staffing-date-board.ts";
+import * as demandPolicy from "./staffing-demand.ts";
 import { STAFFING_PREPARATION_EVENT } from "./staffing-preparation.ts";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 
@@ -18,6 +19,8 @@ function harness(database: Record<string, Row[]>, fail?: (table: string, from: n
     constructor(table: string) { this.table = table; }
     select() { return this; }
     eq(key: string, value: unknown) { this.filters.push((row) => row[key] === value); return this; }
+    gte(key: string, value: string) { this.filters.push((row) => String(row[key]) >= value); return this; }
+    lte(key: string, value: string) { this.filters.push((row) => String(row[key]) <= value); return this; }
     in(key: string, values: unknown[]) { this.filters.push((row) => values.includes(row[key])); return this; }
     order(key: string, options: { ascending: boolean }) { this.orders.push([key, options.ascending]); return this; }
     async range(from: number, to: number) {
@@ -38,6 +41,7 @@ function harness(database: Record<string, Row[]>, fail?: (table: string, from: n
       return new Query(table);
     } }) },
     "@/lib/admin/staffing-date-board": boardPolicy,
+    "@/lib/admin/staffing-demand": demandPolicy,
     "@/lib/admin/staffing-preparation": { STAFFING_PREPARATION_EVENT },
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
   };
@@ -58,6 +62,7 @@ function harness(database: Record<string, Row[]>, fail?: (table: string, from: n
 }
 function largeFixture() {
   return {
+    job_staffing_demand_events: Array.from({ length: 1001 }, (_, index) => ({ id: index + 1, job_id: 1001, work_date: "2026-09-15", state: "operating", required_count: index === 1000 ? 4 : 2 })),
     jobs: Array.from({ length: 1001 }, (_, index) => ({ id: index + 1, title: index === 1000 ? "일반 배송" : "__system__", status: "active",
       closes_at: null, capacity: 2, start_date: "2026-09-15", slot: null, client: null })),
     job_candidates: Array.from({ length: 1001 }, (_, index) => ({ id: index + 1, applicant_id: index + 1, job_id: 1001, agent_stage: null, applicants: { name: `후보 ${index + 1}` } })),
@@ -75,11 +80,14 @@ test("board GET paginates jobs, candidate links and staffing history without mes
   assert.equal(response.body.jobs[0].job_id, 1001);
   assert.equal(response.body.jobs[0].cells[0].confirmed, 1);
   assert.equal(response.body.jobs[0].cells[1].confirmed, 0);
-  for (const table of ["jobs", "job_candidates", "pool_events"]) assert.ok(h.reads.some((read) => read.table === table && read.from === 1000));
+  assert.equal(response.body.jobs[0].cells[0].target, 4);
+  assert.equal(response.body.jobs[0].cells[0].shortage, 3);
+  assert.equal(response.body.jobs[0].cells[1].target, null);
+  for (const table of ["jobs", "job_candidates", "pool_events", "job_staffing_demand_events"]) assert.ok(h.reads.some((read) => read.table === table && read.from === 1000));
 });
 
 test("invalid comparison ranges fail before database reads and no jobs is a complete empty board", async () => {
-  const h = harness({ jobs: [], job_candidates: [], pool_events: [] });
+  const h = harness({ jobs: [], job_candidates: [], pool_events: [], job_staffing_demand_events: [] });
   for (const query of ["", "start=2026-02-29&end=2026-03-01", "start=2026-09-15&end=2026-09-22"]) {
     assert.equal((await h.get(query)).status, 400);
   }
@@ -90,7 +98,7 @@ test("invalid comparison ranges fail before database reads and no jobs is a comp
 });
 
 test("a later-page error in any required dataset never becomes zero shortage or partial success", async () => {
-  for (const table of ["jobs", "job_candidates", "pool_events"]) {
+  for (const table of ["jobs", "job_candidates", "pool_events", "job_staffing_demand_events"]) {
     const h = harness(largeFixture(), (name, from) => name === table && from === 1000);
     assert.equal((await h.get()).status, 503, table);
   }

@@ -7,6 +7,9 @@
 - 타입 검사와 diff 공백 검사 통과. 모델/API와 UI 교차 리뷰에서 P1/P2 발견 없음.
 - `/tmp/ong-staffing-follow-up-1280.png`, `/tmp/ong-staffing-follow-up-390.png` 확인. 모바일 고정 저장 버튼 및 입력 유지 확인.
 - 실제 SMS·운영 DB·AI 설정 변경 없음. DB 마이그레이션 불필요.
+- PR #152 squash merge 완료: `c363712689aa690419179deae05a64e88130afdf`. 기능 브랜치와 origin/main의 파일 차이 없음 확인.
+- Vercel 운영 배포 `BtQwMYRgrf32gtEp9LQxBUhEpknh`: 2026-09-10 16:04:20 KST Ready. main 커밋과 `ong-boarding-pi.vercel.app` 도메인 연결 확인.
+- 운영 공고 50의 날짜별 배차 준비에서 후속 할 일/담당자 필터와 후보별 연락 버튼 확인. 간편 기록창을 열어 다음 할 일·담당자·예정일·완료·메모·저장 버튼을 확인하고 저장 없이 닫음. 실제 후보 데이터 수정 및 연락 없음.
 # 한계와 다음
 - 담당자는 공용 계정 환경의 수기 표시명. 할 일 자동 알림이나 AI의 연락 기록 해석은 포함하지 않는다.
 - 다음 필수: 일자별 실제 운행 여부·필요 인원 → 반복 질문과 불필요한 수동 검토를 줄이는 AI 응대 연결.
