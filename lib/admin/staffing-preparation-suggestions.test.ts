@@ -107,3 +107,28 @@ test("a newer real inbound without an observation invalidates the old positive s
     assert.ok(suggestion.reason.includes(body));
   }
 });
+
+test("training willingness and applicant-proposed times stay visible without becoming backup dates", () => {
+  for (const [body, kind] of [["선탑 꼭 하고 싶습니다", "interest"], ["선탑은 22일 오전 가능", "availability"]]) {
+    const event = observation(body, { meta: { ...observation().meta, observations: [{ kind, quote: body }] } });
+    const [suggestion] = build([event], [message(body)], job);
+    assert.equal(suggestion?.kind, "training");
+    assert.equal(suggestion.quote, body);
+    assert.equal(suggestion.date, null);
+    assert.match(suggestion.reason, /선탑/);
+    const prep = { source: "manager", dates: [], training_availability: "기존 오전 가능", note: "동료 확인 중" };
+    assert.deepEqual(policy.applyStaffingSuggestion(prep as never, suggestion), prep);
+  }
+});
+
+test("a date-only answer to this job's training question is separated from backup availability", () => {
+  const scopedJob = { ...job, title: "가상 동쪽 백업" };
+  const asked = message("가상 동쪽 백업\n선탑 가능한 날짜와 시간대를 알려주시겠어요?", { id: "out-1", direction: "outbound", created_at: "2027-04-09T15:00:00Z" });
+  const [training] = build([observation()], [asked, message()], scopedJob);
+  assert.equal(training.kind, "training"); assert.equal(training.date, null);
+  const acknowledgement = message("네", { id: "ack", created_at: "2027-04-09T15:15:00Z" });
+  const [continued] = build([observation()], [asked, acknowledgement, message()], scopedJob);
+  assert.equal(continued.kind, "training"); assert.equal(continued.date, null);
+  const [backup] = build([observation()], [{ ...asked, body: "다른 공고\n선탑 가능한 날짜와 시간대를 알려주시겠어요?" }, message()], scopedJob);
+  assert.equal(backup.date, "2027-04-22");
+});

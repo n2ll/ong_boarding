@@ -86,9 +86,9 @@ export async function GET(_req: NextRequest, context: Context) {
     const messages: StaffingSourceMessage[] = [];
     for (let offset = 0; offset < observedApplicantIds.length; offset += 250) {
       messages.push(...await fetchAllPostgrestRows(async (from, to) => {
-        // Later refusals may have no AI observation. Read actual inbound history as well as the quoted source.
+        // 직전 선탑 질문과 후속 거절도 읽어 교육 가능시간을 백업 가능일과 구분한다.
         const result = await db.from("messages").select("id, applicant_id, direction, body, created_at")
-          .in("applicant_id", observedApplicantIds.slice(offset, offset + 250)).eq("direction", "inbound")
+          .in("applicant_id", observedApplicantIds.slice(offset, offset + 250))
           .order("id", { ascending: true }).range(from, to);
         return { data: result.data as StaffingSourceMessage[] | null, error: result.error };
       }, "관찰 수신 원문과 후속 답장"));

@@ -221,6 +221,7 @@ export interface StageResult {
   consultation?: {
     job_ids: number[];
     observations: import("./consultation-types").ConsultationObservation[];
+    region_preferences?: import("./consultation-types").RegionPreference[];
     clarification: boolean;
     handoff: boolean;
   };

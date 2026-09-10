@@ -112,6 +112,11 @@ function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): strin
       const preferences = parsePoolPreferences(ev.meta);
       return preferences ? `인력풀 희망 조건 · ${POOL_PREFERENCE_LABELS[preferences.kind]} · ${preferences.area} · ${preferences.schedule} · 차량: ${preferences.vehicle}${preferences.notice ? ` · 사전 연락: ${preferences.notice}` : ""}` : "인력풀 희망 조건 갱신";
     }
+    case "region_preference": {
+      const m = ev.meta as { regions?: unknown; quote?: unknown } | null;
+      const regions = Array.isArray(m?.regions) ? m.regions.filter((region): region is string => typeof region === "string") : [];
+      return `희망 권역 · ${regions.join(" · ") || "원문 확인"}${typeof m?.quote === "string" ? ` · “${m.quote}”` : ""} · 해당 권역 공고 안내 시 우선 검토`;
+    }
     case "ping_sent":
       return "⚡ 다시 연락 문자 발송";
     case "link_view":
@@ -582,7 +587,7 @@ export function ConversationThread({
   const dedupedEvents: PoolEvent[] = [];
   for (const ev of currentEvents) {
     const last = dedupedEvents[dedupedEvents.length - 1];
-    if (last && ev.event_type !== "job_consultation_observation" && ev.event_type !== "pool_preferences" && last.event_type === ev.event_type && last.job_id === ev.job_id) {
+    if (last && ev.event_type !== "job_consultation_observation" && ev.event_type !== "pool_preferences" && ev.event_type !== "region_preference" && last.event_type === ev.event_type && last.job_id === ev.job_id) {
       dedupedEvents[dedupedEvents.length - 1] = ev;
     } else {
       dedupedEvents.push(ev);
@@ -1306,7 +1311,7 @@ export function ConversationThread({
                   <div className="flex justify-center mb-2"><div className="bg-gray-200 text-muted-foreground text-[12px] font-bold px-3 py-1 rounded-full">{fmtDateDivider(createdAt)}</div></div>
                 )}
                 <div className="flex justify-center -my-2">
-                  <div className={`bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 ${["job_consultation_observation", "pool_preferences"].includes(ev.event_type) ? "max-w-full whitespace-pre-wrap break-words rounded-xl" : "rounded-full"}`} title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
+                  <div className={`bg-gray-200 text-muted-foreground text-[12px] font-semibold px-2.5 py-0.5 ${["job_consultation_observation", "pool_preferences", "region_preference"].includes(ev.event_type) ? "max-w-full whitespace-pre-wrap break-words rounded-xl" : "rounded-full"}`} title={`${fmtDateLabel(createdAt)} ${fmtTime(createdAt)}`}>
                     {poolEventLabel(ev, currentJobsMap)} · {fmtTime(createdAt)}
                   </div>
                 </div>

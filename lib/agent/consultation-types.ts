@@ -26,3 +26,10 @@ export interface ConsultationObservation {
   kind: "interest" | "availability";
   quote: string;
 }
+
+/** 공고 관심·가용성과 별개인 지역 문의 원문. 동의·거주지·출퇴근 가능성을 뜻하지 않는다. */
+export interface RegionPreference {
+  source_message_id: string;
+  quote: string;
+  regions: string[];
+}

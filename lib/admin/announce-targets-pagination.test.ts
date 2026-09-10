@@ -7,6 +7,7 @@ import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 import { fetchPhoneMessageIdentityIndex } from "./phone-message-identity.ts";
 import { normalizePhone } from "../ongmanaging.ts";
 import { resolveJobAnnouncementBody } from "./job-announcement-copy.ts";
+import { regionPreferredApplicantIds } from "../region-preference-matching.ts";
 
 type Row = Record<string, unknown>;
 
@@ -196,6 +197,7 @@ function loadRouteModule(supabase: ReturnType<typeof createSupabaseStub>): Route
     "@/lib/admin/phone-message-identity": { fetchPhoneMessageIdentityIndex },
     "@/lib/ongmanaging": { normalizePhone },
     "@/lib/admin/job-announcement-copy": { resolveJobAnnouncementBody },
+    "@/lib/region-preference-matching": { regionPreferredApplicantIds },
     "@/lib/jobs": {
       isJobEffectivelyClosed: (status: string | null, closesAt: string | null) => (
         status !== "active" || Boolean(closesAt && Date.parse(closesAt) <= FixedDate.now())
@@ -277,6 +279,47 @@ function equals(call: QueryCall, column: string, value: unknown): boolean {
   return call.equals.some(([key, actual]) => key === column && actual === value);
 }
 
+function regionEvent(id: number, applicantId: number, regions: string[]): Row {
+  const quote = `${regions.join("이나 ")} 쪽 배송 있나요`;
+  return { ...event(id, applicantId, "region_preference"), job_id: null,
+    meta: { source: "inbound_sms", source_message_id: `sms-${id}`, source_created_at: NOW, quote, regions } };
+}
+
+test("희망 권역 원문 이력은 최근 ping 없이도 해당 지역 공고의 일반 안내보다 우선한다", async () => {
+  const database = { jobs: [{ ...job(), pickup_address: "경기도 시흥시 정왕동", dropoff_address: "서울특별시 금천구 가산동" }],
+    applicants: [1, 2, 3].map(applicant), job_candidates: [],
+    pool_events: [event(1, 1, "waitlist_notice"), regionEvent(2, 2, ["인천", "시흥"]), regionEvent(3, 3, ["부산"])] };
+  const response = await loadRouteModule(createSupabaseStub(database, [])).GET({ url: "http://localhost" }, { params: Promise.resolve({ id: "7" }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(Array.from(response.body.targets as Row[], (row) => [row.id, row.group]), [[2, "regional"], [1, "promised"]]);
+});
+
+test("희망 지역과 동명 도로는 매칭하지 않고 최신 희망 권역 정정을 반영한다", async () => {
+  const database = { jobs: [{ ...job(), pickup_address: "서울특별시 금천구 시흥대로 1", dropoff_address: "인천광역시 연수구 송도동" }],
+    applicants: [1, 2].map(applicant), job_candidates: [],
+    pool_events: [regionEvent(1, 1, ["시흥"]), regionEvent(2, 2, ["인천"]), regionEvent(3, 2, ["부산"])] };
+  const response = await loadRouteModule(createSupabaseStub(database, [])).GET({ url: "http://localhost" }, { params: Promise.resolve({ id: "7" }) });
+  assert.equal(response.status, 200);
+  assert.equal((response.body.targets as Row[]).length, 0);
+});
+
+test("희망 권역 우선도 수신거부·노출 제외·동의·피로도 제한을 우회하지 않는다", async () => {
+  const database = { jobs: [{ ...job("targeted"), pickup_address: "인천광역시 연수구" }],
+    applicants: [applicant(1), { ...applicant(2), sms_opt_out_at: NOW }, { ...applicant(3), marketing_consent: null }, applicant(4), applicant(5)],
+    job_candidates: [], job_exposure_targets: [{ applicant_id: 4, mode: "exclude", job_id: 7 }],
+    pool_events: [...[1, 2, 3, 4, 5].map((id) => regionEvent(id, id, ["인천"])), event(6, 5, "ping_sent", "new_job")] };
+  const response = await loadRouteModule(createSupabaseStub(database, [])).GET({ url: "http://localhost" }, { params: Promise.resolve({ id: "7" }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(Array.from(response.body.targets as Row[], (row) => row.id), [1]);
+});
+
+test("희망 권역 조회 실패는 지역 희망자를 누락한 성공 응답이 아니다", async () => {
+  const response = await loadRouteModule(createSupabaseStub({ jobs: [job()], pool_events: [], applicants: [] }, [], {
+    fail: (call) => equals(call, "event_type", "region_preference") ? "region read failed" : null,
+  })).GET({ url: "http://localhost" }, { params: Promise.resolve({ id: "7" }) });
+  assert.equal(response.status, 500);
+});
+
 test("reads every targeting ledger so rows after 1000 still affect inclusion and exclusion", async () => {
   const poolEvents = [
     ...duplicateEvents(1, 1, "suntop_done"),
@@ -320,7 +363,7 @@ test("reads every targeting ledger so rows after 1000 still affect inclusion and
 
   assert.equal(response.status, 200);
   assert.deepEqual(Array.from(targets, (target) => target.id), [1, 3, 5, 8, 7]);
-  assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), { suntop: 1, promised: 1, requested: 1, matched: 2 });
+  assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), { suntop: 1, regional: 0, promised: 1, requested: 1, matched: 2 });
   assert.match(String(response.body.sms_body), /#\{맞춤링크\}/);
 
   const secondPages = calls.filter((call) => call.method === "range" && call.from === 1_000);
@@ -458,6 +501,7 @@ test("announcement targets deduplicate normalized phone numbers before the send 
   );
   assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), {
     suntop: 1,
+    regional: 0,
     promised: 0,
     requested: 0,
     matched: 0,
@@ -618,7 +662,7 @@ test("chunks the applicant union and caps newest suntop responders before lower-
     [1_001, "지원자 1001", "01000001001", "token-1001", "suntop"],
     [802, "지원자 802", "01000000802", "token-802", "suntop"],
   ]);
-  assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), { suntop: 200, promised: 0, requested: 0, matched: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(response.body.groups)), { suntop: 200, regional: 0, promised: 0, requested: 0, matched: 0 });
 
   const applicantCalls = calls.filter((call) => call.table === "applicants");
   assert.equal(applicantCalls.length > 1, true);
@@ -658,4 +702,17 @@ test("returns 500 when a later applicant-id chunk fails instead of using earlier
     call.table === "applicants"
     && call.inValues.some(([column]) => column === "id")
   )).length, 2);
+});
+
+
+test("대구 같은 두 글자 지역명과 재처리된 옛 원문을 정확히 구분한다", () => {
+  const preference = (regions: string[], at: string) => ({ applicant_id: 1, meta: {
+    source: "inbound_sms", source_message_id: at, source_created_at: at,
+    quote: `${regions.join(" 또는 ")} 지역 희망합니다`, regions,
+  } });
+  assert.deepEqual(regionPreferredApplicantIds([preference(["대구"], NOW)], { pickup_address: "대구광역시 수성구 동대구로 1" }), [1]);
+  assert.deepEqual(regionPreferredApplicantIds([
+    preference(["인천"], "2026-08-29T00:00:00Z"),
+    preference(["시흥"], "2026-08-30T00:00:00Z"),
+  ], { pickup_address: "인천광역시 연수구 센트럴로 1" }), []);
 });

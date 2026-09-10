@@ -22,6 +22,7 @@ import { isJobEffectivelyClosed, isSystemJobTitle } from "../jobs";
 import { loadConsultationJobs } from "./consultation-context";
 import { loadConsultationHistory } from "./consultation-history";
 import { saveConsultationObservations } from "./consultation-observations";
+import { likelyRegionInquiry } from "./region-preference";
 import { isGeneralLineJob, joinedClientType } from "./general-line";
 import { ensureExposureIncludeForLinked } from "../exposure";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
@@ -363,7 +364,8 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       }
     }
     history = recent.history;
-    const enabled = jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id);
+    const enabled = jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id)
+      || recent.sourceMessages.some((message) => likelyRegionInquiry(message.body));
     otherActiveJobs = jobs.filter((j) => j.job_id !== job.id && !j.expired)
       .map((j) => ({ ...j, stage: j.stage ?? "exploration" }));
     if (enabled) {
@@ -589,9 +591,9 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   const consultationSafe = !!result.consultation && !safetyHit && !marketingSafetyHit && !crossHit;
   // 기록은 지원자의 진술 원장일 뿐이며, 채용 단계/전역 가용성에는 반영하지 않는다.
   let observationFailure = false;
-  if (!draftMode && !simulate && consultationSafe && result.consultation!.observations.length) {
+  if (!draftMode && !simulate && consultationSafe && (result.consultation!.observations.length || result.consultation!.region_preferences?.length)) {
     try {
-      await saveConsultationObservations(supabase, applicant.id, result.consultation!.observations, consultation!.sourceMessages);
+      await saveConsultationObservations(supabase, applicant.id, result.consultation!.observations, consultation!.sourceMessages, result.consultation!.region_preferences);
     } catch (error) {
       observationFailure = true;
       result.reply_text = null;
@@ -616,6 +618,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
   if (result.consultation) {
     result.reasoning = `${result.reasoning ?? ""}\n[복수 공고 상담: ${result.consultation.job_ids.join(", ")}]`;
     if (draftMode && result.consultation.observations.length) result.reasoning += "\n[공고별 관찰 제안·미저장] " + JSON.stringify(result.consultation.observations);
+    if (draftMode && result.consultation.region_preferences?.length) result.reasoning += "\n[희망 권역 제안·미저장] " + JSON.stringify(result.consultation.region_preferences);
   }
 
   // ─── 코파일럿(draft) 모드 분기 ───────────────────────────────────────

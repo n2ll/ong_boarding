@@ -328,10 +328,11 @@ interface CloseNotifyTarget {
   phone: string;
 }
 
-// 새 공고 안내 대상 — announce-targets API 응답. group은 S 선탑 완료 > A 충원 안내 이력 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
-type AnnounceGroup = "suntop" | "promised" | "requested" | "matched";
+// 새 공고 안내 대상 — announce-targets API 응답. group은 선탑 완료 > 희망 권역 일치 > 충원 안내 이력 > B 알림 신청 > C 조건 매칭(상위 우선 중복 제거).
+type AnnounceGroup = "suntop" | "regional" | "promised" | "requested" | "matched";
 const ANNOUNCE_GROUP_LABEL: Record<AnnounceGroup, string> = {
   suntop: "선탑 완료(최우선)",
+  regional: "희망 권역 일치",
   promised: "충원 안내 이력",
   requested: "알림 신청",
   matched: "조건 맞는 최근 관심",
@@ -343,7 +344,7 @@ interface AnnounceTarget {
   access_token: string;
   group: AnnounceGroup;
 }
-interface AnnounceGroups { suntop: number; promised: number; requested: number; matched: number }
+interface AnnounceGroups { suntop: number; regional: number; promised: number; requested: number; matched: number }
 interface AnnounceTargetsRes {
   groups: AnnounceGroups;
   targets: AnnounceTarget[];

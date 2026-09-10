@@ -7,7 +7,7 @@ import ts from "typescript";
 import { saveConsultationObservations } from "./consultation-observations.ts";
 import type { ConsultationObservation, ConsultationSourceMessage } from "./consultation-types.ts";
 
-type EventRow = { applicant_id: number; job_id: number; event_type: string; action_key: string; meta: { source: string; source_message_id: string; source_created_at: string; observations: { kind: string; quote: string }[] } };
+type EventRow = { applicant_id: number; job_id: number | null; event_type: string; action_key: string; meta: { source: string; source_message_id: string; source_created_at: string; observations?: { kind: string; quote: string }[]; quote?: string; regions?: string[] } };
 
 function eventStore(options: { writeError?: boolean; readError?: boolean; race?: boolean } = {}) {
   const events: EventRow[] = [];
@@ -77,6 +77,56 @@ test("빈 관찰은 DB 호출 없이 끝난다", async () => {
   assert.equal(store.writes(), 0);
 });
 
+const regionSources = [{ id: "region-sms", body: "혹시 인천이나 시흥쪽에는 없을까요", created_at: "2026-09-10T01:00:00Z" }];
+const regionPreferences = [{ source_message_id: "region-sms", quote: regionSources[0].body, regions: ["인천", "시흥"] }];
+
+test("공고 관심이 아닌 지역 문의도 지원자 희망 권역 원장에 한 번 기록한다", async () => {
+  const store = eventStore();
+  await saveConsultationObservations(store.supabase, 7, [], regionSources, regionPreferences);
+  assert.equal(store.events.length, 1);
+  const row = store.events[0];
+  assert.equal(row.job_id, null);
+  assert.equal(row.event_type, "region_preference");
+  assert.deepEqual(row.meta, { source: "inbound_sms", source_message_id: "region-sms", source_created_at: regionSources[0].created_at, quote: regionSources[0].body, regions: ["인천", "시흥"] });
+  await saveConsultationObservations(store.supabase, 7, [], regionSources, regionPreferences);
+  assert.equal(store.events.length, 1);
+});
+
+test("같은 문자에서 따로 말한 희망 지역은 한 원장으로 합치고 재처리 순서와 무관하다", async () => {
+  const store = eventStore();
+  const source = { ...regionSources[0], body: "인천에서 일하고 싶어요. 시흥 쪽 일자리도 있나요?" };
+  const preferences = [
+    { source_message_id: source.id, quote: "인천에서 일하고 싶어요", regions: ["인천"] },
+    { source_message_id: source.id, quote: "시흥 쪽 일자리도 있나요?", regions: ["시흥"] },
+  ];
+  await saveConsultationObservations(store.supabase, 7, [], [source], preferences);
+  assert.equal(store.events.length, 1);
+  assert.equal(store.events[0].meta.quote, source.body);
+  assert.ok(store.events[0].meta.regions);
+  assert.deepEqual([...store.events[0].meta.regions].sort(), ["시흥", "인천"].sort());
+  await saveConsultationObservations(store.supabase, 7, [], [source], preferences.reverse());
+  assert.equal(store.events.length, 1);
+});
+
+test("근거 없는 지역은 다른 상담 관찰과 함께 저장되지 않는다", async () => {
+  const store = eventStore();
+  await assert.rejects(saveConsultationObservations(store.supabase, 7, observations, [...sources, ...regionSources], [{ ...regionPreferences[0], regions: ["부산"] }]));
+  assert.equal(store.events.length, 0);
+});
+
+test("지역 선호 원장의 중복 내용이 다르면 성공 처리하거나 덮어쓰지 않는다", async () => {
+  const store = eventStore();
+  await saveConsultationObservations(store.supabase, 7, [], regionSources, regionPreferences);
+  await assert.rejects(saveConsultationObservations(store.supabase, 7, [], regionSources, [{ ...regionPreferences[0], regions: ["인천"] }]), /충돌/);
+  assert.equal(store.events.length, 1);
+});
+
+test("지역 기록 실패는 발송 성공 경로로 넘기지 않는다", async () => {
+  const store = eventStore({ writeError: true });
+  await assert.rejects(saveConsultationObservations(store.supabase, 7, [], regionSources, regionPreferences), /write failed/);
+  assert.equal(store.events.length, 0);
+});
+
 for (const patch of [{ source_message_id: "unknown" }, { quote: "금요일 가능" }, { quote: "" }, { quote: " " }, { job_id: 0 }, { kind: "confirmed" }]) {
   test(`근거가 유효하지 않으면 일괄 저장 전 거부한다: ${JSON.stringify(patch)}`, async () => {
     const store = eventStore();
@@ -107,7 +157,7 @@ for (const corruption of ["applicant", "job", "event", "source", "quote"]) {
     if (corruption === "job") event.job_id = 12;
     if (corruption === "event") event.event_type = "availability_set";
     if (corruption === "source") event.meta.source_message_id = "another";
-    if (corruption === "quote") event.meta.observations[0].quote = "다른 발언";
+    if (corruption === "quote") event.meta.observations![0].quote = "다른 발언";
     await assert.rejects(saveConsultationObservations(store.supabase, 7, observations, sources), /conflict|충돌|일치/);
     assert.equal(store.events.length, 1);
   });

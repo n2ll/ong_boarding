@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ConsultationObservation, ConsultationSourceMessage } from "./consultation-types.ts";
+import type { ConsultationObservation, ConsultationSourceMessage, RegionPreference } from "./consultation-types.ts";
+import { validateRegionPreferences } from "./region-preference.ts";
 
 const EVENT_TYPE = "job_consultation_observation";
 const KEY_BATCH_SIZE = 100;
@@ -18,8 +19,17 @@ interface ObservationEvent {
   };
 }
 
-function observationActionKey(messageId: string, jobId: number): string {
-  const bytes = createHash("sha256").update(JSON.stringify([EVENT_TYPE, messageId, jobId])).digest().subarray(0, 16);
+interface RegionPreferenceEvent {
+  applicant_id: number;
+  job_id: null;
+  event_type: "region_preference";
+  action_key: string;
+  meta: { source: "inbound_sms"; source_message_id: string; source_created_at: string; quote: string; regions: string[] };
+}
+type ConsultationEvent = ObservationEvent | RegionPreferenceEvent;
+
+function observationActionKey(messageId: string, jobId: number | null, eventType: string = EVENT_TYPE): string {
+  const bytes = createHash("sha256").update(JSON.stringify([eventType, messageId, jobId])).digest().subarray(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x80;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
@@ -27,15 +37,19 @@ function observationActionKey(messageId: string, jobId: number): string {
 }
 
 /** JSONB의 키 순서와 모델의 항목 순서가 달라도 같은 관찰은 같은 기록이다. */
-function sameEvent(existing: ObservationEvent, intended: ObservationEvent): boolean {
+function sameEvent(existing: ConsultationEvent, intended: ConsultationEvent): boolean {
   const meta = existing.meta;
   if (existing.applicant_id !== intended.applicant_id || existing.job_id !== intended.job_id
-    || existing.event_type !== EVENT_TYPE || meta?.source !== "inbound_sms"
+    || existing.event_type !== intended.event_type || meta?.source !== "inbound_sms"
     || meta.source_message_id !== intended.meta.source_message_id
-    || meta.source_created_at !== intended.meta.source_created_at
-    || !Array.isArray(meta.observations)) return false;
+    || meta.source_created_at !== intended.meta.source_created_at) return false;
+  if (existing.event_type === "region_preference" && intended.event_type === "region_preference") {
+    return existing.meta.quote === intended.meta.quote && Array.isArray(existing.meta.regions)
+      && JSON.stringify([...existing.meta.regions].sort()) === JSON.stringify([...intended.meta.regions].sort());
+  }
+  if (existing.event_type !== EVENT_TYPE || intended.event_type !== EVENT_TYPE || !Array.isArray(existing.meta.observations)) return false;
   const canonical = (items: ObservationEvent["meta"]["observations"]) => items.map((item) => JSON.stringify([item?.kind, item?.quote])).sort();
-  return JSON.stringify(canonical(meta.observations)) === JSON.stringify(canonical(intended.meta.observations));
+  return JSON.stringify(canonical(existing.meta.observations)) === JSON.stringify(canonical(intended.meta.observations));
 }
 
 /** 이미 검증된 상담의 수신 원문을 재검증해 기록한다. 자동 모드 여부는 호출자가 보장한다. */
@@ -44,8 +58,9 @@ export async function saveConsultationObservations(
   applicantId: number,
   observations: ConsultationObservation[],
   sources: ConsultationSourceMessage[],
+  regionPreferences: RegionPreference[] = [],
 ): Promise<void> {
-  if (observations.length === 0) return;
+  if (observations.length === 0 && regionPreferences.length === 0) return;
   if (!Number.isSafeInteger(applicantId) || applicantId <= 0) throw new Error("관찰 지원자가 유효하지 않습니다.");
   const sourceById = new Map<string, ConsultationSourceMessage>();
   for (const source of sources) {
@@ -55,7 +70,9 @@ export async function saveConsultationObservations(
     }
     sourceById.set(source.id, source);
   }
-  const events = new Map<string, ObservationEvent>();
+  const regions = validateRegionPreferences(regionPreferences, sources);
+  if (!regions) throw new Error("희망 지역이 수신 원문과 일치하지 않습니다.");
+  const events = new Map<string, ConsultationEvent>();
   // 전체 입력을 먼저 검사한다. 뒤쪽 원문이 잘못됐는데 앞쪽 발언만 접수되면 안 된다.
   for (const observation of observations) {
     const source = sourceById.get(observation.source_message_id);
@@ -79,9 +96,23 @@ export async function saveConsultationObservations(
       };
       events.set(key, event);
     }
+    if (event.event_type !== EVENT_TYPE) throw new Error("상담 기록 키가 충돌합니다.");
     if (!event.meta.observations.some((item) => item.kind === observation.kind && item.quote === observation.quote)) {
       event.meta.observations.push({ kind: observation.kind, quote: observation.quote });
     }
+  }
+
+  for (const preference of regions) {
+    const source = sourceById.get(preference.source_message_id);
+    if (!source || !Number.isFinite(Date.parse(source.created_at))) throw new Error("희망 지역 원문 시각이 유효하지 않습니다.");
+    const key = observationActionKey(source.id, null, "region_preference");
+    const event: RegionPreferenceEvent = { applicant_id: applicantId, job_id: null, event_type: "region_preference", action_key: key,
+      meta: { source: "inbound_sms", source_message_id: source.id, source_created_at: source.created_at, quote: source.body, regions: [...preference.regions] } };
+    const previous = events.get(key);
+    if (previous) {
+      if (previous.event_type !== "region_preference") throw new Error("희망 지역 원문 기록이 충돌합니다.");
+      previous.meta.regions = [...new Set([...previous.meta.regions, ...preference.regions])];
+    } else events.set(key, event);
   }
 
   const rows = [...events.values()];
@@ -97,7 +128,7 @@ export async function saveConsultationObservations(
       .select("applicant_id, job_id, event_type, action_key, meta")
       .in("action_key", rows.slice(offset, offset + KEY_BATCH_SIZE).map((row) => row.action_key));
     if (readError || !data) throw new Error(`상담 관찰 중복 확인 실패: ${readError?.message ?? "invalid response"}`);
-    for (const existing of data as ObservationEvent[]) {
+    for (const existing of data as ConsultationEvent[]) {
       const intended = events.get(existing.action_key);
       if (!intended || !sameEvent(existing, intended)) throw new Error("이미 기록된 상담 관찰과 내용이 충돌합니다.");
       remaining.delete(existing.action_key);

@@ -20,7 +20,9 @@
 | `router.ts` | 진입점. stage 라우팅 + 응답 발송 + transition 처리. 1분 텀(coalesce) 로직 포함. |
 | `multi-job-consultation.ts` | 기존 단계 호출에 상담 tool 계약을 추가. 공고 데이터로 답변을 구성하고 공고·원문·현재 단계 진행 여부를 검증. |
 | `consultation-context.ts` / `consultation-history.ts` | 지원자별 상담 노출 정책과 최근 50개 SMS·연속 미응답 문자 조회. 조회 실패나 잘린 연속 문맥은 관리자 확인. |
-| `consultation-observations.ts` | 공고·수신문자별 관심/가용성 발언을 `pool_events`에 멱등 기록. 체크리스트나 전역 가용성은 변경하지 않음. |
+| `consultation-observations.ts` | 공고별 관심/가용성과 공고 외 희망 권역을 원문 근거로 `pool_events`에 멱등 기록. 체크리스트·전역 가용성·동의는 변경하지 않음. |
+| `region-preference.ts` | 지역 문의와 원문을 검증. 노출된 상차지·시간·차량 조건을 안내하거나 추가 질문 없이 마무리. |
+| `training-followup.ts` | 등록된 선탑 안내와 미확인 의사·시간 질문만 추가. 실제 일정은 매니저가 문자/전화로 조율. |
 | `types.ts` | StageContext / StageResult / ScreeningChecklist / OnboardingChecklist 등 코어 타입. |
 | `stages/` | 단계별 모듈 — exploration / screening / onboarding / active. 각각 Claude tool_use로 응답 |
 | `transitions.ts` | 단계 전이의 부수효과 — 자동 발송(SCREENING_ANNOUNCE/GUIDE/마무리), status 갱신, Slack 알림 |
@@ -48,3 +50,5 @@
 대상이 모호하면 되묻고, 조건 누락이나 검증 실패는 관리자 확인으로 넘긴다. 코파일럿에서는 관찰 제안만 초안에 표시하며 자동 기록하지 않는다. 직전 복수 공고 안내 뒤의 짧은 긍정은 현재 공고 진행으로 단정하지 않는다. 아직 진행 중인 후보가 없거나 모두 중단된 경우는 기존 진입·관리자 처리 흐름을 유지한다.
 
 검증 범위와 배포 순서: [복수 상담 eval](../../.ai/multi-job-consultation/eval.md). PR129의 선행 대화 선택 DB 마이그레이션이 필요하며, 운영 발송 전 통제된 실문자 검수를 거친다.
+
+지역 희망 원장은 `job_id=null`, `event_type=region_preference`이며 수신 문자 하나의 명시 지역을 합쳐 기록한다. 다음 공고 안내에서 실제 상차·배송 행정구역과 일치하면 일반 안내 이력보다 우선 검토하며 수신거부·동의·노출·피로도 제한은 그대로 적용한다. 발송 동의가 확인되지 않았으면 향후 공고 연락을 약속하지 않고 희망 지역 접수만 안내한다. 기존 중단 문의를 자동 재개하거나 재처리하지 않는다. 검수: [지역 문의·선탑 인계](../../.ai/region-training-handoff/eval.md).
