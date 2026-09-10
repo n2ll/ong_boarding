@@ -346,6 +346,64 @@ test("legacy requests cannot silently clear actual participation but explicit em
   assert.equal((await legacy.route.POST(request({ base_event_id: 1 }), context())).status, 200);
 });
 
+const followUp = { owner: "김담당", next_action: "다음 일정 연락", due_date: "2026-09-15", status: "open",
+  last_contact: { date: "2026-01-08", method: "phone", result: "다음 주 연락 요청" } };
+
+test("follow-up edits and explicit clearing preserve revisions without changing candidate state", async () => {
+  const h = harness({ events: [event(1)] });
+  const added = await h.route.POST(request({ base_event_id: 1, follow_up: followUp }), context());
+  assert.equal(added.status, 200);
+  assert.deepEqual((added.body.preparation as Row).follow_up, followUp);
+  const done = { ...followUp, status: "done" };
+  const completed = await h.route.POST(request({ base_event_id: 2, action_key: crypto.randomUUID(), follow_up: done }), context());
+  assert.equal(completed.status, 200);
+  assert.equal((await h.route.POST(request({ base_event_id: 3, action_key: crypto.randomUUID(), follow_up: null }), context())).status, 200);
+  const response = await h.route.GET({}, context());
+  const row = (response.body.preparations as Row[])[0];
+  assert.equal((row.preparation as Row).follow_up, null);
+  assert.deepEqual(Array.from(row.history as Row[], (revision) => (revision.preparation as Row).follow_up), [null, done, followUp, undefined]);
+  assert.ok((row.history as Row[]).every((revision) => JSON.stringify((revision.preparation as Row).dates) === JSON.stringify(preparation.dates)));
+  assert.deepEqual(h.writes.map((write) => write.table), ["pool_events", "pool_events", "pool_events"]);
+  assert.equal(h.database.job_candidates[0].agent_stage, undefined);
+});
+
+test("legacy omission cannot clear even malformed follow-up metadata, while null is an explicit reset", async () => {
+  for (const follow_up of [followUp, { ...followUp, status: "broken" }]) {
+    const h = harness({ events: [event(1, { ...preparation, follow_up })] });
+    const omitted = await h.route.POST(request({ base_event_id: 1 }), context());
+    assert.equal(omitted.status, 409);
+    assert.match(String(omitted.body.error), /새로고침/);
+    assert.equal(h.writes.length, 0);
+    const cleared = await h.route.POST(request({ base_event_id: 1, follow_up: null }), context());
+    assert.equal(cleared.status, 200);
+    assert.equal((cleared.body.preparation as Row).follow_up, null);
+    assert.deepEqual((h.database.pool_events[0].meta as Row).follow_up, follow_up);
+    assert.equal((await h.route.POST(request({ base_event_id: 2, action_key: crypto.randomUUID() }), context())).status, 200);
+  }
+});
+
+test("follow-up respects stale-write conflicts and permits committed legacy retries after a later follow-up edit", async () => {
+  const h = harness({ events: [event(1)] });
+  const legacy = await h.route.POST(request({ base_event_id: 1 }), context());
+  const followUpKey = crypto.randomUUID();
+  const saved = await h.route.POST(request({ base_event_id: 2, action_key: followUpKey, follow_up: followUp }), context());
+  assert.equal(saved.status, 200);
+  const retry = await h.route.POST(request({ base_event_id: 1 }), context());
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.deduplicated, true);
+  assert.equal(retry.body.event_id, legacy.body.event_id);
+  const orderedDifferently = { status: "open", due_date: "2026-09-15", next_action: " 다음 일정 연락 ", owner: "김담당",
+    last_contact: { result: "다음 주 연락 요청", method: "phone", date: "2026-01-08" } };
+  const followUpRetry = await h.route.POST(request({ base_event_id: 2, action_key: followUpKey, follow_up: orderedDifferently }), context());
+  assert.equal(followUpRetry.status, 200);
+  assert.equal(followUpRetry.body.deduplicated, true);
+  assert.deepEqual((followUpRetry.body.preparation as Row).follow_up, followUp);
+  const stale = await h.route.POST(request({ base_event_id: 2, action_key: crypto.randomUUID(), follow_up: null }), context());
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.conflict, true);
+  assert.equal(h.writes.length, 2);
+});
+
 test("different editors racing on one base preserve the winner and return conflict to the other", async () => {
   const h = harness({ events: [event(1)] });
   const responses = await Promise.all([

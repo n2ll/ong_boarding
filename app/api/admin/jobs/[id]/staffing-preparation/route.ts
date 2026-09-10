@@ -140,7 +140,7 @@ export async function POST(req: NextRequest, context: Context) {
     if (typeof applicantId !== "number" || !Number.isSafeInteger(applicantId) || applicantId <= 0
       || !UUID.test(actionKey) || !preparation || !actorName || actorName.length > STAFFING_PREPARATION_LIMITS.actor
       || (baseEventId !== null && (typeof baseEventId !== "number" || !Number.isSafeInteger(baseEventId) || baseEventId <= 0))) {
-      return NextResponse.json({ error: "작성자·후보·편집 기준 기록·선탑 정보를 확인해주세요. 날짜는 31개, 선탑 정보는 각 240자, 팀 메모는 1000자까지입니다." }, { status: 400 });
+      return NextResponse.json({ error: "작성자·후보·편집 기준 기록·선탑·후속 연락 정보를 확인해주세요. 날짜는 31개, 담당자는 80자, 선탑 정보·다음 할 일은 각 240자, 팀 메모·연락 결과는 각 1000자까지입니다." }, { status: 400 });
     }
     // Middleware handles session refresh; author attribution must use a verified account, never a submitted account ID.
     const auth = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
@@ -186,6 +186,11 @@ export async function POST(req: NextRequest, context: Context) {
     // Older open screens omit records from their payload even after reading a newer snapshot.
     if (body.records === undefined && (parseStaffingPreparation(history[0]?.meta)?.records.length ?? 0) > 0) {
       return NextResponse.json({ error: "실제 참여 이력을 보호하기 위해 현재 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
+    }
+    // Read the raw latest field so a malformed snapshot cannot silently lose follow-up data either.
+    const latestFollowUp = (history[0]?.meta as { follow_up?: unknown } | null)?.follow_up;
+    if (body.follow_up === undefined && latestFollowUp != null) {
+      return NextResponse.json({ error: "후속 연락·담당자·다음 할 일을 보호하기 위해 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
     }
     if ((history[0]?.id ?? null) !== baseEventId) return conflict(history);
     const previouslyConfirmed = new Set(parseStaffingPreparation(history[0]?.meta)?.dates
