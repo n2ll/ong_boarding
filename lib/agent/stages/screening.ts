@@ -22,6 +22,7 @@ import { handoffToolProperties, HANDOFF_EMIT_RULE } from "../handoff-category";
 import {
   buildLineKnowledgeBlock,
   GENERAL_SCREENING_AUTO_TRUE,
+  guardGeneralTrainingDateQuestion,
   isGeneralCollectedComplete,
   isGeneralLineJob,
   mergeGeneralCollected,
@@ -203,7 +204,7 @@ const SYSTEM_PROMPT_BODY_GENERAL = `너는 옹고잉(내이루리) 배송 크루
 2. **본인 명의 정산 가능 여부** → checklist_update의 본인명의_정산_문제없음: true
 3. **시작 가능일** — "언제부터 시작 가능하실까요?" (가능일 수집일 뿐, 시작일 확정 아님 — 확정 뉘앙스 금지)
    → collected.시작가능일에 지원자 답 그대로 기록 (예: "다음 주 월요일부터", "7/20 이후").
-4. **선탑(동승) 참여 의사와 가능 시간대** — 먼저 교육 목적을 설명하고 참여 가능한지 확인한다. 참여 의사 확인 후 [현재 공고]의 예상 소요시간을 안내하고 가능 요일·시간대를 묻는다. 아래 선탑 안내 순서를 따른다.
+4. **선탑(동승) 참여 의사와 가능 시간대** — [현재 공고]의 선탑 대상 기준과 아래 선탑 안내 순서를 따른다. 먼저 교육 목적을 설명하고 참여 의사를 확인한다. 명확히 희망하면 예상 소요시간을 안내하고 가능한 날짜·시간대를 본인이 말하도록 묻는다. 이미 말한 정보는 다시 묻지 마라.
    → 실제 가능 요일·시간만 collected.선탑_가능시간에 기록 (예: "평일 오전", "화·목 가능"). 단순 긍정·미정·거절을 가능한 시간으로 채우지 마라.
 5. 지원자 질문 모두 응답 → 지원자_질문_해소: true ("더 질문 없어요" 응답 또는 처음부터 질문 없었으면 true 처리)
 
@@ -281,10 +282,11 @@ const CLOSED_MODE_BLOCK = `
    안내받으시겠어요? 원하지 않으셔도 이번 지원에는 영향이 없어요."라고 물어라. 동의 전에는 향후
    안내를 약속하지 마라. 이번 턴 답이 명확한 동의면 marketing_consent=true, 거절이면 false로 반환한다.
    이미 거절로 표시된 지원자에게는 다시 묻거나 설득하지 마라.
-3. 선탑은 [현재 공고]에 안내 근거가 있을 때만 목적과 참여 의사를 확인하라. 마감과 무관하게 언제든 가능하다고 약속하지 마라.
+3. 선탑은 [현재 공고]에 안내 근거가 있을 때 공고별 대상 기준에 따라 목적과 참여 의사를 확인하라. 마감과 무관하게 언제든 가능하다고 약속하지 마라.
    선탑≠투입 확정(뉘앙스 금지), 일정 확약 금지(매니저 몫).
-4. 지원자가 선탑에 관심을 보이면 등록된 예상 소요시간을 안내한 뒤 가능 요일·시간대를 물어 collected.선탑_가능시간에 기록하고
-   transition: "pause" (transition_reason: "마감 공고 — 선탑 희망, 매니저 일정 조율 필요").
+4. 지원자가 선탑 참여를 명확히 희망하면 등록된 예상 소요시간을 안내한 뒤 가능한 날짜·시간대를 열린 질문으로 확인하라. 이미 말한 정보는 다시 묻지 마라.
+   지원자가 실제로 말한 가능 날짜·시간대만 collected.선탑_가능시간에 기록하고, 확인되면 transition: "pause" (transition_reason: "마감 공고 — 선탑 희망, 매니저 일정 조율 필요").
+   단순 관심·짧은 "네"·교육비 질문만으로 선탑 희망 인계나 시간대 수집 완료를 만들지 마라. 참여 의사나 가능 시간이 아직 미확인이면 transition: "stay"로 필요한 부분만 확인하라.
 5. 선탑 관심이 없으면 정중히 마무리하고 transition: "stay" — 이후 질문에도 계속 응대한다.
 6. 새 확인질문(차종·명의·시작일)을 네가 먼저 던지지 마라. 지원자가 스스로 준 정보는 collected에 기록만.
 7. FAQ 질문에는 평소처럼 답해라. transition: "advance"는 이 모드에서 금지다.`;
@@ -785,7 +787,7 @@ function toStageResult(
   // advance 시: AI 응답("그럼 온보딩 절차로 안내드릴게요" 식) 발송 생략 →
   // 시스템 자동 발송(비마트: GUIDE 앱설치·교육 안내 / 일반 라인: 선탑 인계 마무리)이
   // 곧바로 나가며 그게 응답을 겸함. (exploration → screening 전환과 동일한 패턴)
-  const reply_text = transition.kind === "advance" ? null : out.reply_text;
+  const reply_text = transition.kind === "advance" ? null : guardGeneralTrainingDateQuestion(out.reply_text, ctx, inboundText);
 
   // 대화로 확인된 차종을 지원자 프로필에도 반영 — 인재풀 카드·새 공고 안내(자차 매칭)가
   // 폼 제출 당시 값이 아니라 최신 확인 값을 쓰게 한다. '차 없음' 류 표현은 보유 확정이 아니므로 제외.

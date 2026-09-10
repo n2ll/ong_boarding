@@ -51,10 +51,10 @@ test("manual attention outranks automated progress on an open job", async () => 
     {
       remaining: 3,
       fillPercent: 40,
-      attention: 3,
+      attention: 1,
       nextAction: {
-        label: "사람 확인 3명",
-        description: "수동 응대 1명 · 응대 시작 전 2명",
+        label: "사람 확인 1건",
+        description: "수동 응대 1건",
         tone: "danger",
       },
     },
@@ -145,7 +145,7 @@ test("filled capacity becomes the first operational action", async () => {
     {
       remaining: 0,
       fillPercent: 100,
-      attention: 2,
+      attention: 1,
       nextAction: {
         label: "충원 완료",
         description: "정원 2명 충원 · 공고 마감 검토",
@@ -178,7 +178,7 @@ test("portfolio summary only counts open-job work", async () => {
       openJobs: 2,
       remaining: 3,
       unconfiguredCapacity: 1,
-      attention: 3,
+      attention: 1,
       reviewReady: 3,
     },
   );
@@ -208,4 +208,22 @@ test("a closed job candidate board is explicitly read-only", async () => {
     allowDispatch: true,
     allowCandidateMutation: true,
   });
+});
+
+
+test("linked pilot candidates do not become manager work before receiving replies", async () => {
+  const { jobOperationsSummary, jobOperationMeta } = await import("./job-operations.ts");
+  const jobs = [49, 50, 50].map((waiting, index) => ({
+    effectivelyClosed: false, capacity: 3, confirmed: 0, waiting, paused: index === 0 ? 1 : 0, reviewReady: 0, inProgress: 0,
+  }));
+  assert.equal(jobOperationsSummary(jobs).attention, 1);
+  assert.equal(jobOperationMeta(jobs[0]).attention, 1);
+  for (const job of jobs.slice(1)) {
+    const meta = jobOperationMeta(job);
+    assert.equal(meta.attention, 0);
+    assert.equal(meta.nextAction.tone, "muted");
+    assert.equal(meta.nextAction.label, "대기 상태 50명");
+  }
+  const review = jobOperationMeta({ ...jobs[1], reviewReady: 2 });
+  assert.equal(review.nextAction.label, "후보 검토 2명", "real manager review still takes priority over unstarted candidates");
 });

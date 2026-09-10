@@ -313,7 +313,7 @@ function slotMatch(confirmed: string | null | undefined, key: string): boolean {
 
 // 표시 라벨만 실무 언어로 통일(LiveConsole·ApplicantDetailPanel·Dashboard와 동일 단어) — DB 값(agent_stage)은 그대로.
 const STAGE_KO: Record<string, string> = {
-  unstarted: "시작 전",
+  unstarted: "대기",
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
   active: "활동 중", paused: "수동 응대", abort: "중단",
 };
@@ -1362,6 +1362,7 @@ export function Jobs() {
   );
   const globalAgentMode = agentModeView({ data: killData, error: killError });
   const agentModeCopy = agentModePresentation(globalAgentMode);
+  const boardAgentModeCopy = agentModePresentation(globalAgentMode, undefined, candPanel?.jobId);
   const jobs = useMemo(
     () => (jobsApi?.jobs ?? []).filter((j) => !isSystemJobTitle(j.title)).map(toJobRow),
     [jobsApi]
@@ -3395,7 +3396,7 @@ export function Jobs() {
                       <Badge variant="priority-critical">수동 응대 {job.pausedCandidates}</Badge>
                     )}
                     {job.newCandidates > 0 && (
-                      <Badge variant="priority-attention">시작 전 {job.newCandidates}</Badge>
+                      <Badge>대기 {job.newCandidates}</Badge>
                     )}
                     {job.reviewReady > 0 && (
                       <Badge variant="stage-screening" title="스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보">후보 검토 {job.reviewReady}</Badge>
@@ -5052,21 +5053,21 @@ export function Jobs() {
                 {boardPolicy.allowDispatch && candState !== "error" && unsentCount > 0 && (
                   <>
                     {/* 최신 AI 모드를 확인하지 못한 상태에서는 후속 응대 방식을 보장할 수 없어 신규 발송을 잠근다. */}
-                    {agentModeCopy.kind !== "auto" && (
-                      <div id="job-dispatch-agent-mode-status" role={agentModeCopy.kind === "error" || agentModeCopy.kind === "stale" ? "alert" : "status"} aria-live="polite" className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[12px] font-bold text-warning-strong">
-                        {agentModeCopy.kind === "off"
-                          ? "전역 AI 중지 중 — 답장은 수동 응대해야 해요"
-                          : agentModeCopy.kind === "draft"
+                    {boardAgentModeCopy.kind !== "auto" && (
+                      <div id="job-dispatch-agent-mode-status" role={boardAgentModeCopy.kind === "error" || boardAgentModeCopy.kind === "stale" ? "alert" : "status"} aria-live="polite" className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[12px] font-bold text-warning-strong">
+                        {boardAgentModeCopy.kind === "off"
+                          ? `${boardAgentModeCopy.label} — ${boardAgentModeCopy.detail ?? "답장은 수동 응대해야 해요"}`
+                          : boardAgentModeCopy.kind === "draft"
                             ? "코파일럿 모드 — 답장은 초안을 검수한 뒤 발송해야 해요"
-                            : `${agentModeCopy.label} — 확인 전 신규 발송을 잠갔어요`}
-                        {agentModeCopy.canRetry && (
+                            : `${boardAgentModeCopy.label} — 확인 전 신규 발송을 잠갔어요`}
+                        {boardAgentModeCopy.canRetry && (
                           <button type="button" onClick={() => void mutateKillMode()} disabled={killValidating} className="ml-2 min-h-11 rounded px-2 underline underline-offset-2 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-ring">
                             {killValidating ? "확인 중…" : "다시 시도"}
                           </button>
                         )}
                       </div>
                     )}
-                    <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} disabled={globalAgentMode.state !== "ready"} aria-describedby={agentModeCopy.kind !== "auto" ? "job-dispatch-agent-mode-status" : undefined} className="mt-3 w-full">
+                    <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} disabled={globalAgentMode.state !== "ready"} aria-describedby={boardAgentModeCopy.kind !== "auto" ? "job-dispatch-agent-mode-status" : undefined} className="mt-3 w-full">
                         {!dispatching && <Sparkles size={15} />} 스크리닝 문자 발송 ({unsentCount}명)
                       </Button>
                     <p className="mt-1.5 text-[12px] text-muted-foreground">이 공고의 첫 안내 기록 없음 {unsentCount}명 · 인재풀에서 보낸 안내는 별도 확인</p>

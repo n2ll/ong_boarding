@@ -67,7 +67,8 @@ export function jobOperationMeta(input: JobOperationInput): JobOperationMeta {
   const confirmed = Math.max(0, input.confirmed);
   const waiting = Math.max(0, input.waiting);
   const paused = Math.max(0, input.paused);
-  const attention = waiting + paused;
+  // 연결된 미응대 후보는 진행 현황이다. 실제 수동 인계만 관리자 할 일로 센다.
+  const attention = paused;
   const remaining = capacity > 0 ? Math.max(0, capacity - confirmed) : null;
   const fillPercent = capacity > 0 ? Math.min(100, Math.round((confirmed / capacity) * 100)) : null;
 
@@ -111,18 +112,14 @@ export function jobOperationMeta(input: JobOperationInput): JobOperationMeta {
   }
 
   if (attention > 0) {
-    const parts = [
-      paused > 0 ? `수동 응대 ${paused}명` : null,
-      waiting > 0 ? `응대 시작 전 ${waiting}명` : null,
-    ].filter(Boolean);
     return {
       remaining,
       fillPercent,
       attention,
       nextAction: {
-        label: `사람 확인 ${attention}명`,
-        description: parts.join(" · "),
-        tone: paused > 0 ? "danger" : "warning",
+        label: `사람 확인 ${attention}건`,
+        description: `수동 응대 ${paused}건`,
+        tone: "danger",
       },
     };
   }
@@ -153,6 +150,19 @@ export function jobOperationMeta(input: JobOperationInput): JobOperationMeta {
     };
   }
 
+  if (waiting > 0) {
+    return {
+      remaining,
+      fillPercent,
+      attention,
+      nextAction: {
+        label: `대기 상태 ${waiting}명`,
+        description: "현재 공고에 연결된 후보",
+        tone: "muted",
+      },
+    };
+  }
+
   return {
     remaining,
     fillPercent,
@@ -170,7 +180,7 @@ export function jobOperationsSummary(jobs: JobOperationInput[]) {
     (summary, job) => {
       if (job.effectivelyClosed) return summary;
       summary.openJobs += 1;
-      summary.attention += Math.max(0, job.waiting) + Math.max(0, job.paused);
+      summary.attention += Math.max(0, job.paused);
       summary.reviewReady += Math.max(0, job.reviewReady);
       if (job.capacity > 0) summary.remaining += Math.max(0, job.capacity - job.confirmed);
       else summary.unconfiguredCapacity += 1;

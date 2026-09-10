@@ -1,5 +1,25 @@
 export const STAFFING_PREPARATION_EVENT = "staffing_preparation";
-export const STAFFING_PREPARATION_LIMITS = { dates: 31, training: 240, note: 1000 } as const;
+export const STAFFING_PREPARATION_LIMITS = { dates: 31, training: 240, note: 1000, actor: 80 } as const;
+
+export const trainingStatusLabels = { reviewing: "선탑 미검토", coordinating: "일정 조율", scheduled: "선탑 예정", completed: "선탑 완료", on_hold: "보류" } as const;
+export const backupIntentLabels = { unknown: "본인 의사 미확인", interested: "본인 진행 희망", declined: "본인 진행 안 함" } as const;
+export type StaffingTraining = {
+  status: keyof typeof trainingStatusLabels;
+  backup_intent: keyof typeof backupIntentLabels;
+  /** Manager-entered local time, always serialized with the Korean +09:00 offset. */
+  scheduled_at: string;
+  first_loading_location: string;
+  linked_pro: string;
+};
+export const emptyStaffingTraining = (): StaffingTraining => ({ status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" });
+export type StaffingPreparationActor = { account_id: string; name: string };
+export type StaffingPreparationRevision = {
+  event_id: number;
+  updated_at: string;
+  actor: StaffingPreparationActor | null;
+  preparation: StaffingPreparation | null;
+  invalid: boolean;
+};
 
 export type StaffingPreparationDate = {
   date: string;
@@ -11,6 +31,7 @@ export type StaffingPreparation = {
   source: "manager";
   dates: StaffingPreparationDate[];
   training_availability: string;
+  training: StaffingTraining;
   note: string;
 };
 export type StaffingPreparationSnapshot = {
@@ -19,6 +40,8 @@ export type StaffingPreparationSnapshot = {
   event_id: number | null;
   updated_at: string | null;
   invalid: boolean;
+  actor: StaffingPreparationActor | null;
+  history: StaffingPreparationRevision[];
 };
 
 export function parseStaffingPreparation(value: unknown): StaffingPreparation | null {
@@ -27,6 +50,16 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
   if (data.source !== "manager" || !Array.isArray(data.dates) || data.dates.length > STAFFING_PREPARATION_LIMITS.dates
     || typeof data.training_availability !== "string" || data.training_availability.length > STAFFING_PREPARATION_LIMITS.training
     || typeof data.note !== "string" || data.note.length > STAFFING_PREPARATION_LIMITS.note) return null;
+  let training = emptyStaffingTraining();
+  if (data.training !== undefined) {
+    const value = record(data.training);
+    if (!Object.hasOwn(trainingStatusLabels, value.status as string) || !Object.hasOwn(backupIntentLabels, value.backup_intent as string)
+      || ["scheduled_at", "first_loading_location", "linked_pro"].some((key) => typeof value[key] !== "string" || (value[key] as string).length > STAFFING_PREPARATION_LIMITS.training)) return null;
+    const at = value.scheduled_at as string;
+    if (at && (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:00\+09:00$/.test(at) || !validDay(at.slice(0, 10)))) return null;
+    training = { status: value.status as StaffingTraining["status"], backup_intent: value.backup_intent as StaffingTraining["backup_intent"],
+      scheduled_at: at, first_loading_location: (value.first_loading_location as string).trim(), linked_pro: (value.linked_pro as string).trim() };
+  }
   const dates: StaffingPreparationDate[] = [];
   const seen = new Set<string>();
   for (const item of data.dates) {
@@ -42,7 +75,7 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
     seen.add(date);
   }
   dates.sort((a, b) => a.date.localeCompare(b.date));
-  return { source: "manager", dates, training_availability: data.training_availability.trim(), note: data.note.trim() };
+  return { source: "manager", dates, training_availability: data.training_availability.trim(), training, note: data.note.trim() };
 }
 
 export const STAFFING_OBSERVATION_EVENT = "job_consultation_observation";

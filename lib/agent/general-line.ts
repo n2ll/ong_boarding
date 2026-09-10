@@ -13,7 +13,7 @@
  */
 
 import { isSystemJobTitle } from "../jobs.ts";
-import type { AgentState, JobContext, ScreeningChecklist } from "./types";
+import type { AgentState, JobContext, ScreeningChecklist, StageContext } from "./types";
 
 /** Supabase의 단일 FK 관계가 객체/배열 어느 형태로 와도 client_type을 안전하게 꺼낸다. */
 export function joinedClientType(relation: unknown): string | null {
@@ -80,16 +80,27 @@ export function readGeneralCollected(
   return (meta?.general_screening ?? {}) as GeneralScreeningCollected;
 }
 
+/** 참여 의사나 확인 대기 표시는 실제 선탑 가능 시간으로 저장·완료 처리하지 않는다. */
+function hasTrainingAvailability(value: string | undefined): value is string {
+  if (!value?.trim()) return false;
+  const pending = /미정|미확인|대기|확인\s*필요/;
+  if (!pending.test(value)) return true;
+  // "화요일 오전 가능, 정확한 날짜 미정"처럼 이미 답한 범위는 지우지 않는다.
+  return value.split(/[,;，\n()]/).some((part) => !pending.test(part)
+    && /평일|주말|[월화수목금토일]요일|오전|오후|\d{1,2}\s*(?:월|일|시)|\d{1,2}\/\d{1,2}/.test(part));
+}
+
 /** 이전 수집값에 이번 턴 수집값을 병합 — 빈 문자열로 기존 값을 지우지 않는다. */
 export function mergeGeneralCollected(
   prev: GeneralScreeningCollected,
   update: GeneralScreeningCollected | undefined
 ): GeneralScreeningCollected {
   const next = { ...prev };
+  if (!hasTrainingAvailability(next.선탑_가능시간)) delete next.선탑_가능시간;
   if (!update) return next;
   if (update.차종?.trim()) next.차종 = update.차종.trim();
   if (update.시작가능일?.trim()) next.시작가능일 = update.시작가능일.trim();
-  if (update.선탑_가능시간?.trim()) next.선탑_가능시간 = update.선탑_가능시간.trim();
+  if (hasTrainingAvailability(update.선탑_가능시간)) next.선탑_가능시간 = update.선탑_가능시간.trim();
   if (typeof update.법인차_렌트_희망 === "boolean") next.법인차_렌트_희망 = update.법인차_렌트_희망;
   const slots = normalizeCollectedSlots(update.가능시간대);
   if (slots.length) next.가능시간대 = slots;
@@ -101,7 +112,7 @@ export function mergeGeneralCollected(
  * ⚠️ `가능시간대`(근무 가능 시간대)는 **여기 넣지 않는다** — 못 받아도 진행에 지장이 없어야 한다(사장님 결정).
  */
 export function isGeneralCollectedComplete(c: GeneralScreeningCollected): boolean {
-  return !!(c.시작가능일?.trim() && c.선탑_가능시간?.trim());
+  return !!c.시작가능일?.trim() && hasTrainingAvailability(c.선탑_가능시간);
 }
 
 /** Slack 인계용 수집 요약 (본인명의는 체크리스트 통과가 전제라 '확인됨'으로 표기). */
@@ -138,14 +149,65 @@ export function buildGeneralHandoffText(name: string | null): string {
   return `${n}님, 확인 감사합니다!\n말씀 주신 내용은 담당 매니저에게 전달해 둘게요.\n매니저가 확인 후 연락드릴 예정이에요 😊\n\n참고로 선탑(동승)은 현장을 미리 보는 단계라, 진행하시더라도 바로 투입 확정은 아니에요.`;
 }
 
+type CalendarDay = { month: number | null; day: number };
+
+/** 날짜만 읽는다. 주차를 날짜로 환산하거나 시간 범위를 날짜로 해석하지 않는다. */
+function calendarDays(text: string): CalendarDay[] {
+  const normalized = text
+    .replace(/\b\d{4}[-/.](\d{1,2})[-/.](\d{1,2})\b/g, "$1/$2")
+    .replace(/(\d{1,2})\s*월\s*(\d{1,2})/g, "$1/$2");
+  const dates: CalendarDay[] = [];
+  const pattern = /(\d{1,2})\/(\d{1,2})\s*일?\s*[~∼–-]\s*(?:(\d{1,2})\/)?(\d{1,2})\s*일?|(\d{1,2})\s*일?\s*[~∼–-]\s*(\d{1,2})\s*일|(\d{1,2})\/(\d{1,2})\s*일?|(\d{1,2})\s*일/g;
+  for (const match of normalized.matchAll(pattern)) {
+    if (match[1]) dates.push({ month: Number(match[1]), day: Number(match[2]) }, { month: Number(match[3] ?? match[1]), day: Number(match[4]) });
+    else if (match[5]) dates.push({ month: null, day: Number(match[5]) }, { month: null, day: Number(match[6]) });
+    else dates.push({ month: match[7] ? Number(match[7]) : null, day: Number(match[8] ?? match[9]) });
+  }
+  return dates;
+}
+
+/** 일반 라인의 선탑 가능일 질문에 백업 날짜·주차 환산 날짜가 섞이면 열린 질문으로 돌린다. */
+export function guardGeneralTrainingDateQuestion(reply: string, ctx: StageContext, inboundText: string): string {
+  if (!isGeneralLineJob(ctx.job)) return reply;
+  const training = /선탑|동승|교육/;
+  const priorOutbound = [...ctx.history].reverse().find((turn) => turn.direction === "outbound")?.body ?? "";
+  if (!training.test(`${reply}\n${inboundText}\n${priorOutbound}`)) return reply;
+
+  // 배송 시작일이나 과거 AI가 먼저 제안한 날짜는 선탑 날짜의 근거가 아니다.
+  const trainingFacts = ctx.job?.ai_facts?.match(/^선탑·교육:[ \t]*([^\r\n]+)$/m)?.[1] ?? "";
+  const duration = trainingFacts.match(/(?:약\s*)?\d+(?:\.\d+)?\s*시간(?:\s*(?:전후|정도))?/)?.[0];
+  const evidence = [
+    ...trainingFacts.split(/[.!?。！？]+/).filter((part) => !/백업|근무|정산|교육비|지급|환산|추측/.test(part)),
+    readGeneralCollected(ctx.state.meta).선탑_가능시간 ?? "",
+  ];
+  if ((training.test(inboundText) || training.test(priorOutbound)) && !/백업|근무/.test(inboundText)) evidence.push(inboundText);
+  const supported = evidence.flatMap(calendarDays);
+  const corrected = reply.split(/((?<=[.!?。！？])\s+|\n+)/).map((sentence) => {
+    if (!training.test(sentence) && /백업|근무|배송/.test(sentence)) return sentence;
+    if (!/(?:가능|괜찮).*(?:[?？]|알려|말씀|회신|부탁)|(?:날짜|일정).*(?:알려|말씀|회신|부탁)/.test(sentence)) return sentence;
+    const unsupported = calendarDays(sentence).some((date) => !supported.some((known) =>
+      known.day === date.day && (date.month === null || date.month === known.month),
+    ));
+    if (!unsupported) return sentence;
+    const durationText = duration && sentence.match(/\d+(?:\.\d+)?\s*시간/g)?.some((value) =>
+      value.replace(/\s/g, "") === duration.replace(/약|전후|정도|\s/g, ""),
+    )
+      ? `예상 소요시간은 ${duration}입니다. ` : "";
+    return `${durationText}선탑 가능한 날짜와 시간대를 알려주시겠어요?`;
+  });
+  return corrected.join("");
+}
+
 const TRAINING_GUIDE = `
 ## 선탑·동승교육 안내 순서
-- 먼저 공고에 적힌 교육 목적(앱 사용과 배송 업무 파악 등)을 짧게 설명하고 참여 가능한지 물어라. 목적 설명 없이 날짜·시간부터 요구하지 마라.
-- 참여 의사를 확인한 다음 공고에 등록된 예상 소요시간을 안내하고 가능 요일·시간대를 물어라. 지원자가 먼저 소요시간·교육비를 질문하면 그 질문에 먼저 답하라.
+- 선탑 대상은 공고별 기준을 따른다. 일정 조율은 매니저가 투입을 확정했거나 선탑 참여 의사가 명확한 지원자 중심이며, 단순 관심·짧은 "네"·교육비 질문만으로 강한 선탑 의사를 인정하지 마라.
+- 먼저 공고에 적힌 교육 목적(앱 사용과 배송 업무 파악 등)을 짧게 설명하고 참여 의사를 확인하라. 목적 설명 없이 날짜·시간부터 요구하지 마라. 지원자가 먼저 소요시간·교육비를 질문하면 그 질문에 먼저 답하라.
+- 참여를 명확히 희망하면 공고에 등록된 예상 소요시간을 안내하고 "선탑 가능한 날짜와 시간대를 알려주시겠어요?"처럼 본인이 말하도록 열린 질문을 하라. 특정 날짜·시간을 제안해 동의를 유도하지 마라. 대화나 수집값에 이미 있는 날짜·시간대는 다시 묻지 말고 빠진 정보만 확인하라.
 - 소요시간이 미등록이면 확인 후 안내한다고 말하고 시간을 추측하지 마라. 배송 근무시간을 교육시간으로 대신 쓰거나 동승교육 기간을 하루로 단정하지 마라. 조건을 확인해야 답할 수 있다는 지원자에게 계속 가능 시간을 요구하지 마라.
-- 공고에 유사한 다른 라인에서 교육할 수 있다고 명시돼 있으면 그 점도 안내하라. 실제 백업할 라인·같은 배송지에서 교육한다고 약속하지 마라.
+- 공고에 유사한 다른 라인에서 교육할 수 있다고 명시돼 있으면 그 점도 안내하라. 실제 백업할 라인·같은 배송지에서 교육한다고 약속하지 마라. 통상 시작 시간이나 공고 운행시간으로 구체적인 교육 시작 시각을 정하지 마라.
+- 교육 당일에는 실제 교육 라인의 첫 상차지에서 연결된 옹고잉 프로와 만난다. 매니저가 정확한 일시·장소·프로 연결을 안내하기 전에는 현재 공고 주소를 확정 접선지로 안내하거나 교육 참석·예약을 약속하지 마라.
 - 교육비·합산 지급·정산일은 해당 공고에 적힌 값으로 답하라. 교육만 받고 백업하지 않은 경우의 지급 조건이 없으면 임의로 지급·미지급을 약속하지 마라.
-- 거절·보류에는 설득하거나 같은 질문을 반복하지 마라. 단순 참여 긍정은 시간대 확인이나 선탑 참석 완료가 아니다. 선탑과 근무 배정은 매니저가 최종 조율한다.
+- 선탑 후 백업 진행 여부는 지원자가 선택한다. 거절·보류에는 설득하거나 같은 질문을 반복하지 마라. 단순 참여 긍정은 시간대 확인이나 선탑 참석 완료가 아니다. 선탑과 근무 배정은 매니저가 최종 조율한다.
 `;
 
 /** 공통 FAQ와 선탑 안내 순서. FAQ가 비어도 추측 방지 규칙은 유지한다. */

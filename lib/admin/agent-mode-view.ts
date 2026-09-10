@@ -125,7 +125,7 @@ const MODE_NAMES: Record<AdminAgentMode, string> = {
   off: "전역 중지",
 };
 
-export function agentModePresentation(view: AdminAgentModeView, applicantId?: number): AdminAgentModePresentation {
+export function agentModePresentation(view: AdminAgentModeView, applicantId?: number, jobId?: number): AdminAgentModePresentation {
   if (view.state === "loading") {
     return {
       kind: "loading",
@@ -153,23 +153,23 @@ export function agentModePresentation(view: AdminAgentModeView, applicantId?: nu
       claimsAutomatic: false,
     };
   }
-  if (view.state === "ready" && view.pilotSession) {
+  if (view.state === "ready" && view.pilotSession && (jobId === undefined || view.pilotSession.job_ids.includes(jobId))) {
     const selected = applicantId !== undefined && view.pilotSession.applicant_ids.includes(applicantId);
     return {
       kind: "off",
-      label: applicantId === undefined ? `선택 ${view.pilotSession.applicant_ids.length}명 제한 자동 응대` : selected ? "이 지원자는 제한 자동 응대 대상" : "이 지원자 AI 중지됨",
+      label: applicantId === undefined ? `${jobId === undefined ? "" : "이 공고 · "}선택 ${view.pilotSession.applicant_ids.length}명 제한 자동 응대` : selected ? "이 지원자는 제한 자동 응대 대상" : "이 지원자 AI 중지됨",
       detail: `선택 공고 ${view.pilotSession.job_ids.length}개 · ${new Date(view.pilotSession.expires_at).toLocaleString("ko-KR")}까지 · 개별 중지 유지`,
       canRetry: false, claimsAutomatic: false,
     };
   }
-  if (view.state === "ready" && view.testSession) {
+  if (view.state === "ready" && view.testSession && (jobId === undefined || view.testSession.job_ids.includes(jobId))) {
     const isOtherApplicant = applicantId !== undefined && applicantId !== view.testSession.applicant_id;
     return {
       kind: "off",
-      label: applicantId === undefined ? "테스트 1명만 자동 응대"
+      label: applicantId === undefined ? `${jobId === undefined ? "" : "이 공고 · "}테스트 1명만 자동 응대`
         : isOtherApplicant ? "이 지원자 AI 중지됨" : "이 지원자는 자동 응대 검수 대상",
       detail: isOtherApplicant ? "검수 대상 1명 외 자동 응대 중지 · 수동 응대 가능"
-        : `선택 공고 ${view.testSession.job_ids.length}개 · 일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수`,
+        : `선택 공고 ${view.testSession.job_ids.length}개 · 일반 지원자 중지 · ${new Date(view.testSession.expires_at).toLocaleTimeString("ko-KR")}까지 검수 · 개별 중지 유지`,
       canRetry: false,
       claimsAutomatic: false,
     };
