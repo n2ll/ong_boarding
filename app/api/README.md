@@ -58,6 +58,8 @@ Next.js App Router의 route handlers. 모두 `route.ts` 파일.
 - `jobs/[id]/dispatch/` — 공고 → 추천 후보에게 일괄 발송
 - `jobs/[id]/candidates/` — 공고 후보 풀
 - `jobs/[id]/staffing-preparation/` — 날짜별 후보·관리자 명시 확정·선탑 일정/접선 정보·본인 의사·실제 참여·팀 메모/변경 이력 GET/POST. `follow_up`에 최근 연락 결과·담당자·다음 할 일·예정일을 함께 저장한다. 작성자와 담당자는 별개이며, 할 일 완료가 투입 확정을 뜻하지 않는다. 동시 수정은 409로 최신 이력을 반환하고 구버전 요청의 새 필드 유실을 방지한다. SMS 발송·AI 상태 변경 없음.
+- `jobs/[id]/staffing-demand/` — 일반 배송 공고의 날짜별 수요 POST. `unknown/null`, `off/0`, `operating/1~999`를 별도 변경 이력에 추가한다. `base_event_id`로 동시 수정 409, `action_key`로 동일 요청 재시도를 처리한다. 작성 계정을 검증하며 후보 확정·발송은 변경하지 않는다.
+- `staffing-date-board/` — 최대 7일의 실제 수요·확정·예비·부족 GET. 수요 미입력은 미정이고 공고 모집인원으로 대체하지 않는다. 운행 없음/초과 충원도 기존 확정 인원을 보존해 담당자가 재확인한다. 새 수요 테이블 마이그레이션을 앱보다 먼저 적용해야 한다.
 - `recommend/` — 공고 텍스트 → 픽업 주소 추출 + 후보 ranking
 - `recommend/generate/` — 거친 메모 → 공고문 생성 (Claude)
 

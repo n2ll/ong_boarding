@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { fetchAllPostgrestRows } from "@/lib/admin/postgrest-pagination";
 import { STAFFING_PREPARATION_EVENT } from "@/lib/admin/staffing-preparation";
+import { type StaffingDemandEvent } from "@/lib/admin/staffing-demand";
 import {
   buildStaffingDateBoard, isStaffingDateBoardJob, staffingDateBoardDates,
   type StaffingDateBoardJob, type StaffingDateBoardCandidate, type StaffingDateBoardEvent,
@@ -27,10 +28,11 @@ export async function GET(req: NextRequest) {
     }, "충원 비교 공고")).filter(isStaffingDateBoardJob);
     const candidates: StaffingDateBoardCandidate[] = [];
     const events: StaffingDateBoardEvent[] = [];
+    const demands: StaffingDemandEvent[] = [];
     for (let offset = 0; offset < jobs.length; offset += 250) {
       const jobIds = jobs.slice(offset, offset + 250).map((job) => job.id);
       // Complete both required datasets; a missing page must not masquerade as an unfilled line.
-      const [links, history] = await Promise.all([
+      const [links, history, demandHistory] = await Promise.all([
         fetchAllPostgrestRows(async (from, to) => {
           const result = await db.from("job_candidates")
             .select("id, applicant_id, job_id, agent_stage, applicants:applicant_id(name)")
@@ -43,11 +45,19 @@ export async function GET(req: NextRequest) {
             .order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
           return { data: result.data as StaffingDateBoardEvent[] | null, error: result.error };
         }, "충원 비교 관리자 기록"),
+        fetchAllPostgrestRows(async (from, to) => {
+          const result = await db.from("job_staffing_demand_events")
+            .select("id, job_id, work_date, state, required_count")
+            .in("job_id", jobIds).gte("work_date", start).lte("work_date", end)
+            .order("id", { ascending: false }).range(from, to);
+          return { data: result.data as StaffingDemandEvent[] | null, error: result.error };
+        }, "날짜별 운행 수요"),
       ]);
       candidates.push(...links);
       events.push(...history);
+      demands.push(...demandHistory);
     }
-    return NextResponse.json(buildStaffingDateBoard({ start, end, jobs, candidates, events, updated_at: new Date().toISOString() }));
+    return NextResponse.json(buildStaffingDateBoard({ start, end, jobs, candidates, events, demands, updated_at: new Date().toISOString() }));
   } catch (error) {
     console.error("[staffing-date-board GET]", error);
     return NextResponse.json({ error: "날짜별 충원 비교를 확인하지 못했습니다. 다시 조회해주세요." }, { status: 503 });

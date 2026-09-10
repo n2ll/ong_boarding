@@ -45,7 +45,7 @@ for (const width of [1280, 390]) test(`날짜별 충원판에서 확정·예비�
       const confirmed = width === 390 || writes.length > 0 ? 1 : 0;
       return route.fulfill({ json: { start, end: requestedEnd, updated_at: at, jobs: jobs.map(job => ({
         job_id: job.id, title: job.title, slot: job.slot, start_date: job.start_date, capacity: job.capacity,
-        cells: [date, "2099-09-22", end].map((cellDate) => ({ date: cellDate, target: job.id === 11 ? 1 : null, confirmed: job.id === 11 && cellDate === date ? confirmed : 0,
+        cells: [date, "2099-09-22", end].map((cellDate) => ({ date: cellDate, demand_state: job.id === 11 ? "operating" : "unknown", demand_event_id: null, invalid_demand: false, target: job.id === 11 ? 1 : null, confirmed: job.id === 11 && cellDate === date ? confirmed : 0,
           reserve: job.id === 11 && cellDate === date ? 1 : 0, primary: job.id === 11 && cellDate === date ? 1 : 0,
           shortage: job.id === 11 ? 1 - (cellDate === date ? confirmed : 0) : null, invalid_records: 0,
           conflicts: width === 390 && job.id === 11 && cellDate === date ? [{ applicant_id: 1, name: "가상후보1", other_job_id: 12, other_job_title: "가상 배송 B" }] : [],
@@ -73,7 +73,7 @@ for (const width of [1280, 390]) test(`날짜별 충원판에서 확정·예비�
   const unsetTarget = page.getByRole("button", { name: `가상 배송 B ${date} 후보 확인`, exact: true });
   await expect(cell).toContainText(new RegExp(`확정\\s*${width === 390 ? 1 : 0}`));
   await expect(cell).toContainText(/예비 후보\s*1/);
-  await expect(unsetTarget).toContainText("모집목표 미정");
+  await expect(unsetTarget).toContainText("수요 미정");
 
   if (width === 1280) {
     await cell.click();
