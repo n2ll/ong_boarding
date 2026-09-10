@@ -5,6 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { readConsultationResult } from "./multi-job-consultation.ts";
+import { likelyRegionInquiry } from "./region-preference.ts";
 import type { ConversationTurn, StageContext, StageResult } from "./types";
 import { canSkipConversationProcessing, shouldSuppressConversationReply } from "./conversation-closing.ts";
 import { fetchPhoneMessageIdentityIndex } from "../admin/phone-message-identity.ts";
@@ -140,8 +141,10 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; contextFails?: boolean; observationFails?: boolean; history?: ConversationTurn[]; stageResult?: StageResult }) {
+function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; sourceBody?: string; contextFails?: boolean; observationFails?: boolean; history?: ConversationTurn[]; stageResult?: StageResult }) {
   const observations: unknown[] = [];
+  const regionPreferences: unknown[] = [];
+  const sourceBody = input.sourceBody ?? "성수는 월요일 가능하고 강남은 주말 가능해요";
   const contexts: StageContext[] = [];
   const rpcCalls: string[] = [];
   const smsCalls: Array<{ phone: string; body: string }> = [];
@@ -193,7 +196,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     async process(ctx: StageContext) {
       contexts.push(ctx);
       if (input.stageResult) return structuredClone(input.stageResult);
-      if (input.consultation) return readConsultationResult({ consultation: input.consultation }, ctx, "성수는 월요일 가능하고 강남은 주말 가능해요") ?? {
+      if (input.consultation) return readConsultationResult({ consultation: input.consultation }, ctx, sourceBody) ?? {
         reply_text: "잘못된 기존 단계 응답", state_update: {}, transition: { kind: "advance", to: "screening", reason: "wrong" },
       };
       return {
@@ -214,6 +217,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
   }).outputText;
   const compiledModule = { exports: {} as Record<string, unknown> };
   const stubs: Record<string, Record<string, unknown>> = {
+    "./region-preference": { likelyRegionInquiry },
     "./conversation-reply-claim": { withConversationReplyClaim },
     "./conversation-closing": { canSkipConversationProcessing, shouldSuppressConversationReply },
     "./consultation-context": { loadConsultationJobs: async () => {
@@ -223,10 +227,11 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
         { job_id: 8, title: "강남 공고", branch: "강남", candidate_id: null, stage: null, expired: false },
       ] : [{ job_id: 7, title: "배송 공고", candidate_id: 11, stage: "exploration", expired: false }];
     } },
-    "./consultation-history": { loadConsultationHistory: async () => ({ history: input.history ?? [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: "성수는 월요일 가능하고 강남은 주말 가능해요", created_at: input.oldSource ? "2000-01-01T00:00:00Z" : new Date().toISOString() }] }) },
-    "./consultation-observations": { saveConsultationObservations: async (_db: unknown, _id: number, values: unknown[]) => {
+    "./consultation-history": { loadConsultationHistory: async () => ({ history: input.history ?? [], ambiguousFollowup: false, sourceMessages: [{ id: "inbound-1", body: sourceBody, created_at: input.oldSource ? "2000-01-01T00:00:00Z" : new Date().toISOString() }] }) },
+    "./consultation-observations": { saveConsultationObservations: async (_db: unknown, _id: number, values: unknown[], _sources: unknown[], regions: unknown[] = []) => {
       if (input.observationFails) throw new Error("event storage failed");
       observations.push(...values);
+      regionPreferences.push(...regions);
     } },
     "../solapi": {
       sendSms: async (phone: string, body: string) => {
@@ -305,6 +310,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     rpcCalls,
     database,
     observations,
+    regionPreferences,
     contexts,
   };
 }
@@ -313,6 +319,26 @@ const consultationEnvelope = { mode: "answer", job_ids: [7, 8], answers: [{ job_
   { job_id: 7, source_message_id: "inbound-1", kind: "availability", quote: "성수는 월요일 가능" },
   { job_id: 8, source_message_id: "inbound-1", kind: "availability", quote: "강남은 주말 가능해요" },
 ] };
+
+const regionSource = "혹시 인천이나 시흥쪽에는 없을까요";
+const regionEnvelope = { mode: "region", job_ids: [], answers: [], observations: [],
+  region_preferences: [{ source_message_id: "inbound-1", quote: regionSource, regions: ["인천", "시흥"] }] };
+for (const consent of [true, null]) test(`지역 문의는 원문 저장 뒤 마무리하고 동의 상태를 바꾸지 않는다: ${consent}`, async () => {
+  const h = loadRouter({ applicants: [applicant(1, { marketing_consent: consent })], consultation: regionEnvelope, sourceBody: regionSource });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 1);
+  assert.equal(h.transitions[0].kind, "stay");
+  assert.equal(h.observations.length, 0);
+  assert.equal(h.regionPreferences.length, 1);
+  assert.equal(hasFutureJobPromotion(h.smsCalls[0].body), consent === true);
+  assert.equal(h.database.applicants[0].marketing_consent, consent);
+});
+test("지역 희망 기록 실패 시 마무리 답장을 보내지 않는다", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], consultation: regionEnvelope, sourceBody: regionSource, observationFails: true });
+  await run(h.router, h.supabase);
+  assert.equal(h.smsCalls.length, 0);
+  assert.equal(h.transitions[0].kind, "pause");
+});
 test("consultation persists per-job evidence and sends one response without advancing the host", async () => {
   const h = loadRouter({ applicants: [applicant(1)], consultation: consultationEnvelope });
   const result = await run(h.router, h.supabase);

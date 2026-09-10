@@ -5,7 +5,7 @@ import type { StageContext } from "./types";
 const path = "./multi-job-consultation.ts";
 const mod = await import(path).catch(() => ({}));
 const ctx = (): StageContext => ({
-  job: { id: 11, title: "성수 오전 배송" }, applicant: { id: 7 }, history: [],
+  job: { id: 11, title: "성수 오전 배송" }, applicant: { id: 7, marketing_consent: true }, history: [],
   state: { screening: { 근무조건_확인: true }, meta: { previous: "keep" } },
   consultation: {
     jobs: [
@@ -446,4 +446,145 @@ test("training-only questions with a verb cannot be substituted with delivery fa
   const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["근무시간", "급여"] }] }, context, text);
   assert.equal(result.transition.kind, "pause");
   assert.equal(result.reply_text, null);
+});
+
+const regionInquiry = (quote = "인천이나 시흥 쪽 일자리는 없나요?", regions = ["인천", "시흥"]) => ({ source_message_id: "m1", quote, regions });
+
+test("노출 공고 밖 지역 문의는 전체 서비스 부재를 단정하지 않고 후속 질문 없이 마친다", () => {
+  const quote = "인천이나 시흥 쪽 일자리는 없나요?";
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry()] }, forMessage(quote), quote);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /현재 안내드릴 수 있는 공고/);
+  assert.match(result.reply_text, /인천.*시흥/);
+  assert.match(result.reply_text, /공고가 생기면.*안내/);
+  assert.doesNotMatch(result.reply_text, /[?？]|서비스.*없|전국.*없|성수|강남|확정|가까|출퇴근.*가능/);
+  assert.deepEqual(result.consultation.region_preferences, [regionInquiry()]);
+  assert.deepEqual(result.consultation.observations, []);
+  assert.deepEqual(result.state_update.screening, ctx().state.screening);
+});
+
+test("지역 문의와 실제 공고 질문·관심을 같은 응답에서 보존한다", () => {
+  const quote = "인천 쪽 일자리 있나요?";
+  const text = `${quote} 강남 오전 배송에 관심 있어요. 강남 근무시간은요?`;
+  const context = forMessage(text);
+  const result = read({ mode: "answer", job_ids: [22], region_preferences: [regionInquiry(quote, ["인천"])], answers: [{ job_id: 22, fields: ["근무시간"] }], observations: [{ job_id: 22, source_message_id: "m1", kind: "interest", quote: "강남 오전 배송에 관심 있어요" }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /인천/);
+  assert.match(result.reply_text, /13:00~17:00/);
+  assert.equal(result.consultation.observations.length, 1);
+  assert.deepEqual(result.consultation.region_preferences[0].regions, ["인천"]);
+});
+
+test("실제 집결 지역 공고는 등록 시간·차량 조건을 비교 자료로만 제공한다", () => {
+  const text = "경기 고양 쪽 일자리는 있나요?";
+  const context = forMessage(text);
+  context.consultation!.jobs[1] = { ...context.consultation!.jobs[1], title: "북부 배송", branch: "다른 지점명", pickup_address: "경기도 고양시 덕양구 비공개로 12", vehicle_required: true };
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry(text, ["고양"])] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /북부 배송/);
+  assert.match(result.reply_text, /경기도 고양시/);
+  assert.match(result.reply_text, /13:00~17:00/);
+  assert.match(result.reply_text, /본인 차량.*필요/);
+  assert.match(result.reply_text, /이동.*시간.*차량|시간.*차량.*이동/);
+  assert.doesNotMatch(result.reply_text, /비공개로|덕양구|출퇴근.*가능|가까|확정|배정/);
+});
+
+for (const patch of [{ stage: "paused" }, { stage: "abort" }, { expired: true }, { pickup_address: null }, { slot: null }, { vehicle_required: null }]) test(`노출 범위 밖 또는 이동 판단 근거가 모자란 공고는 지역 대안으로 제안하지 않는다 ${JSON.stringify(patch)}`, () => {
+  const text = "고양 쪽 일자리 있나요?";
+  const context = forMessage(text);
+  context.consultation!.jobs[1] = { ...context.consultation!.jobs[1], title: "고양 비공개 배송", pickup_address: "경기도 고양시 비밀 장소", ...patch } as NonNullable<StageContext["consultation"]>["jobs"][number];
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry(text, ["고양"])] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.doesNotMatch(result.reply_text, /고양 비공개 배송|비밀 장소|90,000|13:00/);
+  assert.match(result.reply_text, /공고가 생기면/);
+});
+
+for (const signal of [
+  regionInquiry("인천 쪽 일자리 있나요?", ["시흥"]),
+  { ...regionInquiry(), source_message_id: "old-message" },
+  regionInquiry("인천은 싫고 시흥 쪽 일자리 원해요", ["인천", "시흥"]),
+  regionInquiry("친구가 인천 쪽 일자리 있냐고 물었어요", ["인천"]),
+  regionInquiry("인천은 마감인가요?", ["인천"]),
+]) test(`근거 없는 선호 지역은 기록과 발송을 차단한다 ${JSON.stringify(signal)}`, () => {
+  const result = read({ mode: "region", job_ids: [], region_preferences: [signal] }, forMessage(signal.quote), signal.quote);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+  assert.equal(result.consultation, undefined);
+});
+
+test("지역 요청이 있는 문자를 현재 공고 체크리스트로 잘못 진행하지 않는다", () => {
+  const quote = "인천 쪽 일자리는 없나요?";
+  const result = read({ mode: "current", job_ids: [11], region_preferences: [regionInquiry(quote, ["인천"])] }, forMessage(quote), quote);
+  assert.equal(result.transition.kind, "pause");
+});
+
+test("단일 노출 공고의 지역 문의에서 누락된 region_preferences로 기존 단계에 빠지지 않는다", () => {
+  const text = "인천 쪽 일자리는 없나요?";
+  const context = forMessage(text);
+  context.consultation!.jobs = context.consultation!.jobs.slice(0, 1);
+  const result = read({ mode: "current", job_ids: [11] }, context, text);
+  assert.equal(result?.transition.kind, "pause");
+  assert.equal(result?.reply_text, null);
+});
+
+test("실제 인천·시흥 문의를 후속 수집 없이 마치며 두 지역 원문을 보존한다", () => {
+  const text = "혹시 인천이나 시흥쪽에는 없을까요";
+  const context = forMessage(text);
+  context.consultation!.jobs = context.consultation!.jobs.slice(0, 1);
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry(text)] }, context, text);
+  assert.equal(result?.transition.kind, "stay");
+  assert.deepEqual(result.consultation.region_preferences[0], regionInquiry(text));
+  assert.match(result.reply_text, /공고가 생기면.*안내/);
+  assert.doesNotMatch(result.reply_text, /[?？]|어느 공고|성수/);
+});
+
+for (const consent of [false, null]) test(`마케팅 동의 없는 지역 문의는 연락 약속이나 동의 수집 없이 마친다 ${consent}`, () => {
+  const text = "혹시 인천이나 시흥쪽에는 없을까요";
+  const context = forMessage(text);
+  context.applicant.marketing_consent = consent;
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry(text)] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.doesNotMatch(result.reply_text, /생기면|안내드릴게요|연락드릴|동의|[?？]/);
+  assert.match(result.reply_text, /감사합니다/);
+  assert.deepEqual(result.consultation.region_preferences[0].regions, ["인천", "시흥"]);
+  assert.equal(result.applicant_patch, undefined);
+});
+
+test("등록된 교육 안내가 있는 공고의 검증된 관심 다음에는 선탑 의사를 묻는다", () => {
+  const text = "성수에 관심 있어요";
+  const context = forMessage(text);
+  context.consultation!.jobs[0].ai_facts = "선탑·교육: 배송 동승 교육, 가능한 시간은 매니저와 조율";
+  const result = read({ mode: "answer", job_ids: [11], observations: [{ job_id: 11, source_message_id: "m1", kind: "interest", quote: text }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /배송 동승 교육/);
+  assert.match(result.reply_text, /선탑 참여를 희망하시나요/);
+});
+
+test("지역 문의와 관심을 함께 보낸 경우 질문 답변 뒤 무관한 교육 수집을 붙이지 않는다", () => {
+  const text = "혹시 인천이나 시흥쪽에는 없을까요. 성수에 관심 있어요";
+  const context = forMessage(text);
+  context.consultation!.jobs[0].ai_facts = "선탑·교육: 배송 동승 교육, 가능한 시간은 매니저와 조율";
+  const result = read({ mode: "answer", job_ids: [11], region_preferences: [regionInquiry("혹시 인천이나 시흥쪽에는 없을까요")], observations: [{ job_id: 11, source_message_id: "m1", kind: "interest", quote: "성수에 관심 있어요" }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.doesNotMatch(result.reply_text, /선탑 참여를 희망하시나요/);
+  assert.equal(result.consultation.observations.length, 1);
+});
+
+test("지역 모드가 별도로 명시된 공고의 질문을 누락하면 발송과 기록을 보류한다", () => {
+  const text = "인천 쪽 일자리는 없나요? 강남 근무시간은요?";
+  const result = read({ mode: "region", job_ids: [], region_preferences: [regionInquiry("인천 쪽 일자리는 없나요?", ["인천"])] }, forMessage(text), text);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+  assert.equal(result.consultation, undefined);
+});
+
+test("안내 번호를 다시 확인하더라도 같은 문자의 검증된 지역 문의는 보존한다", () => {
+  const text = "인천 쪽 일자리 있나요? 1번에 관심 있어요";
+  const context = numberedContext(text);
+  context.consultation!.numberedReferences = [];
+  const result = read({ mode: "answer", job_ids: [11], region_preferences: [regionInquiry("인천 쪽 일자리 있나요?", ["인천"])], observations: [{ job_id: 11, source_message_id: "m1", kind: "interest", quote: "1번에 관심 있어요" }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.equal(result.consultation.clarification, true);
+  assert.deepEqual(result.consultation.region_preferences[0].regions, ["인천"]);
+  assert.match(result.reply_text, /어느 공고/);
 });

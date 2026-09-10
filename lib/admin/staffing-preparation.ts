@@ -84,10 +84,12 @@ export type StaffingSourceMessage = { id: string; applicant_id: number; directio
 export type StaffingSuggestion = {
   applicant_id: number; event_id: number; source_message_id: string | null; source_created_at: string | null;
   quote: string; date: string | null; availability: "available" | "unavailable" | "unknown"; reason: string | null;
+  /** Training replies are reviewed separately and never populate backup work dates. */
+  kind?: "training";
 };
 export type StaffingPrimaryCandidate = { applicant_id: number; job_id: number; job_title: string; date: string };
 
-type SuggestionJob = { id: number; start_date: string | null; work_period: string | null };
+type SuggestionJob = { id: number; title?: string; start_date: string | null; work_period: string | null };
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -128,15 +130,20 @@ export function buildStaffingSuggestions(events: StaffingEvidenceEvent[], messag
   return [...latest.values()].flatMap((event) => {
     const meta = record(event.meta);
     const observations = Array.isArray(meta.observations) ? meta.observations.map(record) : [];
-    const available = observations.filter((item) => item.kind === "availability");
-    if (observations.length && !available.length) return [];
-    const quotes = available.map((item) => typeof item.quote === "string" ? item.quote : "");
     const sourceId = typeof meta.source_message_id === "string" ? meta.source_message_id : null;
     const sourceAt = typeof meta.source_created_at === "string" ? meta.source_created_at : null;
     const source = sourceId ? sources.get(sourceId) : undefined;
+    const preceding = source ? messages.filter((message) => message.applicant_id === event.applicant_id && message.direction === "outbound" && Date.parse(message.created_at) < Date.parse(source.created_at))
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] : undefined;
+    const training = /선탑|동승|교육(?!비)/.test(source?.body ?? "") || Boolean(preceding?.direction === "outbound" && job.title
+      && preceding.body.includes(job.title) && /선탑|동승|교육(?!비)/.test(preceding.body) && /희망|가능.*(?:날짜|시간)|(?:날짜|시간).*알려/.test(preceding.body));
+    const relevant = observations.filter((item) => item.kind === "availability" || (training && item.kind === "interest"));
+    if (observations.length && !relevant.length) return [];
+    const quotes = relevant.map((item) => typeof item.quote === "string" ? item.quote : "");
     const suggestion: StaffingSuggestion = { applicant_id: event.applicant_id, event_id: event.id,
       source_message_id: sourceId, source_created_at: sourceAt, quote: quotes.filter(Boolean).join(" / "),
-      date: null, availability: "unknown", reason: "날짜·근무 가능 여부를 원문에서 확인해주세요." };
+      date: null, availability: "unknown", reason: training ? "선탑 참여 의사와 본인이 말한 가능 시간을 확인하고 문자나 전화로 조율해주세요." : "날짜·근무 가능 여부를 원문에서 확인해주세요.",
+      ...(training ? { kind: "training" as const } : {}) };
     if (meta.source !== "inbound_sms" || !source || source.applicant_id !== event.applicant_id || source.direction !== "inbound"
       || !sourceAt || !Number.isFinite(Date.parse(sourceAt)) || Date.parse(source.created_at) !== Date.parse(sourceAt)
       || !quotes.length || quotes.some((quote) => !quote || !source.body.includes(quote))) {
@@ -148,6 +155,7 @@ export function buildStaffingSuggestions(events: StaffingEvidenceEvent[], messag
       && message.id !== source.id && Date.parse(message.created_at) >= Date.parse(sourceAt))
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
     if (laterReply) return [{ ...suggestion, reason: `이후 새 답장이 있어 확인이 필요합니다. 최신 답장: “${laterReply.body}”` }];
+    if (training) return [suggestion];
     const resolved = resolveReply(source.body, sourceAt, job);
     return [{ ...suggestion, ...(resolved ?? {}), reason: resolved ? null : suggestion.reason }];
   });
@@ -155,7 +163,7 @@ export function buildStaffingSuggestions(events: StaffingEvidenceEvent[], messag
 
 /** Explicit manager action adds a candidate date; any existing date (including unknown) remains untouched. */
 export function applyStaffingSuggestion(preparation: StaffingPreparation, suggestion: StaffingSuggestion): StaffingPreparation {
-  if (!suggestion.date || suggestion.availability === "unknown" || preparation.dates.some((day) => day.date === suggestion.date)
+  if (suggestion.kind === "training" || !suggestion.date || suggestion.availability === "unknown" || preparation.dates.some((day) => day.date === suggestion.date)
     || preparation.dates.length >= STAFFING_PREPARATION_LIMITS.dates) return preparation;
   return { ...preparation, dates: [...preparation.dates, { date: suggestion.date, availability: suggestion.availability, role: "unassigned" }] };
 }

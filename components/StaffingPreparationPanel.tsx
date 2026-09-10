@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Modal } from "./ui/modal";
 import { useConfirm } from "./ConfirmDialog";
+import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
 type Candidate = {
   applicant_id: number;
   responded_at: string | null;
-  applicants: { name: string; own_vehicle: string | null } | null;
+  applicants: { name: string; own_vehicle: string | null; phone?: string | null } | null;
 };
 const availabilityLabels = { unknown: "미확인", available: "가능", unavailable: "불가" };
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
@@ -19,6 +21,14 @@ const fieldClass = "min-h-11 w-full min-w-0 rounded-lg border border-border-stro
 
 const AUTHOR_STORAGE_KEY = "ongboarding:staffing-author:v1";
 const formatTime = (at: string) => new Date(at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+const nextTrainingAction = (preparation?: StaffingPreparation | null) => {
+  const training = preparation?.training ?? emptyStaffingTraining();
+  if (training.status === "on_hold" || training.backup_intent === "declined") return "보류·거절 내용을 확인한 뒤 연락 여부 검토";
+  if (training.status === "completed") return training.backup_intent === "unknown" ? "선탑 후 본인의 백업 진행 의사 확인" : "본인 의사에 따라 백업 후보 검토";
+  if (training.status === "scheduled") return "선탑 일시·첫 상차지·연결 프로를 대화에서 안내";
+  if (training.status === "coordinating" || preparation?.training_availability) return "문자나 전화로 선탑 일시·첫 상차지·연결 프로 조율";
+  return "원문에서 선탑 참여 의사·본인 가능 시간 확인";
+};
 function PreparationDetails({ preparation }: { preparation: StaffingPreparation }) {
   const training = preparation.training ?? emptyStaffingTraining();
   return <div className="space-y-1 break-words">
@@ -45,6 +55,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
   const [date, setDate] = useState("");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
+  const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
   const [draft, setDraft] = useState<StaffingPreparation>(emptyPreparation);
   const [initial, setInitial] = useState("");
   const [actorName, setActorName] = useState("");
@@ -126,7 +137,15 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
   const shown = candidates.filter((item) => (item.applicants?.name ?? "").includes(query.trim())
     && (!statusFilter || (snapshots.find((snapshot) => snapshot.applicant_id === item.applicant_id)?.preparation?.training?.status ?? "reviewing") === statusFilter));
   const counts = snapshots.flatMap((item) => item.preparation?.dates.filter((day) => day.date === date) ?? []);
-  return <section className="rounded-2xl border border-border-strong bg-card p-4" onKeyDown={(event) => { if (editing) event.stopPropagation(); }}>
+  const contactActions = (candidate: Candidate) => {
+    const phone = candidate.applicants?.phone?.replace(/[^0-9+]/g, "");
+    const name = candidate.applicants?.name ?? "후보";
+    return <div className="flex flex-wrap gap-2">
+      <Button variant="secondary" disabled={saving} onClick={() => setContactCandidate(candidate)} aria-label={`${name} 선탑 대화 열기`}>대화 열기</Button>
+      {phone ? <a href={`tel:${phone}`} aria-label={`${name}에게 전화하기`} className="inline-flex min-h-11 items-center rounded-lg border border-border-strong bg-background px-3 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">전화하기</a> : <span className="flex min-h-11 items-center text-muted-foreground">전화번호 미등록</span>}
+    </div>;
+  };
+  return <section className="rounded-2xl border border-border-strong bg-card p-4" onKeyDown={(event) => { if (editing || contactCandidate) event.stopPropagation(); }}>
     <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">날짜별 배차 준비 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
     {open && <div className="mt-3 space-y-3 text-sm">
       <p className="text-muted-foreground">답장을 확인한 뒤 가능한 날짜와 선탑 진행을 정리하세요. 선탑 대상과 순서는 라인별로 매니저가 검토하며, 선탑 후 백업 진행은 본인이 선택합니다. 본담당·예비는 후보 구분이며 근무 확정은 별도로 진행합니다.</p>
@@ -151,18 +170,25 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
               <p className="mt-1 font-medium">{trainingStatusLabels[prep?.training?.status ?? "reviewing"]} · {backupIntentLabels[prep?.training?.backup_intent ?? "unknown"]}</p>
               <p className="break-words">선탑 가능 시간: {prep?.training_availability || "미확인"}</p>
               {prep?.training?.scheduled_at && <p>선탑 지정: {formatTime(prep.training.scheduled_at)}</p>}
-              {prep?.training?.status === "completed" && prep.training.backup_intent === "unknown" && <p className="text-warning-strong">다음 확인: 선탑 후 본인의 백업 진행 의사</p>}
+              <p className="mt-2 text-info">다음 확인: {nextTrainingAction(prep)}</p>
               {prep?.note && <p className="whitespace-pre-wrap break-words text-muted-foreground">{prep.note}</p>}
               {snapshot?.updated_at && <p className="mt-1 text-xs text-muted-foreground">입력한 작성자: {snapshot.actor?.name ?? "미기록"} · {formatTime(snapshot.updated_at)}</p>}
             </>}
-            {suggestion && <div className="mt-3 rounded-lg bg-muted p-3"><p className="font-medium">답변에서 찾은 날짜 {suggestion.date ? `· ${suggestion.date} ${availabilityLabels[suggestion.availability]}` : "· 확인 필요"}</p><p className="whitespace-pre-wrap break-words">“{suggestion.quote || "원문 확인 필요"}”</p><p className="text-muted-foreground">정리에서 원문을 확인하고 반영해주세요.</p></div>}
+            {suggestion && <div className="mt-3 rounded-lg bg-muted p-3"><p className="font-medium">{suggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : `답변에서 찾은 날짜 ${suggestion.date ? `· ${suggestion.date} ${availabilityLabels[suggestion.availability]}` : "· 확인 필요"}`}</p><p className="whitespace-pre-wrap break-words">“{suggestion.quote || "원문 확인 필요"}”</p><p className="text-muted-foreground">정리에서 원문을 확인하고 반영해주세요.</p></div>}
+            <div className="mt-3">{contactActions(candidate)}</div>
             {conflicts.length > 0 && <p role="alert" className="mt-2 break-words text-warning-strong">같은 날 본담당 후보가 겹칩니다: {conflicts.map((item) => `${item.date} ${item.job_title}`).join(", ")}. 역할 조정은 관리자가 판단해주세요.</p>}
           </div>;
         })}{!shown.length && <p>일치하는 후보가 없습니다.</p>}</div>
       </>}
     </div>}
-    <Modal open={!!editing} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 배차 준비`} description="관리자가 확인한 내용을 기록합니다. 저장으로 문자를 보내거나 근무를 확정하지 않습니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>배차 준비 저장</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 배차 준비`} description="관리자가 확인한 내용을 기록합니다. 저장으로 문자를 보내거나 근무를 확정하지 않습니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>배차 준비 저장</Button>}>
       <div className="space-y-4 text-sm">
+        <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
+          <p className="font-bold">다음 확인: {nextTrainingAction(draft)}</p>
+          <p>선탑 의사와 가능한 시간을 확인한 뒤 매니저가 직접 연락해 실제 일정을 조율합니다.</p>
+          {editing && contactActions(editing)}
+          <p className="text-xs text-muted-foreground">대화를 닫으면 입력 중인 배차 준비로 돌아옵니다. 연락 후 진행 상태와 팀 메모를 기록해주세요.</p>
+        </div>
         <label className="block space-y-1"><span>기록 작성자</span><input disabled={saving} value={actorName} maxLength={STAFFING_PREPARATION_LIMITS.actor} onChange={(event) => setActorName(event.target.value)} className={fieldClass} placeholder="예: 김매니저" /></label>
         <p className="text-xs text-muted-foreground">공용 계정을 쓰는 팀을 위해 직접 입력한 작성자 이름을 표시합니다. 이 브라우저에서 다음 기록에도 사용합니다.</p>
         {conflict && <div className="space-y-2 rounded-xl border border-warning-strong bg-muted p-3">
@@ -188,7 +214,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
           <p className="text-xs text-muted-foreground">위 지정 정보는 매니저가 확인해 입력합니다. 공고의 일반 상차지와 선탑 첫 상차지는 다를 수 있습니다.</p>
         </fieldset>
         {editingSuggestion && <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
-          <p className="font-bold">수신 답변에서 찾은 제안</p>
+          <p className="font-bold">{editingSuggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : "수신 답변에서 찾은 제안"}</p>
           <p className="whitespace-pre-wrap break-words">“{editingSuggestion.quote || "원문 확인 필요"}”</p>
           {editingSuggestion.source_created_at && <p className="text-xs text-muted-foreground">수신 문자 · {new Date(editingSuggestion.source_created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</p>}
           {editingSuggestion.date ? <>
@@ -218,5 +244,9 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
         {saveError && <p role="alert" className="text-error-strong">{saveError}</p>}
       </div>
     </Modal>
+    {/* 후보 보드의 transform·z-index 밖에 띄워 모바일 내비가 대화창을 가리지 않게 한다. */}
+    {contactCandidate && createPortal(<div className="relative z-50">
+      <ApplicantDetailPanel isOpen applicantId={contactCandidate.applicant_id} jobId={jobId} initialTab="chat" onClose={() => setContactCandidate(null)} onChanged={() => setRetry((value) => value + 1)} />
+    </div>, document.body)}
   </section>;
 }
