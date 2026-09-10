@@ -54,7 +54,7 @@ for (const width of [1280, 390]) test(`연락·할 일을 배차 변경 없이 �
   const edit = page.getByRole("button", { name: "가상후보1 연락·할 일 기록", exact: true });
   await expect(edit).toBeVisible();
   await edit.click();
-  const editor = page.getByRole("dialog", { name: "가상후보1 연락·다음 할 일", exact: true });
+  const editor = page.getByRole("dialog", { name: "가상후보1 진행 기록", exact: true });
   await editor.getByRole("button", { name: "연락 기록 추가", exact: true }).click();
   await editor.getByLabel("최근 연락 일자", { exact: true }).fill("2020-01-09");
   await editor.getByRole("combobox", { name: "연락 방법", exact: true }).selectOption(width === 1280 ? "phone" : "sms");
@@ -64,7 +64,7 @@ for (const width of [1280, 390]) test(`연락·할 일을 배차 변경 없이 �
     await editor.getByLabel("후속 담당자", { exact: true }).fill("가상담당자");
     await editor.getByLabel("다음 할 일", { exact: true }).fill("연결 프로 일정 확인");
     await editor.getByLabel("처리 예정일", { exact: true }).fill("2020-01-10");
-    await editor.getByRole("button", { name: "연락·할 일 저장", exact: true }).click();
+    await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
     await expect(editor).not.toBeVisible();
     expect(writes).toHaveLength(1);
     expect(writes[0].follow_up).toEqual({ owner: "가상담당자", next_action: "연결 프로 일정 확인", due_date: "2020-01-10", status: "open", last_contact: { date: "2020-01-09", method: "phone", result: "일정 확인을 요청함" } });
@@ -81,7 +81,7 @@ for (const width of [1280, 390]) test(`연락·할 일을 배차 변경 없이 �
     await filter.selectOption("all");
     await edit.click();
     await editor.getByLabel("할 일 완료", { exact: true }).check();
-    await editor.getByRole("button", { name: "연락·할 일 저장", exact: true }).click();
+    await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
     await expect(editor).not.toBeVisible();
     expect(writes).toHaveLength(2);
     expect(writes[1].follow_up).toMatchObject({ status: "done" });
@@ -91,14 +91,14 @@ for (const width of [1280, 390]) test(`연락·할 일을 배차 변경 없이 �
     await expect(edit).toBeHidden();
     await filter.selectOption("all");
   } else {
-    await editor.getByRole("button", { name: "연락·할 일 저장", exact: true }).click();
+    await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
     await expect(editor.getByRole("alert")).toContainText("저장 연결 실패");
     await expect(editor.getByRole("textbox", { name: "연락 결과", exact: true })).toHaveValue("일정 확인을 요청함");
     await expect(editor.getByLabel("최근 연락 일자", { exact: true })).toHaveValue("2020-01-09");
     expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `/tmp/ong-staffing-follow-up-${width}.png`, fullPage: true });
-    await editor.getByRole("button", { name: "연락·할 일 저장", exact: true }).click();
+    await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
     await expect(editor).not.toBeVisible();
     expect(writes).toHaveLength(2);
     expect(writes[0].action_key).toEqual(expect.any(String));

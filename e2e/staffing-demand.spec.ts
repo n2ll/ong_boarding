@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-for (const width of [1280, 390]) test(`날짜별 수요를 저장하고 실패·충돌에서 입력을 보존한다 ${width}px`, async ({ page, baseURL }) => {
+for (const width of [1280, 390]) test(`필요 인원을 바로 입력하고 실패·충돌에서 입력을 보존한다 ${width}px`, async ({ page, baseURL }) => {
   const session = { access_token: "consultation-fixture", refresh_token: "consultation-fixture", expires_at: Math.floor(Date.now() / 1000) + 3600 };
   await page.context().addCookies([{ name: "sb-127-auth-token", value: `base64-${Buffer.from(JSON.stringify(session)).toString("base64url")}`, url: baseURL! }]);
   await page.setViewportSize({ width, height: 844 });
@@ -62,16 +62,20 @@ for (const width of [1280, 390]) test(`날짜별 수요를 저장하고 실패·
   await expect(cell).toContainText(/확정\s*1/);
   await expect(otherDate).toContainText(/필요\s*3/);
   const otherDateBefore = await otherDate.innerText();
-  const edit = page.getByRole("button", { name: `${job.title} ${date} 수요 수정`, exact: true });
+  const edit = page.getByRole("button", { name: new RegExp(`${job.title} ${date} (필요 인원|수요) 수정`) });
   await edit.click();
-  const editor = page.getByRole("dialog", { name: `${job.title} ${date} 수요 설정`, exact: true });
-  const state = editor.getByRole("combobox", { name: "운행 여부", exact: true });
+  const editor = page.getByRole("dialog", { name: /필요 인원|수요 설정/ });
+  const operating = editor.getByRole("radio", { name: "인원 입력", exact: true });
+  const unknown = editor.getByRole("radio", { name: "아직 미정", exact: true });
+  const off = editor.getByRole("radio", { name: "운행 없음", exact: true });
   const count = editor.getByLabel("필요 인원", { exact: true });
   const author = editor.getByLabel("기록 작성자", { exact: true });
-  const save = editor.getByRole("button", { name: "수요 저장", exact: true });
-  await expect(state).toHaveValue("unknown");
-  await state.selectOption("operating");
+  const save = editor.getByRole("button", { name: "인원 저장", exact: true });
+  await expect(count).toBeVisible();
+  await expect(unknown).toBeChecked();
+  await expect(count).toHaveValue("");
   await count.fill(width === 1280 ? "2" : "4");
+  await expect(operating).toBeChecked();
   await author.fill("가상매니저");
   await save.click();
 
@@ -85,9 +89,10 @@ for (const width of [1280, 390]) test(`날짜별 수요를 저장하고 실패·
     await expect(cell).toContainText(/예비 후보\s*1/);
     await expect(otherDate).toHaveText(otherDateBefore, { useInnerText: true });
     await edit.click();
-    await expect(state).toHaveValue("operating");
+    await expect(operating).toBeChecked();
     await expect(count).toHaveValue("2");
-    await state.selectOption("off");
+    await off.check();
+    await expect(count).toHaveValue("");
     await page.screenshot({ path: "/tmp/ong-staffing-demand-desktop.png" });
     await save.click();
     await expect(editor).not.toBeVisible();
@@ -99,7 +104,7 @@ for (const width of [1280, 390]) test(`날짜별 수요를 저장하고 실패·
     await expect(cell).toContainText(/재확인/);
   } else {
     await expect(editor.getByRole("alert")).toContainText("수요 저장 연결 실패");
-    await expect(state).toHaveValue("operating");
+    await expect(operating).toBeChecked();
     await expect(count).toHaveValue("4");
     await page.screenshot({ path: "/tmp/ong-staffing-demand-mobile.png" });
     await expect(author).toHaveValue("가상매니저");
@@ -112,7 +117,7 @@ for (const width of [1280, 390]) test(`날짜별 수요를 저장하고 실패·
     expect(writes[1]).toEqual(writes[0]);
     await expect(count).toHaveValue("4");
     await editor.getByRole("button", { name: "최신 수요 불러오기", exact: true }).click();
-    await expect(state).toHaveValue("operating");
+    await expect(operating).toBeChecked();
     await expect(count).toHaveValue("6");
     await count.fill("5");
     await save.click();

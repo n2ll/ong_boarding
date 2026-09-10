@@ -24,8 +24,8 @@ function DateCell({ cell, title, onOpen, onEdit }: { cell: StaffingDateBoardCell
     {!!cell.invalid_records && <span className="text-warning-strong">최근 기록 {cell.invalid_records}명 확인 불가 · 인원 재확인</span>}
     {target !== null && cell.confirmed > target && <span className="text-warning-strong">{state === "off" ? "운행 없는 날에 확정 인원 있음" : "필요 인원보다 확정 인원 많음"} · 투입 재확인</span>}
     {!!cell.conflicts.length && <span className="break-words text-warning-strong">같은 날 다른 라인에도 확정<br />{cell.conflicts.map((other) => `${other.name} · ${other.other_job_title}`).join(" / ")}<br />운행 시간·반납 시간을 확인하세요.</span>}
-    <span className="mt-auto inline-flex items-center gap-1 pt-1 font-semibold">후보 확인 <ChevronRight size={15} aria-hidden="true" /></span>
-  </button><Button variant="secondary" className="w-full" aria-label={`${title} ${cell.date} 수요 수정`} onClick={onEdit}>{cell.demand_event_id ? "수요 수정" : "수요 입력"}</Button></div>;
+    <span className="mt-auto inline-flex items-center gap-1 pt-1 font-semibold">후보 확인 · 진행 기록 <ChevronRight size={15} aria-hidden="true" /></span>
+  </button><Button variant="secondary" className="w-full" aria-label={`${title} ${cell.date} 필요 인원 수정`} onClick={onEdit}>{cell.demand_event_id ? "필요 인원 수정" : "필요 인원 입력"}</Button></div>;
 }
 
 export function StaffingDateBoard({ defaultStart, onOpenCandidates }: { defaultStart?: string; onOpenCandidates: (jobId: number, date: string) => void }) {

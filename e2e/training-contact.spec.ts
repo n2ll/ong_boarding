@@ -42,8 +42,9 @@ for (const width of [1280, 390]) test(`선탑 원문에서 대화·전화로 연
   await page.getByRole("button", { name: "전체 후보 1명", exact: true }).click();
   await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
   await expect(page.getByText("선탑 관련 답변 · 원문 확인", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "가상선탑후보 배차 준비 편집", exact: true }).click();
-  const editor = page.getByRole("dialog", { name: "가상선탑후보 배차 준비", exact: true });
+  await page.getByRole("button", { name: "가상선탑후보 진행 기록", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "가상선탑후보 진행 기록", exact: true });
+  await editor.getByRole("button", { name: "선탑 진행", exact: true }).click();
   await expect(editor.getByText(/다음 확인: 문자나 전화로 선탑/)).toBeVisible();
   await expect(editor.getByRole("link", { name: "가상선탑후보에게 전화하기", exact: true })).toHaveAttribute("href", "tel:01000000000");
   await expect(editor.getByRole("button", { name: "원문 확인 후 초안에 반영" })).toHaveCount(0);
@@ -65,7 +66,7 @@ for (const width of [1280, 390]) test(`선탑 원문에서 대화·전화로 연
   await chat.getByRole("button", { name: "지원자 상세 닫기", exact: true }).click();
   await expect(editor.getByLabel("관리자 메모")).toHaveValue("지원자와 통화 후 선탑 프로 조율 예정");
   await expect(editor.getByLabel("선탑 가능 시간", { exact: true })).toHaveValue("화요일 오전");
-  await editor.getByRole("button", { name: "배차 준비 저장", exact: true }).click();
+  await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
   await expect(editor).not.toBeVisible();
   expect(writes).toHaveLength(1);
   expect(writes[0].note).toBe("지원자와 통화 후 선탑 프로 조율 예정");

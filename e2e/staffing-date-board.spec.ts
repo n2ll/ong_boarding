@@ -80,10 +80,11 @@ for (const width of [1280, 390]) test(`날짜별 충원판에서 확정·예비�
     const candidates = page.getByRole("dialog", { name: "가상 배송 A", exact: true });
     await expect(candidates.getByRole("button", { name: /날짜별 배차 준비/ })).toHaveAttribute("aria-expanded", "true");
     await expect(candidates.getByLabel("비교할 날짜", { exact: true })).toHaveValue(date);
-    await candidates.getByRole("button", { name: "가상후보1 배차 준비 편집", exact: true }).click();
-    const editor = page.getByRole("dialog", { name: "가상후보1 배차 준비", exact: true });
+    await candidates.getByRole("button", { name: "가상후보1 진행 기록", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "가상후보1 진행 기록", exact: true });
+    await editor.getByRole("button", { name: "투입 날짜", exact: true }).click();
     await editor.getByLabel("날짜별 투입 확정 1", { exact: true }).check();
-    await editor.getByRole("button", { name: "배차 준비 저장", exact: true }).click();
+    await editor.getByRole("button", { name: "진행 기록 저장", exact: true }).click();
     const confirmation = page.getByRole("alertdialog", { name: "날짜별 투입을 확정할까요?", exact: true });
     await expect(confirmation).toBeVisible();
     expect(writes).toHaveLength(0);

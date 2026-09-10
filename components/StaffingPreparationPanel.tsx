@@ -20,6 +20,8 @@ const availabilityLabels = { unknown: "미확인", available: "가능", unavaila
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
 const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), records: [], note: "" });
 const fieldClass = "min-h-11 w-full min-w-0 rounded-lg border border-border-strong bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const editorModeLabels = { follow_up: "연락·할 일", training: "선탑 진행", participation: "실제 참여", preparation: "투입 날짜" } as const;
+type EditorMode = keyof typeof editorModeLabels;
 
 const AUTHOR_STORAGE_KEY = "ongboarding:staffing-author:v1";
 const formatTime = (at: string) => new Date(at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -60,7 +62,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [date, setDate] = useState(initialDate);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
-  const [editorMode, setEditorMode] = useState<"preparation" | "follow_up">("preparation");
+  const [editorMode, setEditorMode] = useState<EditorMode>("follow_up");
   const [followUpFilter, setFollowUpFilter] = useState("all");
   const [ownerQuery, setOwnerQuery] = useState("");
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
@@ -74,6 +76,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const request = useRef<{ body: string; key: string } | null>(null);
+  const datesOpened = useRef(false);
   useEffect(() => {
     try { setActorName(localStorage.getItem(AUTHOR_STORAGE_KEY) ?? ""); } catch { /* Storage is optional. */ }
   }, []);
@@ -93,18 +96,27 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [open, jobId, retry]);
-  const startEditing = (candidate: Candidate, mode: "preparation" | "follow_up" = "preparation") => {
+  const startEditing = (candidate: Candidate, mode: EditorMode = "follow_up") => {
     const snapshot = snapshots.find((item) => item.applicant_id === candidate.applicant_id);
     const saved = parseStaffingPreparation(snapshot?.preparation) ?? emptyPreparation();
     setBaseEventId(snapshot?.event_id ?? null); setConflict(null); setPreservedDraft(null);
     const hasSuggestion = suggestions.some((item) => item.applicant_id === candidate.applicant_id && item.date === date);
     const next = mode === "preparation" && date && !hasSuggestion && saved.dates.length < STAFFING_PREPARATION_LIMITS.dates && !saved.dates.some((item) => item.date === date)
       ? { ...saved, dates: [...saved.dates, { date, availability: "unknown" as const, role: "unassigned" as const }] } : saved;
+    datesOpened.current = mode === "preparation";
     setEditorMode(mode); setEditing(candidate); setDraft(next); setInitial(JSON.stringify(next)); setSaveError(""); request.current = null;
+  };
+  const selectEditorMode = (mode: EditorMode) => {
+    setEditorMode(mode);
+    if (mode !== "preparation" || datesOpened.current) return;
+    datesOpened.current = true;
+    if (!date || suggestions.some((item) => item.applicant_id === editing?.applicant_id && item.date === date)) return;
+    setDraft((current) => current.dates.length >= STAFFING_PREPARATION_LIMITS.dates || current.dates.some((item) => item.date === date)
+      ? current : { ...current, dates: [...current.dates, { date, availability: "unknown", role: "unassigned" }] });
   };
   const closeEditor = async () => {
     if (saving) return;
-    if ((JSON.stringify(draft) !== initial || preservedDraft) && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "배차 준비 내용을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
+    if ((JSON.stringify(draft) !== initial || preservedDraft) && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "입력한 진행 기록을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
     setEditing(null);
   };
   const updateDate = (index: number, patch: Partial<StaffingPreparationDate>) => setDraft((current) => ({ ...current, dates: current.dates.map((item, i) => {
@@ -124,12 +136,16 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   };
   const save = async () => {
     if (!editing || saving || conflict) return;
-    if (draft.records.some((record) => !record.date || record.date > staffingToday())) { setSaveError("실제 참여 일자는 오늘까지의 날짜로 빠짐없이 입력해주세요. (한국시간 기준)"); return; }
+    if (draft.records.some((record) => !record.date || record.date > staffingToday())) { setEditorMode("participation"); setSaveError("실제 참여 일자는 오늘까지의 날짜로 빠짐없이 입력해주세요. (한국시간 기준)"); return; }
     if (draft.follow_up?.last_contact && (!draft.follow_up.last_contact.date || draft.follow_up.last_contact.date > staffingToday() || !draft.follow_up.last_contact.result.trim())) {
+      setEditorMode("follow_up");
       setSaveError("연락 결과와 오늘까지의 실제 연락 일자를 입력해주세요. (한국시간 기준)"); return;
     }
     const normalized = parseStaffingPreparation(draft);
-    if (!normalized) { setSaveError("날짜가 유효하고 중복되지 않는지, 연락 결과와 다음 할 일 입력이 올바른지 확인해주세요."); return; }
+    if (!normalized) {
+      if (!parseStaffingPreparation({ ...emptyPreparation(), dates: draft.dates })) setEditorMode("preparation");
+      setSaveError("날짜가 유효하고 중복되지 않는지, 연락 결과와 다음 할 일 입력이 올바른지 확인해주세요."); return;
+    }
     if (!actorName.trim()) { setSaveError("팀에 공유할 기록 작성자 이름을 입력해주세요."); return; }
     const previous = parseStaffingPreparation(JSON.parse(initial));
     const before = new Set(previous?.dates.filter((day) => day.confirmation === "confirmed").map((day) => day.date));
@@ -160,7 +176,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       }
       if (!response.ok) throw new Error(data.error ?? "저장 실패");
       setSnapshots((items) => [...items.filter((item) => item.applicant_id !== data.applicant_id), data]);
-      setEditing(null); setRetry((value) => value + 1); toast.success(editorMode === "follow_up" ? "연락·할 일을 팀에 공유했어요." : "배차 준비를 저장했어요.");
+      setEditing(null); setRetry((value) => value + 1); toast.success("진행 기록을 팀에 공유했어요.");
       window.dispatchEvent(new Event("ongboarding:staffing-updated"));
     } catch (error) { setSaveError(`${error instanceof Error ? error.message : "저장 실패"}. 입력 내용은 유지됩니다. 다시 저장해주세요.`); }
     finally { setSaving(false); }
@@ -212,7 +228,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           const suggestion = suggestions.find((item) => item.applicant_id === candidate.applicant_id);
           const conflicts = conflictsFor(candidate.applicant_id, prep);
           return <div key={candidate.applicant_id} className="rounded-xl border border-border-strong p-3">
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0 break-words"><p className="font-bold">{candidate.applicants?.name ?? "이름 미등록"}</p><p className="text-muted-foreground">{candidate.applicants?.own_vehicle || "차량 미확인"}</p></div><Button variant="secondary" onClick={() => startEditing(candidate)} aria-label={`${candidate.applicants?.name ?? "후보"} 배차 준비 편집`}>정리</Button></div>
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0 break-words"><p className="font-bold">{candidate.applicants?.name ?? "이름 미등록"}</p><p className="text-muted-foreground">{candidate.applicants?.own_vehicle || "차량 미확인"}</p></div><Button variant="secondary" onClick={() => startEditing(candidate)} aria-label={`${candidate.applicants?.name ?? "후보"} 진행 기록`}>진행 기록</Button></div>
             {snapshot?.invalid ? <p role="alert" className="text-error-strong">최근 기록을 확인할 수 없어요. 내용을 다시 확인하고 저장해주세요.</p> : <>
               <p className="mt-2">{date ? `${availabilityLabels[day?.availability ?? "unknown"]} · ${roleLabels[day?.role ?? "unassigned"]}${day?.confirmation === "confirmed" ? " · 투입 확정" : ""}` : `날짜 ${prep?.dates.length ?? 0}건 기록`}</p>
               <p className="mt-1 font-medium">{trainingStatusLabels[prep?.training?.status ?? "reviewing"]} · {backupIntentLabels[prep?.training?.backup_intent ?? "unknown"]}</p>
@@ -224,22 +240,19 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
               {prep?.note && <p className="whitespace-pre-wrap break-words text-muted-foreground">{prep.note}</p>}
               {snapshot?.updated_at && <p className="mt-1 text-xs text-muted-foreground">입력한 작성자: {snapshot.actor?.name ?? "미기록"} · {formatTime(snapshot.updated_at)}</p>}
             </>}
-            {suggestion && <div className="mt-3 rounded-lg bg-muted p-3"><p className="font-medium">{suggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : `답변에서 찾은 날짜 ${suggestion.date ? `· ${suggestion.date} ${availabilityLabels[suggestion.availability]}` : "· 확인 필요"}`}</p><p className="whitespace-pre-wrap break-words">“{suggestion.quote || "원문 확인 필요"}”</p><p className="text-muted-foreground">정리에서 원문을 확인하고 반영해주세요.</p></div>}
+            {suggestion && <div className="mt-3 rounded-lg bg-muted p-3"><p className="font-medium">{suggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : `답변에서 찾은 날짜 ${suggestion.date ? `· ${suggestion.date} ${availabilityLabels[suggestion.availability]}` : "· 확인 필요"}`}</p><p className="whitespace-pre-wrap break-words">“{suggestion.quote || "원문 확인 필요"}”</p><p className="text-muted-foreground">진행 기록의 ‘{suggestion.kind === "training" ? "선탑 진행" : "투입 날짜"}’에서 원문을 확인해주세요.</p></div>}
             <div className="mt-3 flex flex-wrap gap-2">{contactActions(candidate)}<Button variant="secondary" disabled={snapshot?.invalid} onClick={() => startEditing(candidate, "follow_up")} aria-label={`${candidate.applicants?.name ?? "후보"} 연락·할 일 기록`}>연락·할 일 기록</Button></div>
             {conflicts.length > 0 && <p role="alert" className="mt-2 break-words text-warning-strong">같은 날 본담당 후보가 겹칩니다: {conflicts.map((item) => `${item.date} ${item.job_title}`).join(", ")}. 역할 조정은 관리자가 판단해주세요.</p>}
           </div>;
         })}{!shown.length && <p>일치하는 후보가 없습니다.</p>}</div>
       </>}
     </div>}
-    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} ${editorMode === "follow_up" ? "연락·다음 할 일" : "배차 준비"}`} description={editorMode === "follow_up" ? "연락한 내용과 누가 언제 이어서 처리할지 팀에 공유하세요." : "관리자가 확인한 내용을 기록합니다. 날짜별 확정은 체크 후 확인하며, 저장으로 문자를 보내지는 않습니다."} footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>{editorMode === "follow_up" ? "연락·할 일 저장" : "배차 준비 저장"}</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description="기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
-        <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
-          {editorMode === "preparation" && <><p className="font-bold">다음 확인: {nextTrainingAction(draft)}</p><p>선탑 의사와 가능한 시간을 확인한 뒤 매니저가 직접 연락해 실제 일정을 조율합니다.</p></>}
-          {editing && contactActions(editing)}
-          <p className="text-xs text-muted-foreground">대화를 닫으면 입력 중인 기록으로 돌아옵니다. 연락 후 결과를 직접 남겨주세요.</p>
+        <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {Object.entries(editorModeLabels).map(([mode, label]) => <button key={mode} type="button" aria-pressed={editorMode === mode} disabled={saving} onClick={() => selectEditorMode(mode as EditorMode)} className={`min-h-11 rounded-lg border px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${editorMode === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-background"}`}>{label}</button>)}
         </div>
-        <label className="block space-y-1"><span>기록 작성자</span><input disabled={saving} value={actorName} maxLength={STAFFING_PREPARATION_LIMITS.actor} onChange={(event) => setActorName(event.target.value)} className={fieldClass} placeholder="예: 김매니저" /></label>
-        <p className="text-xs text-muted-foreground">공용 계정을 쓰는 팀을 위해 직접 입력한 작성자 이름을 표시합니다. 이 브라우저에서 다음 기록에도 사용합니다.</p>
+        {editing && contactActions(editing)}
         {conflict && <div className="space-y-2 rounded-xl border border-warning-strong bg-muted p-3">
           <p className="font-bold">동료의 최신 기록</p>
           <p>입력한 작성자: {conflict.actor?.name ?? "미기록"}{conflict.updated_at && ` · ${formatTime(conflict.updated_at)}`}</p>
@@ -253,8 +266,9 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           }}>최신 기록 불러오기</Button>
         </div>}
         {preservedDraft && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">보관한 내 초안</summary><PreparationDetails preparation={preservedDraft} /></details>}
-        <StaffingFollowUpFields value={draft.follow_up} disabled={saving} onChange={(follow_up) => { setDraft((current) => ({ ...current, follow_up })); setSaveError(""); }} />
+        {editorMode === "follow_up" && <StaffingFollowUpFields value={draft.follow_up} disabled={saving} onChange={(follow_up) => { setDraft((current) => ({ ...current, follow_up })); setSaveError(""); }} />}
         {editorMode === "preparation" && <>
+        <p className="text-muted-foreground">지원자와 협의한 날짜를 기록하세요. 투입 확정은 매니저가 체크 후 저장하며, 문자는 발송되지 않습니다.</p>
         {editingConflicts.length > 0 && <div role="alert" className="rounded-xl border border-warning-strong p-3 text-warning-strong"><p className="font-bold">같은 날 본담당 후보가 겹칩니다</p>{editingConflicts.map((item) => <p key={`${item.job_id}:${item.date}`} className="break-words">{item.date} · {item.job_title}</p>)}<p>다른 공고의 조회 시점 기록입니다. 본담당·예비 역할은 관리자가 판단하며 저장을 계속할 수 있습니다.</p></div>}
         {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 중복 후보를 직접 확인해주세요.</p>}
         {draft.dates.map((day, index) => <fieldset key={index} disabled={saving} className="min-w-0 space-y-2 rounded-xl border p-3"><legend className="px-1">가능 날짜 {index + 1}</legend>
@@ -266,7 +280,11 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           <Button variant="ghost" onClick={() => setDraft((current) => ({ ...current, dates: current.dates.filter((_, i) => i !== index) }))}>날짜 삭제</Button>
         </fieldset>)}
         <Button variant="secondary" disabled={saving || draft.dates.length >= STAFFING_PREPARATION_LIMITS.dates} onClick={() => setDraft((current) => ({ ...current, dates: [...current.dates, { date: "", availability: "unknown", role: "unassigned" }] }))}>날짜 추가</Button>
+        </>}
+        {editorMode === "training" && <>
+        <p className="font-medium">다음 확인: {nextTrainingAction(draft)}</p>
         <fieldset disabled={saving} className="space-y-3 rounded-xl border border-border-strong p-3"><legend className="px-1 font-bold">선탑 진행 · 팀 공유</legend>
+          <label className="block space-y-1"><span>선탑 가능 시간</span><input value={draft.training_availability} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training_availability: event.target.value }))} className={fieldClass} placeholder="예: 9/16 오전 동승 가능 · 일정 조율 필요" /></label>
           <label className="block space-y-1"><span>선탑 진행 상태</span><select value={draft.training.status} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, status: event.target.value as StaffingTraining["status"] } }))} className={fieldClass}>{Object.entries(trainingStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="block space-y-1"><span>선탑 후 본인 백업 진행 의사</span><select value={draft.training.backup_intent} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, backup_intent: event.target.value as StaffingTraining["backup_intent"] } }))} className={fieldClass}>{Object.entries(backupIntentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <p className="text-xs text-muted-foreground">선탑 완료와 본인 진행 희망은 각각 확인해 기록합니다. 실제 투입은 매니저가 별도로 확정합니다.</p>
@@ -275,6 +293,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           <label className="block space-y-1"><span>선탑 연결 프로</span><input value={draft.training.linked_pro} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, linked_pro: event.target.value } }))} className={fieldClass} placeholder="함께 선탑할 프로 이름·연락 참고" /></label>
           <p className="text-xs text-muted-foreground">위 지정 정보는 매니저가 확인해 입력합니다. 공고의 일반 상차지와 선탑 첫 상차지는 다를 수 있습니다.</p>
         </fieldset>
+        </>}
+        {editorMode === "participation" && <>
         <fieldset disabled={saving} className="min-w-0 space-y-3 rounded-xl border border-border-strong p-3"><legend className="px-1 font-bold">실제 참여 이력</legend>
           <p className="text-muted-foreground">실제로 참여한 선탑과 수행한 백업을 기록하세요. 예정 일시는 선탑 진행에서 조율하고, 실제 참여 일자는 참여 후 입력합니다.</p>
           {!draft.records.length && <p>아직 기록한 실제 참여가 없습니다.</p>}
@@ -289,7 +309,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           <Button variant="secondary" disabled={draft.records.length >= STAFFING_PREPARATION_LIMITS.records} onClick={() => setDraft((current) => ({ ...current, records: [...current.records, { id: crypto.randomUUID(), kind: "training", date: "", note: "" }] }))}>실제 참여 추가</Button>
           <p className="text-xs text-muted-foreground">수정·삭제 전 저장 내용은 아래 팀 변경 이력에 남습니다.</p>
         </fieldset>
-        {editingSuggestion && <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
+        </>}
+        {editingSuggestion && ((editorMode === "training" && editingSuggestion.kind === "training") || (editorMode === "preparation" && editingSuggestion.kind !== "training")) && <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
           <p className="font-bold">{editingSuggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : "수신 답변에서 찾은 제안"}</p>
           <p className="whitespace-pre-wrap break-words">“{editingSuggestion.quote || "원문 확인 필요"}”</p>
           {editingSuggestion.source_created_at && <p className="text-xs text-muted-foreground">수신 문자 · {new Date(editingSuggestion.source_created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</p>}
@@ -300,9 +321,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
             <p className="text-muted-foreground">이미 입력한 날짜는 유지합니다. 반영 후 날짜를 확인하고 아래에서 저장해주세요.</p>
           </> : <p className="text-warning-strong">확인 필요: {editingSuggestion.reason} 날짜는 직접 정리해주세요.</p>}
         </div>}
-        <label className="block space-y-1"><span>선탑 가능 시간</span><input disabled={saving} value={draft.training_availability} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training_availability: event.target.value }))} className={fieldClass} placeholder="예: 9/16 오전 동승 가능 · 일정 조율 필요" /></label>
-        </>}
         <label className="block space-y-1"><span>관리자 메모 · 팀 공유</span><textarea disabled={saving} value={draft.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} className={`${fieldClass} min-h-24 py-2`} /></label>
+        <label className="block space-y-1"><span>기록 작성자</span><input disabled={saving} value={actorName} maxLength={STAFFING_PREPARATION_LIMITS.actor} onChange={(event) => setActorName(event.target.value)} className={fieldClass} placeholder="예: 김매니저" /></label>
         {!!editingSnapshot?.history?.length && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">팀 변경 이력 {editingSnapshot.history.length}건</summary>
           <ol className="space-y-3">{editingSnapshot.history.map((revision) => <li key={revision.event_id} className="space-y-2 border-t border-border-strong pt-3">
             <p className="text-xs text-muted-foreground">입력한 작성자: {revision.actor?.name ?? "미기록"} · {formatTime(revision.updated_at)}</p>
