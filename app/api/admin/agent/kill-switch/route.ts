@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { AGENT_PILOT_MAX_APPLICANTS, invalidateKillSwitchCache, isValidTestJobIds, isValidPilotApplicantIds, parseAgentPilotSession, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
+import { AGENT_PILOT_EXTENSION_HOURS, AGENT_PILOT_MAX_APPLICANTS, invalidateKillSwitchCache, isValidTestJobIds, isValidPilotApplicantIds, parseAgentPilotSession, parseAgentMode, parseAgentTestSession, type AgentMode } from "@/lib/agent/kill-switch";
 import { AGENT_KILL_SWITCH_CATEGORY, AGENT_KILL_SWITCH_TITLE } from "@/lib/admin/prompt-example-reserved";
 
 import { loadPilotCandidates } from "@/lib/admin/agent-pilot-targets";
@@ -65,7 +65,36 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown; applicant_ids?: unknown; duration_hours?: unknown; require_inactive?: unknown; expected_updated_at?: unknown };
+    const payload = (await req.json()) as { action?: unknown; mode?: unknown; disabled?: unknown; phone?: unknown; job_ids?: unknown; applicant_ids?: unknown; duration_hours?: unknown; require_inactive?: unknown; expected_updated_at?: unknown };
+
+    if (payload.action !== undefined) {
+      if (payload.action !== "extend_pilot" || Object.keys(payload).some((key) => !["action", "duration_hours", "expected_updated_at"].includes(key))
+        || !AGENT_PILOT_EXTENSION_HOURS.some((hours) => payload.duration_hours === hours)
+        || typeof payload.expected_updated_at !== "string" || !Number.isFinite(Date.parse(payload.expected_updated_at))) {
+        return NextResponse.json({ error: "현재 설정과 연장 기간(24시간·7일·14일)을 확인해주세요. 대상과 공고는 변경할 수 없습니다." }, { status: 400 });
+      }
+      if (process.env.AGENT_DISABLED === "1") return NextResponse.json({ error: "환경 강제 중지 중에는 연장할 수 없습니다." }, { status: 409 });
+      const supabase = createServiceClient();
+      const current = await supabase.from("prompt_examples").select("body, updated_at").eq("category", CATEGORY).eq("title", TITLE).limit(2);
+      if (current.error) return NextResponse.json({ error: "현재 자동 응대 설정을 확인하지 못했습니다." }, { status: 503 });
+      const row = current.data?.length === 1 ? current.data[0] : null;
+      const renewedAt = Date.now();
+      const session = row && typeof row.body === "string" ? parseAgentPilotSession(row.body, renewedAt) : null;
+      if (!session || row?.updated_at !== payload.expected_updated_at) {
+        return NextResponse.json({ error: "운영이 종료되었거나 설정이 바뀌었습니다. 현재 설정을 다시 확인해주세요." }, { status: 409 });
+      }
+      const expiresAt = renewedAt + (payload.duration_hours as number) * 3600_000;
+      if (expiresAt <= Date.parse(session.expires_at)) return NextResponse.json({ error: "현재 종료 시각보다 뒤로 연장할 수 있는 기간을 선택해주세요." }, { status: 409 });
+      const updatedAt = new Date(renewedAt).toISOString();
+      const body = JSON.stringify({ ...session, renewed_at: updatedAt, expires_at: new Date(expiresAt).toISOString() });
+      // 저장된 명단·공고·최초 시작 시각만 이어간다. 후보 준비나 개별 중지 해제는 하지 않는다.
+      const saved = await supabase.from("prompt_examples").update({ body, updated_at: updatedAt }).eq("category", CATEGORY).eq("title", TITLE)
+        .eq("body", row.body).eq("updated_at", payload.expected_updated_at).select("body, updated_at");
+      if (saved.error) return NextResponse.json({ error: "운영 기간을 저장하지 못했습니다." }, { status: 500 });
+      if (saved.data?.length !== 1) return NextResponse.json({ error: "자동 응대 설정이 변경되었습니다. 현재 설정을 다시 확인해주세요." }, { status: 409 });
+      invalidateKillSwitchCache();
+      return NextResponse.json({ mode: "off", disabled: true, env_forced: false, pilot_session: parseAgentPilotSession(saved.data[0].body), test_session: null, updated_at: saved.data[0].updated_at });
+    }
 
     let mode: AgentMode;
     const testing = payload.mode === "test";

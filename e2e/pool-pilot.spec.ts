@@ -18,7 +18,9 @@ async function fixtures(page: Page) {
     else if (path === "/api/admin/agent/kill-switch") {
       if (request.method() === "POST") {
         const body = request.postDataJSON(); writes.push({ path, body });
-        mode = { mode: "off", disabled: true, env_forced: false, pilot_session: body.mode === "pilot" ? { mode: "pilot", applicant_ids: body.applicant_ids, job_ids: body.job_ids, started_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600_000).toISOString() } : null };
+        mode = { mode: "off", disabled: true, env_forced: false, updated_at: "2026-09-10T04:00:00.000Z", pilot_session: body.action === "extend_pilot"
+          ? { ...(mode.pilot_session as Record<string, unknown>), renewed_at: new Date().toISOString(), expires_at: new Date(Date.now() + body.duration_hours * 3600_000).toISOString() }
+          : body.mode === "pilot" ? { mode: "pilot", applicant_ids: body.applicant_ids, job_ids: body.job_ids, started_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600_000).toISOString() } : null };
       }
       response = mode;
     } else if (path === "/api/admin/jobs") response = { jobs: [{ id: 11, title: "가상 실제 모집 공고", status: "active" }] };
@@ -57,8 +59,11 @@ test("모집 공고 없이 희망 조건 저장·수정·재방문, 모바일 �
   await page.screenshot({ path: "/tmp/ong-pool-mobile.png", fullPage: true });
 });
 
-test("파일럿 명단·기간 확인 후 시작하고 즉시 중단, 모바일", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+for (const width of [1280, 390]) test(`파일럿 명단·기간 확인 후 시작·같은 범위 연장·중단 ${width}px`, async ({ page, baseURL }) => {
+  const session = { access_token: "consultation-fixture", refresh_token: "consultation-fixture", expires_at: Math.floor(Date.now() / 1000) + 3600 };
+  await page.context().addCookies([{ name: "sb-127-auth-token", value: `base64-${Buffer.from(JSON.stringify(session)).toString("base64url")}`, url: baseURL! }]);
+  await page.routeWebSocket("**/*", () => {});
+  await page.setViewportSize({ width, height: 844 });
   const writes = await fixtures(page);
   await page.goto("/brain?tab=mode");
   const panel = page.getByRole("region", { name: "파일럿 자동 응대" });
@@ -71,10 +76,21 @@ test("파일럿 명단·기간 확인 후 시작하고 즉시 중단, 모바일"
   await expect(page.getByRole("alertdialog")).toContainText("1시간");
   await page.getByRole("button", { name: "제한 자동 응대 시작", exact: true }).click();
   await expect(panel.getByRole("status")).toContainText("선택 1명");
+  await expect(panel.getByRole("button", { name: "기간 확인 후 연장" })).toBeVisible({ timeout: 2000 });
+  await panel.getByLabel("연장 기간", { exact: true }).selectOption("336");
+  await expect(panel.getByText(/연장 후 종료/)).toBeVisible();
+  await panel.getByRole("button", { name: "기간 확인 후 연장" }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("14일");
+  await expect(page.getByRole("alertdialog")).toContainText("선택 1명·공고 1개");
+  await page.getByRole("alertdialog").getByRole("button", { name: "기간 연장", exact: true }).click();
+  await expect(panel.getByRole("status")).toContainText("선택 1명");
+  await expect(page.getByText("같은 대상과 공고의 운영 기간을 연장했어요.")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel.screenshot({ path: `/tmp/ong-pilot-extension-panel-${width}.png` });
   await panel.getByRole("button", { name: "지금 중단" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "중단", exact: true }).click();
   await expect(start).toBeVisible();
-  expect(writes.map((write) => write.body)).toEqual([{ mode: "pilot", job_ids: [11], applicant_ids: [7], duration_hours: 1 }, { mode: "off" }]);
+  expect(writes.map((write) => write.body)).toEqual([{ mode: "pilot", job_ids: [11], applicant_ids: [7], duration_hours: 1 }, { action: "extend_pilot", duration_hours: 336, expected_updated_at: "2026-09-10T04:00:00.000Z" }, { mode: "off" }]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await panel.screenshot({ path: "/tmp/ong-pilot-panel.png" });
+  await panel.screenshot({ path: `/tmp/ong-pilot-panel-${width}.png` });
 });

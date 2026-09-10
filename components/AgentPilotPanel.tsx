@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AGENT_PILOT_MAX_APPLICANTS, type AgentPilotSession } from "@/lib/agent/kill-switch";
+import { AGENT_PILOT_EXTENSION_HOURS, AGENT_PILOT_MAX_APPLICANTS, type AgentPilotSession } from "@/lib/agent/kill-switch";
 import { useConfirm } from "./ConfirmDialog";
 import { toast } from "sonner";
 import { recruitmentPilotTargets } from "@/lib/admin/recruitment-launch";
@@ -11,6 +11,7 @@ export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated,
   const [jobIds, setJobIds] = useState<number[]>(() => allowedScope ? [allowedScope.jobId] : []);
   const [applicantIds, setApplicantIds] = useState<number[]>([]);
   const [hours, setHours] = useState(1);
+  const [extensionHours, setExtensionHours] = useState(24);
   const [targets, setTargets] = useState<Target[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,13 +58,47 @@ export function AgentPilotPanel({ jobs, jobsError, session, disabled, onUpdated,
     }
     finally { busyRef.current = false; setBusy(false); }
   };
+  const extend = async () => {
+    if (busyRef.current || disabled || !session || typeof expectedUpdatedAt !== "string" || !Number.isFinite(Date.parse(expectedUpdatedAt))) return;
+    const now = Date.now(), expiresAt = now + extensionHours * 3600_000;
+    if (Date.parse(session.expires_at) <= now || expiresAt <= Date.parse(session.expires_at)) return;
+    busyRef.current = true; setBusy(true);
+    const accepted = await confirm({
+      title: "같은 대상과 공고의 운영 기간을 연장할까요?",
+      description: `선택 ${session.applicant_ids.length}명·공고 ${session.job_ids.length}개를 그대로 유지합니다. 현재 종료: ${new Date(session.expires_at).toLocaleString("ko-KR")}. 연장 후 종료: ${new Date(expiresAt).toLocaleString("ko-KR")} 예상(지금부터 ${extensionHours === 24 ? "24시간" : `${extensionHours / 24}일`}). 개별 중지는 유지하며, 기간 연장만으로 문자를 보내거나 미응답 문자를 재처리하지 않습니다.`,
+      confirmText: "기간 연장",
+    });
+    if (!accepted) { busyRef.current = false; setBusy(false); return; }
+    try {
+      const response = await fetch("/api/admin/agent/kill-switch", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "extend_pilot", duration_hours: extensionHours, expected_updated_at: expectedUpdatedAt }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "운영 기간 저장 실패");
+      await onUpdated();
+      toast.success("같은 대상과 공고의 운영 기간을 연장했어요.");
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "운영 기간 저장 실패");
+      await onUpdated();
+    } finally { busyRef.current = false; setBusy(false); }
+  };
   const unavailable = disabled || busy;
+  const extensionExpiresAt = Date.now() + extensionHours * 3600_000;
+  const extensionShortens = Boolean(session && extensionExpiresAt <= Date.parse(session.expires_at));
   return <section className="mt-4 rounded-xl border border-border-strong bg-card p-4" aria-labelledby="pilot-title">
     <h3 id="pilot-title" className="text-[16px] font-bold">파일럿 자동 응대</h3>
     {session ? <div className="mt-3 space-y-3 text-sm">
       <p role="status">선택 {session.applicant_ids.length}명 · 공고 {session.job_ids.length}개만 자동 응대합니다. 개별 중지와 수신거부는 유지됩니다.</p>
       <p>종료: {new Date(session.expires_at).toLocaleString("ko-KR")}</p>
       <p className="text-muted-foreground">대상: {session.applicant_ids.map((id) => { const target = targets.find((item) => item.id === id); return target ? `${target.name}(끝 ${target.phone_suffix})` : `대상 #${id} (명단 확인 필요)`; }).join(", ")} · 공고: {session.job_ids.map((id) => jobs.find((job) => job.id === id)?.title ?? `#${id}`).join(", ")}</p>
+      <div className="space-y-2 rounded-lg border p-3">
+        <label htmlFor="pilot-extension-hours" className="block font-bold">연장 기간</label>
+        <select id="pilot-extension-hours" disabled={unavailable} value={extensionHours} onChange={(event) => setExtensionHours(Number(event.target.value))} className="min-h-11 w-full rounded-lg border bg-background px-3 focus-visible:ring-2 focus-visible:ring-ring">
+          {AGENT_PILOT_EXTENSION_HOURS.map((hour) => <option key={hour} value={hour}>지금부터 {hour === 24 ? "24시간" : `${hour / 24}일`}</option>)}
+        </select>
+        <p>연장 후 종료: {new Date(extensionExpiresAt).toLocaleString("ko-KR")} 예상</p>
+        {extensionShortens && <p className="text-muted-foreground">현재 종료 시각보다 뒤가 되는 기간을 선택해주세요.</p>}
+        <button disabled={unavailable || typeof expectedUpdatedAt !== "string" || !Number.isFinite(Date.parse(expectedUpdatedAt)) || Date.parse(session.expires_at) <= Date.now() || extensionShortens} type="button" onClick={() => void extend()} className="min-h-11 rounded-lg bg-primary px-4 font-bold text-primary-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">기간 확인 후 연장</button>
+      </div>
       <button disabled={unavailable} type="button" onClick={() => void change(true)} className="min-h-11 rounded-lg border border-error px-4 font-bold text-error-strong focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">지금 중단</button>
     </div> : <div className="mt-3 space-y-4 text-sm">
       <p className="text-muted-foreground">최대 {AGENT_PILOT_MAX_APPLICANTS}명·3개 실제 공고에만 새 답장을 보냅니다. 첫 안내 문자와 예약 발송은 실행하지 않습니다.</p>

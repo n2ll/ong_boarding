@@ -100,6 +100,7 @@ test("POST appends only manager review metadata and never changes candidate or a
   assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
   assert.deepEqual(JSON.parse(JSON.stringify(h.writes[0].row.meta)), { ...preparation,
     training: { status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" },
+    records: [],
     actor: { account_id: "verified-account", name: "김운영" }, request_key: KEY, base_event_id: null });
   assert.equal(h.writes[0].row.job_id, 7);
   assert.equal(h.writes[0].row.applicant_id, 1);
@@ -243,6 +244,48 @@ test("team changes retain prior notes, author and training progress scoped to th
   assert.equal((history[1].preparation as Row).note, "처음 연락");
   assert.equal(history[1].actor, null);
   assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
+});
+
+test("actual participation additions, edits and deletions append revisions without changing planned work", async () => {
+  const h = harness({ events: [event(1)] });
+  const training = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "training", date: "2026-01-08", note: "동승 확인" };
+  const backup = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", kind: "backup", date: "2026-01-09", note: "배송 수행 확인" };
+  const added = await h.route.POST(request({ base_event_id: 1, records: [training, backup] }), context());
+  assert.equal(added.status, 200);
+  assert.deepEqual((added.body.preparation as Row).records, [backup, training]);
+  const edited = { ...backup, date: "2026-01-10", note: "실제 수행일 정정" };
+  assert.equal((await h.route.POST(request({ base_event_id: 2, action_key: "22222222-2222-4222-8222-222222222222", records: [training, edited] }), context())).status, 200);
+  assert.equal((await h.route.POST(request({ base_event_id: 3, action_key: "33333333-3333-4333-8333-333333333333", records: [edited] }), context())).status, 200);
+  const result = await h.route.GET({}, context());
+  const history = ((result.body.preparations as Row[])[0].history ?? []) as Row[];
+  assert.deepEqual(Array.from(history, (revision) => (revision.preparation as Row).records), [[edited], [edited, training], [backup, training], []]);
+  assert.ok(history.every((revision) => JSON.stringify((revision.preparation as Row).dates) === JSON.stringify(preparation.dates)));
+  assert.deepEqual(h.writes.map((write) => write.table), ["pool_events", "pool_events", "pool_events"]);
+  assert.equal(h.database.job_candidates[0].agent_stage, undefined);
+});
+
+test("future actual participation is rejected before any write", async () => {
+  const h = harness();
+  const result = await h.route.POST(request({ records: [{ id: KEY, kind: "backup", date: "9999-01-01", note: "" }] }), context());
+  assert.equal(result.status, 400);
+  assert.equal(h.writes.length, 0);
+});
+
+test("legacy requests cannot silently clear actual participation but explicit empty records can", async () => {
+  const records = [{ id: KEY, kind: "training", date: "2026-01-08", note: "실제 동승 확인" }];
+  const h = harness({ events: [event(1, { ...preparation, records })] });
+  const omitted = await h.route.POST(request({ base_event_id: 1, note: "구버전 화면의 메모 수정" }), context());
+  assert.equal(omitted.status, 409);
+  assert.match(String(omitted.body.error), /새로고침/);
+  assert.equal(h.writes.length, 0);
+  assert.deepEqual((h.database.pool_events[0].meta as Row).records, records);
+  const explicit = await h.route.POST(request({ base_event_id: 1, records: [] }), context());
+  assert.equal(explicit.status, 200);
+  assert.deepEqual((explicit.body.preparation as Row).records, []);
+  assert.deepEqual((h.database.pool_events[0].meta as Row).records, records);
+  assert.equal(h.writes.length, 1);
+  const legacy = harness({ events: [event(1)] });
+  assert.equal((await legacy.route.POST(request({ base_event_id: 1 }), context())).status, 200);
 });
 
 test("different editors racing on one base preserve the winner and return conflict to the other", async () => {

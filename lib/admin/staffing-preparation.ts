@@ -1,5 +1,5 @@
 export const STAFFING_PREPARATION_EVENT = "staffing_preparation";
-export const STAFFING_PREPARATION_LIMITS = { dates: 31, training: 240, note: 1000, actor: 80 } as const;
+export const STAFFING_PREPARATION_LIMITS = { dates: 31, records: 200, training: 240, note: 1000, actor: 80 } as const;
 
 export const trainingStatusLabels = { reviewing: "선탑 미검토", coordinating: "일정 조율", scheduled: "선탑 예정", completed: "선탑 완료", on_hold: "보류" } as const;
 export const backupIntentLabels = { unknown: "본인 의사 미확인", interested: "본인 진행 희망", declined: "본인 진행 안 함" } as const;
@@ -26,12 +26,21 @@ export type StaffingPreparationDate = {
   availability: "available" | "unavailable" | "unknown";
   role: "primary_candidate" | "reserve_candidate" | "unassigned";
 };
-/** Manager review only; this never represents a confirmed assignment. */
+export const participationKindLabels = { training: "선탑", backup: "백업" } as const;
+export type StaffingParticipationRecord = {
+  id: string;
+  kind: keyof typeof participationKindLabels;
+  date: string;
+  note: string;
+};
+export const staffingToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+/** Manager-entered plans and actual participation; saving never confirms a future assignment. */
 export type StaffingPreparation = {
   source: "manager";
   dates: StaffingPreparationDate[];
   training_availability: string;
   training: StaffingTraining;
+  records: StaffingParticipationRecord[];
   note: string;
 };
 export type StaffingPreparationSnapshot = {
@@ -75,7 +84,25 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
     seen.add(date);
   }
   dates.sort((a, b) => a.date.localeCompare(b.date));
-  return { source: "manager", dates, training_availability: data.training_availability.trim(), training, note: data.note.trim() };
+  const records: StaffingParticipationRecord[] = [];
+  const ids = new Set<string>();
+  const today = staffingToday();
+  if (data.records !== undefined) {
+    if (!Array.isArray(data.records) || data.records.length > STAFFING_PREPARATION_LIMITS.records) return null;
+    for (const item of data.records) {
+      const value = record(item);
+      if (typeof value.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.id)
+        || !Object.hasOwn(participationKindLabels, value.kind as string)
+        || typeof value.date !== "string" || !validDay(value.date) || value.date > today
+        || typeof value.note !== "string" || value.note.length > STAFFING_PREPARATION_LIMITS.note) return null;
+      const id = value.id.toLowerCase();
+      if (ids.has(id)) return null;
+      ids.add(id);
+      records.push({ id, kind: value.kind as StaffingParticipationRecord["kind"], date: value.date, note: value.note.trim() });
+    }
+  }
+  records.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return { source: "manager", dates, training_availability: data.training_availability.trim(), training, records, note: data.note.trim() };
 }
 
 export const STAFFING_OBSERVATION_EVENT = "job_consultation_observation";

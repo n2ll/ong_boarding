@@ -7,7 +7,7 @@ import { Button } from "./ui/button";
 import { Modal } from "./ui/modal";
 import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
-import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
+import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
 type Candidate = {
   applicant_id: number;
@@ -16,7 +16,7 @@ type Candidate = {
 };
 const availabilityLabels = { unknown: "미확인", available: "가능", unavailable: "불가" };
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
-const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), note: "" });
+const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), records: [], note: "" });
 const fieldClass = "min-h-11 w-full min-w-0 rounded-lg border border-border-strong bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 const AUTHOR_STORAGE_KEY = "ongboarding:staffing-author:v1";
@@ -38,6 +38,8 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
     {training.first_loading_location && <p>선탑 첫 상차지: {training.first_loading_location}</p>}
     {training.linked_pro && <p>선탑 연결 프로: {training.linked_pro}</p>}
     {preparation.dates.length > 0 && <p>날짜별 후보: {preparation.dates.map((day) => `${day.date} ${availabilityLabels[day.availability]} · ${roleLabels[day.role]}`).join(" / ")}</p>}
+    <p className="font-medium">실제 참여 {(preparation.records ?? []).length}건</p>
+    <ul className="space-y-1">{(preparation.records ?? []).map((record) => <li key={record.id} className="whitespace-pre-wrap">{record.date} · {participationKindLabels[record.kind]}{record.note && ` · ${record.note}`}</li>)}</ul>
     {preparation.note && <p className="whitespace-pre-wrap text-muted-foreground">{preparation.note}</p>}
   </div>;
 }
@@ -104,14 +106,23 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
     const next = { ...item, ...patch };
     return next.availability === "available" ? next : { ...next, role: "unassigned" };
   }) }));
+  const updateRecord = (id: string, patch: Partial<Omit<StaffingParticipationRecord, "id">>) => {
+    setDraft((current) => ({ ...current, records: current.records.map((record) => record.id === id ? { ...record, ...patch } : record) }));
+    setSaveError("");
+  };
+  const removeRecord = async (id: string) => {
+    if (!await confirm({ title: "실제 참여 기록을 삭제할까요?", description: "저장하면 현재 목록에서 삭제됩니다. 이전에 저장한 내용은 팀 변경 이력에서 확인할 수 있습니다.", confirmText: "삭제", destructive: true })) return;
+    setDraft((current) => ({ ...current, records: current.records.filter((record) => record.id !== id) }));
+  };
   const save = async () => {
     if (!editing || saving || conflict) return;
+    if (draft.records.some((record) => !record.date || record.date > staffingToday())) { setSaveError("실제 참여 일자는 오늘까지의 날짜로 빠짐없이 입력해주세요. (한국시간 기준)"); return; }
     const normalized = parseStaffingPreparation(draft);
     if (!normalized) { setSaveError("날짜를 빠짐없이 입력하고 중복된 날짜가 없는지 확인해주세요."); return; }
     if (!actorName.trim()) { setSaveError("팀에 공유할 기록 작성자 이름을 입력해주세요."); return; }
     try { localStorage.setItem(AUTHOR_STORAGE_KEY, actorName.trim()); } catch { /* Saving still works without local storage. */ }
     const payload = { applicant_id: editing.applicant_id, base_event_id: baseEventId, actor_name: actorName.trim(),
-      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, note: normalized.note };
+      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, note: normalized.note };
     const body = JSON.stringify(payload);
     if (request.current?.body !== body) request.current = { body, key: crypto.randomUUID() };
     setSaving(true); setSaveError("");
@@ -170,6 +181,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
               <p className="mt-1 font-medium">{trainingStatusLabels[prep?.training?.status ?? "reviewing"]} · {backupIntentLabels[prep?.training?.backup_intent ?? "unknown"]}</p>
               <p className="break-words">선탑 가능 시간: {prep?.training_availability || "미확인"}</p>
               {prep?.training?.scheduled_at && <p>선탑 지정: {formatTime(prep.training.scheduled_at)}</p>}
+              <p className="mt-1">실제 참여: 선탑 {prep?.records?.filter((record) => record.kind === "training").length ?? 0}건 · 백업 {prep?.records?.filter((record) => record.kind === "backup").length ?? 0}건</p>
               <p className="mt-2 text-info">다음 확인: {nextTrainingAction(prep)}</p>
               {prep?.note && <p className="whitespace-pre-wrap break-words text-muted-foreground">{prep.note}</p>}
               {snapshot?.updated_at && <p className="mt-1 text-xs text-muted-foreground">입력한 작성자: {snapshot.actor?.name ?? "미기록"} · {formatTime(snapshot.updated_at)}</p>}
@@ -212,6 +224,20 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
           <label className="block space-y-1"><span>선탑 첫 상차지</span><input value={draft.training.first_loading_location} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, first_loading_location: event.target.value } }))} className={fieldClass} placeholder="매니저가 확인한 선탑 첫 상차지" /></label>
           <label className="block space-y-1"><span>선탑 연결 프로</span><input value={draft.training.linked_pro} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, linked_pro: event.target.value } }))} className={fieldClass} placeholder="함께 선탑할 프로 이름·연락 참고" /></label>
           <p className="text-xs text-muted-foreground">위 지정 정보는 매니저가 확인해 입력합니다. 공고의 일반 상차지와 선탑 첫 상차지는 다를 수 있습니다.</p>
+        </fieldset>
+        <fieldset disabled={saving} className="min-w-0 space-y-3 rounded-xl border border-border-strong p-3"><legend className="px-1 font-bold">실제 참여 이력</legend>
+          <p className="text-muted-foreground">실제로 참여한 선탑과 수행한 백업을 기록하세요. 예정 일시는 선탑 진행에서 조율하고, 실제 참여 일자는 참여 후 입력합니다.</p>
+          {!draft.records.length && <p>아직 기록한 실제 참여가 없습니다.</p>}
+          {draft.records.map((record, index) => <fieldset key={record.id} className="min-w-0 space-y-2 rounded-xl border border-border-strong p-3"><legend className="px-1 font-medium">참여 기록 {index + 1}</legend>
+            <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+              <label className="block min-w-0 space-y-1"><span>참여 종류</span><select aria-label={`참여 종류 ${index + 1}`} value={record.kind} onChange={(event) => updateRecord(record.id, { kind: event.target.value as StaffingParticipationRecord["kind"] })} className={fieldClass}>{Object.entries(participationKindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label className="block min-w-0 space-y-1"><span>실제 참여 일자 (한국시간)</span><input aria-label={`실제 참여 일자 ${index + 1}`} type="date" max={staffingToday()} value={record.date} onChange={(event) => updateRecord(record.id, { date: event.target.value })} className={fieldClass} /></label>
+            </div>
+            <label className="block min-w-0 space-y-1"><span>참여 비고</span><textarea aria-label={`참여 비고 ${index + 1}`} value={record.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => updateRecord(record.id, { note: event.target.value })} className={`${fieldClass} min-h-20 py-2`} placeholder="예: 실제 교육·배송 라인, 함께한 프로, 수행 내용" /></label>
+            <Button variant="ghost" aria-label={`참여 기록 ${index + 1} 삭제`} onClick={() => void removeRecord(record.id)}>기록 삭제</Button>
+          </fieldset>)}
+          <Button variant="secondary" disabled={draft.records.length >= STAFFING_PREPARATION_LIMITS.records} onClick={() => setDraft((current) => ({ ...current, records: [...current.records, { id: crypto.randomUUID(), kind: "training", date: "", note: "" }] }))}>실제 참여 추가</Button>
+          <p className="text-xs text-muted-foreground">수정·삭제 전 저장 내용은 아래 팀 변경 이력에 남습니다.</p>
         </fieldset>
         {editingSuggestion && <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
           <p className="font-bold">{editingSuggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : "수신 답변에서 찾은 제안"}</p>

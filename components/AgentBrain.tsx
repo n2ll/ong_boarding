@@ -1126,7 +1126,7 @@ export function AgentBrain() {
                       })}
                     </div>
 
-                    <AgentPilotPanel jobs={ovJobs} jobsError={Boolean(ovJobsError)} session={pilotSession}
+                    <AgentPilotPanel jobs={ovJobs} jobsError={Boolean(ovJobsError)} session={pilotSession} expectedUpdatedAt={killUpdatedAt}
                       disabled={killBusy || globalAgentMode.state !== "ready" || !killDisabled || Boolean(killEnvForced) || Boolean(testSession)}
                       onUpdated={() => mutateKill()} />
 

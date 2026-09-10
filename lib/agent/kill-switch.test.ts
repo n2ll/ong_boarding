@@ -17,6 +17,7 @@ async function loadKillSwitch() {
     getAgentMode: (client: never, scope?: { applicantId: number; receivedAt: string; jobIds?: number[] }) => Promise<"auto" | "draft" | "off">;
     invalidateKillSwitchCache: () => void;
     parseAgentMode: (body: string | null | undefined) => "auto" | "draft" | "off";
+    parseAgentPilotSession: (body: string, now?: number) => { started_at: string; expires_at: string; renewed_at?: string } | null;
   };
 }
 
@@ -171,4 +172,35 @@ test("pilot invalid membership, expiry and excessive duration fail closed", asyn
     invalidateKillSwitchCache();
     assert.equal(await getAgentMode(fakeClient({ data: [{ body: pilotBody(patch) }], error: null }) as never, { applicantId: 7, receivedAt: new Date().toISOString(), jobIds: [11] }), "off");
   }
+});
+
+test("a renewed pilot keeps its original inbound window and scope for up to 14 days", async () => {
+  const { getAgentMode, invalidateKillSwitchCache, parseAgentPilotSession } = await loadKillSwitch();
+  const now = Date.now();
+  const body = pilotBody({ started_at: new Date(now - 30 * 86400_000).toISOString(), renewed_at: new Date(now).toISOString(), expires_at: new Date(now + 14 * 86400_000).toISOString() });
+  const session = parseAgentPilotSession(body, now);
+  assert.equal(session?.renewed_at, new Date(now).toISOString());
+  invalidateKillSwitchCache();
+  const db = fakeClient({ data: [{ body }], error: null }) as never;
+  assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt: new Date(now - 29 * 86400_000).toISOString(), jobIds: [11, 12] }), "auto");
+  assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt: new Date(now - 31 * 86400_000).toISOString(), jobIds: [11] }), "off");
+  assert.equal(await getAgentMode(db, { applicantId: 9, receivedAt: new Date(now).toISOString(), jobIds: [11] }), "off");
+  assert.equal(await getAgentMode(db, { applicantId: 7, receivedAt: new Date(now).toISOString(), jobIds: [13] }), "off");
+  assert.equal(await getAgentMode(db), "off");
+  assert.equal(parseAgentPilotSession(body, now + 14 * 86400_000), null);
+});
+
+test("renewal requires a valid past renewal time and a finite 14-day horizon", async () => {
+  const { parseAgentPilotSession } = await loadKillSwitch();
+  const now = Date.now();
+  const start = new Date(now - 3600_000).toISOString();
+  const renewed = new Date(now).toISOString();
+  for (const patch of [
+    { renewed_at: null }, { renewed_at: 123 }, { renewed_at: "invalid" },
+    { renewed_at: new Date(now - 3600_001).toISOString() }, { renewed_at: new Date(now + 1).toISOString() },
+    { expires_at: renewed }, { expires_at: new Date(now + 14 * 86400_000 + 1).toISOString() },
+    { started_at: [start] }, { expires_at: [new Date(now + 86400_000).toISOString()] },
+    { applicant_ids: [] }, { job_ids: [11, 11] },
+  ]) assert.equal(parseAgentPilotSession(pilotBody({ started_at: start, renewed_at: renewed, expires_at: new Date(now + 86400_000).toISOString(), ...patch }), now), null);
+  assert.equal(parseAgentPilotSession(pilotBody({ started_at: start, expires_at: new Date(now + 86400_000).toISOString() }), now), null, "legacy pilots retain the 24-hour total limit");
 });
