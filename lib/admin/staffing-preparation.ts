@@ -1,5 +1,6 @@
 export const STAFFING_PREPARATION_EVENT = "staffing_preparation";
-export const STAFFING_PREPARATION_LIMITS = { dates: 31, records: 200, training: 240, note: 1000, actor: 80 } as const;
+export const STAFFING_PREPARATION_LIMITS = { dates: 31, records: 200, training: 240, note: 1000, actor: 80,
+  followUpOwner: 80, followUpAction: 240, followUpResult: 1000 } as const;
 
 export const trainingStatusLabels = { reviewing: "선탑 미검토", coordinating: "일정 조율", scheduled: "선탑 예정", completed: "선탑 완료", on_hold: "보류" } as const;
 export const backupIntentLabels = { unknown: "본인 의사 미확인", interested: "본인 진행 희망", declined: "본인 진행 안 함" } as const;
@@ -12,6 +13,15 @@ export type StaffingTraining = {
   linked_pro: string;
 };
 export const emptyStaffingTraining = (): StaffingTraining => ({ status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" });
+export const followUpContactMethodLabels = { phone: "전화", sms: "문자", other: "기타" } as const;
+export type StaffingFollowUp = {
+  owner: string;
+  next_action: string;
+  due_date: string;
+  status: "open" | "done";
+  last_contact: { date: string; method: keyof typeof followUpContactMethodLabels; result: string } | null;
+};
+export const emptyStaffingFollowUp = (): StaffingFollowUp => ({ owner: "", next_action: "", due_date: "", status: "open", last_contact: null });
 export type StaffingPreparationActor = { account_id: string; name: string };
 export type StaffingPreparationRevision = {
   event_id: number;
@@ -44,6 +54,8 @@ export type StaffingPreparation = {
   training: StaffingTraining;
   records: StaffingParticipationRecord[];
   note: string;
+  /** Omitted in legacy snapshots; null explicitly clears the manager-entered follow-up. */
+  follow_up?: StaffingFollowUp | null;
 };
 export type StaffingPreparationSnapshot = {
   applicant_id: number;
@@ -106,7 +118,28 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
     }
   }
   records.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
-  return { source: "manager", dates, training_availability: data.training_availability.trim(), training, records, note: data.note.trim() };
+  let followUp: StaffingFollowUp | null | undefined;
+  if (data.follow_up === null) followUp = null;
+  else if (data.follow_up !== undefined) {
+    const value = record(data.follow_up);
+    if (typeof value.owner !== "string" || value.owner.length > STAFFING_PREPARATION_LIMITS.followUpOwner
+      || typeof value.next_action !== "string" || value.next_action.length > STAFFING_PREPARATION_LIMITS.followUpAction
+      || typeof value.due_date !== "string" || (value.due_date !== "" && !validDay(value.due_date))
+      || (value.status !== "open" && value.status !== "done")) return null;
+    const nextAction = value.next_action.trim();
+    if (!nextAction && (value.due_date !== "" || value.status !== "open")) return null;
+    let lastContact: StaffingFollowUp["last_contact"] = null;
+    if (value.last_contact !== null) {
+      const contact = record(value.last_contact);
+      if (typeof contact.date !== "string" || !validDay(contact.date) || contact.date > today
+        || typeof contact.method !== "string" || !Object.hasOwn(followUpContactMethodLabels, contact.method)
+        || typeof contact.result !== "string" || contact.result.length > STAFFING_PREPARATION_LIMITS.followUpResult || !contact.result.trim()) return null;
+      lastContact = { date: contact.date, method: contact.method as keyof typeof followUpContactMethodLabels, result: contact.result.trim() };
+    }
+    followUp = { owner: value.owner.trim(), next_action: nextAction, due_date: value.due_date, status: value.status, last_contact: lastContact };
+  }
+  return { source: "manager", dates, training_availability: data.training_availability.trim(), training, records, note: data.note.trim(),
+    ...(followUp === undefined ? {} : { follow_up: followUp }) };
 }
 
 export const STAFFING_OBSERVATION_EVENT = "job_consultation_observation";
