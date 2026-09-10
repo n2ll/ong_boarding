@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { notificationAiDisabled, notificationQueryState } from "@/lib/admin/notification-query-state";
+import { getHandoffDisposition } from "@/lib/admin/handoff-disposition";
 import {
   bulkMessageAttentionPresentation,
   loadBulkMessageAttention,
@@ -45,13 +46,12 @@ export async function GET() {
       .order("created_at", { ascending: true })
       .limit(1),
     // 사람 확인 필요 = 매니저 인계(paused) 후보. head-count가 아니라 행을 받아
-    // (1) '처리 완료'(handoffs/resolve) 표식이 있는 건을 제외하고 — 안 거르면 처리한 건이
-    //     벨·사이드바 배지에 계속 남아 인계 큐 목록과 숫자가 어긋난다 —
+    // (1) 인계 큐와 같은 분류로 현재 처리 완료·의도적 중지·검수를 제외하고
     // (2) 가장 오래 방치된 건의 경과일을 함께 계산한다.
     // (applicants.unread_count는 '스레드 미열람' 신호라 열람만으로 0이 된다 — 답장 여부 지표로 쓰지 않는다)
     supabase
       .from("job_candidates")
-      .select("id, updated_at, agent_state")
+      .select("id, updated_at, paused_reason, agent_state, jobs:job_id ( title )")
       .eq("agent_stage", "paused")
       .order("updated_at", { ascending: true })
       .limit(1000),
@@ -87,8 +87,16 @@ export async function GET() {
     iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)) : null;
   const inboxOldestDays = dayDiff((queryState.inboxOldestRows[0] as { created_at?: string } | undefined)?.created_at);
 
-  type PausedRow = { updated_at: string; agent_state: { meta?: { paused_at?: string; handoff_resolved?: unknown } } | null };
-  const pausedRows = (queryState.handoffRows as PausedRow[]).filter((r) => !r.agent_state?.meta?.handoff_resolved);
+  type PausedRow = {
+    updated_at: string;
+    paused_reason: string | null;
+    agent_state: { meta?: { paused_at?: string } } | null;
+    jobs: { title: string } | null;
+  };
+  const pausedRows = (queryState.handoffRows as PausedRow[]).filter((row) =>
+    row.jobs && typeof row.jobs.title === "string" &&
+    getHandoffDisposition({ ...row, job_title: row.jobs?.title }).state === "action_required"
+  );
   const interventions = pausedRows.length;
   const interventionsOldestDays = pausedRows.length
     ? Math.max(...pausedRows.map((r) => dayDiff(r.agent_state?.meta?.paused_at ?? r.updated_at) ?? 0))
@@ -141,7 +149,7 @@ export async function GET() {
       id: "live",
       tone: (interventionsOldestDays ?? 0) >= 7 ? "red" : "amber",
       title: `사람 확인 필요 ${interventions}건${(interventionsOldestDays ?? 0) >= 1 ? ` · 최장 ${interventionsOldestDays}일` : ""}`,
-      desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.",
+      desc: "인계 사유와 권장 조치를 확인하고, 필요한 답변이나 결정을 진행해 주세요.",
       path: "/live?tab=intervention",
     });
   }
