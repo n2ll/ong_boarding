@@ -7,6 +7,8 @@ import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, E
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { StaffingPreparationPanel } from "./StaffingPreparationPanel";
+import { StaffingDateBoard } from "./StaffingDateBoard";
+import { staffingToday } from "@/lib/admin/staffing-preparation";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
@@ -148,6 +150,7 @@ interface JobRow {
   automation: boolean;
   created: string;
   workPeriod: string | null;
+  startDate: string | null;
   closesAt: string | null;
   // status='active'라도 closes_at이 지났으면 실질 마감 — 배지·AI 현황·통계를 이걸로 판단(마감 텍스트와 일치).
   effectivelyClosed: boolean;
@@ -174,6 +177,7 @@ interface ApiJob {
   created_at: string;
   closed_at: string | null;
   work_period: string | null;
+  start_date?: string | null;
   closes_at: string | null;
   counts: Record<string, number>;
   handoff_counts?: { action_required: number; intentional_pause: number; resolved: number };
@@ -720,6 +724,7 @@ function toJobRow(j: ApiJob): JobRow {
     automation: j.status === "active",
     created: fmtDate(j.created_at),
     workPeriod: j.work_period ?? null,
+    startDate: j.start_date ?? null,
     closesAt: j.closes_at ?? null,
     effectivelyClosed: isJobEffectivelyClosed(j.status, j.closes_at),
     interestCount: j.interest_count ?? null,
@@ -962,7 +967,7 @@ export function Jobs() {
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string } | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
   const candidateBoardReturnFocusRef = useRef<HTMLElement | null>(null);
   const candidateBoardWasOpenRef = useRef(false);
@@ -1204,8 +1209,8 @@ export function Jobs() {
     }
   };
 
-  const openCandidates = (job: JobRow) => {
-    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots });
+  const openCandidates = (job: JobRow, staffingDate?: string) => {
+    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate });
     setCandidates([]);
     setCandLoaded(false);
     setCandError(null);
@@ -3123,6 +3128,15 @@ export function Jobs() {
           ))}
         </div>
       </section>
+
+      <StaffingDateBoard
+        defaultStart={jobs.filter((job) => job.generalLine && !job.effectivelyClosed && job.startDate && job.startDate >= staffingToday()).map((job) => job.startDate!).sort()[0]}
+        onOpenCandidates={(jobId, date) => {
+          const job = jobs.find((item) => Number(item.id) === jobId);
+          if (!job) { toast.error("공고 목록을 새로 불러온 뒤 다시 선택해주세요."); void loadJobs(); return; }
+          openCandidates(job, date);
+        }}
+      />
 
       <section aria-label="채용공고 목록" className="flex min-h-[calc(100dvh-260px)] flex-col overflow-hidden rounded-panel border border-border-strong bg-card">
         {/* Toolbar — 상태·행동과 검색 조건을 두 줄로 고정해 1024px에서도 예측 가능하게 읽힌다. */}
@@ -5113,7 +5127,7 @@ export function Jobs() {
                 )}
                 {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
 
-                {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={candPanel.jobId} jobId={candPanel.jobId} candidates={candidates} />}
+              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialOpen={!!candPanel.staffingDate} allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">

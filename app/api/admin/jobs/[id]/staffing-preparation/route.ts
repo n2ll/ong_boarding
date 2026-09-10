@@ -16,6 +16,7 @@ import {
 } from "@/lib/admin/staffing-preparation";
 
 import { isGeneralLineJob, joinedClientType } from "@/lib/agent/general-line";
+import { isJobEffectivelyClosed } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -149,9 +150,11 @@ export async function POST(req: NextRequest, context: Context) {
     if (authError || !user) return NextResponse.json({ error: "로그인 상태를 확인한 뒤 다시 저장해주세요." }, { status: 401 });
     const actor: StaffingPreparationActor = { account_id: user.id, name: actorName };
     const db = createServiceClient();
-    const candidate = await db.from("job_candidates").select("id").eq("job_id", jobId).eq("applicant_id", applicantId).maybeSingle();
+    const candidate = await db.from("job_candidates").select("id, agent_stage").eq("job_id", jobId).eq("applicant_id", applicantId).maybeSingle();
     if (candidate.error) throw candidate.error;
     if (!candidate.data) return NextResponse.json({ error: "이 공고에 연결된 후보만 준비 내용을 저장할 수 있습니다." }, { status: 404 });
+    const outdatedConfirmationEditor = () => NextResponse.json({ error: "날짜별 관리자 확정을 보호하기 위해 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
+    if (body.confirmation_version !== 1 && preparation.dates.some((day) => day.confirmation === "confirmed")) return outdatedConfirmationEditor();
     const readHistory = () => fetchAllPostgrestRows(async (from, to) => {
       const result = await db.from("pool_events").select(EVENT_COLUMNS).eq("applicant_id", applicantId).eq("job_id", jobId)
         .eq("event_type", STAFFING_PREPARATION_EVENT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
@@ -174,6 +177,9 @@ export async function POST(req: NextRequest, context: Context) {
       return NextResponse.json({ ...snapshot(applicantId, row, await readHistory()), deduplicated: true });
     }
     const history = await readHistory();
+    const latestDates = (history[0]?.meta as { dates?: unknown } | null)?.dates;
+    if (body.confirmation_version !== 1 && Array.isArray(latestDates)
+      && latestDates.some((day) => day && typeof day === "object" && day.confirmation === "confirmed")) return outdatedConfirmationEditor();
     const conflict = (rows: PreparationEvent[]) => NextResponse.json({ conflict: true,
       error: "동료가 먼저 기록을 저장했어요. 최신 기록과 내 입력을 비교한 뒤 다시 정리해주세요.",
       latest: snapshot(applicantId, rows[0], rows) }, { status: 409 });
@@ -182,6 +188,19 @@ export async function POST(req: NextRequest, context: Context) {
       return NextResponse.json({ error: "실제 참여 이력을 보호하기 위해 현재 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
     }
     if ((history[0]?.id ?? null) !== baseEventId) return conflict(history);
+    const previouslyConfirmed = new Set(parseStaffingPreparation(history[0]?.meta)?.dates
+      .filter((day) => day.confirmation === "confirmed").map((day) => day.date));
+    const addsConfirmation = preparation.dates.some((day) => day.confirmation === "confirmed" && !previouslyConfirmed.has(day.date));
+    if (addsConfirmation) {
+      if (candidate.data.agent_stage === "abort") {
+        return NextResponse.json({ error: "이 공고에서 종료된 후보입니다. 후보를 되살린 뒤 날짜별 투입을 확정해주세요." }, { status: 409 });
+      }
+      const job = await db.from("jobs").select("status, closes_at").eq("id", jobId).maybeSingle();
+      if (job.error) throw job.error;
+      if (!job.data || isJobEffectivelyClosed(job.data.status, job.data.closes_at)) {
+        return NextResponse.json({ error: "마감된 공고에는 새 투입을 확정할 수 없습니다. 공고를 다시 연 뒤 진행해주세요." }, { status: 409 });
+      }
+    }
     // One successor per base version, enforced by the existing unique action_key index, including concurrent INSERTs.
     // Keep the client's retry key in metadata; all old event rows stay intact and new saves append their own notes.
     const hash = createHash("sha256").update(`staffing-preparation:${jobId}:${applicantId}:${baseEventId ?? "initial"}`).digest("hex");

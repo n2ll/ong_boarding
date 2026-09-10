@@ -11,6 +11,7 @@ import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, partic
 
 type Candidate = {
   applicant_id: number;
+  agent_stage?: string | null;
   responded_at: string | null;
   applicants: { name: string; own_vehicle: string | null; phone?: string | null } | null;
 };
@@ -37,16 +38,16 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
     {training.scheduled_at && <p>선탑 지정 일시: {formatTime(training.scheduled_at)} (한국시간)</p>}
     {training.first_loading_location && <p>선탑 첫 상차지: {training.first_loading_location}</p>}
     {training.linked_pro && <p>선탑 연결 프로: {training.linked_pro}</p>}
-    {preparation.dates.length > 0 && <p>날짜별 후보: {preparation.dates.map((day) => `${day.date} ${availabilityLabels[day.availability]} · ${roleLabels[day.role]}`).join(" / ")}</p>}
+    {preparation.dates.length > 0 && <p>날짜별 후보: {preparation.dates.map((day) => `${day.date} ${availabilityLabels[day.availability]} · ${roleLabels[day.role]}${day.confirmation === "confirmed" ? " · 투입 확정" : ""}`).join(" / ")}</p>}
     <p className="font-medium">실제 참여 {(preparation.records ?? []).length}건</p>
     <ul className="space-y-1">{(preparation.records ?? []).map((record) => <li key={record.id} className="whitespace-pre-wrap">{record.date} · {participationKindLabels[record.kind]}{record.note && ` · ${record.note}`}</li>)}</ul>
     {preparation.note && <p className="whitespace-pre-wrap text-muted-foreground">{preparation.note}</p>}
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number; candidates: Candidate[] }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; allowNewConfirmation?: boolean }) {
   const confirm = useConfirm();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [snapshots, setSnapshots] = useState<StaffingPreparationSnapshot[]>([]);
   const [suggestions, setSuggestions] = useState<StaffingSuggestion[]>([]);
   const [otherPrimaries, setOtherPrimaries] = useState<StaffingPrimaryCandidate[]>([]);
@@ -54,7 +55,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(initialDate);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
@@ -104,7 +105,9 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
   const updateDate = (index: number, patch: Partial<StaffingPreparationDate>) => setDraft((current) => ({ ...current, dates: current.dates.map((item, i) => {
     if (i !== index) return item;
     const next = { ...item, ...patch };
-    return next.availability === "available" ? next : { ...next, role: "unassigned" };
+    if (next.availability !== "available") next.role = "unassigned";
+    if (next.role !== "primary_candidate" && next.confirmation) next.confirmation = "unconfirmed";
+    return next;
   }) }));
   const updateRecord = (id: string, patch: Partial<Omit<StaffingParticipationRecord, "id">>) => {
     setDraft((current) => ({ ...current, records: current.records.map((record) => record.id === id ? { ...record, ...patch } : record) }));
@@ -120,8 +123,23 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
     const normalized = parseStaffingPreparation(draft);
     if (!normalized) { setSaveError("날짜를 빠짐없이 입력하고 중복된 날짜가 없는지 확인해주세요."); return; }
     if (!actorName.trim()) { setSaveError("팀에 공유할 기록 작성자 이름을 입력해주세요."); return; }
+    const previous = parseStaffingPreparation(JSON.parse(initial));
+    const before = new Set(previous?.dates.filter((day) => day.confirmation === "confirmed").map((day) => day.date));
+    const after = new Set(normalized.dates.filter((day) => day.confirmation === "confirmed").map((day) => day.date));
+    const added = [...after].filter((day) => !before.has(day));
+    const removed = [...before].filter((day) => !after.has(day));
+    if (added.length && (!allowNewConfirmation || editing.agent_stage === "abort")) { setSaveError("마감된 공고나 중단된 후보는 새로 투입 확정할 수 없습니다. 기존 확정 취소와 메모 수정은 가능합니다."); return; }
+    if (added.length || removed.length) {
+      setSaving(true);
+      const approved = await confirm({
+        title: added.length ? "날짜별 투입을 확정할까요?" : "날짜별 투입 확정을 취소할까요?",
+        description: `${jobTitle ?? "현재 공고"} · ${editing.applicants?.name ?? "후보"}\n${added.length ? `확정: ${added.join(", ")}\n` : ""}${removed.length ? `확정 취소: ${removed.join(", ")}\n` : ""}관리자가 지원자와 협의한 날짜인지 확인해주세요. 이 저장으로 문자는 발송되지 않습니다.`,
+        confirmText: added.length ? "확정하고 저장" : "취소하고 저장", destructive: !added.length,
+      });
+      if (!approved) { setSaving(false); return; }
+    }
     try { localStorage.setItem(AUTHOR_STORAGE_KEY, actorName.trim()); } catch { /* Saving still works without local storage. */ }
-    const payload = { applicant_id: editing.applicant_id, base_event_id: baseEventId, actor_name: actorName.trim(),
+    const payload = { applicant_id: editing.applicant_id, base_event_id: baseEventId, actor_name: actorName.trim(), confirmation_version: 1,
       dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, note: normalized.note };
     const body = JSON.stringify(payload);
     if (request.current?.body !== body) request.current = { body, key: crypto.randomUUID() };
@@ -135,6 +153,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
       if (!response.ok) throw new Error(data.error ?? "저장 실패");
       setSnapshots((items) => [...items.filter((item) => item.applicant_id !== data.applicant_id), data]);
       setEditing(null); setRetry((value) => value + 1); toast.success("배차 준비를 저장했어요.");
+      window.dispatchEvent(new Event("ongboarding:staffing-updated"));
     } catch (error) { setSaveError(`${error instanceof Error ? error.message : "저장 실패"}. 입력 내용은 유지됩니다. 다시 저장해주세요.`); }
     finally { setSaving(false); }
   };
@@ -159,13 +178,13 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
   return <section className="rounded-2xl border border-border-strong bg-card p-4" onKeyDown={(event) => { if (editing || contactCandidate) event.stopPropagation(); }}>
     <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">날짜별 배차 준비 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
     {open && <div className="mt-3 space-y-3 text-sm">
-      <p className="text-muted-foreground">답장을 확인한 뒤 가능한 날짜와 선탑 진행을 정리하세요. 선탑 대상과 순서는 라인별로 매니저가 검토하며, 선탑 후 백업 진행은 본인이 선택합니다. 본담당·예비는 후보 구분이며 근무 확정은 별도로 진행합니다.</p>
+      <p className="text-muted-foreground">답장을 확인한 뒤 가능한 날짜와 선탑 진행을 정리하세요. 선탑 후 백업 진행은 본인이 선택합니다. 본담당·예비는 후보 구분이며, 관리자가 ‘날짜별 투입 확정’을 체크하고 저장한 날짜만 충원판에 반영합니다.</p>
       {loading ? <p role="status">배차 준비 불러오는 중…</p> : loadError ? <div role="alert"><p>{loadError}</p><Button variant="secondary" onClick={() => setRetry((value) => value + 1)}>다시 조회</Button></div> : <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-muted-foreground">답변 제안과 다른 공고 기록은 조회 시점 기준입니다.</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)}>새로 확인</Button></div>
         {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 본담당 후보가 겹치는지 직접 확인해주세요.</p>}
         <label className="block space-y-1"><span>비교할 날짜</span><input aria-label="비교할 날짜" type="date" value={date} onChange={(event) => setDate(event.target.value)} className={fieldClass} /></label>
         {dates.length > 0 && <div className="flex flex-wrap gap-2">{dates.map((day) => <button key={day} type="button" aria-pressed={date === day} onClick={() => setDate(day)} className={`min-h-11 rounded-lg border px-3 focus-visible:ring-2 focus-visible:ring-ring ${date === day ? "bg-primary text-primary-foreground" : "bg-background"}`}>{day.slice(5).replace("-", "/")}</button>)}</div>}
-        {date && <p role="status">{date} · 가능 {counts.filter((item) => item.availability === "available").length}명 · 본담당 후보 {counts.filter((item) => item.role === "primary_candidate").length}명 · 예비 후보 {counts.filter((item) => item.role === "reserve_candidate").length}명</p>}
+        {date && <p role="status">{date} · 확정 {counts.filter((item) => item.confirmation === "confirmed").length}명 · 본담당 후보 {counts.filter((item) => item.role === "primary_candidate").length}명 · 예비 후보 {counts.filter((item) => item.role === "reserve_candidate").length}명</p>}
         <input aria-label="배차 준비 후보 이름 검색" placeholder="이름 검색" value={query} onChange={(event) => setQuery(event.target.value)} className={fieldClass} />
         <label className="block space-y-1"><span>선탑 진행 필터</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={fieldClass}><option value="">모든 진행 상태</option>{Object.entries(trainingStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <div className="max-h-96 space-y-2 overflow-y-auto">{shown.map((candidate) => {
@@ -177,7 +196,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
           return <div key={candidate.applicant_id} className="rounded-xl border border-border-strong p-3">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0 break-words"><p className="font-bold">{candidate.applicants?.name ?? "이름 미등록"}</p><p className="text-muted-foreground">{candidate.applicants?.own_vehicle || "차량 미확인"}</p></div><Button variant="secondary" onClick={() => startEditing(candidate)} aria-label={`${candidate.applicants?.name ?? "후보"} 배차 준비 편집`}>정리</Button></div>
             {snapshot?.invalid ? <p role="alert" className="text-error-strong">최근 기록을 확인할 수 없어요. 내용을 다시 확인하고 저장해주세요.</p> : <>
-              <p className="mt-2">{date ? `${availabilityLabels[day?.availability ?? "unknown"]} · ${roleLabels[day?.role ?? "unassigned"]}` : `날짜 ${prep?.dates.length ?? 0}건 기록`}</p>
+              <p className="mt-2">{date ? `${availabilityLabels[day?.availability ?? "unknown"]} · ${roleLabels[day?.role ?? "unassigned"]}${day?.confirmation === "confirmed" ? " · 투입 확정" : ""}` : `날짜 ${prep?.dates.length ?? 0}건 기록`}</p>
               <p className="mt-1 font-medium">{trainingStatusLabels[prep?.training?.status ?? "reviewing"]} · {backupIntentLabels[prep?.training?.backup_intent ?? "unknown"]}</p>
               <p className="break-words">선탑 가능 시간: {prep?.training_availability || "미확인"}</p>
               {prep?.training?.scheduled_at && <p>선탑 지정: {formatTime(prep.training.scheduled_at)}</p>}
@@ -193,7 +212,7 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
         })}{!shown.length && <p>일치하는 후보가 없습니다.</p>}</div>
       </>}
     </div>}
-    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 배차 준비`} description="관리자가 확인한 내용을 기록합니다. 저장으로 문자를 보내거나 근무를 확정하지 않습니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>배차 준비 저장</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 배차 준비`} description="관리자가 확인한 내용을 기록합니다. 날짜별 확정은 체크 후 확인하며, 저장으로 문자를 보내지는 않습니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>배차 준비 저장</Button>}>
       <div className="space-y-4 text-sm">
         <div className="space-y-2 rounded-xl border border-border-strong bg-muted p-3">
           <p className="font-bold">다음 확인: {nextTrainingAction(draft)}</p>
@@ -216,6 +235,17 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
           }}>최신 기록 불러오기</Button>
         </div>}
         {preservedDraft && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">보관한 내 초안</summary><PreparationDetails preparation={preservedDraft} /></details>}
+        {editingConflicts.length > 0 && <div role="alert" className="rounded-xl border border-warning-strong p-3 text-warning-strong"><p className="font-bold">같은 날 본담당 후보가 겹칩니다</p>{editingConflicts.map((item) => <p key={`${item.job_id}:${item.date}`} className="break-words">{item.date} · {item.job_title}</p>)}<p>다른 공고의 조회 시점 기록입니다. 본담당·예비 역할은 관리자가 판단하며 저장을 계속할 수 있습니다.</p></div>}
+        {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 중복 후보를 직접 확인해주세요.</p>}
+        {draft.dates.map((day, index) => <fieldset key={index} disabled={saving} className="min-w-0 space-y-2 rounded-xl border p-3"><legend className="px-1">가능 날짜 {index + 1}</legend>
+          <input aria-label={`날짜 ${index + 1}`} type="date" value={day.date} onChange={(event) => updateDate(index, { date: event.target.value })} className={fieldClass} />
+          <select aria-label={`가능 여부 ${index + 1}`} value={day.availability} onChange={(event) => updateDate(index, { availability: event.target.value as StaffingPreparationDate["availability"] })} className={fieldClass}>{Object.entries(availabilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+          <select aria-label={`후보 역할 ${index + 1}`} value={day.role} disabled={day.availability !== "available"} onChange={(event) => updateDate(index, { role: event.target.value as StaffingPreparationDate["role"] })} className={fieldClass}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+          <label className="flex min-h-11 items-center gap-3 rounded-lg bg-muted px-3 py-2"><input type="checkbox" aria-label={`날짜별 투입 확정 ${index + 1}`} checked={day.confirmation === "confirmed"} disabled={day.availability !== "available" || day.role !== "primary_candidate" || (day.confirmation !== "confirmed" && (!allowNewConfirmation || editing?.agent_stage === "abort"))} onChange={(event) => updateDate(index, { confirmation: event.target.checked ? "confirmed" : "unconfirmed" })} className="size-5 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" /><span>날짜별 투입 확정</span></label>
+          <p className="text-xs text-muted-foreground">{!allowNewConfirmation || editing?.agent_stage === "abort" ? "현재 새 확정은 불가합니다. 기존 확정 취소와 메모 수정은 가능합니다." : "가능한 본담당 후보만 확정할 수 있습니다. 지원자와 협의 후 체크해주세요."}</p>
+          <Button variant="ghost" onClick={() => setDraft((current) => ({ ...current, dates: current.dates.filter((_, i) => i !== index) }))}>날짜 삭제</Button>
+        </fieldset>)}
+        <Button variant="secondary" disabled={saving || draft.dates.length >= STAFFING_PREPARATION_LIMITS.dates} onClick={() => setDraft((current) => ({ ...current, dates: [...current.dates, { date: "", availability: "unknown", role: "unassigned" }] }))}>날짜 추가</Button>
         <fieldset disabled={saving} className="space-y-3 rounded-xl border border-border-strong p-3"><legend className="px-1 font-bold">선탑 진행 · 팀 공유</legend>
           <label className="block space-y-1"><span>선탑 진행 상태</span><select value={draft.training.status} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, status: event.target.value as StaffingTraining["status"] } }))} className={fieldClass}>{Object.entries(trainingStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="block space-y-1"><span>선탑 후 본인 백업 진행 의사</span><select value={draft.training.backup_intent} onChange={(event) => setDraft((current) => ({ ...current, training: { ...current.training, backup_intent: event.target.value as StaffingTraining["backup_intent"] } }))} className={fieldClass}>{Object.entries(backupIntentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -250,15 +280,6 @@ export function StaffingPreparationPanel({ jobId, candidates }: { jobId: number;
             <p className="text-muted-foreground">이미 입력한 날짜는 유지합니다. 반영 후 날짜를 확인하고 아래에서 저장해주세요.</p>
           </> : <p className="text-warning-strong">확인 필요: {editingSuggestion.reason} 날짜는 직접 정리해주세요.</p>}
         </div>}
-        {editingConflicts.length > 0 && <div role="alert" className="rounded-xl border border-warning-strong p-3 text-warning-strong"><p className="font-bold">같은 날 본담당 후보가 겹칩니다</p>{editingConflicts.map((item) => <p key={`${item.job_id}:${item.date}`} className="break-words">{item.date} · {item.job_title}</p>)}<p>다른 공고의 조회 시점 기록입니다. 본담당·예비 역할은 관리자가 판단하며 저장을 계속할 수 있습니다.</p></div>}
-        {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 중복 후보를 직접 확인해주세요.</p>}
-        {draft.dates.map((day, index) => <fieldset key={index} disabled={saving} className="min-w-0 space-y-2 rounded-xl border p-3"><legend className="px-1">가능 날짜 {index + 1}</legend>
-          <input aria-label={`날짜 ${index + 1}`} type="date" value={day.date} onChange={(event) => updateDate(index, { date: event.target.value })} className={fieldClass} />
-          <select aria-label={`가능 여부 ${index + 1}`} value={day.availability} onChange={(event) => updateDate(index, { availability: event.target.value as StaffingPreparationDate["availability"] })} className={fieldClass}>{Object.entries(availabilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-          <select aria-label={`후보 역할 ${index + 1}`} value={day.role} disabled={day.availability !== "available"} onChange={(event) => updateDate(index, { role: event.target.value as StaffingPreparationDate["role"] })} className={fieldClass}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-          <Button variant="ghost" onClick={() => setDraft((current) => ({ ...current, dates: current.dates.filter((_, i) => i !== index) }))}>날짜 삭제</Button>
-        </fieldset>)}
-        <Button variant="secondary" disabled={saving || draft.dates.length >= STAFFING_PREPARATION_LIMITS.dates} onClick={() => setDraft((current) => ({ ...current, dates: [...current.dates, { date: "", availability: "unknown", role: "unassigned" }] }))}>날짜 추가</Button>
         <label className="block space-y-1"><span>선탑 가능 시간</span><input disabled={saving} value={draft.training_availability} maxLength={STAFFING_PREPARATION_LIMITS.training} onChange={(event) => setDraft((current) => ({ ...current, training_availability: event.target.value }))} className={fieldClass} placeholder="예: 9/16 오전 동승 가능 · 일정 조율 필요" /></label>
         <label className="block space-y-1"><span>관리자 메모 · 팀 공유</span><textarea disabled={saving} value={draft.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} className={`${fieldClass} min-h-24 py-2`} /></label>
         {!!editingSnapshot?.history?.length && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">팀 변경 이력 {editingSnapshot.history.length}건</summary>

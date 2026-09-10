@@ -25,6 +25,8 @@ export type StaffingPreparationDate = {
   date: string;
   availability: "available" | "unavailable" | "unknown";
   role: "primary_candidate" | "reserve_candidate" | "unassigned";
+  /** Only an explicit manager decision confirms this date; legacy candidates remain unconfirmed. */
+  confirmation?: "unconfirmed" | "confirmed";
 };
 export const participationKindLabels = { training: "선탑", backup: "백업" } as const;
 export type StaffingParticipationRecord = {
@@ -34,7 +36,7 @@ export type StaffingParticipationRecord = {
   note: string;
 };
 export const staffingToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-/** Manager-entered plans and actual participation; saving never confirms a future assignment. */
+/** Manager-entered plans, explicit date confirmations and actual participation. */
 export type StaffingPreparation = {
   source: "manager";
   dates: StaffingPreparationDate[];
@@ -73,14 +75,16 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
   const seen = new Set<string>();
   for (const item of data.dates) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-    const { date, availability, role } = item as Record<string, unknown>;
+    const { date, availability, role, confirmation } = item as Record<string, unknown>;
     if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || seen.has(date)) return null;
     const timestamp = Date.parse(`${date}T00:00:00.000Z`);
     if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date) return null;
     if (availability !== "available" && availability !== "unavailable" && availability !== "unknown") return null;
     if (role !== "primary_candidate" && role !== "reserve_candidate" && role !== "unassigned") return null;
     if (role !== "unassigned" && availability !== "available") return null;
-    dates.push({ date, availability, role });
+    if (confirmation !== undefined && confirmation !== "unconfirmed" && confirmation !== "confirmed") return null;
+    if (confirmation === "confirmed" && (availability !== "available" || role !== "primary_candidate")) return null;
+    dates.push({ date, availability, role, ...(confirmation === undefined ? {} : { confirmation }) });
     seen.add(date);
   }
   dates.sort((a, b) => a.date.localeCompare(b.date));

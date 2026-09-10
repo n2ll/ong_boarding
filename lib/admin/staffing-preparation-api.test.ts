@@ -7,6 +7,7 @@ import * as crypto from "node:crypto";
 import { isGeneralLineJob, joinedClientType } from "../agent/general-line.ts";
 import * as preparationPolicy from "./staffing-preparation.ts";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
+import { isJobEffectivelyClosed } from "../jobs.ts";
 
 type Row = Record<string, unknown>;
 type Response = { status: number; body: Record<string, unknown> };
@@ -18,8 +19,30 @@ function event(id: number, meta: unknown = preparation, patch: Row = {}): Row {
   return { id, applicant_id: 1, job_id: 7, event_type: "staffing_preparation", meta, created_at: "2026-09-09T00:00:00.000Z", ...patch };
 }
 
+test("confirmed dates require a current editor and old editors cannot remove or clear them", async () => {
+  const confirmed = { ...preparation, dates: [{ date: "2026-09-15", availability: "available", role: "primary_candidate", confirmation: "confirmed" }] };
+  const h = harness();
+  assert.equal((await h.route.POST(request(confirmed), context())).status, 409);
+  assert.equal(h.writes.length, 0);
+  const saved = await h.route.POST(request({ ...confirmed, confirmation_version: 1 }), context());
+  assert.equal(saved.status, 200);
+  assert.equal((saved.body.preparation as typeof confirmed).dates[0].confirmation, "confirmed");
+  const retry = await h.route.POST(request({ ...confirmed, confirmation_version: 1 }), context());
+  assert.equal(retry.status, 200);
+  assert.equal(h.writes.length, 1);
+  for (const dates of [[], preparation.dates]) {
+    const oldEditor = await h.route.POST(request({ dates, base_event_id: saved.body.event_id, action_key: crypto.randomUUID() }), context());
+    assert.equal(oldEditor.status, 409);
+  }
+  const cleared = await h.route.POST(request({ confirmation_version: 1, dates: [{ ...confirmed.dates[0], confirmation: "unconfirmed" }],
+    base_event_id: saved.body.event_id, action_key: crypto.randomUUID() }), context());
+  assert.equal(cleared.status, 200);
+  assert.equal(h.writes.length, 2);
+  assert.ok(h.writes.every((write) => write.table === "pool_events"));
+});
+
 function harness(input: { authenticated?: boolean; events?: Row[]; candidates?: Row[]; jobs?: Row[]; messages?: Row[]; fail?: (table: string, write: boolean, from?: number) => boolean } = {}) {
-  const database: Record<string, Row[]> = { jobs: input.jobs ?? [{ id: 7, title: "일반 A", start_date: "2027-04-20", work_period: "단기", client: null }], messages: input.messages ?? [], pool_events: input.events ?? [], job_candidates: input.candidates ?? [{ id: 11, job_id: 7, applicant_id: 1 }, { id: 12, job_id: 7, applicant_id: 2 }] };
+  const database: Record<string, Row[]> = { jobs: input.jobs ?? [{ id: 7, title: "일반 A", status: "active", closes_at: null, start_date: "2027-04-20", work_period: "단기", client: null }], messages: input.messages ?? [], pool_events: input.events ?? [], job_candidates: input.candidates ?? [{ id: 11, job_id: 7, applicant_id: 1 }, { id: 12, job_id: 7, applicant_id: 2 }] };
   const writes: Array<{ table: string; row: Row }> = [];
   class Query {
     private table: string;
@@ -62,12 +85,47 @@ function harness(input: { authenticated?: boolean; events?: Row[]; candidates?: 
     "@/lib/admin/staffing-preparation": preparationPolicy,
     "@/lib/agent/general-line": { isGeneralLineJob, joinedClientType },
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
+    "@/lib/jobs": { isJobEffectivelyClosed },
   };
   const routePath = new URL("../../app/api/admin/jobs/[id]/staffing-preparation/route.ts", import.meta.url);
   runInNewContext(ts.transpileModule(readFileSync(routePath, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
     { exports, require: (name: string) => modules[name] ?? {}, console: { error() {} }, Date, Map, Set, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "http://auth.example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "fixture" } } });
   return { route: exports, database, writes };
 }
+
+const confirmedDate = { date: "2026-09-15", availability: "available", role: "primary_candidate", confirmation: "confirmed" };
+const unavailableConfirmationScopes = [
+  { candidates: [{ id: 11, applicant_id: 1, job_id: 7, agent_stage: "abort" }] },
+  { jobs: [{ id: 7, status: "closed", closes_at: null }] },
+  { jobs: [{ id: 7, status: "active", closes_at: "2020-01-01T00:00:00.000Z" }] },
+];
+
+test("new confirmed dates reject aborted candidates and closed jobs, while failed job reads remain errors", async () => {
+  for (const scope of unavailableConfirmationScopes) {
+    const h = harness(scope);
+    assert.equal((await h.route.POST(request({ dates: [confirmedDate], confirmation_version: 1 }), context())).status, 409);
+    assert.equal(h.writes.length, 0);
+  }
+  const unavailable = harness({ fail: (table) => table === "jobs" });
+  assert.equal((await unavailable.route.POST(request({ dates: [confirmedDate], confirmation_version: 1 }), context())).status, 503);
+  assert.equal(unavailable.writes.length, 0);
+});
+
+test("closed or aborted scopes can maintain and cancel prior confirmation without permitting a new date", async () => {
+  for (const scope of unavailableConfirmationScopes) {
+    const h = harness({ ...scope, events: [event(1, { ...preparation, dates: [confirmedDate] })] });
+    const added = await h.route.POST(request({ dates: [confirmedDate, { ...confirmedDate, date: "2026-09-16" }],
+      base_event_id: 1, confirmation_version: 1 }), context());
+    assert.equal(added.status, 409);
+    const maintained = await h.route.POST(request({ dates: [confirmedDate], note: "마감 후 메모 정정", base_event_id: 1,
+      confirmation_version: 1, action_key: crypto.randomUUID() }), context());
+    assert.equal(maintained.status, 200);
+    const cancelled = await h.route.POST(request({ dates: [{ ...confirmedDate, confirmation: "unconfirmed" }],
+      base_event_id: maintained.body.event_id, confirmation_version: 1, action_key: crypto.randomUUID() }), context());
+    assert.equal(cancelled.status, 200);
+    assert.equal(h.writes.length, 2);
+  }
+});
 
 test("GET returns only linked candidates and the latest timestamp/id, with empty snapshots included", async () => {
   const h = harness({ events: [event(1, { ...preparation, note: "old" }), event(2, { ...preparation, note: "latest" }),

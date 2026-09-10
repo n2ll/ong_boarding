@@ -6,8 +6,13 @@
 - 최종 production build 및 PC/390px 브라우저 5건 통과(42.2s). 독립 타입 검사·diff 검사 통과. 명령: `npx playwright test --config=playwright.consultation.config.ts e2e/admin-status-accuracy.spec.ts e2e/jobs-handoff-status.spec.ts --grep "운영 인계 보관 분리|공고 중지"`.
 - 인계 완료 후 새 수신은 기존 /live 미답 큐에 표시됨을 교차 검토. Jobs의 완료를 '인계 완료'로 한정하고 새 답장 링크 제공.
 # 운영
-- 사용자 승인 종료 문자 1건: messages sent, manual request recorded/reconcile matched. 후보 paused 유지. 종결 기록은 새 UI 배포 후 적용 예정.
+- 사용자 승인 종료 문자 1건: messages sent, manual request recorded/reconcile matched. 후보 paused 유지. 새 운영 UI로 outcome=closed 종결 기록 및 pool event 저장 확인(2026-09-10 14:55:49 KST). 보관 목록에서 대상 제거 확인. 재발송 없음.
 - 기존 미분류 수거 문의는 공고/배송지 연결이 없어 수거일을 확정할 수 없음. 미해결 상태 보존.
 - DB 마이그레이션/새 모집 문자/외부 모델 재현 없음. 기존 파일럿 범위·기간·모델 유지.
 # 한계
 - 기존 단일 공고 자유문장 응답은 수거 지침에 의존. 복수 공고 상담은 서버 원문 인용 및 검증 경로 적용. 모든 AI 오답을 제거했다고 주장하지 않는다.
+
+# 배포 후 결과
+- PR #150 squash merge: `12e10e0fe0651afae212f7d0afbc42ec53a95566`. Vercel Preview·Production success. 관련 프로젝트 `naeyils-projects/ong-boarding`만 점검.
+- 서비스 도메인에서 새 중지 보관 처리 완료 버튼 확인 후 승인 대상 1건 종결. 기존 선택 50명·공고 3개·9/24 13:53:27 KST 종료·개별 중지 유지.
+- 미분류 수거 문의의 배송라인·배송지 확인을 사용자에게 요청했으며 미확인 사실은 발송하지 않음.
