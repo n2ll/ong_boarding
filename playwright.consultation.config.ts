@@ -6,7 +6,7 @@ const server = base.webServer as NonNullable<Exclude<typeof base.webServer, unkn
 
 export default defineConfig({
   ...base,
-  testMatch: ["multi-job-consultation.spec.ts", "admin-status-accuracy.spec.ts", "training-contact.spec.ts", "staffing-participation.spec.ts", "pool-pilot.spec.ts"],
+  testMatch: ["multi-job-consultation.spec.ts", "admin-status-accuracy.spec.ts", "training-contact.spec.ts", "staffing-participation.spec.ts", "pool-pilot.spec.ts", "jobs-handoff-status.spec.ts"],
   testIgnore: [],
   use: { ...base.use, baseURL },
   webServer: [

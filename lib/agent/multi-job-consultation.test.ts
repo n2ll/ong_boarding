@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StageContext } from "./types";
+import { hasNoAnswerableFacts } from "./cross-job.ts";
 
 const path = "./multi-job-consultation.ts";
 const mod = await import(path).catch(() => ({}));
@@ -20,6 +21,54 @@ function read(envelope: Record<string, unknown>, context = ctx(), text = "성수
   assert.equal(typeof mod.readConsultationResult, "function");
   return mod.readConsultationResult({ consultation: { answers: [], observations: [], ...envelope } }, context, text);
 }
+
+test("수거 미기재 안내만으로 조건이 비어 있는 다른 공고의 백스톱을 해제하지 않는다", () => {
+  assert.equal(hasNoAnswerableFacts({ job_id: 11, title: "배송 모집", body: "배송원 모집합니다.", branch: null, stage: "exploration", vehicle_required: true }), true);
+});
+
+test("수거 방식은 각 공고 원문 그대로 답하고 모델이 만든 반납 시간·장소는 보내지 않는다", () => {
+  const text = "성수와 강남은 각각 가방을 어떻게 수거하나요?";
+  const context = forMessage(text);
+  const first = "배송하면서 전날 가방을 맞수거합니다.";
+  const second = "당일 오후 재방문해 당일 가방을 수거합니다.";
+  context.consultation!.jobs[0].body = `배송 안내\n${first}\n문의는 매니저에게 해주세요.`;
+  context.consultation!.jobs[1].body = `업무 안내\n${second}`;
+  const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 11, fields: ["수거·반납"] }, { job_id: 22, fields: ["수거·반납"] }], reply_text: "두 공고 모두 오후 3시 창고로 반납하세요." }, context, text);
+  assert.equal(result.reply_text, `성수 오전 배송\n수거·반납: ${first}\n\n강남 오후 배송\n수거·반납: ${second}`);
+  assert.equal(result.transition.kind, "stay");
+});
+
+test("수거 미기재는 공고의 기재 상태만 답하고 다른 공고·운영 메모·배송시간으로 메우지 않는다", () => {
+  const text = "성수와 강남 가방 수거는요?";
+  const context = forMessage(text);
+  context.consultation!.jobs[0].body = "배송하면서 전날 가방을 맞수거합니다.";
+  context.consultation!.jobs[1].body = "오후 배송 업무입니다.";
+  context.consultation!.jobs[1].ai_facts = "수거·반납: 오후 3시 창고 반납";
+  const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 11, fields: ["수거·반납"] }, { job_id: 22, fields: ["수거·반납"] }] }, context, text);
+  assert.match(result.reply_text, /강남 오후 배송\n수거·반납: 이 공고에는 수거·반납 업무가 안내되어 있지 않아요/);
+  assert.doesNotMatch(result.reply_text, /오후 3시|창고|13:00|수거.*없/);
+  assert.equal(result.consultation.handoff, false);
+  assert.equal(result.transition.kind, "stay");
+});
+
+test("수거 원문의 일부 배송지·반납 시각 미정은 보존하고 가방 날짜·상세 주소는 더하지 않는다", () => {
+  const text = "성수 공고 가방 수거와 반납은 어떻게 하나요?";
+  const context = forMessage(text);
+  context.consultation!.jobs[0].body = "• 업무: 중식 배송, 일부 배송지 맞수거, 당일 서쪽 구역 반납까지 포함\n• 반납지: 가상시 검수로 123. 반납 완료 시각은 확인 후 안내드립니다.";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["수거·반납"] }] }, context, text);
+  assert.match(result.reply_text, /일부 배송지 맞수거, 당일 서쪽 구역 반납까지 포함/);
+  assert.match(result.reply_text, /반납 완료 시각은 확인 후 안내드립니다/);
+  assert.doesNotMatch(result.reply_text, /전날|당일 가방|검수로 123|재방문/);
+});
+
+test("수거만 물은 질문에 배송시간·집결지를 대신 대입하는 자동 답변을 보류한다", () => {
+  const text = "성수 가방 수거는 몇 시에 어디서 하나요?";
+  for (const fields of [["근무시간"], ["집결지(대략)"]]) {
+    const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields }] }, forMessage(text), text);
+    assert.equal(result.reply_text, null);
+    assert.equal(result.transition.kind, "pause");
+  }
+});
 
 test("answers both jobs from their own stored facts, ignoring invented freeform reply", () => {
   const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 11, fields: ["근무시간"] }, { job_id: 22, fields: ["본인 차량"] }], reply_text: "두 곳 모두 확정입니다" });

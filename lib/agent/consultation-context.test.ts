@@ -113,3 +113,13 @@ test("지원자가 없으면 상담 목록을 만들지 않는다", async () => 
   const { supabase } = client(database([job(1)]));
   await assert.rejects(loadConsultationJobs(supabase, 999), /지원자|applicant/);
 });
+
+test("수거 상담 근거로 노출된 해당 공고의 본문만 전달한다", async () => {
+  const body = "배송하면서 전날 가방을 맞수거합니다.";
+  const { supabase, requests } = client(database([
+    job(1, { body }), job(2, { body: "당일 오후 재방문해 가방을 수거합니다.", exposure: "none" }),
+  ]));
+  const result = await loadConsultationJobs(supabase, 7);
+  assert.deepEqual(result.map((row) => [row.job_id, row.body]), [[1, body]]);
+  assert.ok(requests.filter((url) => url.pathname.endsWith("/jobs")).every((url) => url.searchParams.get("select")?.split(/,\s*/).includes("body")));
+});

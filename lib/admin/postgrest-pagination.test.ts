@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
 import { jobCandidateAggregateStage } from "./job-operations.ts";
+import { getHandoffDisposition } from "./handoff-disposition.ts";
 
 type PageResult<T> = {
   data: T[] | null;
@@ -110,6 +111,7 @@ function loadRouteModule(
     "@/lib/agent/danggeun-job": { DANGGEUN_SYSTEM_JOB_TITLE: "__system__" },
     "@/lib/jobs": { isJobEffectivelyClosed: () => false },
     "@/lib/admin/job-operations": { isReviewReadyCandidate: () => false, jobCandidateAggregateStage },
+    "@/lib/admin/handoff-disposition": { getHandoffDisposition },
     "@/lib/admin/postgrest-pagination": { fetchAllPostgrestRows },
   };
 
@@ -222,6 +224,31 @@ test("admin job list returns rows after the PostgREST 1000-row boundary", async 
   assert.equal(response.status, 200);
   assert.equal(returnedJobs.length, 1_001);
   assert.equal(returnedJobs[1_000].id, 1_001);
+});
+
+test("job list keeps paused headcounts but separates completed, held and actionable handoffs", async () => {
+  const base = { job_id: 7, agent_stage: "paused", sent_at: null, responded_at: null, applicants: null };
+  const candidates = [
+    { ...base, id: 1, agent_state: { meta: { handoff_resolved: { at: "2026-01-02T00:00:00Z" } } } },
+    { ...base, id: 2, paused_reason: "매니저 수동 일시정지" },
+    { ...base, id: 3, paused_reason: "매니저 직접 응답 — 자동 전환" },
+    { ...base, id: 4, agent_state: { meta: { paused_at: "2026-01-03T00:00:00Z", handoff_resolved: { at: "2026-01-02T00:00:00Z" } } } },
+    { ...base, id: 5, agent_state: { meta: { handoff_resolved: { at: "invalid" } } } },
+    { ...base, id: 6, agent_stage: "screening", responded_at: "2026-01-02T00:00:00Z" },
+    { ...base, id: 7, job_id: 8, paused_reason: "문의 확인 필요" },
+  ];
+  const before = JSON.stringify(candidates);
+  const supabase = createSupabaseStub((table, _operation, from, to) => ({ data: (table === "jobs"
+    ? [{ id: 7, title: "가상 배송", status: "active" }, { id: 8, title: "[검수] 가상 배송", status: "active" }]
+    : table === "job_candidates" ? candidates : []).slice(from, to + 1), error: null }));
+  const route = loadRouteModule(new URL("../../app/api/admin/jobs/route.ts", import.meta.url), supabase);
+  const response = await route.GET({ url: "http://localhost/api/admin/jobs" });
+  assert.equal(response.status, 200);
+  const jobs = JSON.parse(JSON.stringify(response.body.jobs));
+  assert.deepEqual(jobs[0].counts, { paused: 5, screening: 1 });
+  assert.deepEqual(jobs[0].handoff_counts, { action_required: 3, intentional_pause: 1, resolved: 1 });
+  assert.deepEqual(jobs[1].handoff_counts, { action_required: 0, intentional_pause: 1, resolved: 0 });
+  assert.equal(JSON.stringify(candidates), before);
 });
 
 test("admin job aggregates chunk accumulated job ids before building PostgREST in filters", async () => {

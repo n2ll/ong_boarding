@@ -107,7 +107,7 @@ import {
   type JobAcquisitionPerformanceRow,
 } from "@/lib/admin/job-acquisition-view";
 import { jobTrackingSubmissionLabel } from "@/lib/admin/job-tracking-submissions";
-import { jobCandidateBoardView } from "@/lib/admin/job-candidate-board-view";
+import { jobCandidateBoardStage, jobCandidateBoardView } from "@/lib/admin/job-candidate-board-view";
 
 const JOB_CREATE_DRAFT_CONFLICT_TOAST_ID = "job-create-draft-conflict";
 
@@ -136,7 +136,9 @@ interface JobRow {
   targetedExposure: boolean;
   candidates: number;
   newCandidates: number;
-  pausedCandidates: number;
+  attentionCandidates: number;
+  heldCandidates: number;
+  resolvedCandidates: number;
   reviewReady: number;
   aiInProgress: number;
   confirmed: number;
@@ -174,6 +176,7 @@ interface ApiJob {
   work_period: string | null;
   closes_at: string | null;
   counts: Record<string, number>;
+  handoff_counts?: { action_required: number; intentional_pause: number; resolved: number };
   // 매니저 명시 확정(applicants.status='확정인력') 수 — 충원율 게이지의 분자.
   confirmed_count?: number;
   // 온보딩·활동 단계이지만 아직 매니저 확정 전인 후보 수.
@@ -202,6 +205,8 @@ interface JobCand {
   id: number;
   applicant_id: number;
   agent_stage: string | null;
+  paused_reason?: string | null;
+  agent_state?: unknown;
   closed_reason: string | null;
   sent_at: string | null;
   responded_at: string | null;
@@ -315,7 +320,7 @@ function slotMatch(confirmed: string | null | undefined, key: string): boolean {
 const STAGE_KO: Record<string, string> = {
   unstarted: "대기",
   exploration: "초기 대화", screening: "스크리닝", onboarding: "온보딩",
-  active: "활동 중", paused: "수동 응대", abort: "중단",
+  active: "활동 중", paused: "사람 확인", paused_held: "중지 유지", paused_resolved: "인계 완료 · 중지 유지", abort: "중단",
 };
 // 마감 안내 최종 본문 — 일반 배송 라인이면 선탑 제안 포함. 모달 미리보기와 실제 발송이 같은 본문을 쓴다.
 const closeNoticeBody = (job: JobRow) =>
@@ -701,7 +706,9 @@ function toJobRow(j: ApiJob): JobRow {
     // "sent"는 발송 전 후보의 집계 키(관심 표시·공개 지원 등 AI 응대 시작 전).
     // 키를 바꾸면 jobs/[id] GET·Recommendations 등 다른 소비처가 깨져 키는 유지하고 라벨만 정합.
     newCandidates: j.counts?.["sent"] ?? 0,
-    pausedCandidates: j.counts?.["paused"] ?? 0,
+    attentionCandidates: j.handoff_counts?.action_required ?? j.counts?.["paused"] ?? 0,
+    heldCandidates: j.handoff_counts?.intentional_pause ?? 0,
+    resolvedCandidates: j.handoff_counts?.resolved ?? 0,
     reviewReady: j.review_ready_count ?? 0,
     aiInProgress: ["exploration", "screening"].reduce((a, s) => a + (j.counts?.[s] ?? 0), 0),
     // 충원율 분자 = 매니저 확정(status='확정인력')만. agent_stage='active'(자동 전이)는 확정이 아니다.
@@ -728,7 +735,7 @@ function toJobOperationInput(job: JobRow): JobOperationInput {
     capacity: job.capacity,
     confirmed: job.confirmed,
     waiting: job.newCandidates,
-    paused: job.pausedCandidates,
+    paused: job.attentionCandidates,
     reviewReady: job.reviewReady,
     inProgress: job.aiInProgress,
   };
@@ -1376,7 +1383,7 @@ export function Jobs() {
   const boardJob = candPanel ? jobs.find((j) => Number(j.id) === candPanel.jobId) : undefined;
   const boardJobClosed = boardJob?.effectivelyClosed ?? false;
   const boardPolicy = jobCandidateBoardPolicy(boardJobClosed);
-  const candidateView = jobCandidateBoardView(sortedCandidates, jobsError ? null : boardJob?.interestCount);
+  const candidateView = jobCandidateBoardView(sortedCandidates, jobsError ? null : boardJob?.interestCount, boardJob?.title);
   const stageGroups = candidateView.groups;
   // 로딩/에러를 빈 상태와 구분 — 미구분 시 느린 로딩·500에서 '공고 0건'으로 오인된다.
   const jobsFirstLoad = jobsLoading && !jobsApi;
@@ -3393,8 +3400,14 @@ export function Jobs() {
                     <ChevronRight size={14} className="text-muted-foreground group-hover/cand:text-info-strong" />
                   </button>
                   <div className="flex flex-wrap gap-1">
-                    {job.pausedCandidates > 0 && (
-                      <Badge variant="priority-critical">수동 응대 {job.pausedCandidates}</Badge>
+                    {job.attentionCandidates > 0 && (
+                      <Badge variant="priority-critical">사람 확인 {job.attentionCandidates}</Badge>
+                    )}
+                    {job.resolvedCandidates > 0 && (
+                      <Badge title="인계 처리 완료 · 자동 응대 중지 유지">인계 완료 {job.resolvedCandidates}</Badge>
+                    )}
+                    {job.heldCandidates > 0 && (
+                      <Badge title="의도적 중지·검수 보관 · 현재 처리할 인계에서 제외">중지 유지 {job.heldCandidates}</Badge>
                     )}
                     {job.newCandidates > 0 && (
                       <Badge>대기 {job.newCandidates}</Badge>
@@ -3403,7 +3416,7 @@ export function Jobs() {
                       <Badge variant="stage-screening" title="스크리닝을 마쳤지만 아직 매니저가 확정하지 않은 후보">후보 검토 {job.reviewReady}</Badge>
                     )}
                     {job.aiInProgress > 0 && (
-                      <Badge variant="info">AI 진행 {job.aiInProgress}</Badge>
+                      <Badge variant="info">대화 단계 {job.aiInProgress}</Badge>
                     )}
                     {job.interestCount === null ? (
                       <Badge variant="warning">관심 표시 확인 필요</Badge>
@@ -5042,6 +5055,12 @@ export function Jobs() {
                   </div>
                   <Button variant="ghost" size="icon" aria-label="지원자 보드 닫기" onClick={closeCandidateBoard}><X size={20} /></Button>
                 </div>
+                {candidateView.groups.some((group) => group.stage === "paused_resolved") && (
+                  <p className="mt-2 text-[12px] text-muted-foreground">
+                    인계 완료는 이전 문의의 처리 기록입니다.{" "}
+                    <Link href="/live" className="underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">새 답장 확인</Link>
+                  </p>
+                )}
                 {boardPolicy.readOnly && (
                   <div className="mt-3 rounded-xl border border-border-strong bg-muted px-3 py-2.5 text-[12px] font-bold text-gray-700">
                     <div className="flex items-center gap-1.5"><PauseCircle size={14} /> {boardPolicy.label}</div>
@@ -5075,7 +5094,7 @@ export function Jobs() {
                   </>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-4 space-y-3">
                 {candState === "loading" && <div className="text-[13px] text-muted-foreground text-center py-8">불러오는 중…</div>}
                 {candState === "error" && (
                   <div role="alert" className="rounded-2xl border border-error/30 bg-error-soft p-4 text-error-strong">
@@ -5235,6 +5254,7 @@ export function Jobs() {
                       // 이미 확정된 사람에게는 '확정' 버튼을 띄우지 않는다(확정 취소는 지원자 상세에서).
                       const alreadyConfirmed = a?.status === "확정인력";
                       const isPaused = stage === "paused";
+                      const displayStage = jobCandidateBoardStage(c, boardJob?.title);
                       const isClosed = stage === "abort";
                       const phone = a?.phone ?? null;
                       // 우선순위 메타 — 가용성 · 공고 거리 · 원지원일. 없는 값은 생략(추천순 정렬 근거와 동일 소스).
@@ -5278,7 +5298,7 @@ export function Jobs() {
                                 isClosed ? (
                                   <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${closedKind(c.closed_reason).badge}`}>{closedKind(c.closed_reason).label}</span>
                                 ) : (
-                                  <StageBadge stage={stage} />
+                                  <StageBadge stage={displayStage} label={STAGE_KO[displayStage]} />
                                 )
                               )}
                             </div>

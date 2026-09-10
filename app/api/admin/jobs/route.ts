@@ -13,6 +13,7 @@ import { geocodeAddressWithFallback } from "@/lib/kakao-geocode";
 import { normalizeRule } from "@/lib/exposure";
 import { jobSupportsRadius } from "@/lib/geo";
 import { isReviewReadyCandidate, jobCandidateAggregateStage } from "@/lib/admin/job-operations";
+import { getHandoffDisposition, type HandoffDisposition } from "@/lib/admin/handoff-disposition";
 import {
   resolveJobCreateRouting,
   validateJobCreateRequiredFields,
@@ -34,6 +35,8 @@ const RECRUIT_MODES = new Set(["external", "internal", "both"]);
 type JobAggregateCandidateRow = {
   job_id: number;
   agent_stage: string | null;
+  paused_reason: string | null;
+  agent_state: unknown;
   sent_at: string | null;
   responded_at: string | null;
   applicants:
@@ -121,6 +124,8 @@ export async function GET(req: NextRequest) {
     (jobs ?? []).filter((j) => isJobEffectivelyClosed(j.status as string | null, j.closes_at as string | null)).map((j) => j.id as number)
   );
   const stageCounts: Record<number, Record<string, number>> = {};
+  const handoffCounts: Record<number, Record<HandoffDisposition["state"], number>> = {};
+  const jobTitles = new Map((jobs ?? []).map((job) => [job.id, job.title]));
   const confirmedCounts: Record<number, number> = {};
   const reviewReadyCounts: Record<number, number> = {};
   const interestCounts: Record<number, number> = {};
@@ -134,7 +139,7 @@ export async function GET(req: NextRequest) {
         fetchJobAggregateRows(jobIds, "공고 후보 집계", async (jobIdChunk, from, to) => {
           const result = await supabase
             .from("job_candidates")
-            .select("id, job_id, agent_stage, sent_at, responded_at, applicants:applicant_id ( status, current_job_id )")
+            .select("id, job_id, agent_stage, paused_reason, agent_state, sent_at, responded_at, applicants:applicant_id ( status, current_job_id )")
             .in("job_id", jobIdChunk)
             .order("id", { ascending: true })
             .range(from, to);
@@ -193,6 +198,12 @@ export async function GET(req: NextRequest) {
       const stage = jobCandidateAggregateStage(c.agent_stage, c.sent_at, c.responded_at);
       stageCounts[jid] ??= {};
       stageCounts[jid][stage] = (stageCounts[jid][stage] ?? 0) + 1;
+      // 단계는 유지하고, /live와 동일한 근거로 현재 처리할 인계만 별도 집계한다.
+      if (stage === "paused") {
+        const disposition = getHandoffDisposition({ ...c, job_title: jobTitles.get(jid) });
+        handoffCounts[jid] ??= { action_required: 0, intentional_pause: 0, resolved: 0 };
+        handoffCounts[jid][disposition.state] += 1;
+      }
       // supabase 조인은 1:1이어도 배열/객체로 올 수 있어 둘 다 방어.
       const rel = c.applicants;
       const a = Array.isArray(rel) ? rel[0] : rel;
@@ -229,6 +240,7 @@ export async function GET(req: NextRequest) {
   const enriched = (jobs ?? []).map((j) => ({
     ...j,
     counts: stageCounts[j.id] ?? {},
+    handoff_counts: handoffCounts[j.id] ?? { action_required: 0, intentional_pause: 0, resolved: 0 },
     confirmed_count: confirmedCounts[j.id] ?? 0,
     review_ready_count: reviewReadyCounts[j.id] ?? 0,
     interest_count: interestCounts[j.id] ?? 0,

@@ -1,5 +1,6 @@
 import { buildTrainingFollowup, TRAINING_FOLLOWUP_GUIDANCE } from "./training-followup.ts";
 import { CROSS_JOB_FIELD_NAMES, splitJobFacts } from "./cross-job.ts";
+import { isCollectionOnlyQuestion } from "./delivery-collection.ts";
 import { likelyRegionInquiry, pickupMatchesRegions, validateRegionPreferences } from "./region-preference.ts";
 import { matchJobsByText } from "./inbound-routing.ts";
 import type { ConsultationJob, ConsultationObservation, RegionPreference } from "./consultation-types";
@@ -61,6 +62,7 @@ export function consultationSystemSuffix(ctx: StageContext): string {
 - mode=answer: 다른 공고/여러 공고의 조건 문의, 비교, 공고별 관심·가능 시간 발언. job_ids에 대상들을 넣고 answers에는 이번에 질문한 항목만 넣어라. 조건 값이나 계산 결과를 작성하지 마라. 서버가 해당 공고의 등록 값으로 답한다.
 - answers와 observations는 서로 독립이며 빈 배열이 정상이다. 시간만 물으면 answers에는 근무시간만, observations=[]다. 관심·가능 시간만 말하고 조건을 묻지 않으면 answers=[]다. 목록의 missing은 미등록 항목 표시일 뿐 안내·수집할 체크리스트가 아니다. 묻지 않은 missing 항목을 답변에 추가하거나 이를 이유로 handoff하지 마라.
 - 선탑·동승·교육의 목적/일정/소요시간/교육비 질문은 answers.fields=["선탑·교육"]다. 배송 근무시간·시작일·배송 대금으로 대체하지 마라. 지원자가 먼저 교육 조건을 물으면 등록된 교육 안내로 답하고, 근무시간과 교육시간을 같은 것으로 취급하지 마라. 후속 질문의 공고는 최근 대화에서 지원자가 선택한 대상을 우선 해석하되 불명확하면 clarify. 전체 노출 공고로 임의 확대하지 마라.
+- 수거·맞수거·회수·재방문·반납 질문은 현재 공고도 mode=answer, answers.fields=["수거·반납"]로 해당 공고 원문을 인용한다. 배송시간·집결지로 대신 답하지 마라. 원문에 없는 가방 날짜·수거 범위·추가 방문·반납 장소나 시각을 만들지 마라. 물은 세부 조건이 원문에 없거나 상세 주소/연락처를 물으면 mode=handoff로 확인을 요청하되, 안내 가능한 원문 항목은 answers에 유지한다.
 - 질문에 해당하는 항목이 answers.fields 목록에 없으면 비슷한 항목으로 바꾸지 마라. 예를 들어 주차비·유류비 지원 여부는 본인 차량 보유 여부가 아니다. 지원되지 않는 조건 질문은 consultation.reason에 적고 consultation.mode="handoff"로 반환하되, 답할 수 있는 다른 질문의 항목만 answers에 넣어라. FAQ에서 답을 알아도 이 목록에 없는 자유문장은 전송되지 않는다. reason에 이를 이미 안내했다고 쓰지 말고, 아직 답하지 않은 질문으로 관리자에게 전달하라.
 - observations: 이번 미응답 수신 문자에 명시한 긍정 관심(interest) 또는 본인의 가능 시간(availability)만 공고별로 기록한다. source_message_id는 source_messages의 id를 그대로 복사하고 quote는 그 body의 연속된 원문을 그대로 복사한다. 원문에 있는 공고명과 긍정 의사를 보존하되 없는 공고명을 덧붙이거나 번호를 공고명으로 바꾸지 마라. 띄어쓰기·쉼표·줄바꿈도 바꾸지 말고 다른 절을 이어 붙이지 마라. 예를 들어 원문이 '1, 3번\\n22일 가능'이면 quote는 같은 줄바꿈을 포함한 전체 원문 또는 '22일 가능'이다. 단순히 공고를 질문한 것은 관심 표시가 아니다. '각각 몇 시에 일하나요?' 같은 순수 질문은 반드시 observations=[]다. 질문/가정/부정/인용된 타인 발언을 기록하지 마라. 과거 대화의 발언을 새로 기록하지 마라.
 - 'A는 월요일 가능합니다. B는 금요일 가능합니다'는 공고별 availability 관찰 2건, answers=[], mode=answer다. '둘 다 관심 있어요'도 interest 관찰이며 근무 확정 요청이 아니다. 상담 원문 기록에 현재 공고의 체크리스트·평일 전체 근무·요일 부분 제한 규칙을 적용하지 마라. 지원자가 실제로 요일 조정·병행 근무·배정 판단을 요청한 경우에만 해당 사유로 handoff한다.
@@ -181,13 +183,16 @@ export function readConsultationResult(out: { consultation?: unknown }, ctx: Sta
     if (otherIds.some((id) => !answers.some((answer) => answer?.job_id === id) && !observations.some((signal) => signal?.job_id === id))) return blocked(ctx, "지역 문의에 섞인 공고 질문·의사 누락");
   }
   if (mode === "current") {
-    if (regionPreferences.length || ctx.consultation!.sourceMessages.some((source) => likelyRegionInquiry(source.body)) || numbered || ctx.consultation!.force || ids.length !== 1 || ids[0] !== ctx.job?.id || answers.length || observations.length ||
+    if (isCollectionOnlyQuestion(sourceText) || regionPreferences.length || ctx.consultation!.sourceMessages.some((source) => likelyRegionInquiry(source.body)) || numbered || ctx.consultation!.force || ids.length !== 1 || ids[0] !== ctx.job?.id || answers.length || observations.length ||
       named.some((id) => id !== ctx.job?.id) || PLURAL.test(sourceText) ||
       (ctx.consultation!.ambiguousFollowup && !named.includes(ctx.job?.id ?? -1))) return blocked(ctx, "현재 공고 진행으로 단정할 수 없는 문자");
     return null;
   }
   if (!ids.length && !regionPreferences.length && mode !== "handoff") return blocked(ctx, "상담 대상 누락");
   if (mode === "clarify" && (answers.length || observations.length)) return blocked(ctx, "모호한 답변에서 의사 기록 시도");
+  if (isCollectionOnlyQuestion(sourceText) && answers.some((answer) => Array.isArray(answer?.fields) && answer.fields.some((field: string) => ["근무시간", "근무기간", "시작일", "집결지(대략)"].includes(field)))) {
+    return blocked(ctx, "수거·반납 질문에 배송 시간·집결지를 대입할 수 없음");
+  }
   // 실운영 회귀: '교육일정과 시간, 교육비'를 배송 근무시간·일 대금으로 답한 오분류를 막는다.
   // 배송 조건도 함께 묻는 문자는 기존 복수 항목 답변을 허용한다.
   const trainingOnlyQuestion = /(?:선탑|동승|교육)[^.!?？\n]{0,16}(?:일정|시간|소요|비용|교육비|얼마|언제|몇|어디)|교육비/.test(sourceText)

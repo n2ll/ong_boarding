@@ -143,8 +143,8 @@ export function jobOperationMeta(input: JobOperationInput): JobOperationMeta {
       fillPercent,
       attention,
       nextAction: {
-        label: `AI 응대 ${input.inProgress}명`,
-        description: "자동 응대 진행 중 · 완료 후 매니저가 검토",
+        label: `대화 단계 ${input.inProgress}명`,
+        description: "초기 대화·스크리닝 단계 · 자동 응대 여부는 현재 AI 모드를 확인하세요",
         tone: "info",
       },
     };
