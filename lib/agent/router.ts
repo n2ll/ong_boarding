@@ -23,6 +23,7 @@ import { loadConsultationJobs } from "./consultation-context";
 import { loadConsultationHistory } from "./consultation-history";
 import { saveConsultationObservations } from "./consultation-observations";
 import { likelyRegionInquiry } from "./region-preference";
+import { hasManagerTrainingProgress } from "./training-followup";
 import { isGeneralLineJob, joinedClientType } from "./general-line";
 import { ensureExposureIncludeForLinked } from "../exposure";
 import { BAEMIN_SYSTEM_JOB_TITLE } from "./baemin-job";
@@ -34,6 +35,7 @@ import { explorationStage } from "./stages/exploration";
 import { onboardingStage } from "./stages/onboarding";
 import { screeningStage } from "./stages/screening";
 import { activeStage } from "./stages/active";
+import { processConsultation } from "./stages/consultation";
 import { recordUsage, toMessageTokens, type UsagePurpose } from "./usage";
 import { getAgentMode, COPILOT_DRAFT_MARKER, type AgentMode } from "./kill-switch";
 import { detectAutomatedOutboundSafetyViolation } from "./outbound-safety";
@@ -341,6 +343,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     !!(await getSystemMessage(supabase, "baemin_suspended"))?.trim();
 
   let consultation: StageContext["consultation"];
+  let managerTraining = false;
   let history: ConversationTurn[] = [];
   let otherActiveJobs: OtherActiveJob[] = [];
   try {
@@ -364,13 +367,15 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       }
     }
     history = recent.history;
-    const enabled = jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id)
+    // 관리자가 선탑을 진행 중이면 체크리스트 재시작보다 조건 상담·신규 원문 기록을 우선한다.
+    managerTraining = isGeneralLineJob(job) && jobs.some((item) => item.job_id === job.id && hasManagerTrainingProgress(item));
+    const enabled = jobs.some((item) => item.manager_preparation) || jobs.length > 1 || input.consultation_only || recent.ambiguousFollowup || (jobs.length === 1 && jobs[0].job_id !== job.id)
       || recent.sourceMessages.some((message) => likelyRegionInquiry(message.body));
     otherActiveJobs = jobs.filter((j) => j.job_id !== job.id && !j.expired)
       .map((j) => ({ ...j, stage: j.stage ?? "exploration" }));
     if (enabled) {
       consultation = { jobs, sourceMessages: recent.sourceMessages, numberedReferences: recent.numberedReferences, ambiguousFollowup: recent.ambiguousFollowup,
-        force: input.consultation_only === true || !currentAllowed };
+        force: input.consultation_only === true || !currentAllowed || managerTraining };
     }
   } catch (error) {
     const reason = `공고 상담 자료 조회 실패 — ${error instanceof Error ? error.message : String(error)}`;
@@ -430,7 +435,9 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
     return { ok: true, skipped: "conversation closing", reply_sent: false, draft_created: false, next_stage: stageName, reasoning };
   }
   const suppressConversationReply = shouldSuppressConversationReply(cleanInbound, history);
-  const result = await stage.process(ctx, cleanInbound);
+  const result = managerTraining
+    ? await processConsultation(ctx, cleanInbound)
+    : await stage.process(ctx, cleanInbound);
   if (suppressConversationReply) {
     // 정보·거절·검증된 상담 관찰은 처리하되, 종료 뒤 후속 질문과 전이 자동 안내는 보내지 않는다.
     result.reply_text = null;

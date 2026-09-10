@@ -111,7 +111,9 @@ function harness(stageName: string, output: Record<string, unknown> | null, fail
   }
   return {
     requests,
-    stage: load(resolve(stageDirectory, stageName))[`${stageName}Stage`] as Stage,
+    stage: (stageName === "consultation"
+      ? { process: load(resolve(stageDirectory, stageName)).processConsultation }
+      : load(resolve(stageDirectory, stageName))[`${stageName}Stage`]) as Stage,
   };
 }
 
@@ -417,4 +419,58 @@ test("exploration: a single unforced job preserves the original tool contract", 
   assert.equal(result.transition.kind, "advance");
   assert.equal(result.consultation, undefined);
   assert.ok(!requests[0].body.tools[0].input_schema.required.includes("consultation"));
+});
+
+function managerContext(body: string): StageContext {
+  const ctx = context();
+  ctx.job!.client_type = "general";
+  ctx.consultation!.jobs = [ctx.consultation!.jobs[0]];
+  ctx.consultation!.force = true;
+  ctx.consultation!.sourceMessages[0].body = body;
+  ctx.consultation!.jobs[0].ai_facts = "선탑·교육: 앱 사용 교육 약 2시간, 일정은 매니저 조율";
+  ctx.consultation!.jobs[0].manager_preparation = {
+    training_status: "scheduled", backup_intent: "interested",
+    training_availability: { has_date: true, has_time: true },
+    training_completed: false, backup_completed: false,
+    manager_follow_up_open: true, last_contact_recorded: true,
+  };
+  return ctx;
+}
+
+test("manager training context reaches the dedicated consultation request while public answers and state stay bounded", async () => {
+  const body = "새벽 배송 시간 알려주세요. 새벽 배송 관심 있어요.";
+  const ctx = managerContext(body);
+  const before = structuredClone(ctx);
+  const { stage, requests } = harness("consultation", advancingOutput({ mode: "answer", job_ids: [10],
+    answers: [{ job_id: 10, fields: ["근무시간"] }], observations: [{ job_id: 10, source_message_id: "inbound-1", kind: "interest", quote: "새벽 배송 관심 있어요." }] }));
+  const result = await stage.process(ctx, body);
+  assert.match(requests[0].body.messages[0].content, /"manager_preparation":\{"training_status":"scheduled"/);
+  assert.match(result.reply_text!, /04:00~08:00/);
+  assert.doesNotMatch(result.reply_text!, /희망하시나요|알려주시겠어요|scheduled|예약|확정됐/);
+  assert.equal(result.transition.kind, "stay");
+  assertNoProgress(result, before, ctx);
+  assert.equal(requests.length, 1);
+});
+
+test("manager-context consultation rejects a model attempt to restart current-stage collection", async () => {
+  const body = "새벽 배송 관심 있어요";
+  const ctx = managerContext(body);
+  const before = structuredClone(ctx);
+  const { stage } = harness("consultation", advancingOutput({ mode: "current", job_ids: [10], answers: [], observations: [] }));
+  const result = await stage.process(ctx, body);
+  assert.equal(result.transition.kind, "pause");
+  assert.equal(result.reply_text, null);
+  assertNoProgress(result, before, ctx);
+});
+
+test("individual training rescheduling remains a manager handoff despite a saved appointment", async () => {
+  const body = "새벽 배송 선탑 날짜를 바꿔주세요";
+  const ctx = managerContext(body);
+  const before = structuredClone(ctx);
+  const { stage } = harness("consultation", advancingOutput({ mode: "handoff", job_ids: [10], answers: [], observations: [], reason: "개별 선탑 일정 변경 요청" }));
+  const result = await stage.process(ctx, body);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text!, /매니저/);
+  assert.doesNotMatch(result.reply_text!, /변경했|확정됐|희망하시나요/);
+  assertNoProgress(result, before, ctx);
 });

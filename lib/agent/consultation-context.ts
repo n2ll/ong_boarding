@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllPostgrestRows } from "../admin/postgrest-pagination.ts";
+import { parseStaffingPreparation, STAFFING_PREPARATION_EVENT } from "../admin/staffing-preparation.ts";
 import { fetchOverridesForApplicant, isExposed, normalizeRule, type ExposureApplicant, type ExposureMode } from "../exposure.ts";
 import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "../geo.ts";
 import { isSystemJobTitle, slotKeysLabel } from "../jobs.ts";
-import type { ConsultationJob } from "./consultation-types.ts";
+import type { ConsultationJob, ManagerPreparationContext } from "./consultation-types.ts";
+import { trainingReplyEvidence } from "./training-followup.ts";
 
 const JOB_COLUMNS = `id, title, body, branch, status, recruit_mode, exposure, exposure_rule, closes_at, slot, slot_keys, start_date, work_period, pay_info, pay_type, pay_amount, ai_facts, pickup_address, vehicle_required, ${EXPOSURE_JOB_GEO_COLUMNS}`;
 const ID_BATCH_SIZE = 200;
@@ -101,9 +103,45 @@ export async function loadConsultationJobs(supabase: SupabaseClient, applicantId
     suntopDone = Boolean(data);
   }
   const applicant = { ...applicantResult.data, suntopDone } as ExposureApplicant;
-  return jobs.filter((job) => job.exposure === "all" || (
+  const exposedJobs = jobs.filter((job) => job.exposure === "all" || (
     job.exposure === "targeted" && isExposed(applicant, normalizeRule(job.exposure_rule), overrides.get(job.id), { job, nowMs })
-  )).sort((a, b) => a.id - b.id).map((job) => {
+  ));
+  const preparationJobIds = exposedJobs.filter((job) => {
+    const candidate = candidateByJob.get(job.id);
+    return candidate && !candidate.closed_at && !candidate.closed_reason && candidate.agent_stage !== "paused" && candidate.agent_stage !== "abort"
+      && (job.closes_at === null || Date.parse(job.closes_at) > nowMs);
+  }).map((job) => job.id);
+  const preparations = new Map<number, ManagerPreparationContext>();
+  for (let offset = 0; offset < preparationJobIds.length; offset += ID_BATCH_SIZE) {
+    type PreparationRow = { id: number; job_id: number; meta: unknown; created_at: string };
+    const events = await fetchAllPostgrestRows<PreparationRow>(async (from, to) => {
+      const result = await supabase.from("pool_events").select("id, job_id, meta, created_at")
+        .eq("applicant_id", applicantId).eq("event_type", STAFFING_PREPARATION_EVENT)
+        .in("job_id", preparationJobIds.slice(offset, offset + ID_BATCH_SIZE))
+        .order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+      return { data: result.data as PreparationRow[] | null, error: result.error };
+    }, "매니저 운영 준비 기록");
+    const latest = new Map<number, PreparationRow>();
+    for (const event of events) if (!latest.has(event.job_id)) latest.set(event.job_id, event);
+    for (const [jobId, event] of latest) {
+      // 손상·삭제된 최신 스냅샷을 과거의 유효한 값으로 보충하지 않는다.
+      const preparation = parseStaffingPreparation(event.meta);
+      if (!preparation || typeof preparation.training.status !== "string" || typeof preparation.training.backup_intent !== "string") {
+        throw new Error("매니저 운영 준비 기록이 올바르지 않습니다.");
+      }
+      const availability = trainingReplyEvidence(preparation.training_availability, true);
+      preparations.set(jobId, {
+        training_status: preparation.training.status,
+        backup_intent: preparation.training.backup_intent,
+        training_availability: { has_date: availability.hasDate, has_time: availability.hasTime },
+        training_completed: preparation.records.some((record) => record.kind === "training"),
+        backup_completed: preparation.records.some((record) => record.kind === "backup"),
+        manager_follow_up_open: preparation.follow_up?.status === "open" && Boolean(preparation.follow_up.next_action),
+        last_contact_recorded: Boolean(preparation.follow_up?.last_contact),
+      });
+    }
+  }
+  return exposedJobs.sort((a, b) => a.id - b.id).map((job) => {
     const candidate = candidateByJob.get(job.id);
     return {
       job_id: job.id,
@@ -122,6 +160,7 @@ export async function loadConsultationJobs(supabase: SupabaseClient, applicantId
       pay_amount: job.pay_amount,
       pickup_address: job.pickup_address,
       vehicle_required: job.vehicle_required,
+      ...(preparations.has(job.id) ? { manager_preparation: preparations.get(job.id)! } : {}),
     };
   });
 }

@@ -6,4 +6,6 @@
 - `npx tsc --noEmit`, `git diff --check` 통과. E2E 중 input의 긴 접근성 이름을 label/설명으로 분리했고, 비교 테스트의 innerText/textContent 불일치를 바로잡았다.
 - 독립 리뷰: 동일 action_key가 최초 조회 이후 커밋된 경우 409로 잘못 응답하는 경합을 발견해 재조회로 보완했다. 해당 RED→GREEN 포함.
 - 실데이터: 파일럿 날짜별 수요를 추정하거나 입력하지 않았다. 지원자·문자·AI 설정 변경 없음.
-- DB 선행 적용·PR 머지·운영 배포 검수: 대기.
+- 운영 DB: 옹보딩 `lrktxyfzxwwpjffzltnq`의 파일럿 공고 50/51/52 제목으로 대상 확인 후 SQL 선행 적용. RLS true, anon/authenticated SELECT false, service_role SELECT/INSERT true·UPDATE/DELETE false, 5개 인덱스 및 초기 0행 확인.
+- PR #153 스쿼시 머지: `b19e9dcf62546721c41af1c6d657d0bc7ae20e2e` (2026-09-10 16:52 KST). 검증 브랜치와 main 파일 차이 없음. Preview·Production 빌드 통과.
+- 운영 배포 `5sr6CSe5VLfWfAPpvMG5q4x9ucyE` Ready 및 production 도메인 연결 확인. 실제 `/jobs`에서 9/21~23·3개 파일럿 라인이 모두 수요 미정으로 조회되고 성동·광진 9/21 수요 입력 창이 정상 열림/닫힘을 확인했다. 운영 저장이나 발송 없이 읽기 검수만 진행.
