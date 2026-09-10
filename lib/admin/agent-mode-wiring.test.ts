@@ -37,7 +37,7 @@ test("AI settings derive from validated snapshots and never inject a false envir
   const route = readFileSync(new URL("../../app/api/admin/agent/kill-switch/route.ts", import.meta.url), "utf8");
   const postRoute = route.slice(route.indexOf("export async function POST"));
   const updateMutation = postRoute.slice(
-    postRoute.indexOf(".update({ body, updated_at: updatedAt })"),
+    postRoute.indexOf("let updateQuery = supabase"),
     postRoute.indexOf("if (updateError)"),
   );
 

@@ -12,7 +12,7 @@ function parse(value: unknown) {
   return policy.parseStaffingPreparation!(value);
 }
 function preparation(patch: Record<string, unknown> = {}) {
-  return { source: "manager", dates: [{ date: "2026-09-15", availability: "available", role: "reserve_candidate" }], training_availability: "월요일 오전", note: "교육 후 후보 검토", training: { status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" }, ...patch };
+  return { source: "manager", dates: [{ date: "2026-09-15", availability: "available", role: "reserve_candidate" }], training_availability: "월요일 오전", note: "교육 후 후보 검토", training: { status: "reviewing", backup_intent: "unknown", scheduled_at: "", first_loading_location: "", linked_pro: "" }, records: [], ...patch };
 }
 
 test("staffing preparation normalizes manager review fields without confirming work", () => {

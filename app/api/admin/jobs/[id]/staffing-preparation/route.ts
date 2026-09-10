@@ -177,6 +177,10 @@ export async function POST(req: NextRequest, context: Context) {
     const conflict = (rows: PreparationEvent[]) => NextResponse.json({ conflict: true,
       error: "동료가 먼저 기록을 저장했어요. 최신 기록과 내 입력을 비교한 뒤 다시 정리해주세요.",
       latest: snapshot(applicantId, rows[0], rows) }, { status: 409 });
+    // Older open screens omit records from their payload even after reading a newer snapshot.
+    if (body.records === undefined && (parseStaffingPreparation(history[0]?.meta)?.records.length ?? 0) > 0) {
+      return NextResponse.json({ error: "실제 참여 이력을 보호하기 위해 현재 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
+    }
     if ((history[0]?.id ?? null) !== baseEventId) return conflict(history);
     // One successor per base version, enforced by the existing unique action_key index, including concurrent INSERTs.
     // Keep the client's retry key in metadata; all old event rows stay intact and new saves append their own notes.

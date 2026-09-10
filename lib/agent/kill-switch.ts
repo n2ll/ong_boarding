@@ -23,6 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AgentMode = "auto" | "draft" | "off";
 export const AGENT_PILOT_MAX_APPLICANTS = 50;
+export const AGENT_PILOT_EXTENSION_HOURS = [24, 168, 336] as const;
 
 /** 코파일럿 초안 식별 마커 — message_drafts.reasoning 맨 앞에 붙인다.
  *  (message_drafts에 meta 컬럼이 없어 reasoning prefix로 구분.
@@ -30,7 +31,7 @@ export const AGENT_PILOT_MAX_APPLICANTS = 50;
 export const COPILOT_DRAFT_MARKER = "[코파일럿]";
 
 export type AgentTestSession = { mode: "test"; applicant_id: number; job_ids: number[]; started_at: string; expires_at: string };
-export type AgentPilotSession = { mode: "pilot"; applicant_ids: number[]; job_ids: number[]; started_at: string; expires_at: string };
+export type AgentPilotSession = { mode: "pilot"; applicant_ids: number[]; job_ids: number[]; started_at: string; expires_at: string; renewed_at?: string };
 export type AgentInboundScope = { applicantId: number; receivedAt: string; jobIds?: number[] };
 
 export function isValidTestJobIds(value: unknown): value is number[] {
@@ -58,10 +59,16 @@ export function isValidPilotApplicantIds(value: unknown): value is number[] {
 export function parseAgentPilotSession(body: string | null | undefined, now = Date.now()): AgentPilotSession | null {
   try {
     const value = JSON.parse(body ?? "") as AgentPilotSession;
-    if (!value || value.mode !== "pilot" || !isValidPilotApplicantIds(value.applicant_ids) || !isValidTestJobIds(value.job_ids)) return null;
+    if (!value || value.mode !== "pilot" || !isValidPilotApplicantIds(value.applicant_ids) || !isValidTestJobIds(value.job_ids)
+      || typeof value.started_at !== "string" || typeof value.expires_at !== "string") return null;
     const start = Date.parse(value.started_at), end = Date.parse(value.expires_at);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 24 * 3600_000 || now < start || now >= end) return null;
-    return { mode: "pilot", applicant_ids: value.applicant_ids, job_ids: value.job_ids, started_at: value.started_at, expires_at: value.expires_at };
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || now < start || now >= end) return null;
+    if (value.renewed_at !== undefined) {
+      const renewed = typeof value.renewed_at === "string" ? Date.parse(value.renewed_at) : NaN;
+      if (!Number.isFinite(renewed) || renewed < start || renewed > now || end <= renewed || end - renewed > 14 * 86400_000) return null;
+    } else if (end - start > 24 * 3600_000) return null;
+    return { mode: "pilot", applicant_ids: value.applicant_ids, job_ids: value.job_ids, started_at: value.started_at, expires_at: value.expires_at,
+      ...(value.renewed_at !== undefined ? { renewed_at: value.renewed_at } : {}) };
   } catch { return null; }
 }
 
