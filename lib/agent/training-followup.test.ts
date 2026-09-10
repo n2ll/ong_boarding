@@ -97,3 +97,73 @@ test("first-time applicant without saved metadata still receives the willingness
   ctx.state = {};
   assert.match(followup("백업 관심 있어요", ctx)!, /선탑 참여를 희망하시나요/);
 });
+
+const preparation = (overrides: Record<string, unknown> = {}) => ({
+  training_status: "reviewing", backup_intent: "unknown",
+  training_availability: { has_date: false, has_time: false },
+  training_completed: false, backup_completed: false,
+  manager_follow_up_open: false, last_contact_recorded: false, ...overrides,
+});
+function managed(ctx: StageContext, id: number, values: Record<string, unknown>) {
+  Object.assign(ctx.consultation!.jobs.find((job) => job.job_id === id)!, { manager_preparation: preparation(values) });
+  return ctx;
+}
+
+test("manager-owned training, actual participation and backup refusal do not restart training collection", () => {
+  for (const values of [
+    ...["coordinating", "scheduled", "completed", "on_hold"].map((training_status) => ({ training_status })),
+    { training_completed: true }, { backup_completed: true }, { backup_intent: "declined" },
+    { training_availability: { has_date: true, has_time: true } },
+  ]) assert.equal(followup("백업 관심 있어요", managed(context(), 11, values)), null, JSON.stringify(values));
+});
+
+test("manager-recorded partial training availability asks only the missing piece", () => {
+  const date = managed(context(), 11, { training_availability: { has_date: true, has_time: false } });
+  assert.match(followup("백업 관심 있어요", date)!, /가능한 시간대를/);
+  assert.doesNotMatch(followup("백업 관심 있어요", date)!, /참여를 희망|가능한 날짜/);
+  const time = managed(context(), 11, { training_availability: { has_date: false, has_time: true } });
+  assert.match(followup("백업 관심 있어요", time)!, /가능한 날짜를/);
+});
+
+test("completed A does not suppress unanswered B in the same inbound", () => {
+  const ctx = managed(context(), 11, { training_completed: true });
+  const reply = followup("둘 다 관심 있어요", ctx, [11, 22]);
+  assert.match(reply!, /가상 서쪽 백업.*\n/);
+  assert.match(reply!, /선탑 참여를 희망/);
+  assert.doesNotMatch(reply!, /가상 동쪽 백업/);
+});
+
+test("contact records and backup interest alone are not training consent", () => {
+  const ctx = managed(context(), 11, { last_contact_recorded: true, manager_follow_up_open: true, backup_intent: "interested" });
+  assert.match(followup("백업 관심 있어요", ctx)!, /선탑 참여를 희망/);
+});
+
+test("different partial manager availability is not combined across jobs", () => {
+  const ctx = managed(context(), 11, { training_availability: { has_date: true, has_time: false } });
+  managed(ctx, 22, { training_availability: { has_date: false, has_time: true } });
+  const reply = followup("둘 다 관심 있어요", ctx, [11, 22]);
+  assert.match(reply!, /가상 동쪽 백업/);
+  assert.match(reply!, /가능한 시간대를/);
+  assert.doesNotMatch(reply!, /가상 서쪽 백업|가능한 날짜/);
+});
+
+test("completed A's new training time is never applied to B's interest", () => {
+  const ctx = managed(context(), 11, { training_status: "completed" });
+  const text = "가상 동쪽 백업 선탑은 월요일 오전 가능합니다. 가상 서쪽 백업 관심 있어요.";
+  const observations = [
+    { job_id: 11, kind: "availability", quote: "가상 동쪽 백업 선탑은 월요일 오전 가능합니다.", source_message_id: "fixture" },
+    { job_id: 22, kind: "interest", quote: "가상 서쪽 백업 관심 있어요.", source_message_id: "fixture" },
+  ];
+  const reply = policy.buildTrainingFollowup(ctx, observations, text);
+  assert.match(reply, /가상 서쪽 백업/);
+  assert.match(reply, /선탑 참여를 희망하시나요/);
+  assert.doesNotMatch(reply, /말씀하신 선탑 가능 시간|가상 동쪽 백업/);
+});
+
+test("a single new observation still excludes another job's historical training statement", () => {
+  const ctx = managed(context(), 11, { training_status: "completed" });
+  const text = "가상 동쪽 백업 선탑은 월요일 오전에 끝났어요. 가상 서쪽 백업 관심 있어요.";
+  const reply = policy.buildTrainingFollowup(ctx, [{ job_id: 22, kind: "interest", quote: "가상 서쪽 백업 관심 있어요.", source_message_id: "fixture" }], text);
+  assert.match(reply, /선탑 참여를 희망하시나요/);
+  assert.doesNotMatch(reply, /말씀하신 선탑 가능 시간/);
+});

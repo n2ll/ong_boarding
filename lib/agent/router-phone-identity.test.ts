@@ -5,6 +5,8 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { readConsultationResult } from "./multi-job-consultation.ts";
+import { hasManagerTrainingProgress } from "./training-followup.ts";
+import type { ConsultationJob, ManagerPreparationContext } from "./consultation-types";
 import { likelyRegionInquiry } from "./region-preference.ts";
 import type { ConversationTurn, StageContext, StageResult } from "./types";
 import { canSkipConversationProcessing, shouldSuppressConversationReply } from "./conversation-closing.ts";
@@ -141,11 +143,12 @@ function applicant(id: number, overrides: Row = {}): Row {
   };
 }
 
-function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; sourceBody?: string; contextFails?: boolean; observationFails?: boolean; history?: ConversationTurn[]; stageResult?: StageResult }) {
+function loadRouter(input: { applicants: Row[]; managerPreparation?: ManagerPreparationContext; consultationJobs?: ConsultationJob[]; general?: boolean; failIdentity?: boolean; mode?: string; stopAfterModel?: boolean; allowedJobs?: number[]; oldSource?: boolean; scoped?: boolean; sendFailure?: "unknown" | "declared"; recordFails?: boolean; transitionUncertain?: boolean; onSleep?: () => void; consultation?: Record<string, unknown>; sourceBody?: string; contextFails?: boolean; observationFails?: boolean; history?: ConversationTurn[]; stageResult?: StageResult }) {
   const observations: unknown[] = [];
   const regionPreferences: unknown[] = [];
   const sourceBody = input.sourceBody ?? "성수는 월요일 가능하고 강남은 주말 가능해요";
   const contexts: StageContext[] = [];
+  const dedicatedConsultations: StageContext[] = [];
   const rpcCalls: string[] = [];
   const smsCalls: Array<{ phone: string; body: string }> = [];
   const transitions: Transition[] = [];
@@ -218,10 +221,14 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
   const compiledModule = { exports: {} as Record<string, unknown> };
   const stubs: Record<string, Record<string, unknown>> = {
     "./region-preference": { likelyRegionInquiry },
+    "./training-followup": { hasManagerTrainingProgress },
+    "./stages/consultation": { processConsultation: async (ctx: StageContext) => { dedicatedConsultations.push(ctx); return stage.process(ctx); } },
     "./conversation-reply-claim": { withConversationReplyClaim },
     "./conversation-closing": { canSkipConversationProcessing, shouldSuppressConversationReply },
     "./consultation-context": { loadConsultationJobs: async () => {
       if (input.contextFails) throw new Error("exposure unavailable");
+      if (input.consultationJobs) return input.consultationJobs;
+      if (input.managerPreparation) return [{ job_id: 7, title: "배송 공고", candidate_id: 11, stage: "exploration", expired: false, ai_facts: "선탑·교육: 약 2시간 동승 교육", manager_preparation: input.managerPreparation }];
       return input.consultation ? [
         { job_id: 7, title: "성수 공고", branch: "성수", candidate_id: 11, stage: "exploration", expired: false, pay_type: "일당", pay_amount: 70000 },
         { job_id: 8, title: "강남 공고", branch: "강남", candidate_id: null, stage: null, expired: false },
@@ -245,7 +252,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
       isSystemJobTitle: () => false,
     },
     "./general-line": {
-      isGeneralLineJob: () => false,
+      isGeneralLineJob: () => input.general ?? false,
       joinedClientType: () => null,
     },
     "../exposure": { ensureExposureIncludeForLinked: async () => {} },
@@ -312,6 +319,7 @@ function loadRouter(input: { applicants: Row[]; failIdentity?: boolean; mode?: s
     observations,
     regionPreferences,
     contexts,
+    dedicatedConsultations,
   };
 }
 
@@ -607,4 +615,37 @@ test("information before a pure closing still gets processed once", async () => 
   assert.equal(h.contexts.length, 1);
   assert.equal(h.smsCalls.length, 0);
   assert.deepEqual(h.stateUpdates[0], closingStageResult.state_update);
+});
+
+const managerPreparation: ManagerPreparationContext = {
+  training_status: "coordinating", backup_intent: "unknown",
+  training_availability: { has_date: false, has_time: false },
+  training_completed: false, backup_completed: false,
+  manager_follow_up_open: false, last_contact_recorded: false,
+};
+test("single general job under manager training coordination stays in consultation without collecting again", async () => {
+  const body = "배송 공고 관심 있어요";
+  const h = loadRouter({ applicants: [applicant(1)], general: true, managerPreparation, sourceBody: body,
+    consultation: { mode: "answer", job_ids: [7], answers: [], observations: [{ job_id: 7, source_message_id: "inbound-1", kind: "interest", quote: body }] } });
+  await run(h.router, h.supabase);
+  assert.equal(h.contexts[0].consultation?.force, true);
+  assert.equal(h.dedicatedConsultations.length, 1);
+  assert.equal(h.smsCalls.length, 1);
+  assert.doesNotMatch(h.smsCalls[0].body, /희망하시나요|가능한 날짜|가능한 시간대/);
+  assert.equal(h.transitions[0].kind, "stay");
+  assert.equal(h.observations.length, 1);
+});
+test("mere manager phone contact does not skip general screening or imply training willingness", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], general: true,
+    managerPreparation: { ...managerPreparation, training_status: "reviewing", last_contact_recorded: true } });
+  await run(h.router, h.supabase);
+  assert.ok(h.contexts[0].consultation);
+  assert.equal(h.contexts[0].consultation.force, false);
+  assert.equal(h.dedicatedConsultations.length, 0);
+});
+test("manager preparation does not force B mart out of its existing stage rules", async () => {
+  const h = loadRouter({ applicants: [applicant(1)], managerPreparation });
+  await run(h.router, h.supabase);
+  assert.notEqual(h.contexts[0].consultation?.force, true);
+  assert.equal(h.dedicatedConsultations.length, 0);
 });

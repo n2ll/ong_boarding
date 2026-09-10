@@ -1,5 +1,5 @@
 import { shouldSuppressConversationReply } from "./conversation-closing.ts";
-import type { ConsultationObservation } from "./consultation-types";
+import type { ConsultationJob, ConsultationObservation } from "./consultation-types";
 import type { StageContext } from "./types";
 
 const TRAINING = /선탑|동승|교육(?!비)/;
@@ -22,37 +22,70 @@ export function trainingReplyEvidence(text: string, answeringTraining = false) {
 export const TRAINING_FOLLOWUP_GUIDANCE = `
 - 선탑 후속 질문에 본인이 명시한 참여 희망은 interest, 가능한 날짜·시간은 availability로 원문을 기록한다. 단순 "네"와 교육비·시간 질문은 참여 의사로 기록하지 마라. 가능 시간을 받았다는 이유만으로 pause하거나 선탑 일정을 잡았다고 말하지 마라. 서버가 등록된 선탑 안내와 아직 답하지 않은 후속 질문을 붙인다.`;
 
+function managerOwnsTraining(job: ConsultationJob): boolean {
+  const saved = job.manager_preparation;
+  return !!saved && (saved.training_status !== "reviewing" || saved.backup_intent === "declined"
+    || saved.training_completed || saved.backup_completed
+    || (saved.training_availability.has_date && saved.training_availability.has_time));
+}
+
+/** 전화 이력·메모만으로 기존 스크리닝을 건너뛰거나 선탑 의사를 추측하지 않는다. */
+export function hasManagerTrainingProgress(job: ConsultationJob): boolean {
+  return managerOwnsTraining(job) || !!job.manager_preparation?.training_availability.has_date
+    || !!job.manager_preparation?.training_availability.has_time;
+}
+
 /** 검증된 상담 관찰 뒤에만 한 가지 다음 질문을 붙인다. 일정·전이·기록은 변경하지 않는다. */
 export function buildTrainingFollowup(ctx: StageContext, verified: ConsultationObservation[], inboundText: string): string | null {
   if (!verified.length || shouldSuppressConversationReply(inboundText, ctx.history)) return null;
   if (QUESTION.test(inboundText) || /^(?:네|예|넵|알겠습니다|감사합니다)[\s,.!]*$/.test(inboundText.trim())) return null;
-  const ids = [...new Set(verified.map((item) => item.job_id))];
-  const jobs = ids.map((id) => ctx.consultation?.jobs.find((job) => job.job_id === id));
-  if (jobs.some((job) => !job || job.expired || job.stage === "paused" || job.stage === "abort")) return null;
+  const observedIds = [...new Set(verified.map((item) => item.job_id))];
+  const observedJobs = observedIds.map((id) => ctx.consultation?.jobs.find((job) => job.job_id === id));
+  if (observedJobs.some((job) => !job || job.expired || job.stage === "paused" || job.stage === "abort")) return null;
+  let jobs = (observedJobs as ConsultationJob[]).filter((job) => !managerOwnsTraining(job));
+  if (!jobs.length) return null;
+  // 서로 다른 부분 확인 값을 합쳐 '모두 확인'으로 만들지 않는다. 한 번에 한 질문만 한다.
+  const availabilityKey = (job: ConsultationJob) => `${!!job.manager_preparation?.training_availability.has_date}:${!!job.manager_preparation?.training_availability.has_time}`;
+  if (new Set(jobs.map(availabilityKey)).size > 1) jobs = jobs.slice(0, 1);
+  const ids = jobs.map((job) => job.job_id);
   const registered = jobs.map((job) => job!.ai_facts?.match(/^선탑·교육:[ \t]*([^\r\n]+)$/m)?.[1]?.trim());
   if (registered.some((value) => !value)) return null;
   const titles = jobs.map((job) => job!.title);
   const label = titles.map((title) => `‘${title}’`).join(", ");
-  const current = trainingReplyEvidence(inboundText);
+  const scopedEvidence = (answeringTraining = false) => {
+    const evidence = jobs.map((job) => {
+      const text = verified
+        .filter((item) => item.job_id === job.job_id)
+        .map((item) => item.quote)
+        .filter((quote) => !ctx.consultation!.jobs.some((other) => other.job_id !== job.job_id && quote.includes(other.title)))
+        .join("\n");
+      return trainingReplyEvidence(text, answeringTraining);
+    });
+    return {
+      interested: evidence.every((item) => item.interested), declined: evidence.some((item) => item.declined),
+      hasDate: evidence.every((item) => item.hasDate), hasTime: evidence.every((item) => item.hasTime),
+    };
+  };
+  const current = scopedEvidence();
   if (current.declined) return null;
 
   let trainingContext = false;
-  let interested = false;
+  let hasDate = jobs.every((job) => job.manager_preparation?.training_availability.has_date);
+  let hasTime = jobs.every((job) => job.manager_preparation?.training_availability.has_time);
+  let interested = hasDate || hasTime;
   let declined = false;
-  let hasDate = false;
-  let hasTime = false;
   if (ids.length === 1 && ids[0] === ctx.job?.id) {
     const saved = (ctx.state.meta?.general_screening as { 선탑_가능시간?: unknown } | undefined)?.선탑_가능시간;
     if (typeof saved === "string") {
       const evidence = trainingReplyEvidence(saved, true);
-      interested = evidence.interested; hasDate = evidence.hasDate; hasTime = evidence.hasTime;
+      interested ||= evidence.interested; hasDate ||= evidence.hasDate; hasTime ||= evidence.hasTime;
     }
   }
   const previousQuestions: string[] = [];
   for (const turn of ctx.history) {
     if (turn.direction === "outbound") {
       const namesAnotherJob = ctx.consultation?.jobs.some((job) => !ids.includes(job.job_id) && turn.body.includes(job.title));
-      if (TRAINING.test(turn.body) && (titles.some((title) => turn.body.includes(title)) || (ids.length === 1 && ids[0] === ctx.job?.id && !namesAnotherJob))) {
+      if (TRAINING.test(turn.body) && !namesAnotherJob && (titles.some((title) => turn.body.includes(title)) || (ids.length === 1 && ids[0] === ctx.job?.id))) {
         trainingContext = /희망하시나요|가능[^?\n]*(?:알려|말씀|회신)|(?:날짜|시간대)[^?\n]*[?？]/.test(turn.body);
         previousQuestions.push(turn.body);
       } else if (/[?？]/.test(turn.body)) trainingContext = false;
@@ -65,7 +98,7 @@ export function buildTrainingFollowup(ctx: StageContext, verified: ConsultationO
     hasDate ||= evidence.hasDate;
     hasTime ||= evidence.hasTime;
   }
-  const latest = trainingReplyEvidence(inboundText, trainingContext);
+  const latest = scopedEvidence(trainingContext);
   if (latest.declined || (declined && !current.interested)) return null;
   const alreadyComplete = hasDate && hasTime;
   interested ||= latest.interested;
