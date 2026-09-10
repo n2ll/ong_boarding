@@ -99,6 +99,17 @@ test("review-ready counts exclude already confirmed people", async () => {
   assert.equal(isReviewReadyCandidate!("screening", "스크리닝 중"), false);
 });
 
+test("conversation stage counts do not claim automation is currently enabled", async () => {
+  const { jobOperationMeta } = await import("./job-operations.ts");
+  assert.deepEqual(jobOperationMeta({
+    effectivelyClosed: false, capacity: 3, confirmed: 0, waiting: 0, paused: 0, reviewReady: 0, inProgress: 2,
+  }).nextAction, {
+    label: "대화 단계 2명",
+    description: "초기 대화·스크리닝 단계 · 자동 응대 여부는 현재 AI 모드를 확인하세요",
+    tone: "info",
+  });
+});
+
 test("an unsent screening candidate remains waiting instead of appearing as AI progress", async () => {
   const operations = await loadOperationsModule();
   const jobCandidateAggregateStage = operations.jobCandidateAggregateStage as

@@ -18,6 +18,7 @@
 import type { OtherActiveJob, StageResult, StageTransition } from "./types";
 import { coarseArea } from "../geo.ts";
 import { jobPayLabel } from "../jobs.ts";
+import { COLLECTION_NOT_STATED, collectionFactFromBody } from "./delivery-collection.ts";
 
 const STAGE_KO: Record<string, string> = {
   exploration: "탐색",
@@ -36,6 +37,7 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
     ["급여", jobPayLabel(j) || null],
     // 자유문장 전체나 배송시간에서 교육 조건을 추측하지 않는다. 관리자가 작성한 안내 줄만 쓴다.
     ["선탑·교육", j.ai_facts?.match(/^선탑·교육:[ \t]*([^\r\n]+)$/m)?.[1]?.trim() || null],
+    ["수거·반납", collectionFactFromBody(j.body)],
     // **상세 주소는 싣지 않는다** — 집결지 상세는 확정 후 매니저가 안내하는 값이다.
     // 지원자 카드(/p/[token])와 같은 함수로 '서울 서초구'까지만(lib/geo.coarseArea).
     ["집결지(대략)", coarseArea(j.pickup_address) || null],
@@ -57,7 +59,7 @@ export function splitJobFacts(j: OtherActiveJob): { known: [string, string][]; m
  *    영원히 발화하지 않는 죽은 코드가 된다(게이트 지적).
  */
 export function hasNoAnswerableFacts(j: OtherActiveJob): boolean {
-  return splitJobFacts(j).known.filter(([k]) => k !== "본인 차량").length === 0;
+  return splitJobFacts(j).known.filter(([k, value]) => k !== "본인 차량" && value !== COLLECTION_NOT_STATED).length === 0;
 }
 
 /** user 프롬프트에 넣을 "다른 진행 공고" 블록. 없으면 빈 문자열. */
@@ -108,7 +110,7 @@ export function crossJobSystemSuffix(jobs?: OtherActiveJob[]): string {
 }
 
 /** 블록에 실리는 항목명 — tool enum과 백스톱이 같은 이름을 쓴다. */
-export const CROSS_JOB_FIELD_NAMES = ["근무시간", "근무기간", "시작일", "급여", "선탑·교육", "집결지(대략)", "본인 차량"] as const;
+export const CROSS_JOB_FIELD_NAMES = ["근무시간", "근무기간", "시작일", "급여", "선탑·교육", "수거·반납", "집결지(대략)", "본인 차량"] as const;
 
 /** 각 stage의 *_turn tool input_schema.properties에 그대로 spread. */
 export const crossJobToolProperties = {

@@ -5,7 +5,7 @@ import { EXPOSURE_JOB_GEO_COLUMNS, type GeoJob } from "../geo.ts";
 import { isSystemJobTitle, slotKeysLabel } from "../jobs.ts";
 import type { ConsultationJob } from "./consultation-types.ts";
 
-const JOB_COLUMNS = `id, title, branch, status, recruit_mode, exposure, exposure_rule, closes_at, slot, slot_keys, start_date, work_period, pay_info, pay_type, pay_amount, ai_facts, pickup_address, vehicle_required, ${EXPOSURE_JOB_GEO_COLUMNS}`;
+const JOB_COLUMNS = `id, title, body, branch, status, recruit_mode, exposure, exposure_rule, closes_at, slot, slot_keys, start_date, work_period, pay_info, pay_type, pay_amount, ai_facts, pickup_address, vehicle_required, ${EXPOSURE_JOB_GEO_COLUMNS}`;
 const ID_BATCH_SIZE = 200;
 const EXPIRED_GRACE_MS = 3 * 24 * 60 * 60 * 1_000;
 
@@ -20,6 +20,7 @@ interface CandidateRow {
 interface JobRow extends GeoJob {
   id: number;
   title: string;
+  body: string | null;
   branch: string | null;
   status: string;
   recruit_mode: string;
@@ -109,6 +110,7 @@ export async function loadConsultationJobs(supabase: SupabaseClient, applicantId
       candidate_id: candidate?.id ?? null,
       stage: candidate?.agent_stage ?? null,
       title: job.title,
+      body: job.body,
       branch: job.branch,
       expired: job.closes_at !== null && Date.parse(job.closes_at) <= nowMs,
       slot: job.slot || slotKeysLabel(job.slot_keys) || null,

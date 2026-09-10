@@ -1503,6 +1503,7 @@ export function LiveConsole() {
                           {isHeldView ? <p className="text-[12px] leading-relaxed text-muted-foreground">{h.hold_reason}</p> : <p className="text-[12px] leading-relaxed text-foreground"><span className="font-bold">권장 조치 · </span>{h.suggested_action}</p>}
                           <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
                             <Button size="chip" variant="ghost" onClick={() => selectHandoff(h)} className="min-h-11 px-2.5 bg-muted">{isHeldView ? "기록 열기" : "대화 확인"}</Button>
+                            {isHeldView && <Button size="chip" variant="secondary" onClick={() => openResolve(h)} className="min-h-11 px-2.5">처리 완료</Button>}
                             {!isHeldView && !h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
                               <Button size="chip" variant="ghost" onClick={() => openPromote(h)} className="min-h-11 px-2.5 bg-priority-attention-soft text-priority-attention-ink">공고에 반영</Button>
                             )}

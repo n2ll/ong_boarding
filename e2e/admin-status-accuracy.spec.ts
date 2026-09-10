@@ -71,9 +71,15 @@ for (const scenario of [
   const held = { ...h, candidate_id: 4, applicant_id: 8, applicant_name: "중지 유지 대상", category: "manual",
     category_label: "수동(매니저)", reason: "매니저 수동 일시정지", hold_label: "수동 중지",
     hold_reason: "관리자가 의도적으로 중지한 대화입니다.", age_days: 90 };
+  const resolutions: unknown[] = [];
   await page.route("**/api/admin/agent/handoffs", route => route.fulfill({ json: {
-    handoffs: scenario.active ? [h] : [], total: Number(scenario.active), held: [held], held_total: 1,
+    handoffs: scenario.active ? [h] : [], total: Number(scenario.active),
+    held: resolutions.length ? [] : [held], held_total: resolutions.length ? 0 : 1,
   } }));
+  await page.route("**/api/admin/agent/handoffs/resolve", async route => {
+    resolutions.push(route.request().postDataJSON());
+    await route.fulfill({ json: { success: true } });
+  });
   await page.goto("/live?tab=intervention");
   const badge = page.getByRole("tab", { name: `사람 확인 ${Number(scenario.active)}`, exact: true });
   await expect(badge).toBeVisible();
@@ -94,11 +100,19 @@ for (const scenario of [
   await expect(page.getByRole("button", { name: "중지 유지 대상", exact: true })).toBeVisible();
   await expect(page.getByText(held.hold_reason, { exact: true })).toBeVisible();
   await expect(page.getByText(/90일 방치/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /대기 답장 AI 처리|이후 응대 재개|처리 완료/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /대기 답장 AI 처리|이후 응대 재개/ })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const box = (await storage.boundingBox())!;
   expect(box.height).toBeGreaterThanOrEqual(44);
   await page.screenshot({ path: `/tmp/ong-handoff-held-${scenario.width}-${Number(scenario.active)}.png`, fullPage: true });
+  await page.getByRole("button", { name: "처리 완료", exact: true }).click();
+  const resolve = page.getByRole("dialog", { name: "처리 완료 — 중지 유지 대상" });
+  await expect(resolve).toContainText("AI는 계속 정지");
+  await resolve.getByRole("radio", { name: "종결(기타)" }).click();
+  await resolve.getByRole("textbox", { name: "한 줄 기록" }).fill("운행 보류 안내 후 종결");
+  await resolve.getByRole("button", { name: "처리 완료로 기록" }).click();
+  await expect(resolve).toHaveCount(0);
+  expect(resolutions).toEqual([{ candidate_id: 4, outcome: "closed", note: "운행 보류 안내 후 종결" }]);
   await page.getByRole("button", { name: `처리 필요 ${Number(scenario.active)}건`, exact: true }).click();
   await expect(page.getByRole("button", { name: "중지 유지 대상", exact: true })).toHaveCount(0);
   expect(state.errors).toEqual([]);

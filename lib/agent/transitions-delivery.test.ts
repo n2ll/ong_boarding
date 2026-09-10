@@ -90,6 +90,7 @@ function harness(failure?: Failure, canAutomate = async () => true) {
     },
   });
   const transitions = compiledModule.exports as {
+    buildFirstDayRules(name: string | null, opts?: { general?: boolean }): string;
     applyTransition(input: {
       canAutomate?: () => Promise<boolean>;
       supabase: unknown;
@@ -107,6 +108,7 @@ function harness(failure?: Failure, canAutomate = async () => true) {
 
   return {
     writes, sends, alerts,
+    firstDayRules: transitions.buildFirstDayRules,
     run(path: Path) {
       return transitions.applyTransition({
         supabase: { from: (table: string) => new Query(table) },
@@ -121,6 +123,12 @@ function harness(failure?: Failure, canAutomate = async () => true) {
     },
   };
 }
+
+test("일반 배송 첫날 안내는 공고 근거 없이 수거·반납 업무를 추가하지 않는다", () => {
+  const reply = harness().firstDayRules("지원자", { general: true });
+  assert.match(reply, /상차 후 배송/);
+  assert.doesNotMatch(reply, /회수|수거|잔여물|반납|재방문/);
+});
 
 function savedState(writes: Write[]): AgentState {
   const saved = writes.findLast((write) => write.table === "job_candidates" && write.row.agent_state);
