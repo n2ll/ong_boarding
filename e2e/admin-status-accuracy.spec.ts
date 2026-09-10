@@ -58,6 +58,55 @@ async function installStatusFixtures(page: Page, baseURL: string, options: {
 }
 
 for (const scenario of [
+  { width: 1280, active: true },
+  { width: 390, active: true },
+  { width: 390, active: false },
+]) test(`운영 인계 보관 분리 (${scenario.width}px, 처리 필요 ${Number(scenario.active)}건)`, async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: scenario.width, height: 900 });
+  const state = await installStatusFixtures(page, baseURL!);
+  const h = { candidate_id: 3, applicant_id: 7, job_id: 11, applicant_name: "상담검수", phone: "01000000000",
+    job_title: "성수 배송", branch: "성수", reason: "공고별 답변 근거 확인 필요", category: "cross_job",
+    category_label: "교차공고", tone: "human", suggested_action: "공고별 문의와 답변 내용을 대조해 주세요.",
+    is_system_job: false, paused_at: new Date().toISOString(), age_days: 3 };
+  const held = { ...h, candidate_id: 4, applicant_id: 8, applicant_name: "중지 유지 대상", category: "manual",
+    category_label: "수동(매니저)", reason: "매니저 수동 일시정지", hold_label: "수동 중지",
+    hold_reason: "관리자가 의도적으로 중지한 대화입니다.", age_days: 90 };
+  await page.route("**/api/admin/agent/handoffs", route => route.fulfill({ json: {
+    handoffs: scenario.active ? [h] : [], total: Number(scenario.active), held: [held], held_total: 1,
+  } }));
+  await page.goto("/live?tab=intervention");
+  const badge = page.getByRole("tab", { name: `사람 확인 ${Number(scenario.active)}`, exact: true });
+  await expect(badge).toBeVisible();
+  const storage = page.getByRole("button", { name: "중지·검수 보관 1건", exact: true });
+  await expect(storage).toBeVisible();
+  await expect(page.getByRole("button", { name: "중지 유지 대상", exact: true })).toHaveCount(0);
+  if (scenario.active) {
+    await expect(page.getByText(h.suggested_action, { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "대화 확인", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "대기 답장 AI 처리", exact: true })).not.toBeVisible();
+    await page.screenshot({ path: `/tmp/ong-handoff-active-${scenario.width}.png`, fullPage: true });
+  } else {
+    await expect(page.getByText("지금 처리할 인계가 없어요.", { exact: false })).toBeVisible();
+  }
+  await storage.click();
+  await expect(storage).toHaveAttribute("aria-pressed", "true");
+  await expect(badge).toBeVisible();
+  await expect(page.getByRole("button", { name: "중지 유지 대상", exact: true })).toBeVisible();
+  await expect(page.getByText(held.hold_reason, { exact: true })).toBeVisible();
+  await expect(page.getByText(/90일 방치/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /대기 답장 AI 처리|이후 응대 재개|처리 완료/ })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const box = (await storage.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await page.screenshot({ path: `/tmp/ong-handoff-held-${scenario.width}-${Number(scenario.active)}.png`, fullPage: true });
+  await page.getByRole("button", { name: `처리 필요 ${Number(scenario.active)}건`, exact: true }).click();
+  await expect(page.getByRole("button", { name: "중지 유지 대상", exact: true })).toHaveCount(0);
+  expect(state.errors).toEqual([]);
+  expect(state.blocked).toEqual([]);
+  expect(state.writes).toEqual([]);
+});
+
+for (const scenario of [
   { name: "검수 대상", options: {}, text: "이 지원자는 자동 응대 검수 대상" },
   { name: "일반 지원자", options: { target: 8 }, text: "이 지원자 AI 중지됨" },
   { name: "검수 만료", options: { expired: true }, text: "AI 전역 중지됨" },
@@ -187,6 +236,9 @@ test("대기 답장 처리와 이후 응대 재개를 구분하고 모바일에�
   });
   await page.goto("/live?tab=intervention");
   const reply = page.getByRole("button", { name: "대기 답장 AI 처리", exact: true });
+  await page.getByText("응대·처리 옵션", { exact: true }).click();
+  await expect(page.getByText(/대기 답장 AI 처리는 실제 문자를 발송합니다/)).toBeVisible();
+  await reply.scrollIntoViewIfNeeded();
   await expect(reply).toBeVisible();
   await expect(reply).toBeInViewport();
   await reply.click();

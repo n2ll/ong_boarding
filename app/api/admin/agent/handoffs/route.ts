@@ -3,31 +3,25 @@
  *
  * 매니저 인계(agent_stage='paused') 작업 큐.
  * 후보(job_candidate) 단위로, 어떤 지원자의 어떤 공고가 왜·얼마나 오래 인계돼 있는지 반환한다.
- *  - 시스템 더미 공고(__ 접두) 제외
- *  - paused_reason을 카테고리로 분류해 배지/필터에 사용
+ *  - 의도적인 중지·검수는 held에 보관, 현재 처리 완료 표식은 제외
+ *  - 구조화 메타와 paused_reason을 분류해 배지/추천조치에 사용
  *  - 오래 방치된 순(paused_at 오름차순)으로 정렬 → SLA 상단 노출
  *
- * 응답: { handoffs: [...], total, by_category: { [id]: count } }
+ * 응답: { handoffs: [...], total, by_category: { [id]: count }, held: [...], held_total }
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { classifyHandoff, getCategory } from "@/lib/agent/handoff-category";
+import { getHandoffDisposition } from "@/lib/admin/handoff-disposition";
 
 export const dynamic = "force-dynamic";
-
-interface PauseMeta {
-  category?: string | null;
-  summary?: string | null;
-  suggested_action?: string | null;
-}
 
 interface JcRow {
   id: number;
   applicant_id: number;
   job_id: number;
   paused_reason: string | null;
-  agent_state: { meta?: { paused_at?: string; pause?: PauseMeta; handoff_resolved?: unknown } } | null;
+  agent_state: { meta?: { paused_at?: string } } | null;
   updated_at: string;
   jobs: { id: number; title: string; branch: string | null } | null;
   applicants: { id: number; name: string | null; phone: string | null; branch: string | null } | null;
@@ -72,22 +66,17 @@ export async function GET(_req: NextRequest) {
   const now = Date.now();
   const byCategory: Record<string, number> = {};
 
-  const handoffs = ((data ?? []) as unknown as JcRow[])
+  const rows = ((data ?? []) as unknown as JcRow[])
     .map((c) => {
       const job = c.jobs ?? null;
       if (!job || typeof job.title !== "string") return null;
-      // '처리 완료'(handoffs/resolve) 표식이 있으면 큐에서 제외 — stage는 paused 그대로라
-      // (AI는 계속 정지) 조건만으로는 못 거른다. 표식이 큐의 유일한 출구다.
-      if (c.agent_state?.meta?.handoff_resolved) return null;
+      const disposition = getHandoffDisposition({ ...c, job_title: job.title });
+      if (disposition.state === "resolved") return null;
       const isSystemJob = job.title.startsWith("__");
       const pausedAt = c.agent_state?.meta?.paused_at ?? c.updated_at;
       const ageDays = Math.max(0, Math.floor((now - new Date(pausedAt).getTime()) / 86400000));
-      // 1순위: 에이전트가 pause 시 직접 emit한 meta.pause. 없으면 paused_reason 키워드 분류(폴백).
-      const pauseMeta = c.agent_state?.meta?.pause ?? null;
-      const category = pauseMeta?.category ? getCategory(pauseMeta.category) : classifyHandoff(c.paused_reason);
-      const suggestedAction =
-        (pauseMeta?.suggested_action && pauseMeta.suggested_action.trim()) || category.action;
-      byCategory[category.id] = (byCategory[category.id] ?? 0) + 1;
+      const { category, suggestedAction } = disposition;
+      if (disposition.state === "action_required") byCategory[category.id] = (byCategory[category.id] ?? 0) + 1;
       return {
         candidate_id: c.id,
         applicant_id: c.applicant_id,
@@ -102,6 +91,8 @@ export async function GET(_req: NextRequest) {
         category_label: category.label,
         tone: category.tone,
         suggested_action: suggestedAction,
+        hold_label: disposition.holdLabel,
+        hold_reason: disposition.holdReason,
         // 시스템 더미 공고는 반영할 실제 공고가 없으므로 '공고에 반영' 액션 비활성 대상
         is_system_job: isSystemJob,
         paused_at: pausedAt,
@@ -110,8 +101,9 @@ export async function GET(_req: NextRequest) {
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => new Date(a.paused_at).getTime() - new Date(b.paused_at).getTime());
+  const handoffs = rows.filter((row) => row.hold_label === null);
+  const held = rows.filter((row) => row.hold_label !== null);
 
-  // truncated를 응답에 실어 보낸다 — 서버 로그만으로는 아무도 모른다.
-  // 지금 화면은 이 값을 읽지 않지만, 잘렸는지 확인할 방법을 남겨두는 게 조용한 누락보다 낫다.
-  return NextResponse.json({ handoffs, total: handoffs.length, by_category: byCategory, truncated });
+  // 조회 한도는 UI에서도 알려 일부 목록을 전체 현황으로 오인하지 않게 한다.
+  return NextResponse.json({ handoffs, total: handoffs.length, by_category: byCategory, held, held_total: held.length, truncated });
 }
