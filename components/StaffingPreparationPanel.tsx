@@ -7,6 +7,7 @@ import { Button } from "./ui/button";
 import { Modal } from "./ui/modal";
 import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
+import { StaffingNoteDraft, useStaffingNoteDraft } from "./StaffingNoteDraft";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
 import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
@@ -21,7 +22,7 @@ const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 
 const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), records: [], note: "" });
 const fieldClass = "min-h-11 w-full min-w-0 rounded-lg border border-border-strong bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const editorModeLabels = { follow_up: "연락·할 일", training: "선탑 진행", participation: "실제 참여", preparation: "투입 날짜" } as const;
-type EditorMode = keyof typeof editorModeLabels;
+type EditorMode = keyof typeof editorModeLabels | "note";
 
 const AUTHOR_STORAGE_KEY = "ongboarding:staffing-author:v1";
 const formatTime = (at: string) => new Date(at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -67,6 +68,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [ownerQuery, setOwnerQuery] = useState("");
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
   const [draft, setDraft] = useState<StaffingPreparation>(emptyPreparation);
+  const noteDraft = useStaffingNoteDraft(draft);
   const [initial, setInitial] = useState("");
   const [actorName, setActorName] = useState("");
   const [baseEventId, setBaseEventId] = useState<number | null>(null);
@@ -103,10 +105,15 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     const hasSuggestion = suggestions.some((item) => item.applicant_id === candidate.applicant_id && item.date === date);
     const next = mode === "preparation" && date && !hasSuggestion && saved.dates.length < STAFFING_PREPARATION_LIMITS.dates && !saved.dates.some((item) => item.date === date)
       ? { ...saved, dates: [...saved.dates, { date, availability: "unknown" as const, role: "unassigned" as const }] } : saved;
+    noteDraft.reset();
     datesOpened.current = mode === "preparation";
     setEditorMode(mode); setEditing(candidate); setDraft(next); setInitial(JSON.stringify(next)); setSaveError(""); request.current = null;
   };
   const selectEditorMode = (mode: EditorMode) => {
+    if (editorMode === "note" && mode !== "note") {
+      if (noteDraft.prepared) setDraft(noteDraft.prepared);
+      noteDraft.invalidate();
+    }
     setEditorMode(mode);
     if (mode !== "preparation" || datesOpened.current) return;
     datesOpened.current = true;
@@ -115,8 +122,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       ? current : { ...current, dates: [...current.dates, { date, availability: "unknown", role: "unassigned" }] });
   };
   const closeEditor = async () => {
-    if (saving) return;
-    if ((JSON.stringify(draft) !== initial || preservedDraft) && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "입력한 진행 기록을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
+    if (saving || noteDraft.busy) return;
+    if ((JSON.stringify(draft) !== initial || preservedDraft || noteDraft.note.trim()) && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "입력한 진행 기록을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
     setEditing(null);
   };
   const updateDate = (index: number, patch: Partial<StaffingPreparationDate>) => setDraft((current) => ({ ...current, dates: current.dates.map((item, i) => {
@@ -134,16 +141,16 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     if (!await confirm({ title: "실제 참여 기록을 삭제할까요?", description: "저장하면 현재 목록에서 삭제됩니다. 이전에 저장한 내용은 팀 변경 이력에서 확인할 수 있습니다.", confirmText: "삭제", destructive: true })) return;
     setDraft((current) => ({ ...current, records: current.records.filter((record) => record.id !== id) }));
   };
-  const save = async () => {
-    if (!editing || saving || conflict) return;
-    if (draft.records.some((record) => !record.date || record.date > staffingToday())) { setEditorMode("participation"); setSaveError("실제 참여 일자는 오늘까지의 날짜로 빠짐없이 입력해주세요. (한국시간 기준)"); return; }
-    if (draft.follow_up?.last_contact && (!draft.follow_up.last_contact.date || draft.follow_up.last_contact.date > staffingToday() || !draft.follow_up.last_contact.result.trim())) {
+  const save = async (prepared = draft) => {
+    if (!editing || saving || conflict || noteDraft.busy) return;
+    if (prepared.records.some((record) => !record.date || record.date > staffingToday())) { setEditorMode("participation"); setSaveError("실제 참여 일자는 오늘까지의 날짜로 빠짐없이 입력해주세요. (한국시간 기준)"); return; }
+    if (prepared.follow_up?.last_contact && (!prepared.follow_up.last_contact.date || prepared.follow_up.last_contact.date > staffingToday() || !prepared.follow_up.last_contact.result.trim())) {
       setEditorMode("follow_up");
       setSaveError("연락 결과와 오늘까지의 실제 연락 일자를 입력해주세요. (한국시간 기준)"); return;
     }
-    const normalized = parseStaffingPreparation(draft);
+    const normalized = parseStaffingPreparation(prepared);
     if (!normalized) {
-      if (!parseStaffingPreparation({ ...emptyPreparation(), dates: draft.dates })) setEditorMode("preparation");
+      if (!parseStaffingPreparation({ ...emptyPreparation(), dates: prepared.dates })) setEditorMode("preparation");
       setSaveError("날짜가 유효하고 중복되지 않는지, 연락 결과와 다음 할 일 입력이 올바른지 확인해주세요."); return;
     }
     if (!actorName.trim()) { setSaveError("팀에 공유할 기록 작성자 이름을 입력해주세요."); return; }
@@ -241,18 +248,19 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
               {snapshot?.updated_at && <p className="mt-1 text-xs text-muted-foreground">입력한 작성자: {snapshot.actor?.name ?? "미기록"} · {formatTime(snapshot.updated_at)}</p>}
             </>}
             {suggestion && <div className="mt-3 rounded-lg bg-muted p-3"><p className="font-medium">{suggestion.kind === "training" ? "선탑 관련 답변 · 원문 확인" : `답변에서 찾은 날짜 ${suggestion.date ? `· ${suggestion.date} ${availabilityLabels[suggestion.availability]}` : "· 확인 필요"}`}</p><p className="whitespace-pre-wrap break-words">“{suggestion.quote || "원문 확인 필요"}”</p><p className="text-muted-foreground">진행 기록의 ‘{suggestion.kind === "training" ? "선탑 진행" : "투입 날짜"}’에서 원문을 확인해주세요.</p></div>}
-            <div className="mt-3 flex flex-wrap gap-2">{contactActions(candidate)}<Button variant="secondary" disabled={snapshot?.invalid} onClick={() => startEditing(candidate, "follow_up")} aria-label={`${candidate.applicants?.name ?? "후보"} 연락·할 일 기록`}>연락·할 일 기록</Button></div>
+            <div className="mt-3 flex flex-wrap gap-2"><Button disabled={snapshot?.invalid} onClick={() => startEditing(candidate, "note")} aria-label={`${candidate.applicants?.name ?? "후보"} 메모로 기록`}>메모로 기록</Button>{contactActions(candidate)}<Button variant="secondary" disabled={snapshot?.invalid} onClick={() => startEditing(candidate, "follow_up")} aria-label={`${candidate.applicants?.name ?? "후보"} 연락·할 일 기록`}>연락·할 일 기록</Button></div>
             {conflicts.length > 0 && <p role="alert" className="mt-2 break-words text-warning-strong">같은 날 본담당 후보가 겹칩니다: {conflicts.map((item) => `${item.date} ${item.job_title}`).join(", ")}. 역할 조정은 관리자가 판단해주세요.</p>}
           </div>;
         })}{!shown.length && <p>일치하는 후보가 없습니다.</p>}</div>
       </>}
     </div>}
-    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description="기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다." footer={<Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "짧게 메모하고, 정리된 내용만 확인해 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
-        <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="flex gap-2"><Button variant={editorMode === "note" ? "primary" : "ghost"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("note")}>메모로 기록</Button><Button variant={editorMode === "note" ? "ghost" : "secondary"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("follow_up")}>직접 입력</Button></div>
+        {editorMode !== "note" && <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Object.entries(editorModeLabels).map(([mode, label]) => <button key={mode} type="button" aria-pressed={editorMode === mode} disabled={saving} onClick={() => selectEditorMode(mode as EditorMode)} className={`min-h-11 rounded-lg border px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${editorMode === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-background"}`}>{label}</button>)}
-        </div>
-        {editing && contactActions(editing)}
+        </div>}
+        {editorMode !== "note" && editing && contactActions(editing)}
         {conflict && <div className="space-y-2 rounded-xl border border-warning-strong bg-muted p-3">
           <p className="font-bold">동료의 최신 기록</p>
           <p>입력한 작성자: {conflict.actor?.name ?? "미기록"}{conflict.updated_at && ` · ${formatTime(conflict.updated_at)}`}</p>
@@ -260,12 +268,13 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           <p className="text-muted-foreground">내 입력은 아래에 유지됩니다. 최신 기록을 불러오면 내 초안을 따로 보관하므로 비교하며 다시 정리할 수 있습니다.</p>
           <Button variant="secondary" onClick={() => {
             const latest = parseStaffingPreparation(conflict.preparation) ?? emptyPreparation();
-            setPreservedDraft(draft); setDraft(latest); setInitial(JSON.stringify(latest)); setBaseEventId(conflict.event_id);
+            setPreservedDraft(noteDraft.prepared ?? draft); setDraft(latest); setInitial(JSON.stringify(latest)); setBaseEventId(conflict.event_id);
             setSnapshots((items) => [...items.filter((item) => item.applicant_id !== conflict.applicant_id), conflict]);
-            setConflict(null); setSaveError(""); request.current = null;
+            setConflict(null); noteDraft.invalidate(); setSaveError(""); request.current = null;
           }}>최신 기록 불러오기</Button>
         </div>}
         {preservedDraft && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">보관한 내 초안</summary><PreparationDetails preparation={preservedDraft} /></details>}
+        {editorMode === "note" && editing && <StaffingNoteDraft state={noteDraft} current={draft} disabled={saving || !!conflict} onGenerate={() => void noteDraft.generate(jobId, editing.applicant_id)} onSave={(prepared) => void save(prepared)} />}
         {editorMode === "follow_up" && <StaffingFollowUpFields value={draft.follow_up} disabled={saving} onChange={(follow_up) => { setDraft((current) => ({ ...current, follow_up })); setSaveError(""); }} />}
         {editorMode === "preparation" && <>
         <p className="text-muted-foreground">지원자와 협의한 날짜를 기록하세요. 투입 확정은 매니저가 체크 후 저장하며, 문자는 발송되지 않습니다.</p>
@@ -321,7 +330,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
             <p className="text-muted-foreground">이미 입력한 날짜는 유지합니다. 반영 후 날짜를 확인하고 아래에서 저장해주세요.</p>
           </> : <p className="text-warning-strong">확인 필요: {editingSuggestion.reason} 날짜는 직접 정리해주세요.</p>}
         </div>}
-        <label className="block space-y-1"><span>관리자 메모 · 팀 공유</span><textarea disabled={saving} value={draft.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} className={`${fieldClass} min-h-24 py-2`} /></label>
+        {editorMode !== "note" && <label className="block space-y-1"><span>관리자 메모 · 팀 공유</span><textarea disabled={saving} value={draft.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} className={`${fieldClass} min-h-24 py-2`} /></label>}
         <label className="block space-y-1"><span>기록 작성자</span><input disabled={saving} value={actorName} maxLength={STAFFING_PREPARATION_LIMITS.actor} onChange={(event) => setActorName(event.target.value)} className={fieldClass} placeholder="예: 김매니저" /></label>
         {!!editingSnapshot?.history?.length && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">팀 변경 이력 {editingSnapshot.history.length}건</summary>
           <ol className="space-y-3">{editingSnapshot.history.map((revision) => <li key={revision.event_id} className="space-y-2 border-t border-border-strong pt-3">
