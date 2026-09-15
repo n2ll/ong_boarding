@@ -40,7 +40,7 @@ for (const width of [1280, 390]) test(`실제 선탑·백업 참여를 기록하
   await page.addInitScript(() => localStorage.setItem("ongboarding:staffing-author:v1", "가상매니저"));
   await page.goto("/jobs");
   await page.getByRole("button", { name: "전체 후보 1명", exact: true }).click();
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
   const edit = page.getByRole("button", { name: "가상참여후보 진행 기록", exact: true });
   await edit.click();
   await page.getByRole("dialog", { name: "가상참여후보 진행 기록", exact: true }).getByRole("button", { name: "실제 참여", exact: true }).click();

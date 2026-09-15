@@ -44,7 +44,8 @@ test("연결 후보와 관심 구분, 날짜별 준비 저장 실패 재시도�
   await page.getByRole("button", { name: "전체 후보 50명", exact: true }).click();
   await expect(page.getByText("연결 후보 50명 · 관심 표시 0명", { exact: true })).toBeVisible();
   await expect(page.getByText("50명 지원", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
+  await page.getByText("날짜·상태로 좁혀 보기", { exact: true }).click();
   await page.getByLabel("비교할 날짜", { exact: true }).fill("2026-09-22");
   await page.getByRole("button", { name: "가상후보1 진행 기록", exact: true }).click();
   await page.getByRole("dialog", { name: "가상후보1 진행 기록", exact: true }).getByRole("button", { name: "투입 날짜", exact: true }).click();
@@ -134,9 +135,10 @@ for (const width of [1280, 390]) test(`수신 답변 제안 확인 반영과 본
   await page.addInitScript(() => localStorage.setItem("ongboarding:staffing-author:v1", "가상매니저"));
   await page.goto("/jobs");
   await page.getByRole("button", { name: "전체 후보 2명", exact: true }).click();
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
   await expect(page.getByText("답변에서 찾은 날짜 · 2027-04-22 가능", { exact: true })).toBeVisible();
   expect(writes).toHaveLength(0);
+  await page.getByText("날짜·상태로 좁혀 보기", { exact: true }).click();
   await page.getByLabel("비교할 날짜", { exact: true }).fill("2027-04-22");
   await page.getByRole("button", { name: "가상후보1 진행 기록", exact: true }).click();
   await page.getByRole("dialog", { name: "가상후보1 진행 기록", exact: true }).getByRole("button", { name: "투입 날짜", exact: true }).click();
@@ -214,7 +216,7 @@ for (const width of [1280, 390]) test(`선탑 후 본인 의사와 팀 기록 �
   });
   await page.goto("/jobs");
   await page.getByRole("button", { name: "전체 후보 1명", exact: true }).click();
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
   await page.getByRole("button", { name: "선탑후보 진행 기록", exact: true }).click();
   await page.getByRole("dialog", { name: "선탑후보 진행 기록", exact: true }).getByRole("button", { name: "선탑 진행", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "선탑후보 진행 기록", exact: true });

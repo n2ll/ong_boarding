@@ -1,0 +1,55 @@
+[
+  {
+    "id": "completed-training-observed-omission",
+    "jobTitle": "가상 성수 배송",
+    "referenceDate": "2026-09-12",
+    "note": "2026-09-11 선탑에 실제 참여해서 교육 완료함. 백업 진행은 안 하겠다고 함.",
+    "requiredChanges": [
+      { "field": "training_status", "value": "completed" },
+      { "field": "participation", "value": { "kind": "training", "date": "2026-09-11" } },
+      { "field": "backup_intent", "value": "declined" }
+    ],
+    "forbiddenChanges": [],
+    "expectation": "기존 합성 검수에서 누락된 완료 상태와 실제 참여를 독립된 항목으로 함께 제안한다. 각 근거는 원문의 정확한 부분문자열이어야 한다."
+  },
+  {
+    "id": "training-hope-is-not-completion",
+    "jobTitle": "가상 성수 배송",
+    "referenceDate": "2026-09-12",
+    "note": "2026-09-15 오전 선탑 참여를 희망함. 교육 완료 후 백업을 할지는 그때 정하기로 함.",
+    "requiredChanges": [],
+    "forbiddenChanges": [
+      { "field": "training_status", "value": "completed" },
+      { "field": "participation" },
+      { "field": "backup_intent", "value": "interested" }
+    ],
+    "expectation": "희망·조건부 완료를 실제 완료나 참여로 바꾸지 않는다."
+  },
+  {
+    "id": "partial-participation-is-not-completion",
+    "jobTitle": "가상 성수 배송",
+    "referenceDate": "2026-09-12",
+    "note": "2026-09-11 선탑에 일부 참여했지만 중도 귀가해서 교육은 미완료. 나머지 교육을 다시 조율하기로 함.",
+    "requiredChanges": [],
+    "forbiddenChanges": [{ "field": "training_status", "value": "completed" }],
+    "expectation": "실제 일부 참여의 기록은 가능하지만 교육 완료 상태는 제안하지 않는다."
+  },
+  {
+    "id": "past-completion-current-retraining",
+    "jobTitle": "가상 성수 배송",
+    "referenceDate": "2026-09-12",
+    "note": "2026-09-11 선탑 참여 완료. 정정: 당시 기초 교육만 마쳤고 현재 재교육 일정 조율 중임.",
+    "requiredChanges": [{ "field": "training_status", "value": "coordinating" }],
+    "forbiddenChanges": [{ "field": "training_status", "value": "completed" }],
+    "expectation": "정정된 현재 상태를 우선한다. 앞 문장의 완료만 잘라서 현재 완료 상태로 만들지 않는다."
+  },
+  {
+    "id": "completion-without-participation-date",
+    "jobTitle": "가상 성수 배송",
+    "referenceDate": "2026-09-12",
+    "note": "선탑 교육을 완료했다고 확인함. 실제 참여 날짜는 확인 필요.",
+    "requiredChanges": [{ "field": "training_status", "value": "completed" }],
+    "forbiddenChanges": [{ "field": "participation" }],
+    "expectation": "완료 상태만 제안하고 실제 참여 날짜는 질문한다. 기준일을 참여일로 채우지 않는다."
+  }
+]

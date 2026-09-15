@@ -79,7 +79,7 @@ export function StaffingDateBoard({ defaultStart, onOpenCandidates }: { defaultS
         <label className="min-w-0 space-y-1 sm:max-w-52 sm:flex-1"><span className="block text-sm font-medium">충원 비교 종료일</span><input type="date" value={end} min={start} onChange={(event) => setEnd(event.target.value)} className={fieldClass} /></label>
         <Button variant="secondary" className="col-span-2" aria-label="충원판 새로고침" disabled={loading || !valid} onClick={() => { setData(null); setRevision((value) => value + 1); }}><RefreshCw size={15} aria-hidden="true" /> 새로고침</Button>
       </div>
-      <p className="text-sm text-muted-foreground">최대 7일 비교 · 수요가 미정인 날은 부족 인원을 계산하지 않습니다. 관리자가 날짜별로 확정한 사람만 충원에 반영하며, 예비 후보는 포함하지 않습니다.</p>
+      <p className="text-sm text-muted-foreground">최대 7일 비교 · 수요가 미정인 날은 부족 인원을 계산하지 않습니다. 실제 필요 인원은 기본 1명, 예비는 권장 1명(필수 아님)입니다. 저장한 수요와 날짜별 확정 인원으로 충원 여부를 계산합니다.</p>
       {!valid ? <p role="alert" className="text-sm text-warning-strong">시작일과 종료일을 포함해 1~7일로 선택해주세요.</p>
         : loading ? <p role="status" className="py-6 text-sm">충원 현황을 불러오는 중…</p>
         : error ? <p role="alert" className="text-sm text-error-strong">{error} 새로고침해 다시 확인해주세요.</p>

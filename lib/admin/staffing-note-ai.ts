@@ -18,16 +18,18 @@ const SYSTEM = `매니저가 작성한 메모를 현재 공고·현재 후보의
 - 연도가 없는 '9월 12일', 월이 없는 '15일', 모호한 요일/지난주 등은 월·연도를 추정하지 말고 questions로 정확한 날짜를 확인한다. 명확한 YYYY-MM-DD 또는 연월일 전체와 기준일에서 계산 가능한 오늘/어제/그제/내일/모레만 날짜로 쓴다. next_action의 내일/모레는 기준일에서 다음 1일/다음 2일로 계산해 due_date에 쓴다. 미래 날짜는 contact나 participation에 쓸 수 없다.
 - contact는 실제로 이루어진 연락만: date는 기준일 이하, method는 phone/sms/other, result는 메모 내용 요약. 통화=phone, 문자= sms. 수단이 불명확하면 other. 과거 연락 날짜가 불명확하면 contact는 제안하지 않고 질문한다.
 - training_availability는 본인이 말한 선탑/교육 가능 시간·요일(240자 이내). 백업 근무 가능 시간을 선탑 가능 시간으로 옮기지 않는다.
-- training_status는 명시적인 조율중(coordinating)/완료(completed)/보류(on_hold)만. 선탑 희망이나 가능하다는 말만으로 상태를 만들지 않는다.
+- training_status는 명시적인 조율중(coordinating)/완료(completed)/보류(on_hold)만. 선탑 희망이나 가능하다는 말만으로 상태를 만들지 않는다. 실제 참여했어도 일부 참여·중도 귀가·미완료이면 completed를 제안하지 않는다. 과거 완료 뒤 현재 재교육·조율·보류나 정정이 적혀 있으면 현재 상태를 우선한다.
 - backup_intent는 명시적인 백업 희망(interested)/거절(declined)만. 선탑 희망을 백업 희망으로 바꾸지 않는다.
 - next_action은 메모에 적힌 앞으로 할 일(240자 이내). due_date는 그 할 일의 명확한 예정일만 쓰고 next_action과 함께 제안한다. 날짜가 불분명해도 할 일은 추출하고 날짜는 질문한다.
-- participation은 실제로 선탑(training)/백업(backup)에 참여했다는 명시적 기록만. 계획·희망·예정·조건부·부정은 참여가 아니다. 날짜도 명확하며 기준일 이하여야 한다. 단순 선탑 완료에 날짜가 없으면 training_status만 제안하고 실제 참여일을 질문한다.
+- participation은 실제로 선탑(training)/백업(backup)에 참여했다는 명시적 기록만. 계획·희망·예정·조건부·부정은 참여가 아니다. 날짜도 명확하며 기준일 이하여야 한다. 선탑 교육 완료와 실제 참여일이 함께 명시되면 training_status=completed와 participation(training)을 각각 독립된 두 항목으로 제안한다. 참여 이력을 제안했다고 완료 상태를 생략하지 않는다. 참여 사실만으로 완료를 추론하지 않는다. 단순 선탑 완료에 날짜가 없으면 training_status만 제안하고 실제 참여일을 질문한다.
 - 변경은 최대 12개, questions는 필요한 확인 질문 최대 5개(각 240자)로 간결하게 쓴다. 정보가 부족하면 억지로 채우지 않는다.
 출력 형식:
 - changes의 각 원소에는 field, value, evidence 3개 키만 쓴다. 그 밖의 키는 금지한다.
 - due_date는 독립된 changes 원소다. next_action 원소에 due_date 키를 추가하거나 value를 객체로 바꾸지 않는다.
 - 예: 기준일이 2026-09-12이고 메모가 "내일 다시 전화하기로 함"이면 다음 두 원소를 반환한다:
 {"changes":[{"field":"next_action","value":"다시 전화","evidence":"내일 다시 전화하기로 함"},{"field":"due_date","value":"2026-09-13","evidence":"내일 다시 전화하기로 함"}],"questions":[]}
+- 예: 기준일이 2026-09-12이고 메모가 "2026-09-11 선탑에 실제 참여해서 교육 완료함."이면 완료 상태와 참여 이력을 따로 반환한다:
+{"changes":[{"field":"training_status","value":"completed","evidence":"선탑에 실제 참여해서 교육 완료함"},{"field":"participation","value":{"kind":"training","date":"2026-09-11","note":"교육 완료"},"evidence":"2026-09-11 선탑에 실제 참여해서 교육 완료함"}],"questions":[]}
 출력은 propose_staffing_note 도구만 사용한다.`;
 
 const text = (maxLength: number) => ({ type: "string", minLength: 1, maxLength });

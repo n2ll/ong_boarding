@@ -9,7 +9,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { StaffingNoteDraft, useStaffingNoteDraft } from "./StaffingNoteDraft";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
-import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
+import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, parseStaffingManagerNote, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
 type Candidate = {
   applicant_id: number;
@@ -66,6 +66,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [editorMode, setEditorMode] = useState<EditorMode>("follow_up");
   const [followUpFilter, setFollowUpFilter] = useState("all");
   const [ownerQuery, setOwnerQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(5);
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
   const [draft, setDraft] = useState<StaffingPreparation>(emptyPreparation);
   const noteDraft = useStaffingNoteDraft(draft);
@@ -79,6 +80,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [saveError, setSaveError] = useState("");
   const request = useRef<{ body: string; key: string } | null>(null);
   const datesOpened = useRef(false);
+  useEffect(() => { setVisibleCount(5); }, [query, statusFilter, followUpFilter, ownerQuery, date]);
   useEffect(() => {
     try { setActorName(localStorage.getItem(AUTHOR_STORAGE_KEY) ?? ""); } catch { /* Storage is optional. */ }
   }, []);
@@ -148,6 +150,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       setEditorMode("follow_up");
       setSaveError("연락 결과와 오늘까지의 실제 연락 일자를 입력해주세요. (한국시간 기준)"); return;
     }
+    const managerNote = noteDraft.note.trim() ? parseStaffingManagerNote({ text: noteDraft.note, reference_date: noteDraft.referenceDate }) : null;
+    if (noteDraft.note.trim() && !managerNote) { setEditorMode("note"); setSaveError("메모는 1000자까지, 기준일은 오늘까지 입력해주세요."); return; }
     const normalized = parseStaffingPreparation(prepared);
     if (!normalized) {
       if (!parseStaffingPreparation({ ...emptyPreparation(), dates: prepared.dates })) setEditorMode("preparation");
@@ -171,7 +175,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     }
     try { localStorage.setItem(AUTHOR_STORAGE_KEY, actorName.trim()); } catch { /* Saving still works without local storage. */ }
     const payload = { applicant_id: editing.applicant_id, base_event_id: baseEventId, actor_name: actorName.trim(), confirmation_version: 1,
-      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, note: normalized.note, follow_up: normalized.follow_up ?? null };
+      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, note: normalized.note, follow_up: normalized.follow_up ?? null, ...(managerNote ? { manager_note: managerNote } : {}) };
     const body = JSON.stringify(payload);
     if (request.current?.body !== body) request.current = { body, key: crypto.randomUUID() };
     setSaving(true); setSaveError("");
@@ -213,24 +217,29 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     </div>;
   };
   return <section className="rounded-2xl border border-border-strong bg-card p-4" onKeyDown={(event) => { if (editing || contactCandidate) event.stopPropagation(); }}>
-    <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">날짜별 배차 준비 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
+    <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">후보 연락·기록 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
     {open && <div className="mt-3 space-y-3 text-sm">
-      <p className="text-muted-foreground">답장을 확인한 뒤 가능한 날짜와 선탑 진행을 정리하세요. 선탑 후 백업 진행은 본인이 선택합니다. 본담당·예비는 후보 구분이며, 관리자가 ‘날짜별 투입 확정’을 체크하고 저장한 날짜만 충원판에 반영합니다.</p>
+      <p className="text-muted-foreground">후보를 찾아 연락하고, 통화·진행 내용을 메모로 남기세요. 다음 할 일도 함께 확인할 수 있습니다.</p>
       {loading ? <p role="status">배차 준비 불러오는 중…</p> : loadError ? <div role="alert"><p>{loadError}</p><Button variant="secondary" onClick={() => setRetry((value) => value + 1)}>다시 조회</Button></div> : <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-muted-foreground">답변 제안과 다른 공고 기록은 조회 시점 기준입니다.</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)}>새로 확인</Button></div>
         {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 본담당 후보가 겹치는지 직접 확인해주세요.</p>}
+        <input aria-label="배차 준비 후보 이름 검색" placeholder="이름 검색" value={query} onChange={(event) => setQuery(event.target.value)} className={fieldClass} />
+        <details open={initialDate ? true : undefined} className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">날짜·상태로 좁혀 보기{date || statusFilter || followUpFilter !== "all" || ownerQuery ? " · 필터 사용 중" : ""}</summary>
+        <div className="space-y-3">
         <label className="block space-y-1"><span>비교할 날짜</span><input aria-label="비교할 날짜" type="date" value={date} onChange={(event) => setDate(event.target.value)} className={fieldClass} /></label>
         {dates.length > 0 && <div className="flex flex-wrap gap-2">{dates.map((day) => <button key={day} type="button" aria-pressed={date === day} onClick={() => setDate(day)} className={`min-h-11 rounded-lg border px-3 focus-visible:ring-2 focus-visible:ring-ring ${date === day ? "bg-primary text-primary-foreground" : "bg-background"}`}>{day.slice(5).replace("-", "/")}</button>)}</div>}
         {date && <p role="status">{date} · 확정 {counts.filter((item) => item.confirmation === "confirmed").length}명 · 본담당 후보 {counts.filter((item) => item.role === "primary_candidate").length}명 · 예비 후보 {counts.filter((item) => item.role === "reserve_candidate").length}명</p>}
-        <input aria-label="배차 준비 후보 이름 검색" placeholder="이름 검색" value={query} onChange={(event) => setQuery(event.target.value)} className={fieldClass} />
         <label className="block space-y-1"><span>선탑 진행 필터</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={fieldClass}><option value="">모든 진행 상태</option>{Object.entries(trainingStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           <label className="block min-w-0 space-y-1"><span>후속 할 일 필터</span><select value={followUpFilter} onChange={(event) => setFollowUpFilter(event.target.value)} className={fieldClass}><option value="all">모든 후보</option><option value="open">미완료 할 일</option><option value="due">오늘까지 처리할 일</option><option value="done">완료한 일</option></select></label>
           <label className="block min-w-0 space-y-1"><span>담당자 검색</span><input value={ownerQuery} onChange={(event) => setOwnerQuery(event.target.value)} className={fieldClass} placeholder="담당자 이름" /></label>
         </div>
-        <div className="max-h-96 space-y-2 overflow-y-auto">{shown.map((candidate) => {
+        </div></details>
+        <p className="text-xs text-muted-foreground">검색 결과 {shown.length}명 · {Math.min(visibleCount, shown.length)}명 표시 · 이름 검색은 전체 후보에서 찾습니다.</p>
+        <div className="space-y-2">{shown.slice(0, visibleCount).map((candidate) => {
           const snapshot = snapshots.find((item) => item.applicant_id === candidate.applicant_id);
           const prep = snapshot?.preparation;
+          const latestMemo = snapshot?.history?.find((revision) => revision.manager_note);
           const day = prep?.dates.find((item) => item.date === date);
           const suggestion = suggestions.find((item) => item.applicant_id === candidate.applicant_id);
           const conflicts = conflictsFor(candidate.applicant_id, prep);
@@ -244,6 +253,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
               <p className="mt-1">실제 참여: 선탑 {prep?.records?.filter((record) => record.kind === "training").length ?? 0}건 · 백업 {prep?.records?.filter((record) => record.kind === "backup").length ?? 0}건</p>
               <div className="mt-2"><StaffingFollowUpSummary value={prep?.follow_up} /></div>
               {!prep?.follow_up?.next_action && <p className="mt-2 text-info">다음 확인: {nextTrainingAction(prep)}</p>}
+              {latestMemo?.manager_note && <details className="mt-2 rounded-lg bg-muted p-3"><summary className="min-h-11 cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">최근 통화·진행 메모 · {latestMemo.actor?.name ?? "작성자 미기록"}</summary><p className="whitespace-pre-wrap break-words">{latestMemo.manager_note.text}</p><p className="mt-1 text-xs text-muted-foreground">메모 기준일 {latestMemo.manager_note.reference_date} · 저장 {formatTime(latestMemo.updated_at)}</p></details>}
               {prep?.note && <p className="whitespace-pre-wrap break-words text-muted-foreground">{prep.note}</p>}
               {snapshot?.updated_at && <p className="mt-1 text-xs text-muted-foreground">입력한 작성자: {snapshot.actor?.name ?? "미기록"} · {formatTime(snapshot.updated_at)}</p>}
             </>}
@@ -252,15 +262,16 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
             {conflicts.length > 0 && <p role="alert" className="mt-2 break-words text-warning-strong">같은 날 본담당 후보가 겹칩니다: {conflicts.map((item) => `${item.date} ${item.job_title}`).join(", ")}. 역할 조정은 관리자가 판단해주세요.</p>}
           </div>;
         })}{!shown.length && <p>일치하는 후보가 없습니다.</p>}</div>
+        {shown.length > visibleCount && <Button variant="secondary" className="w-full" onClick={() => setVisibleCount((count) => count + 5)}>후보 5명 더 보기 · 남은 {shown.length - visibleCount}명</Button>}
       </>}
     </div>}
-    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "짧게 메모하고, 정리된 내용만 확인해 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "메모를 그대로 남기거나, AI가 정리한 내용도 함께 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <div className="flex w-full flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!!conflict || !noteDraft.note.trim() || saving || noteDraft.busy} onClick={() => void save(parseStaffingPreparation(JSON.parse(initial)) ?? emptyPreparation())}>메모만 저장</Button><Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !!noteDraft.selected.length && !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button></div> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
         <div className="flex gap-2"><Button variant={editorMode === "note" ? "primary" : "ghost"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("note")}>메모로 기록</Button><Button variant={editorMode === "note" ? "ghost" : "secondary"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("follow_up")}>직접 입력</Button></div>
         {editorMode !== "note" && <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Object.entries(editorModeLabels).map(([mode, label]) => <button key={mode} type="button" aria-pressed={editorMode === mode} disabled={saving} onClick={() => selectEditorMode(mode as EditorMode)} className={`min-h-11 rounded-lg border px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${editorMode === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-background"}`}>{label}</button>)}
         </div>}
-        {editorMode !== "note" && editing && contactActions(editing)}
+        {editing && contactActions(editing)}
         {conflict && <div className="space-y-2 rounded-xl border border-warning-strong bg-muted p-3">
           <p className="font-bold">동료의 최신 기록</p>
           <p>입력한 작성자: {conflict.actor?.name ?? "미기록"}{conflict.updated_at && ` · ${formatTime(conflict.updated_at)}`}</p>
@@ -330,11 +341,13 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
             <p className="text-muted-foreground">이미 입력한 날짜는 유지합니다. 반영 후 날짜를 확인하고 아래에서 저장해주세요.</p>
           </> : <p className="text-warning-strong">확인 필요: {editingSuggestion.reason} 날짜는 직접 정리해주세요.</p>}
         </div>}
+        {editorMode !== "note" && noteDraft.note.trim() && <p className="rounded-lg bg-muted p-3">작성한 통화·진행 메모 원문도 함께 저장됩니다.</p>}
         {editorMode !== "note" && <label className="block space-y-1"><span>관리자 메모 · 팀 공유</span><textarea disabled={saving} value={draft.note} maxLength={STAFFING_PREPARATION_LIMITS.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} className={`${fieldClass} min-h-24 py-2`} /></label>}
         <label className="block space-y-1"><span>기록 작성자</span><input disabled={saving} value={actorName} maxLength={STAFFING_PREPARATION_LIMITS.actor} onChange={(event) => setActorName(event.target.value)} className={fieldClass} placeholder="예: 김매니저" /></label>
         {!!editingSnapshot?.history?.length && <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-bold focus-visible:ring-2 focus-visible:ring-ring">팀 변경 이력 {editingSnapshot.history.length}건</summary>
           <ol className="space-y-3">{editingSnapshot.history.map((revision) => <li key={revision.event_id} className="space-y-2 border-t border-border-strong pt-3">
             <p className="text-xs text-muted-foreground">입력한 작성자: {revision.actor?.name ?? "미기록"} · {formatTime(revision.updated_at)}</p>
+            {revision.manager_note && <div className="rounded-lg bg-muted p-3"><p className="font-medium">통화·진행 메모 원문 · 기준일 {revision.manager_note.reference_date}</p><p className="whitespace-pre-wrap break-words">{revision.manager_note.text}</p></div>}
             {revision.preparation ? <PreparationDetails preparation={revision.preparation} /> : <p className="text-error-strong">이 기록은 내용을 확인하지 못했어요.</p>}
           </li>)}</ol>
         </details>}

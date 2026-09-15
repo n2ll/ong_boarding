@@ -455,3 +455,96 @@ test("the initial version rejects concurrent editors but stays independent for e
   assert.equal(responses[2].status, 200);
   assert.equal(h.writes.length, 2);
 });
+
+const managerNote = { text: "  오늘 통화함.\n선탑 가능 시간을 다시 확인하기로 함.  ", reference_date: "2026-09-12" };
+
+test("manager memo alone appends the original note while preserving preparation and applicant state", async () => {
+  const state = { ...preparation, dates: [confirmedDate], training: { status: "scheduled", backup_intent: "interested",
+    scheduled_at: "2026-09-15T09:00:00+09:00", first_loading_location: "성수 집결지", linked_pro: "연결 매니저" },
+    records: [{ id: KEY, kind: "training", date: "2026-09-11", note: "실제 참여" }], follow_up: followUp };
+  const h = harness({ events: [event(1, state)], candidates: [{ id: 11, job_id: 7, applicant_id: 1, agent_stage: "paused" }] });
+  const response = await h.route.POST(request({ ...state, base_event_id: 1, confirmation_version: 1, manager_note: managerNote }), context());
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify(response.body.preparation)), state);
+  assert.deepEqual((h.writes[0].row.meta as Row).manager_note, managerNote);
+  assert.equal((h.writes[0].row.meta as Row).note, "후보 검토");
+  assert.equal(Object.hasOwn(response.body.preparation as Row, "manager_note"), false);
+  assert.deepEqual((response.body.history as Row[])[0].manager_note, managerNote);
+  assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
+  assert.equal(h.database.job_candidates[0].agent_stage, "paused");
+  assert.deepEqual(h.database.messages, []);
+  assert.deepEqual(h.database.pool_events[0].meta, state);
+});
+
+test("manager memo rejects invalid text and dates while legacy omission and 1000-character notes remain valid", async () => {
+  const h = harness();
+  for (const manager_note of [null, {}, [], { ...managerNote, text: " \n " }, { ...managerNote, text: 1 },
+    { ...managerNote, text: "가".repeat(1001) }, { ...managerNote, reference_date: "2026-02-30" },
+    { ...managerNote, reference_date: "9999-01-01" }, { ...managerNote, reference_date: "2026-9-12" },
+    { text: "통화함" }, { ...managerNote, unknown: true }]) {
+    assert.equal((await h.route.POST(request({ manager_note }), context())).status, 400);
+  }
+  assert.equal(h.writes.length, 0);
+  const boundary = await h.route.POST(request({ manager_note: { ...managerNote, text: "가".repeat(1000) } }), context());
+  assert.equal(boundary.status, 200);
+  assert.equal(((h.writes[0].row.meta as Row).manager_note as Row).text, "가".repeat(1000));
+  const legacy = harness();
+  assert.equal((await legacy.route.POST(request(), context())).status, 200);
+  assert.equal(Object.hasOwn(legacy.writes[0].row.meta as Row, "manager_note"), false);
+});
+
+test("concurrent manager memo retries accept reordered keys and reject changed, removed or reused original notes", async () => {
+  const h = harness();
+  const results = await Promise.all([
+    h.route.POST(request({ manager_note: managerNote }), context()),
+    h.route.POST(request({ manager_note: { reference_date: managerNote.reference_date, text: managerNote.text } }), context()),
+  ]);
+  assert.deepEqual(results.map((result) => result.status), [200, 200]);
+  assert.deepEqual(results.map((result) => result.body.deduplicated).sort(), [false, true]);
+  assert.equal(h.writes.length, 1);
+  for (const manager_note of [{ ...managerNote, text: "다른 메모" }, { ...managerNote, text: managerNote.text.trim() },
+    { ...managerNote, reference_date: "2026-09-11" }, undefined]) {
+    assert.equal((await h.route.POST(request({ manager_note }), context())).status, 409);
+  }
+  assert.equal(h.writes.length, 1);
+  const legacy = harness();
+  await legacy.route.POST(request(), context());
+  assert.equal((await legacy.route.POST(request({ manager_note: managerNote }), context())).status, 409);
+});
+
+test("history keeps each memo with its revision across later notes and legacy edits, including stale conflicts", async () => {
+  const h = harness({ events: [event(1)] });
+  const secondNote = { text: "추가로 통화함", reference_date: "2026-09-13" };
+  const first = await h.route.POST(request({ base_event_id: 1, manager_note: managerNote }), context());
+  assert.equal(first.status, 200);
+  const second = await h.route.POST(request({ base_event_id: 2, action_key: crypto.randomUUID(), manager_note: secondNote }), context());
+  assert.equal(second.status, 200);
+  const legacy = await h.route.POST(request({ base_event_id: 3, action_key: crypto.randomUUID() }), context());
+  assert.equal(legacy.status, 200);
+  assert.equal(Object.hasOwn(h.writes[2].row.meta as Row, "manager_note"), false);
+  const response = await h.route.GET({}, context());
+  const history = ((response.body.preparations as Row[])[0].history as Row[]);
+  assert.deepEqual(Array.from(history, (revision) => revision.manager_note ?? null), [null, secondNote, managerNote, null]);
+  assert.ok(history.every((revision) => !Object.hasOwn(revision.preparation as Row, "manager_note")));
+  const retry = await h.route.POST(request({ base_event_id: 1, manager_note: managerNote }), context());
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.deduplicated, true);
+  assert.equal(retry.body.event_id, first.body.event_id);
+  const stale = await h.route.POST(request({ base_event_id: 1, action_key: crypto.randomUUID(), manager_note: secondNote }), context());
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.conflict, true);
+  const latest = stale.body.latest as Row;
+  assert.deepEqual(Array.from(latest.history as Row[], (revision) => revision.manager_note ?? null), [null, secondNote, managerNote, null]);
+  assert.equal(h.writes.length, 3);
+});
+
+test("same request key racing with different original notes cannot silently deduplicate the loser", async () => {
+  const h = harness();
+  const results = await Promise.all([
+    h.route.POST(request({ manager_note: managerNote }), context()),
+    h.route.POST(request({ manager_note: { ...managerNote, text: "다른 작성 내용" } }), context()),
+  ]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  assert.equal(h.writes.length, 1);
+  assert.deepEqual((h.writes[0].row.meta as Row).manager_note, managerNote);
+});

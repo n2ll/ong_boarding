@@ -46,7 +46,8 @@ for (const width of [1280, 390]) test(`진행 기록 종류를 바꿔도 초안�
   await page.addInitScript(() => localStorage.setItem("ongboarding:staffing-author:v1", "가상매니저"));
   await page.goto("/jobs");
   await page.getByRole("button", { name: "전체 후보 1명", exact: true }).click();
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
+  await page.getByText("날짜·상태로 좁혀 보기", { exact: true }).click();
   await page.getByLabel("비교할 날짜", { exact: true }).fill("2099-09-22");
   const edit = page.getByRole("button", { name: "가상후보1 진행 기록", exact: true });
   await edit.click();

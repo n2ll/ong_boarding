@@ -64,8 +64,9 @@ function previousValue(current: StaffingPreparation, change: StaffingNoteChange)
 export function StaffingNoteDraft({ state, current, disabled, onGenerate, onSave }: {
   state: ReturnType<typeof useStaffingNoteDraft>; current: StaffingPreparation; disabled: boolean; onGenerate: () => void; onSave: (draft: StaffingPreparation) => void;
 }) {
-  return <form id="staffing-note-form" className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (disabled || state.busy) return; if (state.proposal && state.prepared) onSave(state.prepared); else if (!state.proposal) onGenerate(); }}>
+  return <form id="staffing-note-form" className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (disabled || state.busy) return; if (state.proposal && (!state.selected.length || state.prepared)) onSave(state.prepared ?? current); else if (!state.proposal) onGenerate(); }}>
     <label className="block space-y-2"><span className="font-semibold">통화·진행 메모</span><textarea aria-label="통화·진행 메모" value={state.note} onChange={(event) => state.changeNote(event.target.value)} disabled={disabled || state.busy} maxLength={1000} rows={4} className={`${fieldClass} py-3`} placeholder="예: 오늘 통화함. 9/16 오전 선탑 희망. 내일 첫 상차지 확인 후 다시 전화하기." /></label>
+    <p className="text-sm text-muted-foreground">원문은 팀 이력에 보존됩니다. 메모만 저장하면 직접 입력·AI 제안은 반영하지 않습니다.</p>
     <div className="flex flex-wrap items-center gap-3"><label htmlFor="staffing-note-date" className="text-muted-foreground">메모 기준일</label><input id="staffing-note-date" type="date" value={state.referenceDate} max={staffingToday()} onChange={(event) => state.changeDate(event.target.value)} disabled={disabled || state.busy} className={`${fieldClass} w-auto max-w-full`} /></div>
     {state.busy && <p role="status" className="text-muted-foreground">메모에서 기록할 내용을 정리하고 있어요…</p>}
     {state.error && <p role="alert" className="text-error-strong">{state.error}</p>}
@@ -80,7 +81,7 @@ export function StaffingNoteDraft({ state, current, disabled, onGenerate, onSave
         </span>
       </label>)}
       {state.proposal.questions.length > 0 && <div className="rounded-xl bg-muted p-3"><p className="font-medium">확인이 필요한 내용</p><ul className="mt-2 list-disc space-y-1 pl-5">{state.proposal.questions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
-      {!state.proposal.changes.length && <p>확실하게 기록할 내용을 찾지 못했어요. 메모를 보완하거나 직접 입력해주세요.</p>}
+      {!state.proposal.changes.length && <p>확실하게 기록할 내용을 찾지 못했어요. 원문을 그대로 저장하거나 메모를 보완해주세요.</p>}
       {!!state.selected.length && !state.prepared && <p role="alert" className="text-error-strong">선택한 내용을 기존 기록에 반영하기 어렵습니다. 날짜·할 일을 확인하거나 직접 입력해주세요.</p>}
     </section>}
   </form>;

@@ -48,8 +48,9 @@ for (const width of [1280, 390]) test(`연락·할 일을 배차 변경 없이 �
   await page.addInitScript(() => localStorage.setItem("ongboarding:staffing-author:v1", "가상매니저"));
   await page.goto("/jobs");
   await page.getByRole("button", { name: "전체 후보 1명", exact: true }).click();
-  await page.getByRole("button", { name: "날짜별 배차 준비 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "후보 연락·기록 접기" })).toBeVisible();
   // 비교 중인 날짜가 기록에 없어도 연락 간편 편집이 배차 날짜를 추가해서는 안 된다.
+  await page.getByText("날짜·상태로 좁혀 보기", { exact: true }).click();
   await page.getByLabel("비교할 날짜", { exact: true }).fill("2099-09-22");
   const edit = page.getByRole("button", { name: "가상후보1 연락·할 일 기록", exact: true });
   await expect(edit).toBeVisible();
