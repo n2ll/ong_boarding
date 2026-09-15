@@ -82,6 +82,7 @@ export async function loadConsultationJobs(supabase: SupabaseClient, applicantId
   }
 
   const nowMs = Date.now();
+  const today = new Date(nowMs + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
   const jobs = [...jobsById.values()].filter((job) => {
     if (!job.title?.trim() || isSystemJobTitle(job.title)) return false;
     const closesAt = job.closes_at == null ? null : Date.parse(job.closes_at);
@@ -130,14 +131,25 @@ export async function loadConsultationJobs(supabase: SupabaseClient, applicantId
         throw new Error("매니저 운영 준비 기록이 올바르지 않습니다.");
       }
       const availability = trainingReplyEvidence(preparation.training_availability, true);
+      const followUp = preparation.follow_up;
+      const followUpOpen = followUp?.status === "open" && Boolean(followUp.next_action);
+      let followUpTiming: ManagerPreparationContext["follow_up_timing"] = "none";
+      if (followUpOpen && followUp) {
+        followUpTiming = !followUp.due_date ? "undated" : followUp.due_date > today ? "upcoming"
+          : followUp.due_date === today ? "due_today" : "overdue";
+      }
       preparations.set(jobId, {
         training_status: preparation.training.status,
         backup_intent: preparation.training.backup_intent,
         training_availability: { has_date: availability.hasDate, has_time: availability.hasTime },
         training_completed: preparation.records.some((record) => record.kind === "training"),
         backup_completed: preparation.records.some((record) => record.kind === "backup"),
-        manager_follow_up_open: preparation.follow_up?.status === "open" && Boolean(preparation.follow_up.next_action),
+        manager_follow_up_open: followUpOpen,
         last_contact_recorded: Boolean(preparation.follow_up?.last_contact),
+        training_schedule: preparation.training.status === "scheduled" && preparation.training.scheduled_at
+          ? { scheduled_at: preparation.training.scheduled_at, timing: Date.parse(preparation.training.scheduled_at) <= nowMs ? "elapsed" : "upcoming" }
+          : null,
+        follow_up_timing: followUpTiming,
       });
     }
   }

@@ -135,19 +135,22 @@ const emptyPreparation = { source: "manager", dates: [], training_availability: 
 const emptyManagerContext = {
   training_status: "reviewing", backup_intent: "unknown", training_availability: { has_date: false, has_time: false },
   training_completed: false, backup_completed: false, manager_follow_up_open: false, last_contact_recorded: false,
+  training_schedule: null, follow_up_timing: "none",
 };
 function preparationEvent(id: number, jobId: number, meta: unknown, patch: Row = {}): Row {
   return { id, applicant_id: 7, job_id: jobId, event_type: "staffing_preparation", meta, created_at: "2026-09-09T00:00:00Z", ...patch };
 }
 
-test("매니저 기록은 상태·불리언만 전달하고 메모·담당자·연락처·실제 날짜는 제외한다", async () => {
+test("예정 선탑 일시만 허용하고 내부 메모·담당자·연락처·기한·참여 날짜는 제외한다", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-09-15T00:00:00Z"));
   const rows = database([job(1)], [candidate(1, 1)]);
   rows.pool_events = [preparationEvent(1, 1, {
-    ...emptyPreparation, dates: [{ date: "2027-04-20", availability: "available", role: "primary_candidate", confirmation: "confirmed" }],
+    ...emptyPreparation, dates: [{ date: "2027-04-21", availability: "available", role: "primary_candidate", confirmation: "confirmed" }],
     training_availability: "월요일 오전 가능", note: "팀만 보는 메모 010-1234-5678",
+    manager_note: { text: "비공개 통화 원문", reference_date: "2026-09-01" },
     training: { status: "scheduled", backup_intent: "declined", scheduled_at: "2027-04-20T07:30:00+09:00", first_loading_location: "비공개 상세 주소", linked_pro: "비공개 프로" },
     records: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "training", date: "2026-01-08", note: "참여 평가 메모" }],
-    follow_up: { owner: "비공개 담당자", next_action: "다시 전화 010-2222-3333", due_date: "2027-04-20", status: "open",
+    follow_up: { owner: "비공개 담당자", next_action: "다시 전화 010-2222-3333", due_date: "2027-04-22", status: "open",
       last_contact: { date: "2026-01-08", method: "phone", result: "비공개 통화 내용" } },
     actor: { account_id: "secret-account", name: "비공개 작성자" },
   })];
@@ -156,13 +159,81 @@ test("매니저 기록은 상태·불리언만 전달하고 메모·담당자·�
   assert.deepEqual(result[0].manager_preparation, {
     training_status: "scheduled", backup_intent: "declined", training_availability: { has_date: true, has_time: true },
     training_completed: true, backup_completed: false, manager_follow_up_open: true, last_contact_recorded: true,
+    training_schedule: { scheduled_at: "2027-04-20T07:30:00+09:00", timing: "upcoming" }, follow_up_timing: "upcoming",
   });
-  assert.doesNotMatch(JSON.stringify(result), /비공개|메모|010-|2027-04-20|2026-01-08|secret-account/);
+  assert.doesNotMatch(JSON.stringify(result), /비공개|메모|010-|2027-04-21|2027-04-22|2026-01-08|2026-09-01|secret-account/);
+  const { training_schedule, ...withoutSchedule } = result[0].manager_preparation!;
+  assert.doesNotMatch(JSON.stringify(withoutSchedule), /2027-04-20/);
+});
+
+test("예정 선탑은 정확한 시각까지 지나면 elapsed이며 실제 완료로 바꾸지 않는다", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-09-15T15:00:00Z"));
+  const rows = database([job(1), job(2), job(3)], [candidate(1, 1), candidate(2, 2), candidate(3, 3)]);
+  rows.pool_events = ["2026-09-15T23:59:00+09:00", "2026-09-16T00:00:00+09:00", "2026-09-16T00:01:00+09:00"].map((scheduled_at, index) =>
+    preparationEvent(index + 1, index + 1, { ...emptyPreparation,
+      training: { status: "scheduled", backup_intent: "unknown", scheduled_at, first_loading_location: "", linked_pro: "" },
+    }));
+  const { supabase } = client(rows);
+  const result = (await loadConsultationJobs(supabase, 7)).map((row) => row.manager_preparation!);
+  assert.deepEqual(result.map((value) => value.training_schedule), [
+    { scheduled_at: "2026-09-15T23:59:00+09:00", timing: "elapsed" },
+    { scheduled_at: "2026-09-16T00:00:00+09:00", timing: "elapsed" },
+    { scheduled_at: "2026-09-16T00:01:00+09:00", timing: "upcoming" },
+  ]);
+  assert.ok(result.every((value) => value.training_status === "scheduled" && !value.training_completed && !value.backup_completed));
+});
+
+test("완료·보류·조율의 잔존 일시와 일시 없는 예정은 상담 약속으로 전달하지 않는다", async () => {
+  const statuses = ["completed", "on_hold", "coordinating", "reviewing", "scheduled"];
+  const rows = database(statuses.map((_, index) => job(index + 1)), statuses.map((_, index) => candidate(index + 1, index + 1)));
+  rows.pool_events = statuses.map((status, index) => preparationEvent(index + 1, index + 1, { ...emptyPreparation,
+    training: { status, backup_intent: "unknown", scheduled_at: status === "scheduled" ? "" : "2027-04-20T07:30:00+09:00", first_loading_location: "", linked_pro: "" },
+  }));
+  const { supabase } = client(rows);
+  const result = await loadConsultationJobs(supabase, 7);
+  assert.deepEqual(result.map((row) => row.manager_preparation?.training_schedule), [null, null, null, null, null]);
+  assert.doesNotMatch(JSON.stringify(result), /2027-04-20/);
+});
+
+test("열린 후속 할 일만 기한 시점으로 축약하고 완료·빈 할 일·과거 스키마는 none이다", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-09-15T15:00:00Z"));
+  const followUps = [
+    { status: "open", next_action: "비공개 할 일", due_date: "" },
+    { status: "open", next_action: "비공개 할 일", due_date: "2026-09-15" },
+    { status: "open", next_action: "비공개 할 일", due_date: "2026-09-16" },
+    { status: "open", next_action: "비공개 할 일", due_date: "2026-09-17" },
+    { status: "done", next_action: "비공개 완료", due_date: "2026-09-15" },
+    { status: "open", next_action: "   ", due_date: "" },
+    null, undefined,
+  ];
+  const rows = database(followUps.map((_, index) => job(index + 1)), followUps.map((_, index) => candidate(index + 1, index + 1)));
+  rows.pool_events = followUps.map((value, index) => preparationEvent(index + 1, index + 1, { ...emptyPreparation,
+    ...(value === undefined ? {} : { follow_up: value && { owner: "비공개 담당자", last_contact: null, ...value } }),
+  }));
+  const { supabase } = client(rows);
+  const result = await loadConsultationJobs(supabase, 7);
+  assert.deepEqual(result.map((row) => row.manager_preparation?.follow_up_timing), ["undated", "overdue", "due_today", "upcoming", "none", "none", "none", "none"]);
+  assert.deepEqual(result.map((row) => row.manager_preparation?.manager_follow_up_open), [true, true, true, true, false, false, false, false]);
+  assert.doesNotMatch(JSON.stringify(result), /비공개|2026-09-15|2026-09-16|2026-09-17/);
+});
+
+test("후속 기한은 UTC 날짜가 아닌 한국시간 자정에 오늘·경과로 전환된다", async (t) => {
+  let now = Date.parse("2026-09-15T14:59:59Z");
+  t.mock.method(Date, "now", () => now);
+  const rows = database([job(1), job(2)], [candidate(1, 1), candidate(2, 2)]);
+  rows.pool_events = ["2026-09-15", "2026-09-16"].map((due_date, index) => preparationEvent(index + 1, index + 1, { ...emptyPreparation,
+    follow_up: { owner: "", next_action: "전화하기", due_date, status: "open", last_contact: null },
+  }));
+  const { supabase } = client(rows);
+  assert.deepEqual((await loadConsultationJobs(supabase, 7)).map((row) => row.manager_preparation?.follow_up_timing), ["due_today", "upcoming"]);
+  now = Date.parse("2026-09-15T15:00:00Z");
+  assert.deepEqual((await loadConsultationJobs(supabase, 7)).map((row) => row.manager_preparation?.follow_up_timing), ["overdue", "due_today"]);
 });
 
 test("최신 저장 시각을 우선하고 동시각에는 큰 ID를 선택해 명시 삭제를 유지한다", async () => {
   const rows = database([job(1), job(2)], [candidate(1, 1), candidate(2, 2)]);
   const old = { ...emptyPreparation, training_availability: "월요일 오전 가능",
+    training: { status: "scheduled", backup_intent: "unknown", scheduled_at: "2027-04-20T07:30:00+09:00", first_loading_location: "", linked_pro: "" },
     follow_up: { owner: "담당자", next_action: "다음 연락", due_date: "", status: "open", last_contact: null } };
   rows.pool_events = [
     preparationEvent(99, 1, old), preparationEvent(1, 1, { ...emptyPreparation, follow_up: null }, { created_at: "2026-09-10T00:00:00Z" }),
