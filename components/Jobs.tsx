@@ -968,7 +968,9 @@ export function Jobs() {
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number } | null>(null);
+  const openedFollowUpLink = useRef<string | null>(null);
+  const refreshedFollowUpLink = useRef<string | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
   const candidateBoardReturnFocusRef = useRef<HTMLElement | null>(null);
   const candidateBoardWasOpenRef = useRef(false);
@@ -1210,8 +1212,8 @@ export function Jobs() {
     }
   };
 
-  const openCandidates = (job: JobRow, staffingDate?: string) => {
-    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate });
+  const openCandidates = (job: JobRow, staffingDate?: string, followUpApplicantId?: number) => {
+    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate, followUpApplicantId });
     setCandidates([]);
     setCandLoaded(false);
     setCandError(null);
@@ -1369,7 +1371,7 @@ export function Jobs() {
   }, [searchParams, router]);
 
   // 공고 목록은 SWR 캐시로 — 탭 재방문 시 즉시 표시. 변경 후 갱신은 loadJobs(=mutate)로.
-  const { data: jobsApi, error: jobsError, isLoading: jobsLoading, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
+  const { data: jobsApi, error: jobsError, isLoading: jobsLoading, isValidating: jobsValidating, mutate: mutateJobs } = useSWR<{ jobs?: ApiJob[] }>("/api/admin/jobs?status=all");
   const { data: killData, error: killError, isValidating: killValidating, mutate: mutateKillMode } = useSWR<AdminAgentModeResponse>(
     "/api/admin/agent/kill-switch",
     { refreshInterval: 30_000 },
@@ -1401,6 +1403,28 @@ export function Jobs() {
     [jobsError, jobsFirstLoad, operationsSummary],
   );
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
+  useEffect(() => {
+    const jobParam = searchParams.get("followup_job");
+    const applicantParam = searchParams.get("followup_applicant");
+    if (!jobParam && !applicantParam) { openedFollowUpLink.current = null; refreshedFollowUpLink.current = null; return; }
+    const key = `${jobParam}:${applicantParam}`;
+    if (openedFollowUpLink.current === key || !jobsApi || jobsError) return;
+    const validId = (value: string | null) => !!value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
+    const validLink = validId(jobParam) && validId(applicantParam);
+    const job = validLink ? jobs.find((item) => Number(item.id) === Number(jobParam)) : undefined;
+    // A fresh follow-up queue can refer to a job absent from the shared SWR cache.
+    // Force one fresh lookup even when SWR's deduplication window suppresses a mount fetch.
+    if (validLink && !job && refreshedFollowUpLink.current !== key) {
+      refreshedFollowUpLink.current = key;
+      void mutateJobs().catch(() => { /* The normal job-list error UI offers retry. */ });
+      return;
+    }
+    if (!job && jobsValidating) return;
+    openedFollowUpLink.current = key;
+    if (job) openCandidates(job, undefined, Number(applicantParam));
+    else toast.error("선택한 후속 연락의 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
+    router.replace("/jobs", { scroll: false });
+  }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs]);
 
   // 화주사 유형은 AI 응대 계약의 권위값이다. 등록·수정 중 이 메타데이터를 못 읽었는데도
   // 빈 목록을 '일반 배송'으로 간주하면 비마트 공고를 잘못 저장하므로 작성 경로는 fail-closed한다.
@@ -5130,7 +5154,7 @@ export function Jobs() {
                 )}
                 {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
 
-              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
+              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}:${candPanel.followUpApplicantId ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialApplicantId={candPanel.followUpApplicantId} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">
