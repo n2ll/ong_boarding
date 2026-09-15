@@ -4,6 +4,10 @@ const MAX_PARALLEL_PREVIEW_REQUESTS = 3;
 type PreviewFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface MessagePreviewResponse {
+  message_id?: number;
+  reply_completed?: boolean;
+  handoff_required?: boolean;
+  pending_draft?: boolean;
   body: string;
   direction: "inbound" | "outbound";
   created_at: string;

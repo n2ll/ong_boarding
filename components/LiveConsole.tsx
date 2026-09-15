@@ -12,6 +12,8 @@ import dynamic from "next/dynamic";
 import { Modal } from "./ui/modal";
 import { TextareaField } from "./ui/field";
 import { Inbox } from "./Inbox";
+import { ReplyCompletionButton } from "./ReplyCompletionButton";
+import { isReplyActionable } from "@/lib/admin/reply-completion";
 
 /**
  * 대화창과 오른쪽 상세는 **대화를 누르기 전엔 렌더되지 않는다**(아래 `activeChat &&`).
@@ -116,6 +118,9 @@ type ActiveJob = LiveJobLink;
 
 /** /api/admin/messages/preview 응답의 지원자별 마지막 메시지 요약 */
 interface LastMessagePreview {
+  message_id?: number;
+  reply_completed?: boolean;
+  handoff_required?: boolean;
   body: string;
   direction: string;
   created_at: string;
@@ -253,17 +258,19 @@ function isAwaitingPreview(pv: LastMessagePreview | undefined): boolean {
 // 카드 상태를 '누구 차례냐' 단일 축 배지 하나로 압축(간소화).
 // 이전엔 카드당 최대 6개 배지(미답·개입필요·풀응답·초안대기·수동응대·AI응대중 + 가용성·수신거부)가
 // 겹쳐 무엇을 먼저 봐야 할지 헷갈렸다. 실무자의 질문은 하나 — "지금 내가 답할 것이 뭐지?".
-// 우선순위: 수신거부 > 초안 검토 > 내가 답할 차례 > 수동 응대 > AI 응대 중 > 상대 답 기다림 > (그 외).
+// 수신거부·실제 인계·초안을 먼저 표시하고, 미완료 수신과 명시적인 응대 완료를 구분한다.
 interface TurnBadge { label: string; cls: string; sub?: string }
 function whoseTurn(chat: Applicant, pv: LastMessagePreview | undefined): TurnBadge {
-  const unanswered = pv?.direction === "inbound";
+  const unanswered = isReplyActionable(pv);
   if (chat.sms_opt_out_at) return { label: "수신거부", cls: "bg-error-soft text-error-strong border border-error/30" };
+  if (pv?.handoff_required) return { label: "사람 확인 필요", cls: "bg-warning-soft text-warning-strong border border-warning/30" };
   if (pv?.pending_draft) return { label: "초안 검토", cls: "bg-copilot-soft text-copilot-strong border border-copilot/30" };
   if (unanswered) {
     // 활성 대화 없이 답장 온 재컨택 응답자 = 스크리닝 스코프 밖 답장. 서브라벨로만 구분(별도 색 배지 X).
     const isPool = (!chat.agent_stage || chat.agent_stage === "abort") && !ACTIVE_STATUSES.has(chat.status);
     return { label: "내가 답할 차례", cls: "bg-priority-critical-soft text-priority-critical-ink border border-priority-critical/30", sub: isPool ? "풀 밖 답장" : undefined };
   }
+  if (pv?.reply_completed) return { label: "응대 완료", cls: "bg-success-soft text-success-strong border border-success/25" };
   if (chat.agent_stage === "paused") return { label: "수동 응대", cls: "bg-muted text-gray-700" };
   if (isAwaitingPreview(pv)) return { label: "상대 답 기다림", cls: "bg-muted text-muted-foreground" };
   if (chat.agent_stage && chat.agent_stage !== "abort") return { label: "AI 응대 중", cls: "bg-info-soft text-info-strong border border-info/25" };
@@ -532,9 +539,9 @@ export function LiveConsole() {
   );
   const loadingList = appsState === "loading" && chats.length === 0;
 
-  // 미답 판정(A2): '마지막 메시지가 inbound(지원자 답장)' 기준. 대시보드 답장 큐와 같은 규칙.
+  // 미답 판정: 수신·완료·인계 상태를 대시보드 답장 큐와 같은 규칙으로 확인한다.
   const isUnanswered = useCallback(
-    (c: Applicant) => previewById[c.id]?.direction === "inbound",
+    (c: Applicant) => isReplyActionable(previewById[c.id]),
     [previewById]
   );
   // 답 대기 판정 — 미답이 우선이므로 미답이 아닌 것 중에서만
@@ -1661,6 +1668,10 @@ export function LiveConsole() {
               {(activeChat.branch || activeChat.branch1) && <span className="px-2 py-1 rounded-full text-[12px] font-bold bg-success-soft text-success-strong">{activeChat.branch || activeChat.branch1}</span>}
               {!isUnscopedDraftContext && activeChat.agent_stage && <StageBadge stage={activeChat.agent_stage} className="px-2 py-1" />}
               <ApplicantStatusBadge status={activeChat.status} className="px-2 py-1" />
+              {isReplyActionable(previewById[activeChat.id]) && !previewById[activeChat.id]?.pending_draft && (
+                <ReplyCompletionButton key={activeChat.id} applicantId={activeChat.id} name={activeChat.name}
+                  preview={previewById[activeChat.id]} onChanged={() => { void mutateApps(); }} />
+              )}
               {replyQueueEligible && (
                 <span className="rounded-lg border border-border-strong bg-background px-2 py-1 text-[12px] font-bold tabular-nums text-muted-foreground" aria-label={`답장 큐 ${replyQueuePosition.current}번째, 총 ${replyQueuePosition.total}건`}>
                   답장 {replyQueuePosition.current} / {replyQueuePosition.total}
@@ -1799,7 +1810,7 @@ export function LiveConsole() {
               if (appsState === "error") return <div className="text-[13px] text-error-strong">답을 기다리는 대화를 확인할 수 없어요.</div>;
               // 가장 오래 기다린 미답 대화 — 명단은 이미 손안에 있다(visibleChats + previewById).
               const waiting = chats
-                .filter((c) => previewById[c.id]?.direction === "inbound")
+                .filter((c) => isReplyActionable(previewById[c.id]))
                 .sort((a, b) => new Date(lastActivityAt(a) ?? 0).getTime() - new Date(lastActivityAt(b) ?? 0).getTime());
               const oldest = waiting[0];
               if (!oldest && manualMessageAttentionState === "error") {

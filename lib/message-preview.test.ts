@@ -9,7 +9,7 @@ type GatherMessagePreviews = (
     throwOnCoreError?: boolean;
     requireComplete?: boolean;
   },
-) => Promise<Record<number, { body?: string; direction?: string; last_inbound_at?: string | null }>>;
+) => Promise<Record<number, { body?: string; direction?: string; last_inbound_at?: string | null; message_id?: number; reply_completed?: boolean; handoff_required?: boolean }>>;
 
 type LivePreviewTargetIds = (
   applicants: ({ id: number } & Record<string, unknown>)[],
@@ -48,6 +48,9 @@ function boundedPreviewClient(options: {
   maxIdsPerRequest?: number;
   failManual?: boolean;
   failDraft?: boolean;
+  failStatus?: string;
+  completionRows?: Record<string, any>[];
+  candidateRows?: Record<string, any>[];
   failMessageApplicantId?: number;
   failMessageFrom?: number;
   delayMs?: number;
@@ -81,22 +84,28 @@ function boundedPreviewClient(options: {
       const state: {
         applicantIds: number[];
         direction: string | null;
+        equalities: Array<[string, unknown]>;
+        messageIds: unknown[] | null;
         orders: { column: string; ascending: boolean }[];
       } = {
         applicantIds: [],
         direction: null,
+        equalities: [],
+        messageIds: null,
         orders: [],
       };
       const query = {
         select() { return this; },
         eq(column: string, value: string) {
           if (column === "direction") state.direction = value;
+          state.equalities.push([column, value]);
           return this;
         },
         gte() { return this; },
         not() { return this; },
         in(column: string, values: unknown[]) {
           if (column === "applicant_id") state.applicantIds = values as number[];
+          if (column === "meta->>message_id") state.messageIds = values;
           return this;
         },
         order(column: string, config?: { ascending?: boolean }) {
@@ -104,6 +113,15 @@ function boundedPreviewClient(options: {
           return this;
         },
         range(from: number, to: number) {
+          if (table === "pool_events" || table === "job_candidates") {
+            if (state.applicantIds.length > maxIdsPerRequest) return respond({ data: null, error: new Error("status applicant id request too large") });
+            if (options.failStatus === table) return respond({ data: null, error: new Error(`${table} unavailable`) });
+            const rows = table === "pool_events" ? options.completionRows ?? [] : options.candidateRows ?? [];
+            return respond({ data: rows.filter(row => state.applicantIds.includes(row.applicant_id)
+              && state.equalities.every(([key, value]) => row[key] === value)
+              && (!state.messageIds || state.messageIds.includes(String(row.meta?.message_id))))
+              .slice(from, to + 1), error: null });
+          }
           if (table === "messages" && state.direction === "outbound") {
             if (options.failManual) {
               return respond({ data: null, error: new Error("manual discovery unavailable") });
@@ -304,4 +322,45 @@ test("complete preview lookup fails instead of returning partial draft state", a
     ),
     /drafts unavailable/,
   );
+});
+
+// Break caught: treating a completed prior message, or one resolved candidate, as the whole conversation being done.
+test("completion is tied to the exact latest inbound and current human work across all jobs", async () => {
+  const gather = await loadGather();
+  assert.equal(typeof gather, "function");
+  const previews = await gather!(boundedPreviewClient({
+    completionRows: [
+      { id: 1, applicant_id: 1, event_type: "reply_completed", meta: { message_id: 1 } },
+      { id: 2, applicant_id: 2, event_type: "reply_completed", meta: { message_id: 999 } },
+      { id: 3, applicant_id: 2, event_type: "handoff_resolved", meta: { message_id: 2 } },
+    ],
+    candidateRows: [
+      { id: 1, applicant_id: 1, agent_stage: "paused", agent_state: { meta: { handoff_resolved: { at: "2026-09-01T00:00:00Z" } } }, jobs: { title: "오전 배송" } },
+      { id: 2, applicant_id: 1, agent_stage: "paused", paused_reason: "문의 확인 필요", jobs: { title: "마감된 오후 배송" } },
+      { id: 3, applicant_id: 2, agent_stage: "paused", paused_reason: "매니저 수동 일시정지", jobs: { title: "배송" } },
+      { id: 4, applicant_id: 2, agent_stage: "screening", jobs: { title: "배송" } },
+    ],
+  }), [1, 2], { throwOnCoreError: true });
+  assert.equal(previews[1].message_id, 1);
+  assert.equal(previews[1].reply_completed, true);
+  assert.equal(previews[1].handoff_required, true);
+  assert.equal(previews[2].reply_completed, false);
+  assert.equal(previews[2].handoff_required, false);
+});
+
+for (const failStatus of ["pool_events", "job_candidates"]) {
+  test(`dashboard refuses to call a failed ${failStatus} lookup an empty queue`, async () => {
+    const gather = await loadGather();
+    assert.equal(typeof gather, "function");
+    await assert.rejects(gather!(boundedPreviewClient({ failStatus }), [1], { throwOnCoreError: true }), /unavailable/);
+  });
+}
+
+test("handoff lookup reaches required work after a full page of resolved candidates", async () => {
+  const gather = await loadGather();
+  assert.equal(typeof gather, "function");
+  const candidateRows = Array.from({ length: 1_001 }, (_, i) => ({ id: i + 1, applicant_id: 1, agent_stage: "paused",
+    jobs: { title: "배송" }, agent_state: i < 1_000 ? { meta: { handoff_resolved: { at: "2026-09-01T00:00:00Z" } } } : null }));
+  const previews = await gather!(boundedPreviewClient({ candidateRows }), [1], { requireComplete: true });
+  assert.equal(previews[1].handoff_required, true);
 });

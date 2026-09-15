@@ -56,7 +56,7 @@ export function dashboardQueuePreview<T>(
   };
 }
 
-export function oldestUntouchedReplyDays(
+export function oldestReplyDays(
   items: readonly {
     agent_stage?: string | null;
     last_message_at?: string | null;
@@ -66,7 +66,6 @@ export function oldestUntouchedReplyDays(
 ): number | null {
   let oldest = Number.POSITIVE_INFINITY;
   for (const item of items) {
-    if (item.agent_stage === "paused") continue;
     const timestamp = new Date(item.last_message_at ?? item.created_at ?? "").getTime();
     if (Number.isFinite(timestamp)) oldest = Math.min(oldest, timestamp);
   }
