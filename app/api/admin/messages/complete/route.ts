@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { REPLY_COMPLETED_EVENT } from "@/lib/admin/reply-completion";
+import { REPLY_COMPLETED_EVENT, isReplyMessageId, type ReplyMessageId } from "@/lib/admin/reply-completion";
 import { loadReplyCompletionStatus } from "@/lib/admin/reply-completion-status";
 
 export const dynamic = "force-dynamic";
 
-function completionActionKey(applicantId: number, messageId: number): string {
+function completionActionKey(applicantId: number, messageId: ReplyMessageId): string {
   const bytes = createHash("sha256").update(JSON.stringify([REPLY_COMPLETED_EVENT, applicantId, messageId])).digest().subarray(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x80;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   }
   const { applicant_id: applicantId, message_id: messageId, outcome } = body;
   if (typeof applicantId !== "number" || !Number.isSafeInteger(applicantId) || applicantId <= 0
-    || typeof messageId !== "number" || !Number.isSafeInteger(messageId) || messageId <= 0
+    || !isReplyMessageId(messageId)
     || (outcome !== "call" && outcome !== "no_reply")
     || (body.note !== undefined && typeof body.note !== "string")) {
     return NextResponse.json({ error: "지원자와 문자, 처리 결과를 확인해 주세요." }, { status: 400 });

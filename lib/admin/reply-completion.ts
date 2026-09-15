@@ -1,5 +1,14 @@
 export const REPLY_COMPLETED_EVENT = "reply_completed";
 
+export type ReplyMessageId = string | number;
+
+/** 운영 messages.id는 UUID다. 기존 정수 ID는 변환 없이 호환한다. */
+export function isReplyMessageId(value: unknown): value is ReplyMessageId {
+  return typeof value === "string"
+    ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    : typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 export interface ReplyActionPreview {
   direction: string;
   reply_completed?: boolean;

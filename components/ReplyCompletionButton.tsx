@@ -1,5 +1,6 @@
 "use client";
 
+import { isReplyMessageId, type ReplyMessageId } from "@/lib/admin/reply-completion";
 import { useState } from "react";
 import { useSWRConfig } from "swr";
 import { Check } from "lucide-react";
@@ -7,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Modal } from "./ui/modal";
 
-type ReplySnapshot = { message_id?: number; body: string; created_at: string };
+type ReplySnapshot = { message_id?: ReplyMessageId; body: string; created_at: string };
 
 export type ReplyCompletionSelection = { applicantId: number; name: string; preview: ReplySnapshot };
 
@@ -19,7 +20,7 @@ export function ReplyCompletionButton({ applicantId, name, preview, onChanged }:
   onChanged: () => void;
 }) {
   const [selection, setSelection] = useState<ReplyCompletionSelection | null>(null);
-  if (!Number.isSafeInteger(preview.message_id) || !preview.message_id) return null;
+  if (!isReplyMessageId(preview.message_id)) return null;
   return <>
     <Button variant="secondary" size="sm" className="min-h-11 shrink-0"
       aria-label={`${name}님 응대 완료 기록`}

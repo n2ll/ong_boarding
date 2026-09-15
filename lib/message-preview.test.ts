@@ -9,7 +9,7 @@ type GatherMessagePreviews = (
     throwOnCoreError?: boolean;
     requireComplete?: boolean;
   },
-) => Promise<Record<number, { body?: string; direction?: string; last_inbound_at?: string | null; message_id?: number; reply_completed?: boolean; handoff_required?: boolean }>>;
+) => Promise<Record<number, { body?: string; direction?: string; last_inbound_at?: string | null; message_id?: number | string; reply_completed?: boolean; handoff_required?: boolean }>>;
 
 type LivePreviewTargetIds = (
   applicants: ({ id: number } & Record<string, unknown>)[],
@@ -55,7 +55,7 @@ function boundedPreviewClient(options: {
   failMessageFrom?: number;
   delayMs?: number;
   messageRows?: {
-    id: number;
+    id: number | string;
     applicant_id: number;
     body: string;
     direction: string;
@@ -325,6 +325,24 @@ test("complete preview lookup fails instead of returning partial draft state", a
 });
 
 // Break caught: treating a completed prior message, or one resolved candidate, as the whole conversation being done.
+test("production UUID previews load exact completion and unresolved handoff state", async () => {
+  const gather = await loadGather();
+  const uuid = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b81";
+  const newer = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b82";
+  const previews = await gather!(boundedPreviewClient({
+    messageRows: [uuid, newer].map((id, index) => ({ id, applicant_id: index + 1, body: "네", direction: "inbound", created_at: "2026-09-16T00:00:00Z", sent_by: null })),
+    completionRows: [
+      { id: 1, applicant_id: 1, event_type: "reply_completed", meta: { message_id: uuid } },
+      { id: 2, applicant_id: 2, event_type: "reply_completed", meta: { message_id: uuid } },
+    ],
+    candidateRows: [{ id: 1, applicant_id: 2, agent_stage: "paused", paused_reason: "문의 확인 필요", jobs: { title: "마감 공고" } }],
+  }), [1, 2], { throwOnCoreError: true });
+  assert.equal(previews[1].message_id, uuid);
+  assert.equal(previews[1].reply_completed, true);
+  assert.equal(previews[2].reply_completed, false);
+  assert.equal(previews[2].handoff_required, true);
+});
+
 test("completion is tied to the exact latest inbound and current human work across all jobs", async () => {
   const gather = await loadGather();
   assert.equal(typeof gather, "function");

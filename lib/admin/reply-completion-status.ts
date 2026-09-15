@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getHandoffDisposition } from "./handoff-disposition.ts";
 import { fetchAllPostgrestRows } from "./postgrest-pagination.ts";
-import { REPLY_COMPLETED_EVENT } from "./reply-completion.ts";
+import { REPLY_COMPLETED_EVENT, isReplyMessageId, type ReplyMessageId } from "./reply-completion.ts";
 
-type LatestMessage = { applicant_id: number; message_id: number };
+type LatestMessage = { applicant_id: number; message_id: ReplyMessageId };
 type CompletionEvent = { applicant_id: number; meta: { message_id?: unknown } | null };
 type Candidate = {
   applicant_id: number;
@@ -33,7 +33,7 @@ export async function loadReplyCompletionStatus(
     return { data: result.data as CompletionEvent[] | null, error: result.error };
   }, "답장 처리 완료");
   for (const event of events) {
-    if (typeof event.meta?.message_id === "number"
+    if (isReplyMessageId(event.meta?.message_id)
       && messageByApplicant.get(event.applicant_id) === event.meta.message_id) completed.add(event.applicant_id);
   }
 

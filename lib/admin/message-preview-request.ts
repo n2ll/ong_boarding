@@ -1,10 +1,11 @@
+import type { ReplyMessageId } from "./reply-completion.ts";
 export const MESSAGE_PREVIEW_IDS_PER_REQUEST = 250;
 const MAX_PARALLEL_PREVIEW_REQUESTS = 3;
 
 type PreviewFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface MessagePreviewResponse {
-  message_id?: number;
+  message_id?: ReplyMessageId;
   reply_completed?: boolean;
   handoff_required?: boolean;
   pending_draft?: boolean;

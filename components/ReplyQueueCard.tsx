@@ -4,7 +4,7 @@ import useSWR from "swr";
 import { motion } from "motion/react";
 import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare, Check } from "lucide-react";
 import { ReplyCompletionDialog, type ReplyCompletionSelection } from "./ReplyCompletionButton";
-import { isReplyActionable } from "@/lib/admin/reply-completion";
+import { isReplyActionable, isReplyMessageId, type ReplyMessageId } from "@/lib/admin/reply-completion";
 import { Button } from "./ui/button";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { dashboardQueuePreview, oldestReplyDays } from "@/lib/admin/dashboard-priority";
@@ -48,7 +48,7 @@ interface JobLite {
 }
 
 interface Preview {
-  message_id?: number;
+  message_id?: ReplyMessageId;
   reply_completed?: boolean;
   handoff_required?: boolean;
   pending_draft?: boolean;
@@ -376,7 +376,7 @@ export function ReplyQueueCard({
                 >
                   <MessageSquare size={13} /> 대화 열기
                 </button>
-                {pv && !pv.pending_draft && Number.isSafeInteger(pv.message_id) && <Button variant="secondary" size="sm" className="min-h-11 shrink-0"
+                {pv && !pv.pending_draft && isReplyMessageId(pv.message_id) && <Button variant="secondary" size="sm" className="min-h-11 shrink-0"
                   aria-label={`${it.name || "이름 미상"}님 응대 완료 기록`}
                   onClick={() => setCompletionSelection({ applicantId: it.id, name: it.name || "이름 미상", preview: { ...pv } })}>
                   <Check size={14} aria-hidden="true" /> 응대 완료

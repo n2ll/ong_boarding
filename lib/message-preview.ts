@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadReplyCompletionStatus } from "./admin/reply-completion-status.ts";
+import { isReplyMessageId, type ReplyMessageId } from "./admin/reply-completion.ts";
 
 /**
  * 대화 미리보기 — 지원자별 '마지막 메시지 한 줄' + 판정 신호.
@@ -43,7 +44,7 @@ export const AUTO_SENT_BY = new Set([
 export const RECENT_MANUAL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export interface LastMessagePreview {
-  message_id?: number;
+  message_id?: ReplyMessageId;
   reply_completed?: boolean;
   handoff_required?: boolean;
   body: string;
@@ -186,7 +187,7 @@ export async function gatherMessagePreviews(
           if (!batchPreviews[aid]) {
             const sentBy = (m.sent_by as string | null) ?? null;
             batchPreviews[aid] = {
-              message_id: m.id as number,
+              message_id: m.id as ReplyMessageId,
               reply_completed: false,
               handoff_required: false,
               body: (m.body as string) ?? "",
@@ -222,7 +223,7 @@ export async function gatherMessagePreviews(
     await mapBatches(batches, async (batchIds) => {
       const latest = batchIds.flatMap(applicantId => {
         const messageId = previews[applicantId]?.message_id;
-        return typeof messageId === "number" ? [{ applicant_id: applicantId, message_id: messageId }] : [];
+        return isReplyMessageId(messageId) ? [{ applicant_id: applicantId, message_id: messageId }] : [];
       });
       const status = await loadReplyCompletionStatus(supabase, latest);
       for (const row of latest) {
