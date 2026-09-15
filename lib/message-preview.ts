@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadReplyCompletionStatus } from "./admin/reply-completion-status.ts";
 
 /**
  * 대화 미리보기 — 지원자별 '마지막 메시지 한 줄' + 판정 신호.
@@ -42,6 +43,9 @@ export const AUTO_SENT_BY = new Set([
 export const RECENT_MANUAL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export interface LastMessagePreview {
+  message_id?: number;
+  reply_completed?: boolean;
+  handoff_required?: boolean;
   body: string;
   direction: string;
   created_at: string;
@@ -182,6 +186,9 @@ export async function gatherMessagePreviews(
           if (!batchPreviews[aid]) {
             const sentBy = (m.sent_by as string | null) ?? null;
             batchPreviews[aid] = {
+              message_id: m.id as number,
+              reply_completed: false,
+              handoff_required: false,
               body: (m.body as string) ?? "",
               direction: (m.direction as string) ?? "",
               created_at: (m.created_at as string) ?? "",
@@ -206,6 +213,25 @@ export async function gatherMessagePreviews(
     for (const messageMap of messageMaps) Object.assign(previews, messageMap);
   } catch (error) {
     console.error("[message-preview]", error);
+    if (opts.throwOnCoreError || opts.requireComplete) throw error;
+    return {};
+  }
+
+  // 답장 완료·인계는 큐 포함 여부를 결정하므로 대시보드도 실패 시 부분 상태를 쓰지 않는다.
+  try {
+    await mapBatches(batches, async (batchIds) => {
+      const latest = batchIds.flatMap(applicantId => {
+        const messageId = previews[applicantId]?.message_id;
+        return typeof messageId === "number" ? [{ applicant_id: applicantId, message_id: messageId }] : [];
+      });
+      const status = await loadReplyCompletionStatus(supabase, latest);
+      for (const row of latest) {
+        previews[row.applicant_id].reply_completed = status.completed.has(row.applicant_id);
+        previews[row.applicant_id].handoff_required = status.handoffRequired.has(row.applicant_id);
+      }
+    });
+  } catch (error) {
+    console.error("[message-preview] reply status query failed", error);
     if (opts.throwOnCoreError || opts.requireComplete) throw error;
     return {};
   }

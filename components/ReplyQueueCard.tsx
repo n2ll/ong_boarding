@@ -2,15 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { motion } from "motion/react";
-import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare } from "lucide-react";
+import { ArrowRight, MessageCircle, Phone, Loader2, MessageSquare, Check } from "lucide-react";
+import { ReplyCompletionDialog, type ReplyCompletionSelection } from "./ReplyCompletionButton";
+import { isReplyActionable } from "@/lib/admin/reply-completion";
+import { Button } from "./ui/button";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
-import { dashboardQueuePreview, oldestUntouchedReplyDays } from "@/lib/admin/dashboard-priority";
+import { dashboardQueuePreview, oldestReplyDays } from "@/lib/admin/dashboard-priority";
 import { fetchMessagePreviews } from "@/lib/admin/message-preview-request";
 import { hasTaskQueueActivityAfterReset } from "@/lib/admin/task-queue-reset";
 
 /**
  * '내가 답할 차례' 큐 카드 (내부 매니저용) — 관심 표시 큐(InterestQueueCard)와 대칭.
- * 미답 지원자('마지막 메시지가 inbound')를 카드로 나열해,
+ * 미완료 수신 중 실제 AI 인계가 없는 지원자를 카드로 나열해,
  * 가장 hot한 신호가 흩어지지 않게 모은다. (열람만으로는 큐에서 빠지지 않는다)
  *
  * 판정에 applicants.unread_count는 쓰지 않는다. 그 값은 '답장이 왔는데 스레드를 아직 한 번도 열지 않았다'는
@@ -45,6 +48,10 @@ interface JobLite {
 }
 
 interface Preview {
+  message_id?: number;
+  reply_completed?: boolean;
+  handoff_required?: boolean;
+  pending_draft?: boolean;
   body: string;
   direction: string;
   created_at: string;
@@ -159,11 +166,11 @@ export function ReplyQueueCard({
   // 빈 큐로 축약하면 대시보드가 거짓으로 "할 일 없음"을 보여주므로 별도 상태로 유지한다.
   const previewState = !hasData || previewLoad.key !== previewRequestKey ? "loading" : previewLoad.state;
 
-  // 미답 판정(실시간 응대 탭과 동일): '마지막 메시지가 inbound'.
+  // 실시간 응대와 같은 미완료 판정. 실제 인계가 있는 사람은 인계 큐에서 처리한다.
   const allItems = useMemo(() => {
     if (previewState !== "ready") return [];
     return previewTargets
-      .filter((a) => previewById[a.id]?.direction === "inbound")
+      .filter((a) => isReplyActionable(previewById[a.id]))
       // 오래 기다린 사람이 맨 위 — 최신순이면 오래된 미답이 아래로 밀려 영영 안 보인다.
       .sort((a, b) => {
         const at = new Date(a.last_message_at ?? a.created_at ?? 0).getTime();
@@ -198,7 +205,7 @@ export function ReplyQueueCard({
   const queuePreview = dashboardQueuePreview(items);
 
   const count = items.length;
-  // 미착수 = 매니저가 아직 개입 안 함(paused 아님). paused 건은 '사람 확인 필요'로 따로 집계된다.
+  // 미착수/응대중은 표시용이다. paused여도 실제 인계가 없으면 답장 업무에 포함한다.
   const untouchedCount = useMemo(() => items.filter((a) => a.agent_stage !== "paused").length, [items]);
 
   // 계산된 건수를 부모에 올린다 — 대시보드 '지금 할 일'이 같은 수를 쓰게(공식 중복 금지).
@@ -208,7 +215,7 @@ export function ReplyQueueCard({
   const allUntouched = useMemo(() => allItems.filter((a) => a.agent_stage !== "paused").length, [allItems]);
   // 가장 오래 기다린 답장의 경과일 — 대시보드 '오늘의 할 일'이 색 승급(7일+ 빨강)에 쓴다.
   const oldestDays = useMemo(
-    () => oldestUntouchedReplyDays(allItems, Date.now()),
+    () => oldestReplyDays(allItems, Date.now()),
     [allItems],
   );
   useEffect(() => {
@@ -223,10 +230,11 @@ export function ReplyQueueCard({
   // 상대시각을 화면에 머무는 동안 갱신 (InterestQueueCard와 동일 1분 틱)
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 60_000);
+    const t = setInterval(() => { setNowTick(Date.now()); setPreviewNonce((n) => n + 1); }, 60_000);
     return () => clearInterval(t);
   }, []);
 
+  const [completionSelection, setCompletionSelection] = useState<ReplyCompletionSelection | null>(null);
   const [detailSelection, setDetailSelection] = useState<{
     applicantId: number;
     jobId: number | null;
@@ -248,7 +256,7 @@ export function ReplyQueueCard({
           <h2 className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
             <MessageCircle size={15} className="text-info" /> 내가 답할 차례
           </h2>
-          {!collapsed && <div className="text-[12px] text-muted-foreground mt-0.5">문자 답장이 온 지원자 · 대화를 열어 매니저가 직접 응대</div>}
+          {!collapsed && <div className="text-[12px] text-muted-foreground mt-0.5">답장 또는 완료 기록이 필요한 대화 · AI 인계는 사람 확인 필요에서 처리</div>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* 공고별 필터 — 큐에 2개 이상 공고가 섞였을 때만 노출(컨텍스트 연결) */}
@@ -317,9 +325,9 @@ export function ReplyQueueCard({
             return (
               <div
                 key={it.id}
-                className={`flex items-center gap-3 rounded-2xl border p-3 ${untouched ? "border-priority-critical/25 bg-priority-critical-soft" : "border-border-strong bg-white"}`}
+                className={`flex flex-wrap items-center gap-3 rounded-2xl border p-3 ${untouched ? "border-priority-critical/25 bg-priority-critical-soft" : "border-border-strong bg-white"}`}
               >
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-[160px]">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-bold text-foreground">{it.name || "이름 미상"}</span>
                     <span
@@ -364,10 +372,15 @@ export function ReplyQueueCard({
                     applicantId: it.id,
                     jobId: it.current_job_id ?? null,
                   })}
-                  className="flex items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex min-h-11 items-center gap-1 text-[12px] font-bold text-white bg-foreground hover:bg-gray-800 px-3 py-1.5 rounded-lg shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <MessageSquare size={13} /> 대화 열기
                 </button>
+                {pv && !pv.pending_draft && Number.isSafeInteger(pv.message_id) && <Button variant="secondary" size="sm" className="min-h-11 shrink-0"
+                  aria-label={`${it.name || "이름 미상"}님 응대 완료 기록`}
+                  onClick={() => setCompletionSelection({ applicantId: it.id, name: it.name || "이름 미상", preview: { ...pv } })}>
+                  <Check size={14} aria-hidden="true" /> 응대 완료
+                </Button>}
               </div>
             );
           })}
@@ -385,6 +398,10 @@ export function ReplyQueueCard({
           )}
         </div>
       )}
+
+      {completionSelection && <ReplyCompletionDialog selection={completionSelection}
+        onClose={() => setCompletionSelection(null)}
+        onChanged={() => { void mutate(); setPreviewNonce((n) => n + 1); }} />}
 
       {/* 상세 드로어를 대화 탭으로 바로 열어 매니저가 즉시 응대.
           매니저가 답장하면 '마지막 메시지'가 발신으로 바뀌므로, 닫힐 때/변경 시 목록을 재검증해 큐에서 빠지게 한다. */}

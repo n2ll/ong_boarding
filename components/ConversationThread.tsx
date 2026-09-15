@@ -144,6 +144,12 @@ function poolEventLabel(ev: PoolEvent, jobsMap: Record<number, JobLabel>): strin
     }
     case "opt_out_set":
       return "🚫 수신거부 등록";
+    case "reply_completed": {
+      const meta = (ev.meta ?? {}) as { outcome?: unknown; note?: unknown };
+      const outcome = meta.outcome === "call" ? "통화로 해결" : "답장 불필요";
+      const note = typeof meta.note === "string" && meta.note.trim() ? ` — ${meta.note.trim()}` : "";
+      return `매니저 응대 완료 (${outcome} · 문자 발송 없음)${note}`;
+    }
     case "handoff_resolved": {
       // 인계 큐 '처리 완료' — 매니저가 전화·문자로 직접 해결한 기록. 통화 결과가 타임라인에 남아
       // 다음 사람이 같은 사람에게 다시 걸거나 아무도 안 거는 일이 없게 한다.

@@ -29,7 +29,7 @@ type DashboardPriorityModule = {
     visible: T[];
     remaining: number;
   };
-  oldestUntouchedReplyDays?: (
+  oldestReplyDays?: (
     items: readonly {
       agent_stage?: string | null;
       last_message_at?: string | null;
@@ -125,18 +125,18 @@ test("dashboard queue preview keeps short queues intact without mutating the sou
   assert.deepEqual(items, [{ id: 1 }, { id: 2 }]);
 });
 
-test("reply age ignores older conversations that a manager already started", async () => {
-  const { oldestUntouchedReplyDays } = await loadModule();
+test("reply age includes paused applicants after completed handoffs when they have a new reply", async () => {
+  const { oldestReplyDays } = await loadModule();
   const now = Date.parse("2026-08-21T00:00:00.000Z");
 
-  assert.equal(typeof oldestUntouchedReplyDays, "function");
-  assert.equal(oldestUntouchedReplyDays!([
+  assert.equal(typeof oldestReplyDays, "function");
+  assert.equal(oldestReplyDays!([
     { agent_stage: "paused", last_message_at: "2026-05-01T00:00:00.000Z" },
     { agent_stage: "screening", last_message_at: "2026-08-19T00:00:00.000Z" },
-  ], now), 2);
-  assert.equal(oldestUntouchedReplyDays!([
+  ], now), 112);
+  assert.equal(oldestReplyDays!([
     { agent_stage: "paused", last_message_at: "2026-05-01T00:00:00.000Z" },
-  ], now), null);
+  ], now), 112);
 });
 
 test("priority labels can distinguish immediate work from aged critical work", async () => {

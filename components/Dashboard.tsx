@@ -373,9 +373,9 @@ export function Dashboard() {
   const sosOpen = sosRes?.open ?? [];
   // '내가 답할 차례' 건수는 아래 ReplyQueueCard가 계산해 올려준다.
   // (예전엔 여기서 unread_count>0으로 셌다. 그 값은 '스레드를 아직 열지 않았다'는 뜻이라 열람만으로 0이 되고,
-  //  실데이터에서도 전원 0이어서 이 항목이 뜬 적이 없다. 판정은 '마지막 메시지가 inbound' 한 가지로 통일하고,
+  //  실데이터에서도 전원 0이어서 이 항목이 뜬 적이 없다. 수신·완료·인계를 함께 확인하고,
   //  공식을 두 곳에 두면 어긋나므로 큐 카드 한 곳에서만 계산한다.)
-  const poolReplies = replyCounts.state === "ready" ? replyCounts.untouched : 0;
+  const poolReplies = replyCounts.state === "ready" ? replyCounts.total : 0;
   const interestCount = interestRes?.count ?? 0;
   const interestImmediate = interestRes?.immediate_count ?? 0;
   const confirmPendingCount = confirmRes?.total ?? confirmRes?.pending?.length ?? 0;
@@ -466,7 +466,7 @@ export function Dashboard() {
     }
     if (poolReplies > 0) {
       const oldest = replyCounts.oldestDays === null || replyCounts.oldestDays === undefined ? null : replyCounts.oldestDays * 1_440;
-      u.push({ id: "pool-reply", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
+      u.push({ id: "pool-reply", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "수신 내용을 확인하고 답장하거나 응대 완료로 기록해 주세요. AI 인계는 사람 확인 필요에서 처리합니다.", cta: "답장 큐로", path: "#reply-queue" });
     }
     const dueFollowUps = followUps?.items.filter((item) => item.due_date && item.due_date <= followUps.today) ?? [];
     if (dueFollowUps.length > 0) {
