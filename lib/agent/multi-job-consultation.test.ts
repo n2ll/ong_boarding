@@ -22,6 +22,81 @@ function read(envelope: Record<string, unknown>, context = ctx(), text = "성수
   return mod.readConsultationResult({ consultation: { answers: [], observations: [], ...envelope } }, context, text);
 }
 
+function withAppointment(text: string, at = "2099-09-16T09:30:00+09:00") {
+  const context = forMessage(text);
+  context.consultation!.jobs[0].ai_facts = "선탑·교육: 9월 셋째 주 예정, 약 2시간";
+  context.consultation!.jobs[0].manager_preparation = {
+    training_status: "scheduled", backup_intent: "interested",
+    training_availability: { has_date: true, has_time: true }, training_completed: false, backup_completed: false,
+    manager_follow_up_open: true, last_contact_recorded: true,
+    training_schedule: { scheduled_at: at, timing: Date.parse(at) > Date.now() ? "upcoming" : "elapsed" },
+    follow_up_timing: "overdue",
+  } as NonNullable<StageContext["consultation"]>["jobs"][number]["manager_preparation"];
+  return context;
+}
+
+test("본인 선탑 일시 재확인은 공고의 일반 일정 대신 관리자 기록으로 답하고 상태를 변경하지 않는다", () => {
+  const text = "성수 선탑 저랑 약속한 날짜와 시간이 언제죠?";
+  const context = withAppointment(text);
+  const before = structuredClone(context);
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["개별 선탑 일정"] }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /2099년 9월 16일 09:30/);
+  assert.match(result.reply_text, /관리자 기록/);
+  assert.doesNotMatch(result.reply_text, /셋째 주|희망하시나요|확정됐|배정됐/);
+  assert.deepEqual(result.consultation.observations, []);
+  assert.equal(result.applicant_patch, undefined);
+  assert.deepEqual(result.state_update.screening, before.state.screening);
+  assert.deepEqual(context, before);
+});
+
+test("지난 선탑 예정 시각은 완료나 새 약속으로 안내하지 않고 진행 여부 확인으로 인계한다", () => {
+  const text = "성수 선탑 일정 확인 부탁해요";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["개별 선탑 일정"] }] }, withAppointment(text, "2020-09-16T09:30:00+09:00"), text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /예정 시각[\s\S]*지났/);
+  assert.match(result.reply_text, /진행 여부/);
+  assert.doesNotMatch(result.reply_text, /완료되었|완료됐|선탑 예정 일시:/);
+});
+
+test("완료 상태의 잔존 예약이나 기록 없는 다른 공고를 현재 선탑 약속으로 재사용하지 않는다", () => {
+  const text = "성수와 강남 제 선탑 일정은 각각 언제인가요?";
+  const context = withAppointment(text);
+  context.consultation!.jobs[0].manager_preparation!.training_status = "completed";
+  const result = read({ mode: "answer", job_ids: [11, 22], answers: [11, 22].map((job_id) => ({ job_id, fields: ["개별 선탑 일정"] })) }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /성수 오전 배송/);
+  assert.match(result.reply_text, /강남 오후 배송/);
+  assert.doesNotMatch(result.reply_text, /2099|09:30|셋째 주/);
+});
+
+test("선탑 일정 변경을 조회로 오분류해도 기존 약속 재안내로 끝내지 않는다", () => {
+  const text = "성수 선탑 날짜를 바꿔주세요";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["개별 선탑 일정"] }] }, withAppointment(text), text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /변경.*매니저 확인/);
+  assert.doesNotMatch(result.reply_text, /변경했|변경됐|2099/);
+});
+
+test("근무시간 질문에는 개인 선탑 약속과 내부 후속 업무 기한을 덧붙이지 않는다", () => {
+  const text = "성수 근무시간 알려주세요";
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["근무시간"] }] }, withAppointment(text), text);
+  assert.equal(result.transition.kind, "stay");
+  assert.match(result.reply_text, /09:00~12:00/);
+  assert.doesNotMatch(result.reply_text, /2099|선탑|연락|overdue/);
+});
+
+test("A 일정 변경을 인계하면서 B의 기록된 일정 조회는 함께 답한다", () => {
+  const text = "성수 선탑 날짜를 바꿔주세요. 강남 선탑 약속은 언제죠?";
+  const context = withAppointment(text);
+  context.consultation!.jobs[1].candidate_id = 102;
+  context.consultation!.jobs[1].manager_preparation = structuredClone(context.consultation!.jobs[0].manager_preparation);
+  const result = read({ mode: "handoff", job_ids: [11, 22], answers: [11, 22].map((job_id) => ({ job_id, fields: ["개별 선탑 일정"] })) }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /성수 오전 배송\n선탑 일정 변경/);
+  assert.match(result.reply_text, /강남 오후 배송\n선탑 예정 일시: 2099년 9월 16일 09:30/);
+});
+
 test("수거 미기재 안내만으로 조건이 비어 있는 다른 공고의 백스톱을 해제하지 않는다", () => {
   assert.equal(hasNoAnswerableFacts({ job_id: 11, title: "배송 모집", body: "배송원 모집합니다.", branch: null, stage: "exploration", vehicle_required: true }), true);
 });
@@ -178,6 +253,18 @@ test("expired jobs only receive closure information, with no new interest record
   assert.doesNotMatch(result.reply_text, /90,000/);
   const signal = read({ mode: "answer", job_ids: [22], observations: [{ job_id: 22, source_message_id: "m1", kind: "availability", quote: "강남은 주말 가능해요" }] }, expired);
   assert.equal(signal.consultation, undefined);
+});
+
+test("마감 공고의 개인 선탑 문의는 모집 마감 안내만으로 끝내지 않고 인계한다", () => {
+  const text = "성수 저랑 약속한 선탑 언제죠?";
+  const context = withAppointment(text);
+  context.consultation!.jobs[0].expired = true;
+  const result = read({ mode: "answer", job_ids: [11], answers: [{ job_id: 11, fields: ["개별 선탑 일정"] }] }, context, text);
+  assert.equal(result.transition.kind, "pause");
+  assert.match(result.reply_text, /마감/);
+  assert.match(result.reply_text, /개별 선탑 일정.*매니저 확인/);
+  assert.doesNotMatch(result.reply_text, /2099|09:30/);
+  assert.deepEqual(result.consultation.observations, []);
 });
 
 test("invalid envelope is a visible handoff, never silent normal-stage progress", () => {

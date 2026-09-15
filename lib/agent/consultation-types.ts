@@ -1,7 +1,7 @@
 import type { OtherActiveJob } from "./types";
 import type { StaffingTraining } from "../admin/staffing-preparation";
 
-/** 매니저 기록의 재질문 방지 문맥. 메모·담당자·연락처·일시는 전달하지 않는다. */
+/** 매니저 기록의 재질문 방지 문맥. 예정 선탑 일시 외 내부 메모·담당자·연락처·날짜는 제외한다. */
 export interface ManagerPreparationContext {
   training_status: StaffingTraining["status"];
   backup_intent: StaffingTraining["backup_intent"];
@@ -10,6 +10,8 @@ export interface ManagerPreparationContext {
   backup_completed: boolean;
   manager_follow_up_open: boolean;
   last_contact_recorded: boolean;
+  training_schedule?: { scheduled_at: string; timing: "upcoming" | "elapsed" } | null;
+  follow_up_timing?: "none" | "undated" | "upcoming" | "due_today" | "overdue";
 }
 
 /** 지원자 노출 정책을 통과한 상담용 공고. 상담만으로 단계가 시작되지는 않는다. */
