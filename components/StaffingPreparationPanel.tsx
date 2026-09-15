@@ -9,6 +9,7 @@ import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { StaffingNoteDraft, useStaffingNoteDraft } from "./StaffingNoteDraft";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
+import { buildStaffingDateRecommendations } from "@/lib/admin/staffing-date-recommendation";
 import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, parseStaffingManagerNote, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
 type Candidate = {
@@ -199,6 +200,10 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const editingSuggestion = suggestions.find((item) => item.applicant_id === editing?.applicant_id);
   const editingConflicts = editing ? conflictsFor(editing.applicant_id, draft) : [];
   const editingSnapshot = snapshots.find((item) => item.applicant_id === editing?.applicant_id);
+  const recommendForDate = Boolean(date && date >= staffingToday());
+  const recommendations = new Map((recommendForDate
+    ? buildStaffingDateRecommendations({ date, candidates, snapshots, otherPrimaries }) : [])
+    .map((item) => [item.applicant_id, item]));
   const shown = candidates.filter((item) => {
     const prep = snapshots.find((snapshot) => snapshot.applicant_id === item.applicant_id)?.preparation;
     const followUpState = staffingFollowUpState(prep?.follow_up);
@@ -206,7 +211,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       && (!statusFilter || (prep?.training?.status ?? "reviewing") === statusFilter)
       && (prep?.follow_up?.owner ?? "").includes(ownerQuery.trim())
       && (followUpFilter === "all" || (followUpFilter === "open" ? followUpState === "open" || followUpState === "due" : followUpState === followUpFilter));
-  });
+  }).sort((a, b) => (recommendations.get(a.applicant_id)?.rank ?? 0) - (recommendations.get(b.applicant_id)?.rank ?? 0));
   const counts = snapshots.flatMap((item) => item.preparation?.dates.filter((day) => day.date === date) ?? []);
   const contactActions = (candidate: Candidate) => {
     const phone = candidate.applicants?.phone?.replace(/[^0-9+]/g, "");
@@ -224,7 +229,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-muted-foreground">답변 제안과 다른 공고 기록은 조회 시점 기준입니다.</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)}>새로 확인</Button></div>
         {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 본담당 후보가 겹치는지 직접 확인해주세요.</p>}
         <input aria-label="배차 준비 후보 이름 검색" placeholder="이름 검색" value={query} onChange={(event) => setQuery(event.target.value)} className={fieldClass} />
-        <details open={initialDate ? true : undefined} className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">날짜·상태로 좁혀 보기{date || statusFilter || followUpFilter !== "all" || ownerQuery ? " · 필터 사용 중" : ""}</summary>
+        <details className="rounded-xl border border-border-strong p-3"><summary className="min-h-11 cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">날짜·상태로 좁혀 보기{date || statusFilter || followUpFilter !== "all" || ownerQuery ? " · 필터 사용 중" : ""}</summary>
         <div className="space-y-3">
         <label className="block space-y-1"><span>비교할 날짜</span><input aria-label="비교할 날짜" type="date" value={date} onChange={(event) => setDate(event.target.value)} className={fieldClass} /></label>
         {dates.length > 0 && <div className="flex flex-wrap gap-2">{dates.map((day) => <button key={day} type="button" aria-pressed={date === day} onClick={() => setDate(day)} className={`min-h-11 rounded-lg border px-3 focus-visible:ring-2 focus-visible:ring-ring ${date === day ? "bg-primary text-primary-foreground" : "bg-background"}`}>{day.slice(5).replace("-", "/")}</button>)}</div>}
@@ -235,6 +240,10 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           <label className="block min-w-0 space-y-1"><span>담당자 검색</span><input value={ownerQuery} onChange={(event) => setOwnerQuery(event.target.value)} className={fieldClass} placeholder="담당자 이름" /></label>
         </div>
         </div></details>
+        {recommendForDate && <div className="rounded-xl bg-muted p-3">
+          <p className="font-bold">{date.slice(5).replace("-", "/")} 연락 검토 순서</p>
+          <p className="mt-1 text-muted-foreground">이 날짜의 가능 여부와 선탑 기록을 기준으로 정리했어요. 이유를 확인하고 대화나 전화로 이어가세요.</p>
+        </div>}
         <p className="text-xs text-muted-foreground">검색 결과 {shown.length}명 · {Math.min(visibleCount, shown.length)}명 표시 · 이름 검색은 전체 후보에서 찾습니다.</p>
         <div className="space-y-2">{shown.slice(0, visibleCount).map((candidate) => {
           const snapshot = snapshots.find((item) => item.applicant_id === candidate.applicant_id);
@@ -243,10 +252,15 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
           const day = prep?.dates.find((item) => item.date === date);
           const suggestion = suggestions.find((item) => item.applicant_id === candidate.applicant_id);
           const conflicts = conflictsFor(candidate.applicant_id, prep);
+          const recommendation = recommendations.get(candidate.applicant_id);
           return <div key={candidate.applicant_id} className="rounded-xl border border-border-strong p-3">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0 break-words"><p className="font-bold">{candidate.applicants?.name ?? "이름 미등록"}</p><p className="text-muted-foreground">{candidate.applicants?.own_vehicle || "차량 미확인"}</p></div><Button variant="secondary" onClick={() => startEditing(candidate)} aria-label={`${candidate.applicants?.name ?? "후보"} 진행 기록`}>진행 기록</Button></div>
+            {recommendation && <div className="mt-2 rounded-lg bg-muted px-3 py-2 break-words">
+              <p className="font-medium">{recommendation.label}{day?.role && day.role !== "unassigned" && ` · ${roleLabels[day.role]}`}</p>
+              <p className="mt-1 text-muted-foreground">{recommendation.reasons.join(" · ")}</p>
+            </div>}
             {snapshot?.invalid ? <p role="alert" className="text-error-strong">최근 기록을 확인할 수 없어요. 내용을 다시 확인하고 저장해주세요.</p> : <>
-              <p className="mt-2">{date ? `${availabilityLabels[day?.availability ?? "unknown"]} · ${roleLabels[day?.role ?? "unassigned"]}${day?.confirmation === "confirmed" ? " · 투입 확정" : ""}` : `날짜 ${prep?.dates.length ?? 0}건 기록`}</p>
+              {!recommendation && <p className="mt-2">{date ? `${availabilityLabels[day?.availability ?? "unknown"]} · ${roleLabels[day?.role ?? "unassigned"]}${day?.confirmation === "confirmed" ? " · 투입 확정" : ""}` : `날짜 ${prep?.dates.length ?? 0}건 기록`}</p>}
               <p className="mt-1 font-medium">{trainingStatusLabels[prep?.training?.status ?? "reviewing"]} · {backupIntentLabels[prep?.training?.backup_intent ?? "unknown"]}</p>
               <p className="break-words">선탑 가능 시간: {prep?.training_availability || "미확인"}</p>
               {prep?.training?.scheduled_at && <p>선탑 지정: {formatTime(prep.training.scheduled_at)}</p>}
