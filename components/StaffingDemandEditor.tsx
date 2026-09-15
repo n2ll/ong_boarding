@@ -15,8 +15,9 @@ const stateLabel = { unknown: "수요 미정", off: "운행 없음", operating: 
 export function StaffingDemandEditor({ jobId, title, capacity, cell, onClose, onSaved }: {
   jobId: number; title: string; capacity: number | null; cell: StaffingDateBoardCell; onClose: () => void; onSaved: () => void;
 }) {
-  const [state, setState] = useState<StaffingDemand["state"]>(cell.demand_state ?? "unknown");
-  const [count, setCount] = useState(cell.demand_state === "operating" && cell.target ? String(cell.target) : "");
+  const newDemand = !cell.demand_event_id && !cell.invalid_demand && (cell.demand_state ?? "unknown") === "unknown";
+  const [state, setState] = useState<StaffingDemand["state"]>(newDemand ? "operating" : cell.demand_state ?? "unknown");
+  const [count, setCount] = useState(cell.demand_state === "operating" && cell.target ? String(cell.target) : newDemand ? "1" : "");
   const [baseId, setBaseId] = useState(cell.demand_event_id ?? null);
   const [author, setAuthor] = useState("");
   const [saving, setSaving] = useState(false);
@@ -61,13 +62,14 @@ export function StaffingDemandEditor({ jobId, title, capacity, cell, onClose, on
       <div className="space-y-2 rounded-xl bg-muted p-4">
         <label htmlFor={countId} className="block font-semibold">필요 인원</label>
         <div className="flex items-center gap-3"><input id={countId} aria-describedby={`${countId}-hint`} className={`${fieldClass} max-w-40 text-2xl font-bold`} type="number" inputMode="numeric" min={1} max={999} step={1} value={count} placeholder="숫자 입력" disabled={saving} onChange={(event) => { setCount(event.target.value); setState("operating"); setDirty(true); }} /><span className="font-medium">명</span></div>
-        <p id={`${countId}-hint`} className="text-sm text-muted-foreground">실제 투입할 인원만 입력하세요. 예비 후보는 제외합니다.</p>
+        <p id={`${countId}-hint`} className="text-sm text-muted-foreground">기본 필요 인원은 1명입니다. 다른 인원이 필요하면 수정하세요.</p>
       </div>
       <fieldset disabled={saving} className="space-y-2"><legend className="mb-2 text-sm font-medium">이 날짜의 모집 계획</legend>
         <div className="grid grid-cols-3 gap-2">{([['operating', '인원 입력'], ['unknown', '아직 미정'], ['off', '운행 없음']] as const).map(([value, label]) => <label key={value} className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border px-2 text-sm ${state === value ? "border-primary bg-primary/10 font-semibold" : "border-border-strong bg-background"}`}>
-          <input type="radio" name={`${countId}-state`} value={value} checked={state === value} onChange={() => { setState(value); if (value !== "operating") setCount(""); setDirty(true); }} className="size-4 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />{label}
+          <input type="radio" name={`${countId}-state`} value={value} checked={state === value} onChange={() => { setState(value); setCount(value === "operating" ? count || "1" : ""); setDirty(true); }} className="size-4 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />{label}
         </label>)}</div>
       </fieldset>
+      <p className="text-sm text-muted-foreground">예비는 1명 권장 · 필수 아님. 예비가 없어도 실제 필요 인원을 채우면 충족입니다.</p>
       <p className="text-sm text-muted-foreground">현재 확정 {cell.confirmed}명 · 예비 후보 {cell.reserve}명{capacity ? ` · 공고 모집인원 ${capacity}명` : ""}</p>
       {cell.confirmed > 0 && demand?.required_count !== null && demand && cell.confirmed > demand.required_count && <p className="rounded-lg bg-warning/10 p-3 text-sm text-warning-strong">기존 확정 {cell.confirmed}명이 수요보다 많습니다. 담당자와 투입 여부를 재확인해주세요. 확정 기록은 유지됩니다.</p>}
       <label className="block space-y-1"><span className="text-sm font-medium">기록 작성자</span><input className={fieldClass} maxLength={80} value={author} disabled={saving} onChange={(event) => { setAuthor(event.target.value); setDirty(true); }} /></label>

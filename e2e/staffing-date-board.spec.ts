@@ -78,7 +78,7 @@ for (const width of [1280, 390]) test(`날짜별 충원판에서 확정·예비�
   if (width === 1280) {
     await cell.click();
     const candidates = page.getByRole("dialog", { name: "가상 배송 A", exact: true });
-    await expect(candidates.getByRole("button", { name: /날짜별 배차 준비/ })).toHaveAttribute("aria-expanded", "true");
+    await expect(candidates.getByRole("button", { name: /후보 연락·기록/ })).toHaveAttribute("aria-expanded", "true");
     await expect(candidates.getByLabel("비교할 날짜", { exact: true })).toHaveValue(date);
     await candidates.getByRole("button", { name: "가상후보1 진행 기록", exact: true }).click();
     const editor = page.getByRole("dialog", { name: "가상후보1 진행 기록", exact: true });

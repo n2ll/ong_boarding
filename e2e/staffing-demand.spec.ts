@@ -36,7 +36,7 @@ for (const width of [1280, 390]) test(`필요 인원을 바로 입력하고 실�
         job_id: job.id, title: job.title, slot: job.slot, start_date: job.start_date, capacity: job.capacity,
         cells: [
           // Missing demand fields must remain unknown, even when the job has a capacity.
-          { date, target: demand?.required_count ?? null, confirmed: 1, reserve: 1, primary: 1, shortage: demand?.state === "operating" ? Math.max(0, demand.required_count! - 1) : demand?.state === "off" ? 0 : null,
+          { date, target: demand?.required_count ?? null, confirmed: 1, reserve: 0, primary: 1, shortage: demand?.state === "operating" ? Math.max(0, demand.required_count! - 1) : demand?.state === "off" ? 0 : null,
             invalid_records: 0, conflicts: [], ...(demand ? { demand_state: demand.state, demand_event_id: demand.id, invalid_demand: false } : {}) },
           { date: end, target: 3, confirmed: 0, reserve: 0, primary: 0, shortage: 3, invalid_records: 0, conflicts: [], demand_state: "operating", demand_event_id: 20, invalid_demand: false },
         ],
@@ -72,9 +72,10 @@ for (const width of [1280, 390]) test(`필요 인원을 바로 입력하고 실�
   const author = editor.getByLabel("기록 작성자", { exact: true });
   const save = editor.getByRole("button", { name: "인원 저장", exact: true });
   await expect(count).toBeVisible();
-  await expect(unknown).toBeChecked();
-  await expect(count).toHaveValue("");
-  await count.fill(width === 1280 ? "2" : "4");
+  await expect(operating).toBeChecked();
+  await expect(count).toHaveValue("1");
+  await expect(editor).toContainText("예비는 1명 권장 · 필수 아님");
+  if (width === 390) await count.fill("4");
   await expect(operating).toBeChecked();
   await author.fill("가상매니저");
   await save.click();
@@ -82,15 +83,15 @@ for (const width of [1280, 390]) test(`필요 인원을 바로 입력하고 실�
   if (width === 1280) {
     await expect(editor).not.toBeVisible();
     expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ date, state: "operating", required_count: 2, base_event_id: null, actor_name: "가상매니저", action_key: expect.any(String) });
-    await expect(cell).toContainText(/필요\s*2/);
+    expect(writes[0]).toMatchObject({ date, state: "operating", required_count: 1, base_event_id: null, actor_name: "가상매니저", action_key: expect.any(String) });
+    await expect(cell).toContainText(/필요\s*1/);
     await expect(cell).toContainText(/확정\s*1/);
-    await expect(cell).toContainText(/1명\s*부족|부족\s*1/);
-    await expect(cell).toContainText(/예비 후보\s*1/);
+    await expect(cell).toContainText("필요 인원 충족");
+    await expect(cell).toContainText(/예비 후보\s*0/);
     await expect(otherDate).toHaveText(otherDateBefore, { useInnerText: true });
     await edit.click();
     await expect(operating).toBeChecked();
-    await expect(count).toHaveValue("2");
+    await expect(count).toHaveValue("1");
     await off.check();
     await expect(count).toHaveValue("");
     await page.screenshot({ path: "/tmp/ong-staffing-demand-desktop.png" });
@@ -102,6 +103,10 @@ for (const width of [1280, 390]) test(`필요 인원을 바로 입력하고 실�
     await expect(cell).toContainText("운행 없음");
     await expect(cell).toContainText(/확정\s*1/);
     await expect(cell).toContainText(/재확인/);
+    await edit.click();
+    await expect(off).toBeChecked();
+    await expect(count).toHaveValue("");
+    await editor.getByRole("button", { name: "창 닫기", exact: true }).click();
   } else {
     await expect(editor.getByRole("alert")).toContainText("수요 저장 연결 실패");
     await expect(operating).toBeChecked();

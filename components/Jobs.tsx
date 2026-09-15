@@ -5127,7 +5127,7 @@ export function Jobs() {
                 )}
                 {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
 
-              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialOpen={!!candPanel.staffingDate} allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
+              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">

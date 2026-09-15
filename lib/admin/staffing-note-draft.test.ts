@@ -158,3 +158,24 @@ test("change summaries render human-readable labels and values for review", () =
   assert.equal(policy.staffingNoteChangeValue(parsed.changes[1]), "선탑 완료");
   assert.match(policy.staffingNoteChangeValue(parsed.changes[2]), /선탑.*2026-09-12.*선탑 완료/);
 });
+
+test("completed training and actual participation remain independently selectable after proposal review", () => {
+  const completedNote = "2026-09-11 선탑에 실제 참여해서 교육 완료함.";
+  const parsed = policy.parseStaffingNoteProposal({ changes: [
+    { field: "training_status", value: "completed", evidence: "선탑에 실제 참여해서 교육 완료함" },
+    { field: "participation", value: { kind: "training", date: "2026-09-11", note: "교육 완료" }, evidence: "2026-09-11 선탑에 실제 참여해서 교육 완료함" },
+  ], questions: [] }, completedNote, referenceDate);
+  assert.ok(parsed);
+  const current = initial();
+  const withoutStatus = policy.applyStaffingNoteChanges(current, parsed.changes.filter((change) => change.field !== "training_status"));
+  assert.ok(withoutStatus);
+  assert.equal(withoutStatus.training.status, "scheduled");
+  assert.equal(withoutStatus.records.length, 2);
+  assert.equal(withoutStatus.records[1].date, "2026-09-11");
+  assert.deepEqual(withoutStatus.dates, current.dates);
+  const withoutParticipation = policy.applyStaffingNoteChanges(current, parsed.changes.filter((change) => change.field !== "participation"));
+  assert.ok(withoutParticipation);
+  assert.equal(withoutParticipation.training.status, "completed");
+  assert.deepEqual(withoutParticipation.records, current.records);
+  assert.deepEqual(withoutParticipation.dates, current.dates);
+});

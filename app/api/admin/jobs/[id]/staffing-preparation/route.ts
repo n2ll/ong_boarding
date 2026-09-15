@@ -12,6 +12,7 @@ import {
   type StaffingSourceMessage,
   type StaffingPrimaryCandidate,
   parseStaffingPreparation,
+  parseStaffingManagerNote,
   type StaffingPreparationSnapshot,
 } from "@/lib/admin/staffing-preparation";
 
@@ -40,6 +41,7 @@ function snapshot(applicantId: number, event?: PreparationEvent, history: Prepar
   return { applicant_id: applicantId, preparation, event_id: event?.id ?? null,
     updated_at: event?.created_at ?? null, invalid: Boolean(event && !preparation), actor: author(event),
     history: history.map((row) => ({ event_id: row.id, updated_at: row.created_at, actor: author(row),
+      manager_note: parseStaffingManagerNote((row.meta as { manager_note?: unknown } | null)?.manager_note),
       preparation: parseStaffingPreparation(row.meta), invalid: !parseStaffingPreparation(row.meta) })) };
 }
 
@@ -135,6 +137,10 @@ export async function POST(req: NextRequest, context: Context) {
     const applicantId = body.applicant_id;
     const actionKey = typeof body.action_key === "string" ? body.action_key.trim().toLowerCase() : "";
     const preparation = parseStaffingPreparation({ ...body, source: "manager" });
+    const managerNote = parseStaffingManagerNote(body.manager_note);
+    if (body.manager_note !== undefined && !managerNote) {
+      return NextResponse.json({ error: "통화·진행 메모는 1~1000자로 입력하고, 메모 기준일은 오늘까지의 올바른 날짜를 선택해주세요." }, { status: 400 });
+    }
     const baseEventId = body.base_event_id;
     const actorName = typeof body.actor_name === "string" ? body.actor_name.trim() : "";
     if (typeof applicantId !== "number" || !Number.isSafeInteger(applicantId) || applicantId <= 0
@@ -163,10 +169,13 @@ export async function POST(req: NextRequest, context: Context) {
     const isRetry = (row: PreparationEvent) => {
       const meta = row.meta as Record<string, unknown>;
       const savedActor = author(row);
+      const savedManagerNote = parseStaffingManagerNote(meta.manager_note);
       return row.applicant_id === applicantId && row.job_id === jobId && row.event_type === STAFFING_PREPARATION_EVENT
         && meta.request_key === actionKey && meta.base_event_id === baseEventId
         && savedActor?.account_id === actor.account_id && savedActor.name === actor.name
-        && JSON.stringify(parseStaffingPreparation(row.meta)) === JSON.stringify(preparation);
+        && JSON.stringify(parseStaffingPreparation(row.meta)) === JSON.stringify(preparation)
+        && (meta.manager_note === undefined ? managerNote === null
+          : savedManagerNote !== null && JSON.stringify(savedManagerNote) === JSON.stringify(managerNote));
     };
     // Check a committed request before its base version: a lost response may be retried after a teammate's later edit.
     const previous = await db.from("pool_events").select(EVENT_COLUMNS).eq("meta->>request_key", actionKey).maybeSingle();
@@ -212,7 +221,8 @@ export async function POST(req: NextRequest, context: Context) {
     const versionKey = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     const inserted = await db.from("pool_events").insert({ applicant_id: applicantId, job_id: jobId,
       event_type: STAFFING_PREPARATION_EVENT, action_key: versionKey,
-      meta: { ...preparation, actor, request_key: actionKey, base_event_id: baseEventId } }).select(EVENT_COLUMNS).single();
+      meta: { ...preparation, ...(managerNote ? { manager_note: managerNote } : {}),
+        actor, request_key: actionKey, base_event_id: baseEventId } }).select(EVENT_COLUMNS).single();
     if (inserted.error?.code === "23505") {
       const existing = await db.from("pool_events").select(EVENT_COLUMNS).eq("action_key", versionKey).maybeSingle();
       if (existing.error) throw existing.error;

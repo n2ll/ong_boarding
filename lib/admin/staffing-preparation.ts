@@ -23,10 +23,12 @@ export type StaffingFollowUp = {
 };
 export const emptyStaffingFollowUp = (): StaffingFollowUp => ({ owner: "", next_action: "", due_date: "", status: "open", last_contact: null });
 export type StaffingPreparationActor = { account_id: string; name: string };
+export type StaffingManagerNote = { text: string; reference_date: string };
 export type StaffingPreparationRevision = {
   event_id: number;
   updated_at: string;
   actor: StaffingPreparationActor | null;
+  manager_note?: StaffingManagerNote | null;
   preparation: StaffingPreparation | null;
   invalid: boolean;
 };
@@ -66,6 +68,15 @@ export type StaffingPreparationSnapshot = {
   actor: StaffingPreparationActor | null;
   history: StaffingPreparationRevision[];
 };
+
+/** The original manager memo belongs to its revision, outside the structured preparation. */
+export function parseStaffingManagerNote(value: unknown): StaffingManagerNote | null {
+  const note = record(value);
+  if (Object.keys(note).length !== 2 || typeof note.text !== "string" || !note.text.trim()
+    || note.text.length > STAFFING_PREPARATION_LIMITS.note || typeof note.reference_date !== "string"
+    || !validDay(note.reference_date) || note.reference_date > staffingToday()) return null;
+  return { text: note.text, reference_date: note.reference_date };
+}
 
 export function parseStaffingPreparation(value: unknown): StaffingPreparation | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
