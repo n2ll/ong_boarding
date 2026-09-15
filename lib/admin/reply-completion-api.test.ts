@@ -71,6 +71,38 @@ test("completion stores one event for the observed inbound and retries do not du
   assert.deepEqual(h.database.messages, [inbound(1)]);
 });
 
+test("production UUID completion stores the exact id and retries without duplicating", async () => {
+  const uuid = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b81";
+  const h = await harness({ messages: [{ ...inbound(1), id: uuid }] });
+  assert.equal((await h.post(request({ message_id: uuid }))).status, 200);
+  assert.equal((await h.post(request({ message_id: uuid }))).status, 200);
+  assert.equal(h.database.pool_events.length, 1);
+  assert.equal(h.database.pool_events[0].meta.message_id, uuid);
+});
+
+test("UUID completion keeps a concurrently arriving other-job inbound actionable", async () => {
+  const uuid = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b81";
+  const newer = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b82";
+  const messages = [{ ...inbound(1), id: uuid }];
+  const h = await harness({ messages, afterRead: () => { messages.push({ ...inbound(2, 1, 20), id: newer }); } });
+  assert.equal((await h.post(request({ message_id: uuid }))).status, 200);
+  const { gatherMessagePreviews } = await import(new URL("../message-preview.ts", import.meta.url).href);
+  const preview = await gatherMessagePreviews(h.db, [1], { requireComplete: true });
+  assert.equal(preview[1].message_id, newer);
+  assert.equal(preview[1].reply_completed, false);
+  assert.equal((await h.post(request({ message_id: uuid }))).status, 409);
+});
+
+test("UUID completion still rejects any-job human handoffs and core read failures", async () => {
+  const uuid = "4bd5096c-0790-4eb2-b1bd-e46ecfd78b81";
+  const blocked = await harness({ messages: [{ ...inbound(1), id: uuid }], candidates: [{ id: 1, applicant_id: 1, agent_stage: "paused", paused_reason: "문의 확인 필요", jobs: { title: "다른 공고" } }] });
+  assert.equal((await blocked.post(request({ message_id: uuid }))).status, 409);
+  assert.equal(blocked.database.pool_events.length, 0);
+  const failed = await harness({ messages: [{ ...inbound(1), id: uuid }], fail: "pool_events" });
+  assert.equal((await failed.post(request({ message_id: uuid }))).status, 503);
+  assert.equal(failed.database.pool_events.length, 0);
+});
+
 test("newer inbound on another job prevents completion of an old tab", async () => {
   const h = await harness({ messages: [inbound(1), inbound(2, 1, 20)] });
   assert.equal((await h.post(request())).status, 409);
@@ -105,9 +137,9 @@ for (const fail of ["messages", "message_drafts", "pool_events", "job_candidates
   });
 }
 
-test("only positive integer ids and documented outcomes are accepted", async () => {
+test("only supported message ids and documented outcomes are accepted", async () => {
   const h = await harness();
-  for (const patch of [{ applicant_id: "1" }, { applicant_id: 0 }, { message_id: 1.2 }, { message_id: null }, { outcome: "closed" }, { note: {} }]) {
+  for (const patch of [{ applicant_id: "1" }, { applicant_id: 0 }, { message_id: 1.2 }, { message_id: null }, { message_id: "1" }, { message_id: "not-a-uuid" }, { outcome: "closed" }, { note: {} }]) {
     assert.equal((await h.post(request(patch))).status, 400);
   }
   assert.equal(h.database.pool_events.length, 0);

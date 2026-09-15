@@ -13,7 +13,7 @@ import { Modal } from "./ui/modal";
 import { TextareaField } from "./ui/field";
 import { Inbox } from "./Inbox";
 import { ReplyCompletionButton } from "./ReplyCompletionButton";
-import { isReplyActionable } from "@/lib/admin/reply-completion";
+import { isReplyActionable, type ReplyMessageId } from "@/lib/admin/reply-completion";
 
 /**
  * 대화창과 오른쪽 상세는 **대화를 누르기 전엔 렌더되지 않는다**(아래 `activeChat &&`).
@@ -118,7 +118,7 @@ type ActiveJob = LiveJobLink;
 
 /** /api/admin/messages/preview 응답의 지원자별 마지막 메시지 요약 */
 interface LastMessagePreview {
-  message_id?: number;
+  message_id?: ReplyMessageId;
   reply_completed?: boolean;
   handoff_required?: boolean;
   body: string;
