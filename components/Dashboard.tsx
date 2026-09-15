@@ -10,6 +10,8 @@ import { SosLedgerCard } from "@/components/SosLedgerCard";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard, type ReplyQueueCounts } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
+import { StaffingFollowUpQueue } from "@/components/StaffingFollowUpQueue";
+import type { StaffingFollowUpQueueData } from "@/lib/admin/staffing-follow-ups";
 import { PageShell } from "@/components/ui/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -152,6 +154,7 @@ export function Dashboard() {
   const { data: hbRes, error: hbError, isValidating: heartbeatValidating, mutate: mutateHeartbeat } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
   const { data: interestRes, error: interestError, mutate: mutateInterest } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
+  const { data: followUps, error: followUpsError, mutate: mutateFollowUps } = useSWR<StaffingFollowUpQueueData>("/api/admin/staffing-follow-ups", { refreshInterval: 60_000, revalidateOnFocus: true });
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
   const {
@@ -188,6 +191,7 @@ export function Dashboard() {
     confirmations: { data: confirmRes, error: confirmError },
     sos: { data: sosRes?.open, error: sosError },
     interest: { data: interestRes, error: interestError },
+    followups: { data: followUps, error: followUpsError || (followUps?.invalid_records ? true : undefined) },
     heartbeat: { data: hbRes, error: hbError },
     replies: {
       data: replyCounts.state === "ready" ? replyCounts : undefined,
@@ -207,12 +211,13 @@ export function Dashboard() {
     confirmations: "확정 검토",
     sos: "긴급 건",
     interest: "관심 표시",
+    followups: "후속 연락",
     heartbeat: "문자 수신폰",
     replies: "답장 대기",
   };
   const retryUrgentSources = () => {
     setReplyRetrySignal((signal) => signal + 1);
-    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest(), mutateHeartbeat()]);
+    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest(), mutateHeartbeat(), mutateFollowUps()]);
   };
   const rawApps = appsRes?.data ?? [];
   const hasAppsSnapshot = appsRes?.data !== undefined;
@@ -463,8 +468,15 @@ export function Dashboard() {
       const oldest = replyCounts.oldestDays === null || replyCounts.oldestDays === undefined ? null : replyCounts.oldestDays * 1_440;
       u.push({ id: "pool-reply", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `내가 답할 차례 ${poolReplies}건${suffix(oldest)}`, desc: "문자 답장이 왔는데 아직 아무도 답하지 않았어요. AI가 넘긴 대화('사람 확인 필요')와는 별개예요.", cta: "답장 큐로", path: "#reply-queue" });
     }
+    const dueFollowUps = followUps?.items.filter((item) => item.due_date && item.due_date <= followUps.today) ?? [];
+    if (dueFollowUps.length > 0) {
+      const overdue = dueFollowUps.filter((item) => item.due_date < followUps!.today).length;
+      u.push({ id: "staffing-followups", urgency: "attention", title: `오늘 후속 연락 ${dueFollowUps.length}건`,
+        desc: `전체 공고 기준 · 팀에서 기록한 다음 할 일이에요.${overdue ? ` 기한이 지난 일 ${overdue}건 포함.` : ""}`,
+        cta: "연락할 후보 보기", path: "#staffing-followups", icon: PhoneCall });
+    }
     return orderDashboardUrgentItems(u);
-  }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick]);
+  }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick, followUps]);
 
   const openUrgentItem = (item: UrgentItem) => {
     if (item.action === "retry-heartbeat") {
@@ -689,6 +701,9 @@ export function Dashboard() {
           <SosLedgerCard />
         </div>
       )}
+
+      <StaffingFollowUpQueue data={followUps} error={followUpsError} onRetry={() => { void mutateFollowUps(); }}
+        onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}`)} />
 
       {/* 실제 응대 큐가 홈의 주 작업이다. 본문 폭이 충분한 xl(1280+)부터 2:1로 나누고 1024에서는 우선순위대로 쌓는다. */}
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">

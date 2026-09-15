@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSWRConfig } from "swr";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
@@ -51,14 +52,17 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; allowNewConfirmation?: boolean }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; allowNewConfirmation?: boolean }) {
   const confirm = useConfirm();
+  const { mutate } = useSWRConfig();
   const [open, setOpen] = useState(initialOpen);
   const [snapshots, setSnapshots] = useState<StaffingPreparationSnapshot[]>([]);
   const [suggestions, setSuggestions] = useState<StaffingSuggestion[]>([]);
   const [otherPrimaries, setOtherPrimaries] = useState<StaffingPrimaryCandidate[]>([]);
   const [conflictCheckIncomplete, setConflictCheckIncomplete] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [targetError, setTargetError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
   const [date, setDate] = useState(initialDate);
@@ -81,6 +85,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [saveError, setSaveError] = useState("");
   const request = useRef<{ body: string; key: string } | null>(null);
   const datesOpened = useRef(false);
+  const initialApplicantOpened = useRef(false);
   useEffect(() => { setVisibleCount(5); }, [query, statusFilter, followUpFilter, ownerQuery, date]);
   useEffect(() => {
     try { setActorName(localStorage.getItem(AUTHOR_STORAGE_KEY) ?? ""); } catch { /* Storage is optional. */ }
@@ -88,7 +93,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    setLoading(true); setLoadError("");
+    setLoading(true); setLoaded(false); setLoadError("");
     fetch(`/api/admin/jobs/${jobId}/staffing-preparation`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
@@ -96,6 +101,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
         if (!controller.signal.aborted) {
           setSnapshots(data.preparations); setSuggestions(data.suggestions ?? []);
           setOtherPrimaries(data.primary_candidates ?? []); setConflictCheckIncomplete(data.conflict_check_incomplete !== false);
+          setLoaded(true);
         }
       }).catch((error) => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "배차 준비 조회 실패"); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
@@ -112,6 +118,19 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     datesOpened.current = mode === "preparation";
     setEditorMode(mode); setEditing(candidate); setDraft(next); setInitial(JSON.stringify(next)); setSaveError(""); request.current = null;
   };
+  // Dashboard links open only after the authoritative snapshot arrives; a retry must
+  // never open an empty draft over a saved record or reopen a just-closed editor.
+  useEffect(() => {
+    if (!initialApplicantId || initialApplicantOpened.current || !loaded || loadError) return;
+    initialApplicantOpened.current = true;
+    const candidate = candidates.find((item) => item.applicant_id === initialApplicantId);
+    const snapshot = snapshots.find((item) => item.applicant_id === initialApplicantId);
+    if (!candidate || !snapshot?.event_id || snapshot.invalid || !parseStaffingPreparation(snapshot.preparation)) {
+      setTargetError("선택한 후보의 후속 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
+      return;
+    }
+    startEditing(candidate);
+  });
   const selectEditorMode = (mode: EditorMode) => {
     if (editorMode === "note" && mode !== "note") {
       if (noteDraft.prepared) setDraft(noteDraft.prepared);
@@ -190,6 +209,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       setSnapshots((items) => [...items.filter((item) => item.applicant_id !== data.applicant_id), data]);
       setEditing(null); setRetry((value) => value + 1); toast.success("진행 기록을 팀에 공유했어요.");
       window.dispatchEvent(new Event("ongboarding:staffing-updated"));
+      void mutate("/api/admin/staffing-follow-ups");
     } catch (error) { setSaveError(`${error instanceof Error ? error.message : "저장 실패"}. 입력 내용은 유지됩니다. 다시 저장해주세요.`); }
     finally { setSaving(false); }
   };
@@ -225,6 +245,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">후보 연락·기록 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
     {open && <div className="mt-3 space-y-3 text-sm">
       <p className="text-muted-foreground">후보를 찾아 연락하고, 통화·진행 내용을 메모로 남기세요. 다음 할 일도 함께 확인할 수 있습니다.</p>
+      {targetError && <p role="alert" className="text-warning-strong">{targetError}</p>}
       {loading ? <p role="status">배차 준비 불러오는 중…</p> : loadError ? <div role="alert"><p>{loadError}</p><Button variant="secondary" onClick={() => setRetry((value) => value + 1)}>다시 조회</Button></div> : <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-muted-foreground">답변 제안과 다른 공고 기록은 조회 시점 기준입니다.</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)}>새로 확인</Button></div>
         {conflictCheckIncomplete && <p role="alert" className="text-warning-strong">다른 공고의 일부 기록을 확인하지 못했어요. 본담당 후보가 겹치는지 직접 확인해주세요.</p>}
@@ -281,6 +302,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     </div>}
     <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "메모를 그대로 남기거나, AI가 정리한 내용도 함께 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <div className="flex w-full flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!!conflict || !noteDraft.note.trim() || saving || noteDraft.busy} onClick={() => void save(parseStaffingPreparation(JSON.parse(initial)) ?? emptyPreparation())}>메모만 저장</Button><Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !!noteDraft.selected.length && !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button></div> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
+        {jobTitle && <p className="break-words font-medium text-muted-foreground">{jobTitle}</p>}
         <div className="flex gap-2"><Button variant={editorMode === "note" ? "primary" : "ghost"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("note")}>메모로 기록</Button><Button variant={editorMode === "note" ? "ghost" : "secondary"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("follow_up")}>직접 입력</Button></div>
         {editorMode !== "note" && <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Object.entries(editorModeLabels).map(([mode, label]) => <button key={mode} type="button" aria-pressed={editorMode === mode} disabled={saving} onClick={() => selectEditorMode(mode as EditorMode)} className={`min-h-11 rounded-lg border px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${editorMode === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-background"}`}>{label}</button>)}
