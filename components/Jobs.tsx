@@ -8,6 +8,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { StaffingPreparationPanel } from "./StaffingPreparationPanel";
 import { StaffingDateBoard } from "./StaffingDateBoard";
+import { JobPostingBodyEditor } from "./JobPostingBodyEditor";
 import { staffingToday } from "@/lib/admin/staffing-preparation";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
@@ -4131,10 +4132,12 @@ export function Jobs() {
                         <div className="hidden flex-1 sm:block" />
                         <Button size="sm" variant="brand" className="col-span-2 w-full rounded-xl border border-brand-yellow bg-yellow-50 text-[13px] text-warning-strong shadow-none hover:bg-yellow-100 sm:w-auto" onClick={() => copyChannel(channelDrafts[visibleDraftChannel], visibleDraftChannel === "albamon" ? "공고 원문" : "안내 문자")}><Copy size={14} /> 복사</Button>
                       </div>
-                      <textarea
+                      <JobPostingBodyEditor
                         value={channelDrafts[visibleDraftChannel]}
-                        onChange={(e) => setChannelDrafts({ ...channelDrafts, [visibleDraftChannel]: e.target.value })}
-                        className="w-full bg-yellow-50 border-0 rounded-md px-4 py-3.5 text-[14px] text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-ring min-h-[260px] font-medium resize-none whitespace-pre-wrap"
+                        onChange={(value) => setChannelDrafts((current) => current ? { ...current, [visibleDraftChannel]: value } : current)}
+                        channel={visibleDraftChannel}
+                        source={generatedContext?.prompt}
+                        disabled={isGenerating}
                       />
                       {/* 지금 보는 용도와 실제 저장·발송 계약을 바로 연결한다. */}
                       <div className="mt-2 text-[12px] text-muted-foreground">
