@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
 import { StaffingDemandEditor } from "./StaffingDemandEditor";
@@ -28,7 +28,8 @@ function DateCell({ cell, title, onOpen, onEdit }: { cell: StaffingDateBoardCell
   </button><Button variant="secondary" className="w-full" aria-label={`${title} ${cell.date} 필요 인원 수정`} onClick={onEdit}>{cell.demand_event_id ? "필요 인원 수정" : "필요 인원 입력"}</Button></div>;
 }
 
-export function StaffingDateBoard({ defaultStart, onOpenCandidates }: { defaultStart?: string; onOpenCandidates: (jobId: number, date: string) => void }) {
+export function StaffingDateBoard({ defaultStart, requestedStart, onOpenCandidates }: { defaultStart?: string; requestedStart?: { date: string }; onOpenCandidates: (jobId: number, date: string) => void }) {
+  const headingRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -37,6 +38,17 @@ export function StaffingDateBoard({ defaultStart, onOpenCandidates }: { defaultS
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<{ job: StaffingDateBoardData["jobs"][number]; cell: StaffingDateBoardCell } | null>(null);
+  useEffect(() => {
+    if (!requestedStart || !staffingDateBoardDates(requestedStart.date, requestedStart.date)) return;
+    setStart(requestedStart.date);
+    setEnd(new Date(Date.parse(`${requestedStart.date}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10));
+    setOpen(true);
+    const frame = requestAnimationFrame(() => {
+      headingRef.current?.focus({ preventScroll: true });
+      headingRef.current?.closest("section")?.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [requestedStart]);
   const days = staffingDateBoardDates(start, end);
   const valid = !!days;
   useEffect(() => {
@@ -68,7 +80,7 @@ export function StaffingDateBoard({ defaultStart, onOpenCandidates }: { defaultS
     setOpen((value) => !value);
   };
   return <section aria-label="날짜별 충원 현황" className="min-w-0 rounded-panel border border-border-strong bg-card p-3 sm:p-4">
-    <button type="button" aria-label="날짜별 충원판" aria-expanded={open} aria-controls="staffing-date-board-content" onClick={toggle}
+    <button ref={headingRef} type="button" aria-label="날짜별 충원판" aria-expanded={open} aria-controls="staffing-date-board-content" onClick={toggle}
       className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <span><span className="block font-bold">날짜별 충원판</span><span className="block text-sm text-muted-foreground">날짜별 수요를 정하고 부족한 라인의 후보를 확인하세요.</span></span>
       {open ? <ChevronDown size={20} aria-hidden="true" /> : <ChevronRight size={20} aria-hidden="true" />}

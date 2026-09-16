@@ -7,6 +7,7 @@ import { Search, Filter, Briefcase, Eye, MapPin, CheckCircle2, Copy, CopyPlus, E
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { StaffingPreparationPanel } from "./StaffingPreparationPanel";
+import { staffingDateBoardDates } from "@/lib/admin/staffing-date-board";
 import { StaffingDateBoard } from "./StaffingDateBoard";
 import { JobPostingBodyEditor } from "./JobPostingBodyEditor";
 import { staffingToday } from "@/lib/admin/staffing-preparation";
@@ -969,6 +970,10 @@ export function Jobs() {
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
   const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number; followUpMode?: "follow_up" | "participation" } | null>(null);
+  const [requestedStaffingStart, setRequestedStaffingStart] = useState<{ date: string } | undefined>();
+  const [verifiedStaffingLink, setVerifiedStaffingLink] = useState<string | null>(null);
+  const openedStaffingLink = useRef<string | null>(null);
+  const refreshedStaffingLink = useRef<string | null>(null);
   const openedFollowUpLink = useRef<string | null>(null);
   const refreshedFollowUpLink = useRef<string | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
@@ -1428,6 +1433,51 @@ export function Jobs() {
     else toast.error("선택한 후속 연락의 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
     router.replace("/jobs", { scroll: false });
   }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs]);
+
+  useEffect(() => {
+    const jobParam = searchParams.get("staffing_job");
+    const dateParam = searchParams.get("staffing_date");
+    const startParam = searchParams.get("staffing_start");
+    if (jobParam === null && dateParam === null && startParam === null) {
+      openedStaffingLink.current = null; refreshedStaffingLink.current = null; setVerifiedStaffingLink(null); return;
+    }
+    if (searchParams.has("followup_job") || searchParams.has("followup_applicant")) return;
+    const key = `${jobParam}:${dateParam}:${startParam}`;
+    if (openedStaffingLink.current === key) return;
+    const date = dateParam ?? startParam;
+    const validDate = !!date && !!staffingDateBoardDates(date, date);
+    const candidateLink = jobParam !== null || dateParam !== null;
+    const validJob = !!jobParam && /^[1-9]\d*$/.test(jobParam) && Number.isSafeInteger(Number(jobParam));
+    if (!validDate || (candidateLink && (!validJob || !dateParam))) {
+      openedStaffingLink.current = key;
+      toast.error("충원 확인 링크의 공고와 날짜를 확인해주세요.");
+      router.replace("/jobs", { scroll: false });
+      return;
+    }
+    if (!candidateLink) {
+      openedStaffingLink.current = key;
+      setRequestedStaffingStart({ date });
+      router.replace("/jobs", { scroll: false });
+      return;
+    }
+    if (!jobsApi || jobsError) return;
+    // Verify even a cached match: the job may have been removed since visiting home.
+    if (verifiedStaffingLink !== key) {
+      if (refreshedStaffingLink.current !== key) {
+        refreshedStaffingLink.current = key;
+        void mutateJobs().then(() => {
+          if (refreshedStaffingLink.current === key) setVerifiedStaffingLink(key);
+        }).catch(() => { refreshedStaffingLink.current = null; });
+      }
+      return;
+    }
+    if (jobsValidating) return;
+    const job = jobs.find((item) => Number(item.id) === Number(jobParam));
+    openedStaffingLink.current = key;
+    if (job?.generalLine) openCandidates(job, date);
+    else toast.error("선택한 일반 배송 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
+    router.replace("/jobs", { scroll: false });
+  }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs, verifiedStaffingLink]);
 
   // 화주사 유형은 AI 응대 계약의 권위값이다. 등록·수정 중 이 메타데이터를 못 읽었는데도
   // 빈 목록을 '일반 배송'으로 간주하면 비마트 공고를 잘못 저장하므로 작성 경로는 fail-closed한다.
@@ -3158,6 +3208,7 @@ export function Jobs() {
       </section>
 
       <StaffingDateBoard
+        requestedStart={requestedStaffingStart}
         defaultStart={jobs.filter((job) => job.generalLine && !job.effectivelyClosed && job.startDate && job.startDate >= staffingToday()).map((job) => job.startDate!).sort()[0]}
         onOpenCandidates={(jobId, date) => {
           const job = jobs.find((item) => Number(item.id) === jobId);
