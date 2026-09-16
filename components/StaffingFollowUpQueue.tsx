@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, CalendarClock, Loader2 } from "lucide-react";
+import { ArrowRight, CalendarClock, ChevronDown, Loader2 } from "lucide-react";
 import { participationKindLabels } from "@/lib/admin/staffing-preparation";
 import type { StaffingFollowUpItem, StaffingFollowUpQueueData } from "@/lib/admin/staffing-follow-ups";
 import { Button } from "./ui/button";
+import { StaffingHandoffSummary } from "./StaffingHandoffSummary";
 
 export function StaffingFollowUpQueue({
   data,
@@ -19,6 +20,7 @@ export function StaffingFollowUpQueue({
 }) {
   const [filter, setFilter] = useState<"due" | "all">("due");
   const [visibleCount, setVisibleCount] = useState(5);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const dueItems = data?.items.filter((item) => item.due_date && item.due_date <= data.today) ?? [];
   const items = filter === "due" ? dueItems : data?.items ?? [];
   const remaining = Math.max(0, items.length - visibleCount);
@@ -97,34 +99,48 @@ export function StaffingFollowUpQueue({
                 const isToday = item.due_date === data.today;
                 const hasResults = Boolean(item.result_checks?.length);
                 const actionLabel = hasResults ? "결과 기록 열기" : "연락·기록 열기";
+                const handoffId = `staffing-handoff-${item.job_id}-${item.applicant_id}`;
+                const isExpanded = expanded === handoffId;
                 return (
-                  <li key={`${item.job_id}:${item.candidate_id}`} className="flex min-w-0 flex-col gap-3 py-3 sm:flex-row sm:items-center">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span className="max-w-full break-words text-sm font-bold text-foreground">{item.name || "이름 미상"}</span>
-                        <span className="min-w-0 max-w-full break-words text-xs text-muted-foreground">{item.job_title}</span>
+                  <li key={`${item.job_id}:${item.candidate_id}`} className="min-w-0 space-y-3 py-3">
+                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="max-w-full break-words text-sm font-bold text-foreground">{item.name || "이름 미상"}</span>
+                          <span className="min-w-0 max-w-full break-words text-xs text-muted-foreground">{item.job_title}</span>
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">{item.next_action}</p>
+                        {hasResults && <p className="mt-1 break-words text-sm text-warning-strong">
+                          결과 미기록: {item.result_checks!.map((check) => `${check.date} ${participationKindLabels[check.kind]}`).join(" · ")}
+                        </p>}
+                        {item.manual_due_date !== undefined && <p className="mt-1 text-xs text-muted-foreground">연락 예정일: {item.manual_due_date || "미정"}</p>}
+                        <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-xs">
+                          <span className="max-w-full break-words rounded-full bg-muted px-2 py-1 text-muted-foreground">담당 {item.owner || "미지정"}</span>
+                          <span className={`rounded-full px-2 py-1 ${isOverdue ? "bg-priority-critical-soft text-priority-critical-ink" : isToday ? "bg-priority-attention-soft text-priority-attention-ink" : "bg-muted text-muted-foreground"}`}>
+                            {item.due_date ? `${hasResults ? "결과 확인" : isOverdue ? "기한 지남" : isToday ? "오늘" : "예정"} · ${item.due_date}` : "예정일 미정"}
+                          </span>
+                        </div>
                       </div>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">{item.next_action}</p>
-                      {hasResults && <p className="mt-1 break-words text-sm text-warning-strong">
-                        결과 미기록: {item.result_checks!.map((check) => `${check.date} ${participationKindLabels[check.kind]}`).join(" · ")}
-                      </p>}
-                      {item.manual_due_date !== undefined && <p className="mt-1 text-xs text-muted-foreground">연락 예정일: {item.manual_due_date || "미정"}</p>}
-                      <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-xs">
-                        <span className="max-w-full break-words rounded-full bg-muted px-2 py-1 text-muted-foreground">담당 {item.owner || "미지정"}</span>
-                        <span className={`rounded-full px-2 py-1 ${isOverdue ? "bg-priority-critical-soft text-priority-critical-ink" : isToday ? "bg-priority-attention-soft text-priority-attention-ink" : "bg-muted text-muted-foreground"}`}>
-                          {item.due_date ? `${hasResults ? "결과 확인" : isOverdue ? "기한 지남" : isToday ? "오늘" : "예정"} · ${item.due_date}` : "예정일 미정"}
-                        </span>
+                      <div className="flex shrink-0 flex-col gap-2">
+                        <Button type="button" size="sm" variant="ghost" aria-expanded={isExpanded} aria-controls={handoffId}
+                          aria-label={`${item.name || "이름 미상"} · ${item.job_title} 최근 진행 ${isExpanded ? "접기" : "보기"}`}
+                          onClick={() => setExpanded(isExpanded ? null : handoffId)}>
+                          최근 진행 {isExpanded ? "접기" : "보기"}<ChevronDown aria-hidden="true" size={14} className={isExpanded ? "rotate-180" : ""} />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          aria-label={`${item.name || "이름 미상"} · ${item.job_title} ${actionLabel}`}
+                          onClick={() => onOpen(item)}
+                          className="w-full sm:w-auto"
+                        >
+                          {actionLabel} <ArrowRight aria-hidden="true" size={14} />
+                        </Button>
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      aria-label={`${item.name || "이름 미상"} · ${item.job_title} ${actionLabel}`}
-                      onClick={() => onOpen(item)}
-                      className="w-full sm:w-auto"
-                    >
-                      {actionLabel} <ArrowRight aria-hidden="true" size={14} />
-                    </Button>
+                    {isExpanded && <div id={handoffId} role="region" aria-label={`${item.name || "이름 미상"} · ${item.job_title} 최근 진행`}>
+                      <StaffingHandoffSummary jobId={item.job_id} applicantId={item.applicant_id} />
+                    </div>}
                   </li>
                 );
               })}
