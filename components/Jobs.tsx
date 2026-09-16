@@ -1038,6 +1038,8 @@ export function Jobs() {
     void applicantUnsavedGuard.requestTransition(closeCandidateBoardNow);
   }, [applicantUnsavedGuard, closeCandidateBoardNow]);
   const handleCandidateBoardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Portaled dialogs own their keys, even after Radix synchronously closes them.
+    if (!candidateBoardRef.current?.contains(event.target as Node)) return;
     const focusables = Array.from(
       candidateBoardRef.current?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
