@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
 import { StaffingDemandEditor } from "./StaffingDemandEditor";
+import { StaffingDemandBatchEditor } from "./StaffingDemandBatchEditor";
 import { staffingToday } from "@/lib/admin/staffing-preparation";
 import { staffingDateBoardDates, type StaffingDateBoardData, type StaffingDateBoardCell } from "@/lib/admin/staffing-date-board";
 
@@ -38,6 +39,7 @@ export function StaffingDateBoard({ defaultStart, requestedStart, onOpenCandidat
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<{ job: StaffingDateBoardData["jobs"][number]; cell: StaffingDateBoardCell } | null>(null);
+  const [batchData, setBatchData] = useState<StaffingDateBoardData | null>(null);
   useEffect(() => {
     if (!requestedStart || !staffingDateBoardDates(requestedStart.date, requestedStart.date)) return;
     setStart(requestedStart.date);
@@ -90,6 +92,7 @@ export function StaffingDateBoard({ defaultStart, requestedStart, onOpenCandidat
         <label className="min-w-0 space-y-1 sm:max-w-52 sm:flex-1"><span className="block text-sm font-medium">충원 비교 시작일</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)} className={fieldClass} /></label>
         <label className="min-w-0 space-y-1 sm:max-w-52 sm:flex-1"><span className="block text-sm font-medium">충원 비교 종료일</span><input type="date" value={end} min={start} onChange={(event) => setEnd(event.target.value)} className={fieldClass} /></label>
         <Button variant="secondary" className="col-span-2" aria-label="충원판 새로고침" disabled={loading || !valid} onClick={() => { setData(null); setRevision((value) => value + 1); }}><RefreshCw size={15} aria-hidden="true" /> 새로고침</Button>
+        <Button className="col-span-2" disabled={!current?.jobs.length} onClick={() => { if (current) setBatchData(current); }}>여러 날짜 인원 입력</Button>
       </div>
       <p className="text-sm text-muted-foreground">최대 7일 비교 · 수요가 미정인 날은 부족 인원을 계산하지 않습니다. 실제 필요 인원은 기본 1명, 예비는 권장 1명(필수 아님)입니다. 저장한 수요와 날짜별 확정 인원으로 충원 여부를 계산합니다.</p>
       {!valid ? <p role="alert" className="text-sm text-warning-strong">시작일과 종료일을 포함해 1~7일로 선택해주세요.</p>
@@ -116,5 +119,6 @@ export function StaffingDateBoard({ defaultStart, requestedStart, onOpenCandidat
         </>}
     </div>}
     {editing && <StaffingDemandEditor jobId={editing.job.job_id} title={editing.job.title} capacity={editing.job.capacity} cell={editing.cell} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
+    {batchData && <StaffingDemandBatchEditor data={batchData} onClose={() => setBatchData(null)} />}
   </section>;
 }
