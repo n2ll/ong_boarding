@@ -10,6 +10,10 @@ import { SosLedgerCard } from "@/components/SosLedgerCard";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard, type ReplyQueueCounts } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
+import { StaffingGapSummary } from "@/components/StaffingGapSummary";
+import { buildDashboardStaffingGaps } from "@/lib/admin/dashboard-staffing-gaps";
+import { staffingToday } from "@/lib/admin/staffing-preparation";
+import type { StaffingDateBoardData } from "@/lib/admin/staffing-date-board";
 import { StaffingFollowUpQueue } from "@/components/StaffingFollowUpQueue";
 import type { StaffingFollowUpQueueData } from "@/lib/admin/staffing-follow-ups";
 import { PageShell } from "@/components/ui/page-shell";
@@ -155,6 +159,19 @@ export function Dashboard() {
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
   const { data: interestRes, error: interestError, mutate: mutateInterest } = useSWR<{ count?: number; immediate_count?: number; items?: { interested_at?: string | null }[] }>("/api/admin/interest-queue", { refreshInterval: 30_000 });
   const { data: followUps, error: followUpsError, mutate: mutateFollowUps } = useSWR<StaffingFollowUpQueueData>("/api/admin/staffing-follow-ups", { refreshInterval: 60_000, revalidateOnFocus: true });
+  const staffingStart = staffingToday();
+  const staffingEnd = new Date(Date.parse(`${staffingStart}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+  const { data: staffingData, error: staffingError, isValidating: staffingValidating, mutate: mutateStaffing } = useSWR<StaffingDateBoardData>(
+    `/api/admin/staffing-date-board?start=${staffingStart}&end=${staffingEnd}`,
+    { refreshInterval: 60_000, revalidateOnFocus: true, keepPreviousData: false },
+  );
+  const staffingCurrent = !staffingError && staffingData?.start === staffingStart && staffingData.end === staffingEnd ? staffingData : undefined;
+  const staffingGaps = useMemo(() => staffingCurrent ? buildDashboardStaffingGaps(staffingCurrent) : undefined, [staffingCurrent]);
+  useEffect(() => {
+    const refresh = () => { void mutateStaffing(); };
+    window.addEventListener("ongboarding:staffing-updated", refresh);
+    return () => window.removeEventListener("ongboarding:staffing-updated", refresh);
+  }, [mutateStaffing]);
   // AI 응답 모드(자동/코파일럿/완전 중지) — LiveConsole·에이전트 두뇌와 동일 키라 SWR이 dedup.
   // 처음 보는 매니저도 '지금 AI가 답하고 있는지'를 헤더 한 줄로 알 수 있게 상시 노출한다.
   const {
@@ -191,6 +208,7 @@ export function Dashboard() {
     confirmations: { data: confirmRes, error: confirmError },
     sos: { data: sosRes?.open, error: sosError },
     interest: { data: interestRes, error: interestError },
+    staffing: { data: staffingCurrent, error: staffingError },
     followups: { data: followUps, error: followUpsError || (followUps?.invalid_records ? true : undefined) },
     heartbeat: { data: hbRes, error: hbError },
     replies: {
@@ -212,12 +230,13 @@ export function Dashboard() {
     sos: "긴급 건",
     interest: "관심 표시",
     followups: "후속 연락",
+    staffing: "날짜별 충원",
     heartbeat: "문자 수신폰",
     replies: "답장 대기",
   };
   const retryUrgentSources = () => {
     setReplyRetrySignal((signal) => signal + 1);
-    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest(), mutateHeartbeat(), mutateFollowUps()]);
+    void Promise.all([mutateApps(), mutateInbox(), mutateNoti(), mutateConfirm(), mutateSos(), mutateInterest(), mutateHeartbeat(), mutateFollowUps(), mutateStaffing()]);
   };
   const rawApps = appsRes?.data ?? [];
   const hasAppsSnapshot = appsRes?.data !== undefined;
@@ -475,8 +494,15 @@ export function Dashboard() {
         desc: `전체 공고의 다음 할 일과 지난 일정의 미기록 결과예요.${overdue ? ` 기한이 지난 일 ${overdue}건 포함.` : ""}`,
         cta: "확인할 후보 보기", path: "#staffing-followups", icon: PhoneCall });
     }
+    if (staffingGaps && (staffingGaps.items.length || staffingGaps.unknownCount)) {
+      const urgent = staffingGaps.items.some((item) => item.date <= staffingStart);
+      u.push({ id: "staffing-gaps", urgency: urgent ? "critical" : "attention",
+        title: staffingGaps.items.length ? `가까운 운행일 충원 확인 ${staffingGaps.items.length}건` : "가까운 운행일 수요 확인",
+        desc: `오늘부터 7일의 부족 인원·확정 충돌을 확인해요.${staffingGaps.unknownCount ? ` 필요 인원 미정 ${staffingGaps.unknownCount}건 포함.` : ""}`,
+        cta: "라인·날짜 확인", path: "#staffing-gaps", icon: Users });
+    }
     return orderDashboardUrgentItems(u);
-  }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick, followUps]);
+  }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick, followUps, staffingGaps, staffingStart]);
 
   const openUrgentItem = (item: UrgentItem) => {
     if (item.action === "retry-heartbeat") {
@@ -701,6 +727,10 @@ export function Dashboard() {
           <SosLedgerCard />
         </div>
       )}
+
+      <StaffingGapSummary data={staffingCurrent} summary={staffingGaps} error={staffingError}
+        start={staffingStart} end={staffingEnd} refreshing={staffingValidating}
+        onRetry={() => { void mutateStaffing(); }} onOpen={(path) => router.push(path)} />
 
       <StaffingFollowUpQueue data={followUps} error={followUpsError} onRetry={() => { void mutateFollowUps(); }}
         onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}${item.result_checks?.length ? "&followup_mode=participation" : ""}`)} />
