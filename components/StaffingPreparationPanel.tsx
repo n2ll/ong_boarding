@@ -13,6 +13,7 @@ import { StaffingReplacementComparison } from "./StaffingReplacementComparison";
 import { StaffingMissingResults } from "./StaffingMissingResults";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
 import { buildStaffingDateRecommendations } from "@/lib/admin/staffing-date-recommendation";
+import { canOpenStaffingRecord, type StaffingRecordMode } from "@/lib/admin/staffing-record-entry";
 import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, parseStaffingManagerNote, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
 
 type Candidate = {
@@ -55,7 +56,7 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: "follow_up" | "participation"; allowNewConfirmation?: boolean }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowEmptyInitialRecord = false, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: StaffingRecordMode; allowEmptyInitialRecord?: boolean; allowNewConfirmation?: boolean }) {
   const confirm = useConfirm();
   const { mutate } = useSWRConfig();
   const [open, setOpen] = useState(initialOpen);
@@ -128,8 +129,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     initialApplicantOpened.current = true;
     const candidate = candidates.find((item) => item.applicant_id === initialApplicantId);
     const snapshot = snapshots.find((item) => item.applicant_id === initialApplicantId);
-    if (!candidate || !snapshot?.event_id || snapshot.invalid || !parseStaffingPreparation(snapshot.preparation)) {
-      setTargetError("선택한 후보의 후속 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
+    if (!candidate || !canOpenStaffingRecord(snapshot, allowEmptyInitialRecord)) {
+      setTargetError("선택한 후보의 진행 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
       return;
     }
     startEditing(candidate, initialEditorMode);
