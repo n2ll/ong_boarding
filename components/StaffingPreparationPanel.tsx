@@ -9,6 +9,7 @@ import { Modal } from "./ui/modal";
 import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { StaffingNoteDraft, useStaffingNoteDraft } from "./StaffingNoteDraft";
+import { StaffingReplacementComparison } from "./StaffingReplacementComparison";
 import { StaffingMissingResults } from "./StaffingMissingResults";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
 import { buildStaffingDateRecommendations } from "@/lib/admin/staffing-date-recommendation";
@@ -18,7 +19,7 @@ type Candidate = {
   applicant_id: number;
   agent_stage?: string | null;
   responded_at: string | null;
-  applicants: { name: string; own_vehicle: string | null; phone?: string | null } | null;
+  applicants: { name: string; own_vehicle: string | null; vehicle_type?: string | null; phone?: string | null } | null;
 };
 const availabilityLabels = { unknown: "미확인", available: "가능", unavailable: "불가" };
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
@@ -266,6 +267,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
         {recommendForDate && <div className="rounded-xl bg-muted p-3">
           <p className="font-bold">{date.slice(5).replace("-", "/")} 연락 검토 순서</p>
           <p className="mt-1 text-muted-foreground">이 날짜의 가능 여부와 선탑 기록을 기준으로 정리했어요. 이유를 확인하고 대화나 전화로 이어가세요.</p>
+          <StaffingReplacementComparison key={`${jobId}:${date}`} date={date} jobTitle={jobTitle} candidates={candidates} snapshots={snapshots} otherPrimaries={otherPrimaries} conflictCheckIncomplete={conflictCheckIncomplete}
+            onOpenRecord={(applicantId) => { const candidate = candidates.find((item) => item.applicant_id === applicantId); if (candidate) startEditing(candidate); }} />
         </div>}
         <p className="text-xs text-muted-foreground">검색 결과 {shown.length}명 · {Math.min(visibleCount, shown.length)}명 표시 · 이름 검색은 전체 후보에서 찾습니다.</p>
         <div className="space-y-2">{shown.slice(0, visibleCount).map((candidate) => {
