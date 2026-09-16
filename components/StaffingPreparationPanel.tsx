@@ -9,6 +9,7 @@ import { Modal } from "./ui/modal";
 import { useConfirm } from "./ConfirmDialog";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { StaffingNoteDraft, useStaffingNoteDraft } from "./StaffingNoteDraft";
+import { StaffingMissingResults } from "./StaffingMissingResults";
 import { StaffingFollowUpFields, StaffingFollowUpSummary, staffingFollowUpState } from "./StaffingFollowUpFields";
 import { buildStaffingDateRecommendations } from "@/lib/admin/staffing-date-recommendation";
 import { emptyStaffingTraining, trainingStatusLabels, backupIntentLabels, participationKindLabels, staffingToday, type StaffingParticipationRecord, type StaffingTraining, applyStaffingSuggestion, type StaffingSuggestion, type StaffingPrimaryCandidate, parseStaffingPreparation, parseStaffingManagerNote, STAFFING_PREPARATION_LIMITS, type StaffingPreparation, type StaffingPreparationDate, type StaffingPreparationSnapshot } from "@/lib/admin/staffing-preparation";
@@ -23,7 +24,7 @@ const availabilityLabels = { unknown: "미확인", available: "가능", unavaila
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
 const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), records: [], note: "" });
 const fieldClass = "min-h-11 w-full min-w-0 rounded-lg border border-border-strong bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const editorModeLabels = { follow_up: "연락·할 일", training: "선탑 진행", participation: "실제 참여", preparation: "투입 날짜" } as const;
+const editorModeLabels = { follow_up: "연락·할 일", training: "선탑 진행", participation: "참여·결과", preparation: "투입 날짜" } as const;
 type EditorMode = keyof typeof editorModeLabels | "note";
 
 const AUTHOR_STORAGE_KEY = "ongboarding:staffing-author:v1";
@@ -47,12 +48,13 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
     {preparation.dates.length > 0 && <p>날짜별 후보: {preparation.dates.map((day) => `${day.date} ${availabilityLabels[day.availability]} · ${roleLabels[day.role]}${day.confirmation === "confirmed" ? " · 투입 확정" : ""}`).join(" / ")}</p>}
     <p className="font-medium">실제 참여 {(preparation.records ?? []).length}건</p>
     <ul className="space-y-1">{(preparation.records ?? []).map((record) => <li key={record.id} className="whitespace-pre-wrap">{record.date} · {participationKindLabels[record.kind]}{record.note && ` · ${record.note}`}</li>)}</ul>
+    {(preparation.non_participations ?? []).map((record) => <p key={`${record.kind}:${record.date}`} className="whitespace-pre-wrap">{record.date} · {participationKindLabels[record.kind]} 미참여{record.note && ` · ${record.note}`}</p>)}
     <StaffingFollowUpSummary value={preparation.follow_up} />
     {preparation.note && <p className="whitespace-pre-wrap text-muted-foreground">{preparation.note}</p>}
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; allowNewConfirmation?: boolean }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: "follow_up" | "participation"; allowNewConfirmation?: boolean }) {
   const confirm = useConfirm();
   const { mutate } = useSWRConfig();
   const [open, setOpen] = useState(initialOpen);
@@ -129,7 +131,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       setTargetError("선택한 후보의 후속 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
       return;
     }
-    startEditing(candidate);
+    startEditing(candidate, initialEditorMode);
   });
   const selectEditorMode = (mode: EditorMode) => {
     if (editorMode === "note" && mode !== "note") {
@@ -175,7 +177,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     const normalized = parseStaffingPreparation(prepared);
     if (!normalized) {
       if (!parseStaffingPreparation({ ...emptyPreparation(), dates: prepared.dates })) setEditorMode("preparation");
-      setSaveError("날짜가 유효하고 중복되지 않는지, 연락 결과와 다음 할 일 입력이 올바른지 확인해주세요."); return;
+      setSaveError("날짜·연락 기록이 올바른지, 같은 날 같은 종류의 참여와 미참여가 겹치지 않는지 확인해주세요."); return;
     }
     if (!actorName.trim()) { setSaveError("팀에 공유할 기록 작성자 이름을 입력해주세요."); return; }
     const previous = parseStaffingPreparation(JSON.parse(initial));
@@ -195,7 +197,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     }
     try { localStorage.setItem(AUTHOR_STORAGE_KEY, actorName.trim()); } catch { /* Saving still works without local storage. */ }
     const payload = { applicant_id: editing.applicant_id, base_event_id: baseEventId, actor_name: actorName.trim(), confirmation_version: 1,
-      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, note: normalized.note, follow_up: normalized.follow_up ?? null, ...(managerNote ? { manager_note: managerNote } : {}) };
+      dates: normalized.dates, training_availability: normalized.training_availability, training: normalized.training, records: normalized.records, non_participations: normalized.non_participations ?? [], note: normalized.note, follow_up: normalized.follow_up ?? null, ...(managerNote ? { manager_note: managerNote } : {}) };
     const body = JSON.stringify(payload);
     if (request.current?.body !== body) request.current = { body, key: crypto.randomUUID() };
     setSaving(true); setSaveError("");
@@ -351,6 +353,12 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
         </fieldset>
         </>}
         {editorMode === "participation" && <>
+        <StaffingMissingResults value={draft} disabled={saving} onChange={(value) => { setDraft(value); setSaveError(""); }}
+          onEditSchedule={(kind) => selectEditorMode(kind === "training" ? "training" : "preparation")}
+          onRemoveNonParticipation={async (kind, day) => {
+            if (!await confirm({ title: "미참여 기록을 삭제할까요?", description: "저장하면 결과가 없는 지난 일정은 다시 확인할 일로 표시됩니다. 이전 내용은 팀 변경 이력에 남습니다.", confirmText: "삭제", destructive: true })) return;
+            setDraft((current) => ({ ...current, non_participations: (current.non_participations ?? []).filter((record) => record.kind !== kind || record.date !== day) }));
+          }} />
         <fieldset disabled={saving} className="min-w-0 space-y-3 rounded-xl border border-border-strong p-3"><legend className="px-1 font-bold">실제 참여 이력</legend>
           <p className="text-muted-foreground">실제로 참여한 선탑과 수행한 백업을 기록하세요. 예정 일시는 선탑 진행에서 조율하고, 실제 참여 일자는 참여 후 입력합니다.</p>
           {!draft.records.length && <p>아직 기록한 실제 참여가 없습니다.</p>}

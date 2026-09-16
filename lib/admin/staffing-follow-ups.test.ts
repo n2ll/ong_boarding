@@ -77,6 +77,38 @@ test("today changes at Korean midnight", (t) => {
   assert.equal(build([], [], []).today, "2026-09-16");
 });
 
+test("missing results merge per applicant/job without completing manual actions or hiding original deadlines", (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-09-15T15:00:00Z"));
+  const planned = { ...preparation(followUp({ due_date: "2026-09-20" })),
+    training: { status: "scheduled", backup_intent: "unknown", scheduled_at: "2026-09-14T09:00:00+09:00", first_loading_location: "", linked_pro: "" },
+    dates: [{ date: "2026-09-15", availability: "available", role: "primary_candidate", confirmation: "confirmed" }] };
+  const result = build([job(1)], [candidate(1), candidate(2), candidate(3)], [
+    event(1, 1, 1, undefined, { meta: planned }),
+    event(2, 2, 1, undefined, { meta: { ...planned, follow_up: followUp({ status: "done" }) } }),
+    event(3, 3, 1, undefined, { meta: { ...planned, follow_up: null } }),
+  ]);
+  assert.equal(result.items.length, 3);
+  assert.deepEqual(result.items[0], { job_id: 1, job_title: "배송 1", applicant_id: 1, candidate_id: 101, name: "후보 1", owner: "김담당",
+    next_action: "다음 일정 연락", due_date: "2026-09-14", manual_due_date: "2026-09-20",
+    result_checks: [{ kind: "training", date: "2026-09-14" }, { kind: "backup", date: "2026-09-15" }] });
+  assert.ok(result.items.slice(1).every((item: Row) => !Object.hasOwn(item, "manual_due_date")));
+  assert.ok(result.items.slice(1).every((item: Row) => /결과 확인/.test(String(item.next_action))));
+  assert.equal((planned.follow_up as Row).status, "open");
+});
+
+test("latest result snapshots resolve only matching checks while malformed newest data never revives old work", (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-09-15T15:00:00Z"));
+  const planned = { ...preparation(null), dates: [{ date: "2026-09-15", availability: "available", role: "primary_candidate", confirmation: "confirmed" }] };
+  const result = build([job(1)], [candidate(1), candidate(2), candidate(3), candidate(4)], [
+    event(1, 1, 1, undefined, { meta: planned }), event(2, 1, 1, undefined, { meta: { ...planned, non_participations: [{ kind: "backup", date: "2026-09-15", note: "미참여" }] } }),
+    event(3, 2, 1, undefined, { meta: planned }), event(4, 2, 1, undefined, { meta: { ...planned, records: [{ id: "11111111-1111-4111-8111-111111111111", kind: "backup", date: "2026-09-15", note: "참여" }] } }),
+    event(5, 3, 1, undefined, { meta: planned }), event(6, 3, 1, undefined, { meta: { ...planned, non_participations: "broken" } }),
+    event(7, 4, 1, undefined, { meta: planned }),
+  ]);
+  assert.deepEqual(result.items.map((item: Row) => item.applicant_id), [4]);
+  assert.equal(result.invalid_records, 1);
+});
+
 function harness(database: Record<string, Row[]>, fail?: (table: string, from: number) => boolean) {
   class Query {
     private table: string;

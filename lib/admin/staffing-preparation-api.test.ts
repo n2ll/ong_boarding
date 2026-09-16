@@ -346,6 +346,46 @@ test("legacy requests cannot silently clear actual participation but explicit em
   assert.equal((await legacy.route.POST(request({ base_event_id: 1 }), context())).status, 200);
 });
 
+test("nonparticipation writes retain confirmations, actual history and candidate state, with idempotent retry", async () => {
+  const state = { ...preparation, dates: [confirmedDate], records: [{ id: KEY, kind: "training", date: "2026-01-08", note: "참여" }] };
+  const non_participations = [{ kind: "backup", date: "2026-09-15", note: "미참여 확인" }];
+  const h = harness({ events: [event(1, state)], candidates: [{ id: 11, applicant_id: 1, job_id: 7, agent_stage: "abort" }], jobs: [{ id: 7, status: "closed" }] });
+  const body = { ...state, base_event_id: 1, confirmation_version: 1, non_participations };
+  const saved = await h.route.POST(request(body), context());
+  assert.equal(saved.status, 200);
+  assert.deepEqual((saved.body.preparation as Row).non_participations, non_participations);
+  assert.deepEqual((saved.body.preparation as Row).dates, state.dates);
+  assert.deepEqual((saved.body.preparation as Row).records, state.records);
+  assert.equal((await h.route.POST(request(body), context())).body.deduplicated, true);
+  assert.deepEqual(h.writes.map((write) => write.table), ["pool_events"]);
+  assert.equal(h.database.job_candidates[0].agent_stage, "abort");
+  assert.deepEqual(h.database.messages, []);
+  assert.equal(Object.hasOwn(h.database.pool_events[0].meta as Row, "non_participations"), false);
+});
+
+test("old screens cannot silently drop nonparticipation, including malformed latest metadata", async () => {
+  for (const non_participations of [[{ kind: "backup", date: "2026-09-15", note: "미참여" }], { broken: true }, null]) {
+    const h = harness({ events: [event(1, { ...preparation, non_participations })] });
+    const omitted = await h.route.POST(request({ base_event_id: 1 }), context());
+    assert.equal(omitted.status, 409);
+    assert.match(String(omitted.body.error), /새로고침/);
+    assert.equal(h.writes.length, 0);
+    const explicit = await h.route.POST(request({ base_event_id: 1, non_participations: [] }), context());
+    assert.equal(explicit.status, 200);
+    assert.deepEqual((explicit.body.preparation as Row).non_participations, []);
+  }
+  const empty = harness({ events: [event(1, { ...preparation, non_participations: [] })] });
+  assert.equal((await empty.route.POST(request({ base_event_id: 1 }), context())).status, 200);
+});
+
+test("conflicting actual and nonparticipation results are rejected before any write", async () => {
+  const h = harness();
+  const response = await h.route.POST(request({ non_participations: [{ kind: "backup", date: "2026-09-15", note: "미참여" }],
+    records: [{ id: KEY, kind: "backup", date: "2026-09-15", note: "참여" }] }), context());
+  assert.equal(response.status, 400);
+  assert.equal(h.writes.length, 0);
+});
+
 const followUp = { owner: "김담당", next_action: "다음 일정 연락", due_date: "2026-09-15", status: "open",
   last_contact: { date: "2026-01-08", method: "phone", result: "다음 주 연락 요청" } };
 

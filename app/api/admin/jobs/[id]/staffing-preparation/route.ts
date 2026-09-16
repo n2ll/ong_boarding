@@ -196,6 +196,11 @@ export async function POST(req: NextRequest, context: Context) {
     if (body.records === undefined && (parseStaffingPreparation(history[0]?.meta)?.records.length ?? 0) > 0) {
       return NextResponse.json({ error: "실제 참여 이력을 보호하기 위해 현재 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
     }
+    const latestNonParticipations = (history[0]?.meta as { non_participations?: unknown } | null)?.non_participations;
+    if (body.non_participations === undefined && latestNonParticipations !== undefined
+      && (!Array.isArray(latestNonParticipations) || latestNonParticipations.length > 0)) {
+      return NextResponse.json({ error: "미참여 기록을 보호하기 위해 현재 화면을 새로고침한 뒤 다시 저장해주세요." }, { status: 409 });
+    }
     // Read the raw latest field so a malformed snapshot cannot silently lose follow-up data either.
     const latestFollowUp = (history[0]?.meta as { follow_up?: unknown } | null)?.follow_up;
     if (body.follow_up === undefined && latestFollowUp != null) {
