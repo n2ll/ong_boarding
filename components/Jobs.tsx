@@ -968,7 +968,7 @@ export function Jobs() {
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number; followUpMode?: "follow_up" | "participation" } | null>(null);
   const openedFollowUpLink = useRef<string | null>(null);
   const refreshedFollowUpLink = useRef<string | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
@@ -1212,8 +1212,8 @@ export function Jobs() {
     }
   };
 
-  const openCandidates = (job: JobRow, staffingDate?: string, followUpApplicantId?: number) => {
-    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate, followUpApplicantId });
+  const openCandidates = (job: JobRow, staffingDate?: string, followUpApplicantId?: number, followUpMode?: "follow_up" | "participation") => {
+    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate, followUpApplicantId, followUpMode });
     setCandidates([]);
     setCandLoaded(false);
     setCandError(null);
@@ -1407,7 +1407,8 @@ export function Jobs() {
     const jobParam = searchParams.get("followup_job");
     const applicantParam = searchParams.get("followup_applicant");
     if (!jobParam && !applicantParam) { openedFollowUpLink.current = null; refreshedFollowUpLink.current = null; return; }
-    const key = `${jobParam}:${applicantParam}`;
+    const mode = searchParams.get("followup_mode") === "participation" ? "participation" : "follow_up";
+    const key = `${jobParam}:${applicantParam}:${mode}`;
     if (openedFollowUpLink.current === key || !jobsApi || jobsError) return;
     const validId = (value: string | null) => !!value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
     const validLink = validId(jobParam) && validId(applicantParam);
@@ -1421,7 +1422,7 @@ export function Jobs() {
     }
     if (!job && jobsValidating) return;
     openedFollowUpLink.current = key;
-    if (job) openCandidates(job, undefined, Number(applicantParam));
+    if (job) openCandidates(job, undefined, Number(applicantParam), mode);
     else toast.error("선택한 후속 연락의 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
     router.replace("/jobs", { scroll: false });
   }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs]);
@@ -5154,7 +5155,7 @@ export function Jobs() {
                 )}
                 {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
 
-              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}:${candPanel.followUpApplicantId ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialApplicantId={candPanel.followUpApplicantId} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
+              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}:${candPanel.followUpApplicantId ?? ""}:${candPanel.followUpMode ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialApplicantId={candPanel.followUpApplicantId} initialEditorMode={candPanel.followUpMode} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">

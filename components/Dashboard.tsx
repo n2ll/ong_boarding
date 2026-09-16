@@ -471,9 +471,9 @@ export function Dashboard() {
     const dueFollowUps = followUps?.items.filter((item) => item.due_date && item.due_date <= followUps.today) ?? [];
     if (dueFollowUps.length > 0) {
       const overdue = dueFollowUps.filter((item) => item.due_date < followUps!.today).length;
-      u.push({ id: "staffing-followups", urgency: "attention", title: `오늘 후속 연락 ${dueFollowUps.length}건`,
-        desc: `전체 공고 기준 · 팀에서 기록한 다음 할 일이에요.${overdue ? ` 기한이 지난 일 ${overdue}건 포함.` : ""}`,
-        cta: "연락할 후보 보기", path: "#staffing-followups", icon: PhoneCall });
+      u.push({ id: "staffing-followups", urgency: "attention", title: `후속 연락·결과 확인 ${dueFollowUps.length}건`,
+        desc: `전체 공고의 다음 할 일과 지난 일정의 미기록 결과예요.${overdue ? ` 기한이 지난 일 ${overdue}건 포함.` : ""}`,
+        cta: "확인할 후보 보기", path: "#staffing-followups", icon: PhoneCall });
     }
     return orderDashboardUrgentItems(u);
   }, [notiCounts, gateway, bulkAttentionView, notiRes?.bulk_message_attention?.oldestAgeMinutes, sosOpen, inboxRes, inboxCount, poolReplies, replyCounts.oldestDays, interestRes, interestCount, interestImmediate, confirmRes, confirmPendingCount, nowTick, followUps]);
@@ -703,7 +703,7 @@ export function Dashboard() {
       )}
 
       <StaffingFollowUpQueue data={followUps} error={followUpsError} onRetry={() => { void mutateFollowUps(); }}
-        onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}`)} />
+        onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}${item.result_checks?.length ? "&followup_mode=participation" : ""}`)} />
 
       {/* 실제 응대 큐가 홈의 주 작업이다. 본문 폭이 충분한 xl(1280+)부터 2:1로 나누고 1024에서는 우선순위대로 쌓는다. */}
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">

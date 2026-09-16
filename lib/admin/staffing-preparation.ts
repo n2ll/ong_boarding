@@ -47,6 +47,8 @@ export type StaffingParticipationRecord = {
   date: string;
   note: string;
 };
+/** A manager-recorded outcome, separate from actual participation and planned confirmations. */
+export type StaffingNonParticipation = Omit<StaffingParticipationRecord, "id">;
 export const staffingToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 /** Manager-entered plans, explicit date confirmations and actual participation. */
 export type StaffingPreparation = {
@@ -55,6 +57,8 @@ export type StaffingPreparation = {
   training_availability: string;
   training: StaffingTraining;
   records: StaffingParticipationRecord[];
+  /** Omitted in legacy snapshots; an empty array explicitly clears these outcomes. */
+  non_participations?: StaffingNonParticipation[];
   note: string;
   /** Omitted in legacy snapshots; null explicitly clears the manager-entered follow-up. */
   follow_up?: StaffingFollowUp | null;
@@ -129,6 +133,23 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
     }
   }
   records.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  let nonParticipations: StaffingNonParticipation[] | undefined;
+  if (data.non_participations !== undefined) {
+    if (!Array.isArray(data.non_participations) || data.non_participations.length > STAFFING_PREPARATION_LIMITS.records) return null;
+    nonParticipations = [];
+    const results = new Set(records.map((item) => `${item.kind}:${item.date}`));
+    for (const item of data.non_participations) {
+      const value = record(item);
+      if (typeof value.kind !== "string" || !Object.hasOwn(participationKindLabels, value.kind)
+        || typeof value.date !== "string" || !validDay(value.date) || value.date > today
+        || typeof value.note !== "string" || value.note.length > STAFFING_PREPARATION_LIMITS.note) return null;
+      const key = `${value.kind}:${value.date}`;
+      if (results.has(key)) return null;
+      results.add(key);
+      nonParticipations.push({ kind: value.kind as StaffingNonParticipation["kind"], date: value.date, note: value.note.trim() });
+    }
+    nonParticipations.sort((a, b) => b.date.localeCompare(a.date) || a.kind.localeCompare(b.kind));
+  }
   let followUp: StaffingFollowUp | null | undefined;
   if (data.follow_up === null) followUp = null;
   else if (data.follow_up !== undefined) {
@@ -150,6 +171,7 @@ export function parseStaffingPreparation(value: unknown): StaffingPreparation | 
     followUp = { owner: value.owner.trim(), next_action: nextAction, due_date: value.due_date, status: value.status, last_contact: lastContact };
   }
   return { source: "manager", dates, training_availability: data.training_availability.trim(), training, records, note: data.note.trim(),
+    ...(nonParticipations === undefined ? {} : { non_participations: nonParticipations }),
     ...(followUp === undefined ? {} : { follow_up: followUp }) };
 }
 
