@@ -22,6 +22,7 @@ type Candidate = {
   responded_at: string | null;
   applicants: { name: string; own_vehicle: string | null; vehicle_type?: string | null; phone?: string | null } | null;
 };
+export type { Candidate as StaffingCandidate };
 const availabilityLabels = { unknown: "미확인", available: "가능", unavailable: "불가" };
 const roleLabels = { unassigned: "역할 미정", primary_candidate: "본담당 후보", reserve_candidate: "예비 후보" };
 const emptyPreparation = (): StaffingPreparation => ({ source: "manager", dates: [], training_availability: "", training: emptyStaffingTraining(), records: [], note: "" });
@@ -56,10 +57,10 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowEmptyInitialRecord = false, allowNewConfirmation = true }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: StaffingRecordMode; allowEmptyInitialRecord?: boolean; allowNewConfirmation?: boolean }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowEmptyInitialRecord = false, allowNewConfirmation = true, recordOnly = false, onRecordClose, onRecordSaved, onRecordDirtyChange }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: StaffingRecordMode; allowEmptyInitialRecord?: boolean; allowNewConfirmation?: boolean; recordOnly?: boolean; onRecordClose?: () => void; onRecordSaved?: () => void; onRecordDirtyChange?: (dirty: boolean) => void }) {
   const confirm = useConfirm();
   const { mutate } = useSWRConfig();
-  const [open, setOpen] = useState(initialOpen);
+  const [open, setOpen] = useState(initialOpen || recordOnly);
   const [snapshots, setSnapshots] = useState<StaffingPreparationSnapshot[]>([]);
   const [suggestions, setSuggestions] = useState<StaffingSuggestion[]>([]);
   const [otherPrimaries, setOtherPrimaries] = useState<StaffingPrimaryCandidate[]>([]);
@@ -90,6 +91,16 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const request = useRef<{ body: string; key: string } | null>(null);
   const datesOpened = useRef(false);
   const initialApplicantOpened = useRef(false);
+  const recordDirty = Boolean(editing && (JSON.stringify(draft) !== initial || preservedDraft || noteDraft.note.trim()));
+  const recordGuardActive = recordDirty || saving || noteDraft.busy;
+  const recordDirtyCallback = useRef(onRecordDirtyChange);
+  recordDirtyCallback.current = onRecordDirtyChange;
+  useEffect(() => {
+    if (recordOnly) recordDirtyCallback.current?.(recordGuardActive);
+  }, [recordOnly, recordGuardActive]);
+  useEffect(() => () => {
+    if (recordOnly) recordDirtyCallback.current?.(false);
+  }, [recordOnly]);
   useEffect(() => { setVisibleCount(5); }, [query, statusFilter, followUpFilter, ownerQuery, date]);
   useEffect(() => {
     try { setActorName(localStorage.getItem(AUTHOR_STORAGE_KEY) ?? ""); } catch { /* Storage is optional. */ }
@@ -125,12 +136,18 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   // Dashboard links open only after the authoritative snapshot arrives; a retry must
   // never open an empty draft over a saved record or reopen a just-closed editor.
   useEffect(() => {
-    if (!initialApplicantId || initialApplicantOpened.current || !loaded || loadError) return;
+    if (!open || initialApplicantOpened.current || !loaded || loadError) return;
+    if (!initialApplicantId) {
+      if (recordOnly) setTargetError("기록할 후보를 확인할 수 없어요. 창을 닫고 후보를 다시 선택해주세요.");
+      return;
+    }
     initialApplicantOpened.current = true;
     const candidate = candidates.find((item) => item.applicant_id === initialApplicantId);
     const snapshot = snapshots.find((item) => item.applicant_id === initialApplicantId);
     if (!candidate || !canOpenStaffingRecord(snapshot, allowEmptyInitialRecord)) {
-      setTargetError("선택한 후보의 진행 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
+      setTargetError(recordOnly
+        ? "선택한 후보의 진행 기록을 확인할 수 없어요. 다시 조회하거나 창을 닫고 후보 상태를 확인해주세요."
+        : "선택한 후보의 진행 기록을 확인할 수 없어요. 아래 후보 목록에서 현재 상태를 확인해주세요.");
       return;
     }
     startEditing(candidate, initialEditorMode);
@@ -149,8 +166,9 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   };
   const closeEditor = async () => {
     if (saving || noteDraft.busy) return;
-    if ((JSON.stringify(draft) !== initial || preservedDraft || noteDraft.note.trim()) && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "입력한 진행 기록을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
+    if (recordDirty && !await confirm({ title: "저장하지 않은 변경이 있어요", description: "입력한 진행 기록을 버리고 닫을까요?", confirmText: "변경 버리기", destructive: true })) return;
     setEditing(null);
+    if (recordOnly) { setOpen(false); onRecordClose?.(); }
   };
   const updateDate = (index: number, patch: Partial<StaffingPreparationDate>) => setDraft((current) => ({ ...current, dates: current.dates.map((item, i) => {
     if (i !== index) return item;
@@ -211,9 +229,13 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       }
       if (!response.ok) throw new Error(data.error ?? "저장 실패");
       setSnapshots((items) => [...items.filter((item) => item.applicant_id !== data.applicant_id), data]);
-      setEditing(null); setRetry((value) => value + 1); toast.success("진행 기록을 팀에 공유했어요.");
+      setEditing(null);
+      if (recordOnly) setOpen(false);
+      else setRetry((value) => value + 1);
+      toast.success("진행 기록을 팀에 공유했어요.");
       window.dispatchEvent(new Event("ongboarding:staffing-updated"));
       void mutate("/api/admin/staffing-follow-ups");
+      if (recordOnly) { onRecordSaved?.(); onRecordClose?.(); }
     } catch (error) { setSaveError(`${error instanceof Error ? error.message : "저장 실패"}. 입력 내용은 유지됩니다. 다시 저장해주세요.`); }
     finally { setSaving(false); }
   };
@@ -241,11 +263,12 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     const phone = candidate.applicants?.phone?.replace(/[^0-9+]/g, "");
     const name = candidate.applicants?.name ?? "후보";
     return <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" disabled={saving} onClick={() => setContactCandidate(candidate)} aria-label={`${name} 선탑 대화 열기`}>대화 열기</Button>
+      {!recordOnly && <Button variant="secondary" disabled={saving} onClick={() => setContactCandidate(candidate)} aria-label={`${name} 선탑 대화 열기`}>대화 열기</Button>}
       {phone ? <a href={`tel:${phone}`} aria-label={`${name}에게 전화하기`} className="inline-flex min-h-11 items-center rounded-lg border border-border-strong bg-background px-3 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">전화하기</a> : <span className="flex min-h-11 items-center text-muted-foreground">전화번호 미등록</span>}
     </div>;
   };
-  return <section className="rounded-2xl border border-border-strong bg-card p-4" onKeyDown={(event) => { if (editing || contactCandidate) event.stopPropagation(); }}>
+  return <section className={recordOnly ? "contents" : "rounded-2xl border border-border-strong bg-card p-4"} onKeyDown={(event) => { if (recordOnly || editing || contactCandidate) event.stopPropagation(); }}>
+    {!recordOnly && <>
     <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-bold focus-visible:ring-2 focus-visible:ring-ring">후보 연락·기록 <span className="text-sm text-muted-foreground">{open ? "접기" : "펼치기"}</span></button>
     {open && <div className="mt-3 space-y-3 text-sm">
       <p className="text-muted-foreground">후보를 찾아 연락하고, 통화·진행 내용을 메모로 남기세요. 다음 할 일도 함께 확인할 수 있습니다.</p>
@@ -306,6 +329,17 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
         {shown.length > visibleCount && <Button variant="secondary" className="w-full" onClick={() => setVisibleCount((count) => count + 5)}>후보 5명 더 보기 · 남은 {shown.length - visibleCount}명</Button>}
       </>}
     </div>}
+    </>}
+    {recordOnly && open && !editing && <Modal open onClose={() => void closeEditor()} closeOnOutside={false} title={`${candidates.find((candidate) => candidate.applicant_id === initialApplicantId)?.applicants?.name ?? "후보"} 진행 기록`} footer={<>
+      <Button variant="secondary" onClick={() => void closeEditor()}>닫기</Button>
+      <Button disabled={loading} onClick={() => {
+        initialApplicantOpened.current = false;
+        setLoaded(false); setTargetError(""); setLoadError(""); setRetry((value) => value + 1);
+      }}>다시 조회</Button>
+    </>}>
+      {jobTitle && <p className="mb-3 break-words font-medium text-muted-foreground">{jobTitle}</p>}
+      {loadError || targetError ? <p role="alert" className="text-error-strong">{loadError || targetError}</p> : <p role="status">진행 기록을 불러오는 중…</p>}
+    </Modal>}
     <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "메모를 그대로 남기거나, AI가 정리한 내용도 함께 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <div className="flex w-full flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!!conflict || !noteDraft.note.trim() || saving || noteDraft.busy} onClick={() => void save(parseStaffingPreparation(JSON.parse(initial)) ?? emptyPreparation())}>메모만 저장</Button><Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !!noteDraft.selected.length && !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button></div> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
         {jobTitle && <p className="break-words font-medium text-muted-foreground">{jobTitle}</p>}
@@ -403,8 +437,8 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       </div>
     </Modal>
     {/* 후보 보드의 transform·z-index 밖에 띄워 모바일 내비가 대화창을 가리지 않게 한다. */}
-    {contactCandidate && createPortal(<div className="relative z-50">
-      <ApplicantDetailPanel isOpen applicantId={contactCandidate.applicant_id} jobId={jobId} initialTab="chat" onClose={() => setContactCandidate(null)} onChanged={() => setRetry((value) => value + 1)} />
+    {!recordOnly && contactCandidate && createPortal(<div className="relative z-50">
+      <ApplicantDetailPanel isOpen applicantId={contactCandidate.applicant_id} jobId={jobId} initialTab="chat" hideStaffingRecords onClose={() => setContactCandidate(null)} onChanged={() => setRetry((value) => value + 1)} />
     </div>, document.body)}
   </section>;
 }

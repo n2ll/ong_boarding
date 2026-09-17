@@ -1288,8 +1288,8 @@ export function LiveConsole() {
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="shrink-0">
-              <h1 className="text-[15px] font-extrabold leading-tight text-foreground">오늘 처리할 지원자 업무</h1>
-              <div className="mt-0.5 hidden text-[12px] text-muted-foreground wide:block">답장 · 인계 · 확정 검토를 한 흐름으로 처리합니다.</div>
+              <h1 className="text-[15px] font-extrabold leading-tight text-foreground">지원자 대화</h1>
+              <div className="mt-0.5 hidden text-[12px] text-muted-foreground wide:block">대화를 확인하고, 답장한 뒤 처리 결과를 기록하세요.</div>
             </div>
             {modeNotice && (
               <div
@@ -1510,7 +1510,7 @@ export function LiveConsole() {
                           {isHeldView ? <p className="text-[12px] leading-relaxed text-muted-foreground">{h.hold_reason}</p> : <p className="text-[12px] leading-relaxed text-foreground"><span className="font-bold">권장 조치 · </span>{h.suggested_action}</p>}
                           <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
                             <Button size="chip" variant="ghost" onClick={() => selectHandoff(h)} className="min-h-11 px-2.5 bg-muted">{isHeldView ? "기록 열기" : "대화 확인"}</Button>
-                            {isHeldView && <Button size="chip" variant="secondary" onClick={() => openResolve(h)} className="min-h-11 px-2.5">처리 완료</Button>}
+                            <Button size="chip" variant="secondary" onClick={() => openResolve(h)} className="min-h-11 px-2.5">처리 완료</Button>
                             {!isHeldView && !h.is_system_job && ["pay", "contract", "policy"].includes(h.category) && (
                               <Button size="chip" variant="ghost" onClick={() => openPromote(h)} className="min-h-11 px-2.5 bg-priority-attention-soft text-priority-attention-ink">공고에 반영</Button>
                             )}
@@ -1524,8 +1524,6 @@ export function LiveConsole() {
                             )}
                             <Button size="chip" variant="ghost" disabled={resumingCandidateId !== null} onClick={() => resumeHandoff(h, true)} className="min-h-11 px-2.5 bg-info-soft text-info-strong border border-info/25 hover:bg-info-soft hover:text-info-strong">{resumingCandidateId === h.candidate_id ? "처리 중…" : "대기 답장 AI 처리"}</Button>
                             <Button size="chip" variant="ghost" disabled={resumingCandidateId !== null} onClick={() => resumeHandoff(h)} className="min-h-11 px-2.5">이후 응대 재개</Button>
-                            {/* 큐의 출구 — 전화·문자로 해결한 건을 닫는다. AI 재개와 달리 봇을 다시 붙이지 않는다. */}
-                            <Button size="chip" variant="ghost" onClick={() => openResolve(h)} className="min-h-11 px-2.5 bg-foreground text-white border border-foreground hover:bg-gray-800 hover:text-white">처리 완료</Button>
                             </div>
                           </details>}
                         </div>

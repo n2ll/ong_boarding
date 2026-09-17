@@ -23,7 +23,7 @@ interface JobHit { id: number; title: string; status: string | null }
 interface Notice { id: string; kind?: "bulk-message" | "bulk-message-error"; tone: "red" | "amber" | "slate"; title: string; desc: string; path: string }
 interface BranchOpt { id: number; name: string; active: boolean }
 
-export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction }: TopbarProps) {
+export function Topbar({ pageTitle, showBranchScope, showCreateJobAction }: TopbarProps) {
   const router = useRouter();
   const { requestNavigation } = useAdminUnsavedNavigation();
   const { branch: scopeBranch, setBranch: setScopeBranch } = useBranchScope();
@@ -196,8 +196,6 @@ export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction 
       <header className="relative z-40 mb-3 mt-3 shrink-0 lg:mb-4 lg:mt-4">
         <div className={`glass backdrop-blur-lg backdrop-saturate-150 flex min-h-16 items-center gap-[18px] rounded-2xl px-4 transition-shadow duration-200 lg:px-8 ${scrolled ? "shadow-glass-md" : "shadow-glass-sm"}`}>
         <div className="min-w-0">
-          {/* 375px에선 두 줄이 헤더를 밀어내므로 브레드크럼을 접는다 */}
-          <div className="hidden truncate text-[12px] text-muted-foreground font-semibold tracking-wide sm:block">{crumb}</div>
           <div className="truncate text-[16px] font-extrabold tracking-tight text-foreground leading-snug lg:whitespace-nowrap lg:text-[20px]">
             {pageTitle}
           </div>
@@ -242,7 +240,7 @@ export function Topbar({ crumb, pageTitle, showBranchScope, showCreateJobAction 
               aria-label="지점 필터"
               className="max-h-[360px] w-[220px] overflow-y-auto rounded-2xl border-border-glass bg-glass-3 p-1.5 shadow-glass-xl backdrop-blur-xl backdrop-saturate-150 scrollbar-custom"
             >
-              <div className="text-xs font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 대시보드·파이프라인에 적용</div>
+              <div className="text-xs font-bold text-muted-foreground tracking-wide px-2.5 pt-2 pb-1.5">지점 필터 — 오늘 할 일·인력풀에 적용</div>
               <button
                 onClick={() => pickBranch(null)}
                 className={`w-full flex items-center justify-between gap-2 border-0 rounded-lg py-2 px-3 text-sm cursor-pointer text-left focus-visible:outline-none focus-visible:bg-muted ${!scopeBranch ? "bg-muted font-bold text-gray-800" : "bg-transparent font-medium text-gray-700 hover:bg-muted"}`}

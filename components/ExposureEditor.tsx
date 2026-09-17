@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { Loader2, Users, UserX, RotateCcw, RefreshCw, Sparkles } from "lucide-react";
+import { Loader2, Users, UserX, RotateCcw, RefreshCw, Sparkles, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { jsonFetcher } from "@/lib/swr";
 import { useConfirm } from "./ConfirmDialog";
-import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO } from "@/lib/exposure";
+import { VEHICLE_RULE_VALUES, UNKNOWN_RULE_VALUE, SIGUNGU_NO_SIDO, describeRule, normalizeRule } from "@/lib/exposure";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 
 /**
  * J · 타겟 공고 노출 편집기 — 공고 생성 폼·수정 모달 공용.
@@ -175,7 +176,7 @@ export function ExposureEditor({
   const canUseRadius = Boolean(jobId || draftJob);
 
   // 규칙 빌더 옵션 — 실데이터 distinct 값(지정 노출을 켰을 때만 로드)
-  const { data: options } = useSWR<{
+  const { data: options, error: optionsError } = useSWR<{
     sidos: string[];
     availabilities: string[];
     sigunguGroups?: { sido: string; items: { name: string; count: number; key: string }[] }[];
@@ -264,6 +265,7 @@ export function ExposureEditor({
   const {
     data: roster,
     isLoading: rosterLoading,
+    error: rosterError,
     mutate: mutateRoster,
   } = useSWR<RosterResp>(
     targeted && jobId ? `/api/admin/jobs/${jobId}/exposure` : null,
@@ -329,287 +331,13 @@ export function ExposureEditor({
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[13px] font-bold text-gray-700 mb-2">노출 방식</label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {(
-            [
-              ["all", "전체 노출", "인재풀 전원의 맞춤 공고 링크에 노출(기본)"],
-              ["targeted", "지정 노출", "아래 규칙·수동 지정 대상에게만 노출"],
-            ] as ["all" | "targeted", string, string][]
-          ).map(([k, label, desc]) => {
-            const sel = value.exposure === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                aria-pressed={sel}
-                onClick={() => onChange({ ...value, exposure: k })}
-                className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${
-                  sel
-                    ? "border-foreground bg-white ring-1 ring-foreground"
-                    : "border-border-strong bg-white hover:border-gray-300"
-                }`}
-              >
-                <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{label}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{desc}</div>
-              </button>
-            );
-          })}
-        </div>
+        <div className="text-[13px] font-bold text-foreground">{targeted ? "지정 노출" : "전체 노출"}</div>
+        <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+          {targeted
+            ? describeRule(normalizeRule(draftToRule(value.rule))).join(" · ") || "조건 없음 · 수동 지정한 인원에게만 보여요"
+            : "전체 인력풀의 맞춤 공고 링크에 보여요."}
+        </p>
       </div>
-
-      {targeted && (
-        <div className="rounded-2xl border border-border-strong bg-surface-raised p-3.5 space-y-3">
-          <div className="text-[13px] font-bold text-gray-700">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
-          {/* 역방향 동선 — 여기 있는 축(지역·가용성·차량…)으로 안 잡히는 대상은 인재풀에서 직접 골라야 한다.
-              **저장된 공고(jobId)에서만** 안내한다 — 등록 폼에서 이 링크를 타면 작성 중 내용을 잃고,
-              아직 공고가 없어 명단을 만들 수도 없다. */}
-          {jobId && (
-          <p className="text-[11px] text-muted-foreground leading-snug">
-            여기 조건으로 못 가르는 대상이면{" "}
-            <a
-              href="/pipeline"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
-            >
-              인재풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
-            </a>
-            을 쓰세요. 새 탭에서 열려요 — <b className="text-warning-strong">거기서 노출을 바꾸면 이 창의 노출 값은 옛 값이 됩니다.</b> 돌아와서는 이 창을 닫고 다시 열어 주세요.
-          </p>
-          )}
-
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">지역(시도)</div>
-            <div className="flex flex-wrap gap-1.5">
-              {(options?.sidos ?? []).map((s) => (
-                <Chip key={s} label={s} on={value.rule.sido.includes(s)} onClick={() => setRule({ sido: toggleIn(value.rule.sido, s) })} />
-              ))}
-              {/* 값이 없는 사람도 포함할 수 있게 — 안 고르면 그 인원은 이 조건에서 조용히 빠진다 */}
-              {(options?.unknown?.sido ?? 0) > 0 && (
-                <Chip
-                  label={`미확인 ${options?.unknown?.sido}`}
-                  on={value.rule.sido.includes(UNKNOWN_RULE_VALUE)}
-                  onClick={() => setRule({ sido: toggleIn(value.rule.sido, UNKNOWN_RULE_VALUE) })}
-                />
-              )}
-              {options && options.sidos.length === 0 && <span className="text-[12px] text-muted-foreground">지역 데이터 없음</span>}
-            </div>
-          </div>
-
-          {/* 시군구(구 단위) — 시·도로는 강남권/용산권을 못 가른다. 동명이구(중구·서구)가 있어 시도별로 묶어 보여준다. */}
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
-              시군구 <span className="font-semibold text-muted-foreground">— 권역별 라인이면 여기서 구를 고르세요</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {(options?.sigunguGroups ?? []).map((g) => (
-                <div key={g.sido}>
-                  <div className="text-[11px] font-bold text-muted-foreground mb-1">
-                    {g.sido}
-                    {g.sido === SIGUNGU_NO_SIDO && <span className="font-semibold"> — 주소 정리가 필요한 분들</span>}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {g.items.map((it) => (
-                      <Chip
-                        key={it.key}
-                        label={`${it.name} ${it.count}`}
-                        /* 저장 값은 '시도>시군구' 복합키 — 이름만 담으면 동명이구(중구·서구)가 교차로 걸려
-                           화면의 시도 그룹과 실제 판정 범위가 어긋난다. */
-                        on={value.rule.sigungu.includes(it.key)}
-                        onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, it.key) })}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {(options?.unknown?.sigungu ?? 0) > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  <Chip
-                    label={`미확인 ${options?.unknown?.sigungu}`}
-                    on={value.rule.sigungu.includes(UNKNOWN_RULE_VALUE)}
-                    onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, UNKNOWN_RULE_VALUE) })}
-                  />
-                </div>
-              )}
-              {options && (options.sigunguGroups ?? []).length === 0 && (
-                <span className="text-[12px] text-muted-foreground">시군구 데이터 없음</span>
-              )}
-            </div>
-          </div>
-
-          {/* 희망 시간대 — 폼 4슬롯 토큰과 자유 입력(`월,화,수,목,금 9:00~18:00`)을 같은 함수로 판정한다.
-              미확인은 값이 '~' 한 글자이거나 야간·새벽 근무인 분들이라, 고르지 않으면 조용히 빠진다. */}
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
-              희망 시간대 <span className="font-semibold text-muted-foreground">— 오전·오후 라인이면 여기서 고르세요</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(options?.slots ?? []).map((s) => (
-                <Chip
-                  key={s.key}
-                  label={`${s.label} ${s.count}`}
-                  on={value.rule.slot.includes(s.key)}
-                  onClick={() => setRule({ slot: toggleIn(value.rule.slot, s.key) })}
-                />
-              ))}
-              {(options?.unknown?.slot ?? 0) > 0 && (
-                <Chip
-                  label={`미확인 ${options?.unknown?.slot}`}
-                  on={value.rule.slot.includes(UNKNOWN_RULE_VALUE)}
-                  onClick={() => setRule({ slot: toggleIn(value.rule.slot, UNKNOWN_RULE_VALUE) })}
-                />
-              )}
-            </div>
-            {(options?.unknown?.slot ?? 0) > 0 && (
-              <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-                미확인 {options?.unknown?.slot}명 — 지원 당시 시간대를 안 남기신 분
-                {(options?.unknown?.slot_partial ?? 0) > 0 &&
-                  `, 그리고 요일이나 시각을 적었지만 오전·오후로 판정할 수 없는 분 ${options?.unknown?.slot_partial}명(야간·새벽 근무 포함)`}
-                이에요. 고르지 않으면 이 규칙에서 빠집니다.
-              </p>
-            )}
-          </div>
-
-          {/* 집결지 거리 반경 — 권역 라인의 핵심 축. 기준점(집결지만/경유지 포함)은 공고 수정에서 고른다.
-              좌표 없는 분은 어떤 반경으로도 안 걸리므로 '주소 미확인 포함'을 따로 둔다(조용한 탈락 방지). */}
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
-              집결지 거리{" "}
-              <span className="font-semibold text-muted-foreground">
-                {jobId
-                  ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요"
-                  : draftJob
-                    ? "— 지금 입력한 집결지·경유지로 저장 전에 계산해요"
-                    : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
-              </span>
-            </div>
-            {canUseRadius ? (
-              <>
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  {[5, 10, 15, 20, 30].map((km) => (
-                    <Chip
-                      key={km}
-                      label={`${km}km`}
-                      on={value.rule.radiusKm === km}
-                      // 같은 값을 다시 누르면 해제 — 반경 조건을 끄는 방법이 있어야 한다.
-                      onClick={() => setRule({ radiusKm: value.rule.radiusKm === km ? "" : km })}
-                    />
-                  ))}
-                  {value.rule.radiusKm !== "" && (
-                    <button
-                      type="button"
-                      onClick={() => setRule({ radiusKm: "", radiusIncludeUnknown: false })}
-                      className="text-[11px] font-bold text-error-strong hover:underline px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      해제
-                    </button>
-                  )}
-                </div>
-                {value.rule.radiusKm !== "" && (
-                  <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700 mt-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={value.rule.radiusIncludeUnknown}
-                      onChange={(e) => setRule({ radiusIncludeUnknown: e.target.checked })}
-                      className="accent-foreground"
-                    />
-                    주소를 몰라 거리를 못 재는 분도 포함
-                    {typeof preview?.geo_unknown === "number" && ` (${preview.geo_unknown}명)`}
-                  </label>
-                )}
-                {value.rule.radiusKm !== "" && preview?.radius_unavailable && (
-                  <p className="text-[11px] font-bold text-error-strong mt-1 leading-snug">
-                    이 공고는 집결지 좌표가 없어 거리를 계산할 수 없어요 — 이대로 저장하면 막힙니다(집결지 주소를 먼저 저장해 주세요).
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                집결지나 경유지를 입력하면 저장 전에도 반경을 고를 수 있어요. 지금은 지역·시군구로 좁혀 주세요.
-              </p>
-            )}
-          </div>
-
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">가용성</div>
-            <div className="flex flex-wrap gap-1.5">
-              {(options?.availabilities ?? []).map((s) => (
-                <Chip key={s} label={s} on={value.rule.availability.includes(s)} onClick={() => setRule({ availability: toggleIn(value.rule.availability, s) })} />
-              ))}
-              {options && options.availabilities.length === 0 && <span className="text-[12px] text-muted-foreground">가용성 데이터 없음</span>}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
-              차량 <span className="font-semibold text-muted-foreground">— 차량이 필요한 라인이면 '있음'만 골라 주세요</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {VEHICLE_RULE_VALUES.map((s) => (
-                <Chip key={s} label={s} on={value.rule.vehicle.includes(s)} onClick={() => setRule({ vehicle: toggleIn(value.rule.vehicle, s) })} />
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={value.rule.suntopDone}
-                onChange={(e) => setRule({ suntopDone: e.target.checked })}
-                className="accent-foreground"
-              />
-              선탑(동승) 완료자만
-            </label>
-            <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700">
-              지원(등록)
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={value.rule.cohortMonths}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  // 120 초과는 normalizeRule이 조용히 버리므로 입력 단계에서 클램프(표시-저장 불일치 방지)
-                  setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
-                }}
-                placeholder="없음"
-                className="w-16 bg-white border border-border-strong rounded-2xl px-2 py-1 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              개월 이내
-            </label>
-          </div>
-
-          {!draftJob && (
-            <>
-              <p className="text-[11px] text-muted-foreground leading-snug border-t border-muted pt-2">
-                여기 숫자는 <b className="text-muted-foreground">노출 기준 인재풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
-                문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
-              </p>
-              <div className="text-[12px] font-bold pt-1">
-                {previewLoading ? (
-                  <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
-                ) : previewError ? (
-                  <span className="text-error-strong">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
-                ) : preview?.radius_unavailable ? (
-                  <span className="text-error-strong">
-                    거리를 계산할 수 없어 해당 인원을 셀 수 없어요 — 이 공고에 집결지 좌표가 없습니다.
-                  </span>
-                ) : preview ? (
-                  <span className="text-info-strong">
-                    규칙 해당 {preview.count}명 <span className="text-muted-foreground font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>
-                  </span>
-                ) : !jobId ? (
-                  <span className="text-warning">⚠️ 지정 노출인데 규칙이 비어 있어요 — 등록 후 파이프라인에서 노출 대상을 추가하지 않으면 아무에게도 안 보입니다.</span>
-                ) : (
-                  <span className="text-muted-foreground">규칙이 비어 있어요 — 수동 지정 대상에게만 노출됩니다.</span>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
 
       {draftJob && (
         <div className="rounded-2xl border border-info/25 bg-info-soft/35 p-3.5" aria-live="polite">
@@ -656,7 +384,7 @@ export function ExposureEditor({
                     onClick={() => {
                       onChange({ exposure: "targeted", rule: ruleToDraft(preview.suggested_audience?.rule) });
                       setAppliedSuggestionContext(draftJobJson);
-                      toast.success("추천 조건을 적용했어요. 아래에서 바로 수정할 수 있어요.");
+                      toast.success("추천 조건을 적용했어요. 조건 직접 수정에서 바꿀 수 있어요.");
                     }}
                     className="mt-3 min-h-11 w-full rounded-xl bg-foreground px-4 py-2.5 text-[13px] font-extrabold text-white transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
@@ -679,6 +407,11 @@ export function ExposureEditor({
                   <div className="mt-0.5 text-[20px] font-extrabold text-foreground">{preview.sms_eligible_count ?? 0}명</div>
                 </div>
               </div>
+              {(preview.visible_count ?? preview.count) === 0 && (
+                <p role="status" className="mt-2 text-[12px] font-semibold text-warning-strong">
+                  현재 노출 대상이 없어요.{targeted ? " 조건을 넓히거나 전체 노출로 바꿔 주세요." : ""}
+                </p>
+              )}
               <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
                 동의·수신거부·연락처·중복을 반영한 현재 시점의 예상치예요. 등록 순간과 실제 발송 전에도 다시 확인합니다.
               </p>
@@ -707,6 +440,307 @@ export function ExposureEditor({
         </div>
       )}
 
+      {targeted && !draftJob && (
+        <div className="rounded-2xl border border-border-strong bg-surface-raised p-3.5 space-y-2" aria-live="polite">
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            여기 숫자는 <b className="text-muted-foreground">노출 기준 인력풀 전체</b>예요 — 부적합·이탈·수신거부·연락처 없는 분도 포함됩니다.
+            문자 발송 대상은 이보다 적습니다(발송 화면에서 따로 걸러져요).
+          </p>
+          <div className="text-[12px] font-bold pt-1">
+            {previewLoading ? (
+              <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 해당 인원 계산 중…</span>
+            ) : previewError ? (
+              <span className="text-error-strong">미리보기를 불러오지 못했어요 — 규칙을 바꾸면 다시 시도돼요.</span>
+            ) : preview?.radius_unavailable ? (
+              <span className="text-error-strong">
+                거리를 계산할 수 없어 해당 인원을 셀 수 없어요 — 이 공고에 집결지 좌표가 없습니다.
+              </span>
+            ) : preview ? (
+              <span className="text-info-strong">
+                규칙 해당 {preview.count}명 <span className="text-muted-foreground font-semibold">/ 전체 {preview.total}명{preview.sample.length > 0 ? ` · 예: ${preview.sample.join(", ")}` : ""} · 편집 중 규칙 기준</span>
+              </span>
+            ) : !jobId ? (
+              <span className="text-warning">⚠️ 지정 노출인데 규칙이 비어 있어요 — 등록 후 파이프라인에서 노출 대상을 추가하지 않으면 아무에게도 안 보입니다.</span>
+            ) : (
+              <span className="text-muted-foreground">규칙이 비어 있어요 — 수동 지정 대상에게만 노출됩니다.</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {targeted && value.rule.radiusKm !== "" && preview?.radius_unavailable && (
+        <p className="text-[11px] font-bold text-error-strong mt-1 leading-snug">
+          이 공고는 집결지 좌표가 없어 거리를 계산할 수 없어요 — 이대로 저장하면 막힙니다(집결지 주소를 먼저 저장해 주세요).
+        </p>
+      )}
+
+      {targeted && optionsError && (
+        <p role="alert" className="text-[12px] font-semibold text-error-strong">노출 조건 목록을 불러오지 못했어요. 선택한 조건은 유지됩니다.</p>
+      )}
+
+      {targeted && value.rule.slot.length > 0 && !value.rule.slot.includes(UNKNOWN_RULE_VALUE) && (options?.unknown?.slot ?? 0) > 0 && (
+        <p role="status" className="text-[11px] text-warning-strong mt-1 leading-snug">
+          미확인 {options?.unknown?.slot}명 — 지원 당시 시간대를 안 남기신 분
+          {(options?.unknown?.slot_partial ?? 0) > 0 &&
+            `, 그리고 요일이나 시각을 적었지만 오전·오후로 판정할 수 없는 분 ${options?.unknown?.slot_partial}명(야간·새벽 근무 포함)`}
+          이에요. 고르지 않으면 이 규칙에서 빠집니다.
+        </p>
+      )}
+
+      <Collapsible className="group rounded-2xl border border-border-strong bg-card">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left text-[13px] font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            조건 직접 수정
+            <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3 border-t border-muted p-3.5">
+          <div>
+            <label className="block text-[13px] font-bold text-gray-700 mb-2">노출 방식</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {(
+                [
+                  ["all", "전체 노출", "인력풀 전원의 맞춤 공고 링크에 노출(기본)"],
+                  ["targeted", "지정 노출", "아래 규칙·수동 지정 대상에게만 노출"],
+                ] as ["all" | "targeted", string, string][]
+              ).map(([k, label, desc]) => {
+                const sel = value.exposure === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={sel}
+                    onClick={() => onChange({ ...value, exposure: k })}
+                    className={`outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-left p-3 rounded-2xl border transition-colors ${
+                      sel
+                        ? "border-foreground bg-white ring-1 ring-foreground"
+                        : "border-border-strong bg-white hover:border-gray-300"
+                    }`}
+                  >
+                    <div className={`text-[13px] font-bold ${sel ? "text-foreground" : "text-gray-700"}`}>{label}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {targeted && (
+            <div className="rounded-2xl border border-border-strong bg-surface-raised p-3.5 space-y-3">
+              <div className="text-[13px] font-bold text-gray-700">자동 노출 규칙 — 조건에 맞는 인원에게 자동 노출 (비우면 수동 지정만)</div>
+
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">지역(시도)</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(options?.sidos ?? []).map((s) => (
+                    <Chip key={s} label={s} on={value.rule.sido.includes(s)} onClick={() => setRule({ sido: toggleIn(value.rule.sido, s) })} />
+                  ))}
+                  {/* 값이 없는 사람도 포함할 수 있게 — 안 고르면 그 인원은 이 조건에서 조용히 빠진다 */}
+                  {(options?.unknown?.sido ?? 0) > 0 && (
+                    <Chip
+                      label={`미확인 ${options?.unknown?.sido}`}
+                      on={value.rule.sido.includes(UNKNOWN_RULE_VALUE)}
+                      onClick={() => setRule({ sido: toggleIn(value.rule.sido, UNKNOWN_RULE_VALUE) })}
+                    />
+                  )}
+                  {options && options.sidos.length === 0 && <span className="text-[12px] text-muted-foreground">지역 데이터 없음</span>}
+                </div>
+              </div>
+
+              {/* 시군구(구 단위) — 시·도로는 강남권/용산권을 못 가른다. 동명이구(중구·서구)가 있어 시도별로 묶어 보여준다. */}
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
+                  시군구 <span className="font-semibold text-muted-foreground">— 권역별 라인이면 여기서 구를 고르세요</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {(options?.sigunguGroups ?? []).map((g) => (
+                    <div key={g.sido}>
+                      <div className="text-[11px] font-bold text-muted-foreground mb-1">
+                        {g.sido}
+                        {g.sido === SIGUNGU_NO_SIDO && <span className="font-semibold"> — 주소 정리가 필요한 분들</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {g.items.map((it) => (
+                          <Chip
+                            key={it.key}
+                            label={`${it.name} ${it.count}`}
+                            /* 저장 값은 '시도>시군구' 복합키 — 이름만 담으면 동명이구(중구·서구)가 교차로 걸려
+                               화면의 시도 그룹과 실제 판정 범위가 어긋난다. */
+                            on={value.rule.sigungu.includes(it.key)}
+                            onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, it.key) })}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {(options?.unknown?.sigungu ?? 0) > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      <Chip
+                        label={`미확인 ${options?.unknown?.sigungu}`}
+                        on={value.rule.sigungu.includes(UNKNOWN_RULE_VALUE)}
+                        onClick={() => setRule({ sigungu: toggleIn(value.rule.sigungu, UNKNOWN_RULE_VALUE) })}
+                      />
+                    </div>
+                  )}
+                  {options && (options.sigunguGroups ?? []).length === 0 && (
+                    <span className="text-[12px] text-muted-foreground">시군구 데이터 없음</span>
+                  )}
+                </div>
+              </div>
+
+              {/* 희망 시간대 — 폼 4슬롯 토큰과 자유 입력(`월,화,수,목,금 9:00~18:00`)을 같은 함수로 판정한다.
+                  미확인은 값이 '~' 한 글자이거나 야간·새벽 근무인 분들이라, 고르지 않으면 조용히 빠진다. */}
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
+                  희망 시간대 <span className="font-semibold text-muted-foreground">— 오전·오후 라인이면 여기서 고르세요</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(options?.slots ?? []).map((s) => (
+                    <Chip
+                      key={s.key}
+                      label={`${s.label} ${s.count}`}
+                      on={value.rule.slot.includes(s.key)}
+                      onClick={() => setRule({ slot: toggleIn(value.rule.slot, s.key) })}
+                    />
+                  ))}
+                  {(options?.unknown?.slot ?? 0) > 0 && (
+                    <Chip
+                      label={`미확인 ${options?.unknown?.slot}`}
+                      on={value.rule.slot.includes(UNKNOWN_RULE_VALUE)}
+                      onClick={() => setRule({ slot: toggleIn(value.rule.slot, UNKNOWN_RULE_VALUE) })}
+                    />
+                  )}
+                </div>
+
+              </div>
+
+              {/* 집결지 거리 반경 — 권역 라인의 핵심 축. 기준점(집결지만/경유지 포함)은 공고 수정에서 고른다.
+                  좌표 없는 분은 어떤 반경으로도 안 걸리므로 '주소 미확인 포함'을 따로 둔다(조용한 탈락 방지). */}
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
+                  집결지 거리{" "}
+                  <span className="font-semibold text-muted-foreground">
+                    {jobId
+                      ? "— 공고에 저장된 기준(집결지/경유지)으로 계산해요"
+                      : draftJob
+                        ? "— 지금 입력한 집결지·경유지로 저장 전에 계산해요"
+                        : "— 공고를 저장한 뒤에 쓸 수 있어요(집결지 좌표 필요)"}
+                  </span>
+                </div>
+                {canUseRadius ? (
+                  <>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {[5, 10, 15, 20, 30].map((km) => (
+                        <Chip
+                          key={km}
+                          label={`${km}km`}
+                          on={value.rule.radiusKm === km}
+                          // 같은 값을 다시 누르면 해제 — 반경 조건을 끄는 방법이 있어야 한다.
+                          onClick={() => setRule({ radiusKm: value.rule.radiusKm === km ? "" : km })}
+                        />
+                      ))}
+                      {value.rule.radiusKm !== "" && (
+                        <button
+                          type="button"
+                          onClick={() => setRule({ radiusKm: "", radiusIncludeUnknown: false })}
+                          className="text-[11px] font-bold text-error-strong hover:underline px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          해제
+                        </button>
+                      )}
+                    </div>
+                    {value.rule.radiusKm !== "" && (
+                      <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700 mt-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={value.rule.radiusIncludeUnknown}
+                          onChange={(e) => setRule({ radiusIncludeUnknown: e.target.checked })}
+                          className="accent-foreground"
+                        />
+                        주소를 몰라 거리를 못 재는 분도 포함
+                        {typeof preview?.geo_unknown === "number" && ` (${preview.geo_unknown}명)`}
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    집결지나 경유지를 입력하면 저장 전에도 반경을 고를 수 있어요. 지금은 지역·시군구로 좁혀 주세요.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">가용성</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(options?.availabilities ?? []).map((s) => (
+                    <Chip key={s} label={s} on={value.rule.availability.includes(s)} onClick={() => setRule({ availability: toggleIn(value.rule.availability, s) })} />
+                  ))}
+                  {options && options.availabilities.length === 0 && <span className="text-[12px] text-muted-foreground">가용성 데이터 없음</span>}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[12px] font-bold text-muted-foreground mb-1.5">
+                  차량 <span className="font-semibold text-muted-foreground">— 차량이 필요한 라인이면 '있음'만 골라 주세요</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {VEHICLE_RULE_VALUES.map((s) => (
+                    <Chip key={s} label={s} on={value.rule.vehicle.includes(s)} onClick={() => setRule({ vehicle: toggleIn(value.rule.vehicle, s) })} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={value.rule.suntopDone}
+                    onChange={(e) => setRule({ suntopDone: e.target.checked })}
+                    className="accent-foreground"
+                  />
+                  선탑(동승) 완료자만
+                </label>
+                <label className="flex items-center gap-1.5 text-[13px] font-bold text-gray-700">
+                  지원(등록)
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={value.rule.cohortMonths}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      // 120 초과는 normalizeRule이 조용히 버리므로 입력 단계에서 클램프(표시-저장 불일치 방지)
+                      setRule({ cohortMonths: e.target.value === "" || !Number.isFinite(n) || n <= 0 ? "" : Math.min(120, Math.floor(n)) });
+                    }}
+                    placeholder="없음"
+                    className="w-16 bg-white border border-border-strong rounded-2xl px-2 py-1 text-[13px] focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  개월 이내
+                </label>
+              </div>
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      {targeted && jobId && (
+        <p className="text-[11px] text-muted-foreground leading-snug">
+          여기 조건으로 못 가르는 대상이면{" "}
+          <a
+            href="/pipeline"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+          >
+            인력풀에서 조건으로 고른 뒤 &lsquo;이 명단에게만 노출&rsquo;
+          </a>
+          을 쓰세요. 새 탭에서 열려요 — <b className="text-warning-strong">거기서 노출을 바꾸면 이 창의 노출 값은 옛 값이 됩니다.</b> 돌아와서는 이 창을 닫고 다시 열어 주세요.
+        </p>
+      )}
+
       {targeted && jobId && (
         <div className="rounded-2xl border border-border-strong bg-white p-3.5 space-y-2.5">
           <div className="flex items-center justify-between">
@@ -728,9 +762,11 @@ export function ExposureEditor({
             </button>
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">이 명단은 <b className="text-muted-foreground">저장된 규칙</b> 기준이에요(위 &lsquo;규칙 해당 N명&rsquo;은 편집 중 기준이라 다를 수 있어요). 규칙을 바꿔 저장하면 다음에 열 때 반영됩니다. <b className="text-muted-foreground">제외·복원은 누르는 즉시 적용</b>돼요(규칙과 달리 저장 불필요). 수동 추가는{" "}
-            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">인재풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
+            <a href="/pipeline" target="_blank" rel="noopener noreferrer" className="font-bold text-info-strong underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">인력풀에서 인원 선택 → &lsquo;이 명단에게만 노출&rsquo;</a>.</p>
           {rosterLoading ? (
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><Loader2 size={13} className="animate-spin" /> 불러오는 중…</div>
+          ) : rosterError ? (
+            <p role="alert" className="text-[12px] font-semibold text-error-strong">노출 대상 명단을 불러오지 못했어요. 새로고침해 주세요.</p>
           ) : roster ? (
             <>
               {roster.effective.length === 0 ? (

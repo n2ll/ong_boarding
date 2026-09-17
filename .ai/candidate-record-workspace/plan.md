@@ -1,0 +1,3 @@
+- [x] 기존 StaffingPreparationPanel에 단일 후보 기록창 진입 지원 — posting_missing_conditions.
+- [x] 지원자 상세/대화의 같은 화면 기록 진입점 — root.
+- [x] 코드 리뷰·관련 테스트·브라우저·빌드 — root.

@@ -7,6 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { useBranchScope, matchesBranchScope } from "@/lib/branch-scope";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SosLedgerCard } from "@/components/SosLedgerCard";
+import { sosLedgerCardView } from "@/lib/admin/sos-ledger-card-view";
 import { InterestQueueCard } from "@/components/InterestQueueCard";
 import { ReplyQueueCard, type ReplyQueueCounts } from "@/components/ReplyQueueCard";
 import { CampaignStatsCard } from "@/components/CampaignStatsCard";
@@ -154,6 +155,9 @@ export function Dashboard() {
   const { data: confirmRes, error: confirmError, mutate: mutateConfirm } = useSWR<{ total?: number; pending?: { created_at?: string | null }[] }>("/api/admin/confirm/pending", { refreshInterval: 60_000 });
   // SosLedgerCard와 동일 키라 SWR이 중복 호출을 dedup — 진행 중 긴급 건을 '오늘의 할 일'에 합류
   const { data: sosRes, error: sosError, mutate: mutateSos } = useSWR<{ open?: SosOpenRow[] }>("/api/admin/sos");
+  // 보조 카드를 접어도 기존 SWR 키의 오류는 숨기지 않는다(요청은 카드와 dedup).
+  const { data: ledgerRes, error: ledgerError } = useSWR<unknown>("/api/admin/cost-ledger");
+  const { data: campaignRes, error: campaignError } = useSWR<unknown>("/api/admin/campaign-stats");
   // SMS 게이트웨이(법인폰) 하트비트 — last_seen_at 내림차순 응답이라 [0]이 최신 기기
   const { data: hbRes, error: hbError, isValidating: heartbeatValidating, mutate: mutateHeartbeat } = useSWR<{ data?: HeartbeatRow[] }>("/api/admin/heartbeat", { refreshInterval: 60_000 });
   // InterestQueueCard와 동일 키라 SWR이 dedup — 관심 표시 처리 대기 건수를 '오늘의 할 일'에 합류
@@ -191,6 +195,21 @@ export function Dashboard() {
     oldestDays: null,
   });
   const [replyRetrySignal, setReplyRetrySignal] = useState(0);
+  const [overviewOpen, setOverviewOpen] = useState(false);
+  const [replyQueueOpened, setReplyQueueOpened] = useState(false);
+  const [interestQueueOpened, setInterestQueueOpened] = useState(false);
+  useEffect(() => {
+    const revealAnchor = () => {
+      const anchor = window.location.hash;
+      if (["#reply-queue", "#interest-queue", "#staffing-gaps", "#staffing-followups", "#sos-ledger"].includes(anchor)) {
+        setOverviewOpen(true);
+        window.requestAnimationFrame(() => document.getElementById(anchor.slice(1))?.scrollIntoView({ block: "start" }));
+      }
+    };
+    revealAnchor();
+    window.addEventListener("hashchange", revealAnchor);
+    return () => window.removeEventListener("hashchange", revealAnchor);
+  }, []);
   const handleReplyCounts = useCallback((next: ReplyQueueCounts) => {
     setReplyCounts((previous) => (
       previous.state === next.state
@@ -218,9 +237,9 @@ export function Dashboard() {
   });
   const queueStatus = dashboardQueueStatus(urgentSourcesState);
   const queueStatusTone = {
-    success: { dot: "bg-success", text: "text-white/65" },
-    warning: { dot: "bg-warning", text: "text-warning-on-dark" },
-    error: { dot: "bg-error", text: "text-error-on-dark" },
+    success: { dot: "bg-success", text: "text-muted-foreground" },
+    warning: { dot: "bg-warning", text: "text-warning-strong" },
+    error: { dot: "bg-error", text: "text-error-strong" },
   }[queueStatus.tone];
   const urgentSourceLabels: Record<string, string> = {
     applicants: "지원자 목록",
@@ -415,7 +434,7 @@ export function Dashboard() {
       return (days ?? 0) >= 1 ? ` · 최장 ${days}일` : "";
     };
     if (notiCounts?.aiDisabled) {
-      u.push({ id: "ai-off", urgency: "blocker", ageMinutes: null, title: "AI 자동응대가 중단된 상태예요", desc: "전역 응답 스위치가 꺼져 있어 신규 인입에 자동 응대하지 않습니다.", cta: "자동화 현황으로", path: "/automation" });
+      u.push({ id: "ai-off", urgency: "blocker", ageMinutes: null, title: "자동응대가 중단되어 있어요", desc: "새로 도착한 문자에 자동으로 답하지 않습니다.", cta: "자동응대 상태 확인", path: "/automation" });
     }
     if (gateway?.urgent) {
       u.push({
@@ -472,12 +491,12 @@ export function Dashboard() {
           return t && (!min || t < min) ? t : min;
         }, null)
       ) ?? (notiCounts?.inbox_oldest_days === null || notiCounts?.inbox_oldest_days === undefined ? null : notiCounts.inbox_oldest_days * 1_440);
-      u.push({ id: "inbox", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `분류가 필요한 문자 ${inboxCount}건${suffix(oldest)}`, desc: "지원자·기존 계약자 문의·기타 메시지로 정리해야 하는 수신 문자가 있어요.", cta: "지원자 운영에서 분류", path: "/live?tab=inbox" });
+      u.push({ id: "inbox", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `분류가 필요한 문자 ${inboxCount}건${suffix(oldest)}`, desc: "지원자·기존 계약자 문의·기타 메시지로 정리해야 하는 수신 문자가 있어요.", cta: "지원자 대화에서 분류", path: "/live?tab=inbox" });
     }
     if ((notiCounts?.interventions ?? 0) > 0) {
       const oldest = notiCounts?.interventions_oldest_days === null || notiCounts?.interventions_oldest_days === undefined ? null : notiCounts.interventions_oldest_days * 1_440;
       // 목적 탭으로 딥링크 — 예전엔 둘 다 '전체' 탭으로 떨어져 매니저가 탭을 다시 찾아야 했다.
-      u.push({ id: "live", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `사람 확인 필요 ${notiCounts!.interventions}건${suffix(oldest)}`, desc: "AI가 답을 멈추고 넘긴 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "지원자 운영으로", path: "/live?tab=intervention" });
+      u.push({ id: "live", urgency: urgencyFor(oldest), ageMinutes: oldest, title: `사람 확인 필요 ${notiCounts!.interventions}건${suffix(oldest)}`, desc: "자동응대가 멈춘 대화예요. 매니저가 직접 확인해 답해야 합니다.", cta: "지원자 대화로", path: "/live?tab=intervention" });
     }
     if (confirmPendingCount > 0) {
       const oldest = elapsedMinutes(confirmRes?.pending?.[0]?.created_at ?? null); // 라우트가 오래된 순 정렬
@@ -518,14 +537,14 @@ export function Dashboard() {
   };
 
   const aiModeTone = agentModeCopy.kind === "error" || agentModeCopy.kind === "off"
-    ? "text-error-on-dark"
+    ? "text-error-strong"
     : agentModeCopy.kind === "stale"
-      ? "text-warning-on-dark"
+      ? "text-warning-strong"
       : agentModeCopy.kind === "draft"
-        ? "text-copilot-on-dark"
+        ? "text-copilot-strong"
         : agentModeCopy.kind === "auto"
-          ? "text-success-on-dark"
-          : "text-white/65";
+          ? "text-success-strong"
+          : "text-muted-foreground";
   const aiModeDot = agentModeCopy.kind === "off"
     ? "bg-error"
     : agentModeCopy.kind === "draft"
@@ -538,6 +557,15 @@ export function Dashboard() {
 
   // '지표 · 분석' 접이식 섹션 — 기본 접힘. 첫 화면은 '지금 할 일'이 스크롤 없이 보이는 게 목표.
   const [metricsOpen, setMetricsOpen] = useState(false);
+  // 0건이 확인된 목록만 접는다. 열린 대화·입력창은 마지막 건 처리 후에도 유지한다.
+  // 자식은 계속 마운트해 새 답장·오류와 건수 계산을 유지한다.
+  const showReplyQueue = overviewOpen || replyQueueOpened || replyCounts.state !== "ready" || replyCounts.total > 0;
+  const showInterestQueue = overviewOpen || interestQueueOpened || !!interestError || !interestRes || interestCount > 0 || !!interestRes.items?.length;
+  const showStaffingGaps = overviewOpen || !!staffingError || !staffingGaps || staffingGaps.items.length > 0 || staffingGaps.unknownCount > 0;
+  const showFollowUps = overviewOpen || !!followUpsError || !followUps || followUps.invalid_records > 0 || followUps.items.length > 0;
+  const sosHistoryView = sosLedgerCardView({ sosData: sosRes, sosError, ledgerData: ledgerRes, ledgerError });
+  const showSosHistory = overviewOpen || sosHistoryView.sos.state !== "ready" || sosHistoryView.ledger.state !== "ready";
+  const showCampaign = overviewOpen || !!campaignError || !campaignRes;
 
   if (showSkeleton) return <DashboardSkeleton />;
 
@@ -549,15 +577,14 @@ export function Dashboard() {
   return (
     <PageShell className="min-h-full">
       {/* 상단 헤더 — 제목 + 운영 상태 한 줄(동기화·AI 응답 모드·문자 수신폰). KPI 숫자는 아래 '지표 · 분석'으로 이동 */}
-      <motion.div initial={{ opacity: 0, scale: 0.99 }} animate={{ opacity: 1, scale: 1 }} className="relative overflow-hidden rounded-panel border border-white/10 bg-foreground px-5 py-5 text-white sm:px-6 lg:px-8 lg:py-6">
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-brand-yellow/10 to-transparent" />
-
-        <div className="relative z-10 flex items-start justify-between gap-4">
+      <motion.div initial={{ opacity: 0, scale: 0.99 }} animate={{ opacity: 1, scale: 1 }} className="rounded-panel border border-border-strong bg-card px-5 py-4 text-foreground sm:px-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <h1 className="mb-1 text-[20px] font-bold tracking-tight">
-              {scopeBranch ? `${scopeBranch} · 오늘의 채용 운영` : "오늘의 채용 운영"}
+              {scopeBranch ? `${scopeBranch} · 오늘 할 일` : "오늘 할 일"}
             </h1>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-white/65">
+            <p className="mb-3 text-sm text-muted-foreground">답장하고, 필요한 인력을 검토하고, 다음 할 일을 기록하세요.</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-muted-foreground">
               {/* 지원자 한 소스가 아니라 오늘의 업무 큐 전체 상태. 색상과 문구를 함께 바꾼다. */}
               <span
                 role="status"
@@ -573,7 +600,7 @@ export function Dashboard() {
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-                title="AI 응답 모드 — 변경은 지원자 운영 화면 상단 배너 또는 에이전트 두뇌에서"
+                title="자동응대 상태 — 설정에서 변경할 수 있어요"
                 className={`flex min-w-0 items-center gap-1.5 ${aiModeTone}`}
               >
                 {agentModeCopy.kind === "loading" ? (
@@ -591,7 +618,7 @@ export function Dashboard() {
                     type="button"
                     onClick={() => void mutateKillMode()}
                     disabled={killValidating}
-                    className="-my-1 flex min-h-8 shrink-0 items-center rounded px-2 font-bold underline underline-offset-2 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-white/50"
+                    className="-my-1 flex min-h-8 shrink-0 items-center rounded px-2 font-bold underline underline-offset-2 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {killValidating ? "확인 중" : "다시 시도"}
                   </button>
@@ -600,7 +627,7 @@ export function Dashboard() {
               {gateway && (
                 <span
                   title="수신 문자를 옹보딩으로 전달하는 법인폰 상태예요. 신호가 10분 이상 없으면 답장이 옹보딩에 도착하지 못할 수 있어요."
-                  className={`flex items-center gap-1.5 ${gateway.tone === "blocker" ? "text-error-on-dark" : gateway.tone === "attention" ? "text-warning-on-dark" : "text-white/75"}`}
+                  className={`flex items-center gap-1.5 ${gateway.tone === "blocker" ? "text-error-strong" : gateway.tone === "attention" ? "text-warning-strong" : "text-muted-foreground"}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${gateway.tone === "blocker" ? "bg-error animate-pulse" : gateway.tone === "attention" ? "bg-warning" : "bg-success"}`}></span>
                   {gateway.label}
@@ -608,46 +635,31 @@ export function Dashboard() {
               )}
             </div>
           </div>
-          <button type="button" onClick={() => router.push('/pipeline')} className="flex min-h-10 items-center gap-2 whitespace-nowrap rounded-lg border border-white/15 bg-white/10 px-3.5 text-[13px] font-semibold transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40">
-            인재풀 보기 <ArrowRight size={14} />
+          <button type="button" onClick={() => router.push('/pipeline')} className="flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border border-border-strong bg-background px-3.5 text-[13px] font-semibold transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            인력풀 보기 <ArrowRight size={14} />
           </button>
         </div>
       </motion.div>
 
       {/* 오늘의 할 일 — 첫 화면 최상단(전폭). 유입 추이 차트는 아래 '지표 · 분석'으로 이동 */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="flex flex-col rounded-panel border border-border-strong bg-card p-5 lg:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-[16px] font-bold text-foreground flex items-center gap-2">
-              오늘의 할 일
-              {urgentSourcesState.state === "ready" && urgent.length > 0 && <Badge className="tabular-nums">업무 유형 {urgent.length}개</Badge>}
+              지금 할 일
+              {urgentSourcesState.state === "ready" && urgent.length > 0 && <Badge className="tabular-nums">{urgent.length}가지</Badge>}
               {urgentSourcesState.state !== "ready" && <Badge>{urgentSourcesState.state === "error" ? "일부 확인 불가" : "확인 중"}</Badge>}
             </h2>
-            {/* 목록과 동일한 우선순위 정렬의 첫 항목을 연다. 차단 상태 우선, 같은 단계는 최장 대기 순. */}
-            {urgent.length > 0 && isDashboardPrimaryPriority(urgentSourcesState.state, 0) && (
-              <Button
-                size="sm"
-                variant="primary"
-                className="rounded-lg shadow-none hover:translate-y-0"
-                title={urgent[0].action === "retry-heartbeat" ? "문자 수신폰 연결 상태를 다시 확인합니다" : "운영 차단을 먼저, 같은 단계에서는 가장 오래 기다린 업무를 엽니다"}
-                isLoading={urgent[0].action === "retry-heartbeat" && heartbeatValidating}
-                onClick={() => {
-                  const t = urgent[0];
-                  openUrgentItem(t);
-                }}
-              >
-                {urgent[0].action === "retry-heartbeat" ? "문자폰 상태 다시 확인" : <>우선순위 1번 열기 <ChevronRight size={15} /></>}
-              </Button>
-            )}
+            <span className="text-xs text-muted-foreground">항목을 누르면 처리할 곳으로 이동해요.</span>
           </div>
 
-          <div className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3 [&>*]:shrink-0">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {urgentSourcesState.state === "loading" && (
-              <div className="flex items-center gap-2 rounded-lg border border-border-strong bg-background p-4 text-[13px] font-medium text-muted-foreground lg:col-span-2 xl:col-span-3">
+              <div className="flex items-center gap-2 rounded-lg border border-border-strong bg-background p-4 text-[13px] font-medium text-muted-foreground md:col-span-2">
                 <RefreshCw size={15} className="animate-spin" /> 업무 큐를 모두 확인하는 중이에요…
               </div>
             )}
             {urgentSourcesState.state === "error" && (
-              <div role="alert" className="rounded-lg border border-error/30 bg-error-soft p-4 text-error-strong lg:col-span-2 xl:col-span-3">
+              <div role="alert" className="rounded-lg border border-error/30 bg-error-soft p-4 text-error-strong md:col-span-2">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-1.5 text-[14px] font-bold"><AlertTriangle size={15} /> 일부 업무 큐를 확인하지 못했어요</div>
@@ -660,24 +672,11 @@ export function Dashboard() {
               </div>
             )}
             {urgentSourcesState.state === "ready" && urgent.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center py-4 text-center lg:col-span-2 xl:col-span-3">
-                <CheckCircle2 size={28} className="text-success mb-2" />
-                <div className="text-[13px] font-bold text-gray-700">지금 처리할 긴급 항목이 없어요</div>
-                <div className="text-[12px] mt-0.5 text-muted-foreground">분류가 필요한 문자, 사람 확인이 필요한 대화, 긴급 건이 생기면 여기에 표시됩니다.</div>
-                <div className="w-full max-w-[420px] mt-5 flex flex-col gap-2">
-                  {[
-                    { label: "인재풀 · 파이프라인 점검", path: "/pipeline" },
-                    { label: "지원자 운영 열기", path: "/live" },
-                  ].map((s) => (
-                    <button
-                      key={s.path}
-                      onClick={() => router.push(s.path)}
-                      className="flex min-h-11 w-full items-center justify-between rounded-lg border border-border-strong bg-background px-4 py-2.5 text-[13px] font-semibold text-gray-700 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {s.label} <ChevronRight size={15} className="text-muted-foreground" />
-                    </button>
-                  ))}
+              <div className="flex flex-wrap items-center justify-between gap-3 py-2 md:col-span-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <CheckCircle2 size={19} className="shrink-0 text-success" /> 지금 처리할 긴급 항목이 없어요
                 </div>
+                <Button variant="ghost" size="sm" onClick={() => router.push("/live")}>대화 보기 <ChevronRight size={15} /></Button>
               </div>
             )}
             {urgent.map((item, index) => {
@@ -697,62 +696,76 @@ export function Dashboard() {
                   type="button"
                   key={item.id}
                   onClick={() => openUrgentItem(item)}
-                  className={`group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-[148px] ${surface}`}
+                  disabled={item.action === "retry-heartbeat" && heartbeatValidating}
+                  aria-busy={item.action === "retry-heartbeat" && heartbeatValidating || undefined}
+                  title={item.desc}
+                  className={`group flex min-h-11 w-full items-start gap-2.5 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 ${surface}`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-current/15 bg-card/70 ${accent}`}>
                     <ItemIcon aria-hidden="true" size={16} />
                   </span>
-                  <span className="min-w-0 flex-1 lg:flex lg:h-full lg:flex-col lg:items-stretch lg:gap-3">
+                  <span className="min-w-0 flex-1">
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <Badge variant={isCritical ? "priority-critical" : "priority-attention"}>{priorityLabel}</Badge>
-                        {isPrimary && <span className="text-[12px] font-medium text-muted-foreground">우선순위 1</span>}
+                        {isPrimary && <span className="text-[12px] font-medium text-muted-foreground">먼저 확인</span>}
                         <span className="text-[13px] font-bold text-foreground">{item.title}</span>
                       </span>
-                      <span className="mt-1 block text-[12px] leading-relaxed text-muted-foreground">{item.desc}</span>
+                      {isCritical && <span className="mt-1 block text-[12px] leading-relaxed text-muted-foreground">{item.desc}</span>}
                     </span>
-                    <span className={`mt-2.5 inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold lg:mt-auto lg:self-start ${accent}`}>
-                      {item.cta} <ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none" />
+                    <span className={`mt-1 inline-flex items-center gap-1 text-[12px] font-semibold ${accent}`}>
+                      {item.action === "retry-heartbeat" && heartbeatValidating ? "확인 중…" : item.cta} <ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none" />
                     </span>
                   </span>
                 </button>
               );
             })}
           </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+            <span className="text-xs text-muted-foreground">아래에는 확인할 일이 있는 목록을 펼쳐 보여요.</span>
+            <button type="button" aria-expanded={overviewOpen} aria-controls="dashboard-work-lists" onClick={() => setOverviewOpen((open) => !open)}
+              className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-[13px] font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {overviewOpen ? "기록·전체 현황 접기" : "기록·전체 현황 보기"}<ChevronDown aria-hidden="true" size={15} className={overviewOpen ? "rotate-180" : ""} />
+            </button>
+          </div>
       </motion.div>
 
-      {/* 진행 중 긴급 건은 운영 차단이므로 큐보다 먼저 전폭 노출한다. 0건 기록 카드는 우측 보조 열로 내린다. */}
+      <div id="dashboard-work-lists" className={sosOpen.length > 0 || showReplyQueue || showInterestQueue || showStaffingGaps || showFollowUps || showSosHistory || showCampaign ? "flex flex-col gap-5" : "hidden"}>
+      {/* 진행 중 긴급 건은 접지 않는다. 미처리 목록은 보조 통계보다 먼저 노출한다. */}
       {sosOpen.length > 0 && (
         <div id="sos-ledger" className="scroll-mt-6">
           <SosLedgerCard />
         </div>
       )}
 
-      <StaffingGapSummary data={staffingCurrent} summary={staffingGaps} error={staffingError}
-        start={staffingStart} end={staffingEnd} refreshing={staffingValidating}
-        onRetry={() => { void mutateStaffing(); }} onOpen={(path) => router.push(path)} />
-
-      <StaffingFollowUpQueue data={followUps} error={followUpsError} onRetry={() => { void mutateFollowUps(); }}
-        onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}${item.result_checks?.length ? "&followup_mode=participation" : ""}`)} />
-
-      {/* 실제 응대 큐가 홈의 주 작업이다. 본문 폭이 충분한 xl(1280+)부터 2:1로 나누고 1024에서는 우선순위대로 쌓는다. */}
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-        <ReplyQueueCard onCountsChange={handleReplyCounts} retrySignal={replyRetrySignal} />
-        <div className="flex min-w-0 flex-col gap-6">
+      <div className={showReplyQueue || showInterestQueue ? `grid grid-cols-1 items-start gap-5 ${showReplyQueue && showInterestQueue ? "xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]" : ""}` : "hidden"}>
+        <div className={showReplyQueue ? "min-w-0" : "hidden"} onClickCapture={() => setReplyQueueOpened(true)}>
+          <ReplyQueueCard onCountsChange={handleReplyCounts} retrySignal={replyRetrySignal} />
+        </div>
+        <div className={showInterestQueue ? "min-w-0" : "hidden"} onClickCapture={() => setInterestQueueOpened(true)}>
           <InterestQueueCard />
-          {sosOpen.length === 0 && (
-            <div id="sos-ledger" className="scroll-mt-6">
-              <SosLedgerCard />
-            </div>
-          )}
         </div>
       </div>
 
-      {/* 다시 연락 캠페인 현황 — 발송 묶음의 열람/관심/답장 단계별 현황. 발송 이력 없으면 카드 스스로 숨김. */}
-      <CampaignStatsCard />
+      <div className={showStaffingGaps ? "min-w-0" : "hidden"}>
+        <StaffingGapSummary data={staffingCurrent} summary={staffingGaps} error={staffingError}
+          start={staffingStart} end={staffingEnd} refreshing={staffingValidating}
+          onRetry={() => { void mutateStaffing(); }} onOpen={(path) => router.push(path)} />
+      </div>
+      <div className={showFollowUps ? "min-w-0" : "hidden"}>
+        <StaffingFollowUpQueue data={followUps} error={followUpsError} onRetry={() => { void mutateFollowUps(); }}
+          onOpen={(item) => router.push(`/jobs?followup_job=${item.job_id}&followup_applicant=${item.applicant_id}${item.result_checks?.length ? "&followup_mode=participation" : ""}`)} />
+      </div>
+      {sosOpen.length === 0 && (
+        <div id="sos-ledger" className={showSosHistory ? "scroll-mt-6" : "hidden"}>
+          <SosLedgerCard />
+        </div>
+      )}
+      {/* 캠페인 집계를 펼치면 연결된 답장·관심 목록도 보여 기존 앵커 이동을 유지한다. */}
+      <div className={showCampaign ? "min-w-0" : "hidden"}><CampaignStatsCard /></div>
+      </div>
 
-      {/* 지표 · 분석 — 접이식 섹션(기본 접힘). KPI 4칸·유입 추이·단계별 전환율·스크리닝 현황·지역 분포를 한곳에 모음.
-          접힌 상태에서도 헤더에 핵심 숫자(총 풀·확정·오늘 유입)는 보인다. */}
+      {/* 지표는 요청할 때 펼친다. 조회 실패·갱신 실패는 접혀 있어도 표시한다. */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="overflow-hidden rounded-panel border border-border-strong bg-card">
         <div className="flex flex-col sm:flex-row sm:items-stretch">
           <button
@@ -768,18 +781,8 @@ export function Dashboard() {
               <span className="text-[13px] text-muted-foreground">
                 {metricsState === "loading" && "지원자 지표를 불러오는 중이에요"}
                 {metricsState === "error" && "지원자 지표를 불러오지 못했어요"}
-                {hasAppsSnapshot && (
-                  <>
-                    총 인재풀 <b className="tabular-nums text-foreground">{stats.total.toLocaleString()}</b>명
-                    {!metricsOpen && (
-                      <>
-                        <span> · </span>확정 <b className="tabular-nums text-foreground">{stats.passed.toLocaleString()}</b>명
-                        <span> · </span>오늘 유입 <b className="tabular-nums text-foreground">{stats.today.toLocaleString()}</b>명
-                      </>
-                    )}
-                    {metricsState === "stale" && <span className="font-semibold text-warning-strong"> · 이전 집계 · 갱신 실패</span>}
-                  </>
-                )}
+                {hasAppsSnapshot && (metricsOpen ? <>인력풀 <b className="tabular-nums text-foreground">{stats.total.toLocaleString()}</b>명</> : "지원자 수·유입·전환 현황")}
+                {metricsState === "stale" && <span className="font-semibold text-warning-strong"> · 이전 집계 · 갱신 실패</span>}
               </span>
             </div>
             <span className="flex shrink-0 items-center gap-1 text-[12px] font-bold text-muted-foreground">
@@ -980,16 +983,16 @@ export function Dashboard() {
 function DashboardSkeleton() {
   return (
     <PageShell className="min-h-full">
-      <div className="bg-foreground rounded-2xl px-8 py-6 shadow-md">
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <Skeleton className="h-5 w-64 bg-white/10" />
-            <Skeleton className="h-3 w-96 bg-white/10" />
+      <div className="rounded-panel border border-border-strong bg-card px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 max-w-full space-y-2">
+            <Skeleton className="h-5 w-48 max-w-full" />
+            <Skeleton className="h-3 w-56 max-w-full" />
           </div>
-          <Skeleton className="h-9 w-36 rounded-2xl bg-white/10" />
+          <Skeleton className="h-9 w-24 rounded-lg" />
         </div>
       </div>
-      <Skeleton className="h-[420px] rounded-lg xl:h-[270px]" />
+      <Skeleton className="h-[240px] rounded-lg" />
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         <Skeleton className="h-[520px] rounded-lg" />
         <div className="flex flex-col gap-6">
