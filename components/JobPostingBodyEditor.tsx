@@ -19,6 +19,7 @@ export function JobPostingBodyEditor({ value, onChange, channel, source, disable
   const useShortEditor = operations !== null && canEditJobOperationsSection(value);
   const fullEditor = <textarea
     aria-label={channel === "albamon" ? "공고 원문 전체" : "안내 문자 본문"}
+    aria-describedby={operations !== null ? `${id}-scope` : undefined}
     value={value}
     onChange={(event) => {
       // Keep the same visible input when a whole-body edit changes short-editor eligibility.
@@ -42,10 +43,10 @@ export function JobPostingBodyEditor({ value, onChange, channel, source, disable
         rows={7}
         className={`${textAreaClass} min-h-[180px] resize-y`}
       />
-      <p id={`${id}-scope`} className="mt-1 text-xs leading-relaxed text-muted-foreground">수거 방식·대상 가방·반납 기한은 확인된 조건만 적어 주세요. 반납 기한과 상세 주소는 줄을 나눠 입력해 주세요.</p>
     </div> : <div>
       {operations !== null && <p className="mb-2 text-xs leading-relaxed text-muted-foreground">운행 조건이 다른 항목에도 적혀 있어 전체 원문을 보여드립니다. 수정할 조건이 반복되어 있다면 함께 확인해 주세요.</p>}
     </div>}
+    {operations !== null && <p id={`${id}-scope`} className="text-xs leading-relaxed text-muted-foreground">수거 방식·대상 가방·반납 기한은 확인된 조건만 적어 주세요. 반납 기한과 상세 주소는 줄을 나눠 입력해 주세요.</p>}
     {channel === "albamon" && <p className="text-xs leading-relaxed text-muted-foreground">안내 문자는 별도 초안이므로 발송 전에 확인해 주세요.</p>}
     {channel === "albamon" && source?.trim() && <details className="rounded-xl border border-border-strong px-3">
       <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">생성에 사용한 원문과 비교</summary>
