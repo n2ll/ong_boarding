@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:core": "node --experimental-strip-types --import ./scripts/test-no-network.mjs --test lib/solapi.test.ts lib/sms-length.test.ts lib/agent/handoff-category.test.ts lib/agent/kill-switch.test.ts lib/agent/outbound-safety.test.ts lib/agent/response-containment.test.ts lib/agent/multi-job-consultation.test.ts lib/agent/consultation-context.test.ts lib/agent/consultation-history.test.ts lib/agent/consultation-observations.test.ts lib/agent/stages/consultation.test.ts lib/admin/reply-completion.test.ts lib/admin/reply-completion-api.test.ts lib/admin/staffing-preparation.test.ts lib/admin/staffing-preparation-api.test.ts lib/admin/staffing-demand-batch.test.ts lib/admin/staffing-demand-api.test.ts lib/admin/job-create-followup.test.ts lib/admin/job-operations.test.ts lib/admin/job-registration-followup.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

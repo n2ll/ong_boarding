@@ -1,9 +1,17 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { canEditJobOperationsSection, getJobOperationsSection, replaceJobOperationsSection } from "@/lib/admin/job-operations-section";
+import { missingJobCreateOperationFields, type JobCreateOperationField } from "@/lib/admin/job-create-followup";
+import { Button } from "./ui/button";
 
 const textAreaClass = "w-full rounded-md border border-border-strong bg-input-background px-4 py-3 text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+const operationQuestions: Record<JobCreateOperationField, string> = {
+  collectionMode: "수거는 배송 중에 하나요, 별도로 재방문하나요?",
+  collectionBagDate: "어느 날 사용한 가방을 수거하나요?",
+  returnPlace: "반납 장소는 어디인가요?",
+  returnDeadline: "반납은 언제까지 해야 하나요?",
+};
 
 /** The short editor edits the saved public body itself, so applicant guidance cannot use an older copy. */
 export function JobPostingBodyEditor({ value, onChange, channel, source, disabled = false }: {
@@ -15,9 +23,13 @@ export function JobPostingBodyEditor({ value, onChange, channel, source, disable
 }) {
   const id = useId();
   const [fullEditorOpen, setFullEditorOpen] = useState(false);
+  const operationsEditorRef = useRef<HTMLTextAreaElement>(null);
+  const fullEditorRef = useRef<HTMLTextAreaElement>(null);
   const operations = channel === "albamon" ? getJobOperationsSection(value) : null;
   const useShortEditor = operations !== null && canEditJobOperationsSection(value);
+  const missingOperations = channel === "albamon" ? missingJobCreateOperationFields(value) : [];
   const fullEditor = <textarea
+    ref={fullEditorRef}
     aria-label={channel === "albamon" ? "공고 원문 전체" : "안내 문자 본문"}
     aria-describedby={operations !== null ? `${id}-scope` : undefined}
     value={value}
@@ -31,10 +43,26 @@ export function JobPostingBodyEditor({ value, onChange, channel, source, disable
   />;
 
   return <div className="space-y-3">
+    {missingOperations.length > 0 && <section aria-labelledby={`${id}-questions`} className="rounded-xl border border-warning/35 bg-warning-soft p-3">
+      <h3 id={`${id}-questions`} className="text-sm font-bold text-warning-strong">운행 조건 확인</h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">본문에서 확인되지 않은 조건입니다. 아는 내용만 보완해 주세요. 미정이어도 등록할 수 있어요.</p>
+      <ul className="mt-2 list-disc space-y-1 pl-4 text-sm leading-relaxed">
+        {missingOperations.map((field) => <li key={field}>{operationQuestions[field]}</li>)}
+      </ul>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className="mt-3 min-h-11 w-full"
+        disabled={disabled}
+        onClick={() => (useShortEditor ? operationsEditorRef : fullEditorRef).current?.focus()}
+      >본문에 조건 보완하기</Button>
+    </section>}
     {useShortEditor ? <div>
       <label htmlFor={id} className="mb-1.5 block text-sm font-bold">배송·수거·반납 확인</label>
       <p id={`${id}-help`} className="mb-2 text-xs leading-relaxed text-muted-foreground">상차부터 반납까지 이번 라인의 조건을 확인해 주세요. 여기서 고치면 공고 원문에도 바로 반영됩니다.</p>
       <textarea
+        ref={operationsEditorRef}
         id={id}
         aria-describedby={`${id}-help ${id}-scope`}
         value={operations}

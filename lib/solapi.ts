@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { smsByteLength, SMS_MAX_BYTES } from "./sms-length.ts";
 
 const SOLAPI_URL = "https://api.solapi.com/messages/v4/send-many/detail";
 const SOLAPI_LIST_URL = "https://api.solapi.com/messages/v4/list";
@@ -67,6 +68,10 @@ export async function sendSms(
   subject?: string,
   options: SmsSendOptions = {}
 ): Promise<SmsSendResult> {
+  const bytes = smsByteLength(text);
+  if (bytes > SMS_MAX_BYTES) {
+    return { success: false, failureKind: "declared", error: `문자 본문 길이 ${bytes}byte가 최대 ${SMS_MAX_BYTES}byte를 초과해 발송하지 않았습니다. 조건을 누락하지 않도록 본문을 정리해 주세요.` };
+  }
   if (isSmsDryRun()) {
     console.warn(`[SMS DRY-RUN] 발송 생략 (SMS_DRY_RUN) to=${to} text="${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
     return { success: true, messageId: "dry-run" };

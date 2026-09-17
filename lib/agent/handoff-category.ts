@@ -24,6 +24,7 @@ export interface HandoffCategory {
 
 // 모든 카테고리의 단일 소스(라벨·톤·기본 추천 액션).
 const CATEGORY_META: Record<string, { label: string; tone: HandoffTone; action: string }> = {
+  delivery: { label: "문자 발송", tone: "human", action: "발송 실패 사유와 전송 결과를 확인한 뒤 응대" },
   pay: { label: "단가·정산", tone: "answerable", action: "공고에 수치 없음 → 확인 후 안내" },
   contract: { label: "계약·고용", tone: "human", action: "계약·보험 매니저 영역 → 직접 응대" },
   call: { label: "통화·연락요청", tone: "human", action: "통화 연결 / 연락 일정 안내" },
@@ -58,6 +59,7 @@ export function getCategory(id: string | null | undefined): HandoffCategory {
 
 // 키워드 폴백 분류 — paused_reason 텍스트에서 첫 매칭.
 const RULES: { re: RegExp; id: string }[] = [
+  { re: /SMS 발송|문자 발송 실패|발송 등록 실패|문자 본문 길이/, id: "delivery" },
   { re: /취소|법적|불만|호소|항의/, id: "complaint" },
   { re: /다른\s*공고|교차/, id: "cross_job" },
   { re: /단가|시급|프로모션|페이|배송비|임금|정산|수입|수당|급여|주급/, id: "pay" },

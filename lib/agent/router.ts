@@ -768,7 +768,10 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       sendMessageId = send.messageId ?? null;
       if (!send.success) {
         deliveryUncertain = send.failureKind === "unknown";
-        result.transition = { kind: "pause", reason: `SMS 발송 실패: ${send.error ?? "unknown"}` };
+        result.transition = { kind: "pause", category: "delivery", reason: `SMS 발송 실패: ${send.error ?? "unknown"}`,
+          suggestedAction: deliveryUncertain
+            ? "공급자 전송 결과를 먼저 확인해 주세요. 결과 불명 상태에서는 재발송하지 마세요."
+            : "발송 실패 사유를 확인해 주세요. 길이 초과라면 조건을 빠뜨리지 않도록 본문을 정리한 뒤 응대해 주세요." };
         console.error("[router] SMS send failed", send.error);
       }
     }
@@ -797,7 +800,7 @@ async function runClaimedAgentForCandidate(input: RunAgentInput): Promise<RunAge
       outboundId = outMsg?.id ?? null;
       if (!simulate && (outMsgError || !outboundId)) {
         deliveryUncertain = true;
-        result.transition = { kind: "pause", reason: "SMS 발송 후 원장 저장 실패 — 공급자 결과 확인 필요" };
+        result.transition = { kind: "pause", category: "delivery", reason: "SMS 발송 후 원장 저장 실패 — 공급자 결과 확인 필요", suggestedAction: "공급자 전송 결과와 문자 기록을 먼저 확인해 주세요. 확인 전에는 재발송하지 마세요." };
         console.error("[router] sent SMS recording failed", outMsgError);
       }
 
