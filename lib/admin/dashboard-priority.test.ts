@@ -259,10 +259,11 @@ test("an invalid or missing heartbeat timestamp is treated as no signal", async 
   }
 });
 
-test("the primary heartbeat action names and exposes its refresh progress", () => {
+test("the heartbeat task row disables repeated refresh and exposes its progress", () => {
   const dashboard = readFileSync(new URL("../../components/Dashboard.tsx", import.meta.url), "utf8");
 
   assert.match(dashboard, /isValidating: heartbeatValidating/);
-  assert.match(dashboard, /isLoading=\{urgent\[0\]\.action === "retry-heartbeat" && heartbeatValidating\}/);
-  assert.match(dashboard, /urgent\[0\]\.action === "retry-heartbeat" \? "문자폰 상태 다시 확인"/);
+  assert.match(dashboard, /disabled=\{item\.action === "retry-heartbeat" && heartbeatValidating\}/);
+  assert.match(dashboard, /aria-busy=\{item\.action === "retry-heartbeat" && heartbeatValidating \|\| undefined\}/);
+  assert.match(dashboard, /heartbeatValidating \? "확인 중…" : item\.cta/);
 });

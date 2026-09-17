@@ -529,14 +529,6 @@ function basicSummary(f: EditJobForm, clientLabel?: string | null, branchLabel?:
     .filter(Boolean)
     .join(" · ");
 }
-function exposureSummary(f: EditJobForm): string {
-  if (f.exposureDraft.exposure !== "targeted") return "전체 인재풀에 보여줘요";
-  const r = f.exposureDraft.rule;
-  const rule = draftToRule(r);
-  // radiusIncludeUnknown은 반경 조건의 부속 옵션 — 따로 세면 '조건 2개'로 부풀어 보인다.
-  const conds = rule ? Object.keys(rule).filter((k) => k !== "radiusIncludeUnknown").length : 0;
-  return conds > 0 ? `지정 대상에게만 · 조건 ${conds}개` : "지정 대상에게만";
-}
 function workSummary(f: EditJobForm): string {
   const parts = [
     f.slot.trim() ? `근무시간 ${f.slot.trim()}` : null,
@@ -918,6 +910,9 @@ export function Jobs() {
   const newJobAiFactsValueRef = useRef(newJobAiFacts);
   newJobAiFactsValueRef.current = newJobAiFacts;
   const [newJobExtraOpen, setNewJobExtraOpen] = useState(false);
+  const [newJobOptionsOpen, setNewJobOptionsOpen] = useState(false);
+  const [newJobInitialSettingsOpen, setNewJobInitialSettingsOpen] = useState(false);
+  const newJobSettingsVisible = Boolean(channelDrafts || isGenerating || newJobInitialSettingsOpen);
   // J 타겟 노출 — 노출 대상(전체/지정) + 자동 규칙 draft. 등록 POST에 exposure·exposure_rule로 실림.
   const [newJobExposure, setNewJobExposure] = useState<ExposureDraft>(EMPTY_EXPOSURE);
   // 긴급 건(SOS)에서 넘어온 공고 — 등록 시 sos_request_id로 저장 + 등록 후 '대상 선별' CTA용 권역/차종 보관.
@@ -948,7 +943,7 @@ export function Jobs() {
   const editPayInfoRef = useRef<HTMLTextAreaElement>(null);
   // E17 · 수정 모달 접이식 섹션 열림 상태. 자주 고치는 제목·기간·마감은 접이식 밖 상단 상시 표시,
   // 나머지는 섹션으로 접어 ~2,100px 평면 스크롤을 없앤다. 기본 정보만 열고 시작.
-  const [editOpenSections, setEditOpenSections] = useState({ basic: true, exposure: false, work: false, content: false });
+  const [editOpenSections, setEditOpenSections] = useState({ basic: true, work: false, content: false });
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   // 마감 확인 모달 — 미선발 관심자 안내 발송 체크박스(send, 기본 ON)와 대상(targets)을 함께 관리.
   const [closeModal, setCloseModal] = useState<{ job: JobRow; targets: CloseNotifyTarget[]; loading: boolean; send: boolean } | null>(null);
@@ -957,8 +952,8 @@ export function Jobs() {
   // night=true(KST 21~08)면 발송 버튼 비활성 — 아침 9시 이후 행 메뉴에서 다시 열어 보낸다.
   const [announceModal, setAnnounceModal] = useState<{ jobId: number; smsTitle: string; body: string; targets: AnnounceTarget[]; groups: AnnounceGroups; night: boolean; dropped?: { total: number; promised: number } } | null>(null);
   const [announceSendReport, setAnnounceSendReport] = useState<NoticeSendReport | null>(null);
-  // 등록 성공 뒤 비만료 완료 창에서 다음 공고 작성 또는 인재풀 대상 선별로 이어 준다.
-  // 문자는 인재풀에서 명단을 확인하고 노출을 저장한 뒤에만 별도 검토한다.
+  // 등록 성공 뒤 비만료 완료 창에서 다음 공고 작성 또는 인력풀 대상 선별로 이어 준다.
+  // 문자는 인력풀에서 명단을 확인하고 노출을 저장한 뒤에만 별도 검토한다.
   const [registrationFollowup, setRegistrationFollowup] = useState<JobRegistrationFollowup<JobDuplicateSource> | null>(null);
   // 긴급 건에서 만든 공고는 완료 모달이 닫힐 때까지 원 수요와 필터 맥락을 보존해
   // 사라지는 토스트 없이 인력 선별 화면으로 이어 준다.
@@ -1027,7 +1022,7 @@ export function Jobs() {
   };
   const [candBusyId, setCandBusyId] = useState<number | null>(null);
   const [dispatching, setDispatching] = useState(false);
-  // 인재풀에서 후보 추가(피커)
+  // 인력풀에서 후보 추가(피커)
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pool, setPool] = useState<PoolApplicant[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
@@ -1174,7 +1169,7 @@ export function Jobs() {
     // 실제 SMS 대량 발송 — 확인 없이 원클릭이면 오클릭 사고. 같은 화면의 마감/새공고 안내처럼 확인 거친다.
     const ok = await confirm({
       title: `첫 안내 기록 없는 ${unsentCount}명에게 스크리닝 문자를 보낼까요?`,
-      description: "이 공고의 첫 안내·응답 기록이 없는 후보에게 공고 본문 문자가 즉시 발송돼요. 인재풀에서 보낸 안내는 이 기록에 포함되지 않으니 대화 이력을 먼저 확인하세요. 발송은 되돌릴 수 없어요.",
+      description: "이 공고의 첫 안내·응답 기록이 없는 후보에게 공고 본문 문자가 즉시 발송돼요. 인력풀에서 보낸 안내는 이 기록에 포함되지 않으니 대화 이력을 먼저 확인하세요. 발송은 되돌릴 수 없어요.",
       confirmText: "발송",
     });
     if (!ok) return;
@@ -1242,20 +1237,20 @@ export function Jobs() {
     try {
       setPool(await fetchApplicantPool() as PoolApplicant[]);
     } catch (error) {
-      setPoolError(error instanceof Error ? error.message : "인재풀을 불러오지 못했어요");
+      setPoolError(error instanceof Error ? error.message : "인력풀을 불러오지 못했어요");
     } finally {
       setPoolLoading(false);
     }
   };
 
-  // 인재풀에서 후보 추가 — 피커 열기(전체 인재풀 로드)
+  // 인력풀에서 후보 추가 — 피커 열기(전체 인력풀 로드)
   const openPicker = () => {
     setPickerOpen(true);
     setPickerQuery("");
     void loadPool();
   };
 
-  // 선택한 인재풀 후보를 공고에 추가 — '미발송' 상태로만 들어가고, 발송은 별도(컨택은 매니저 판단)
+  // 선택한 인력풀 후보를 공고에 추가 — '미발송' 상태로만 들어가고, 발송은 별도(컨택은 매니저 판단)
   const addFromPool = async () => {
     if (!candPanel || picked.size === 0 || poolLoading || poolError) return;
     setAdding(true);
@@ -1293,7 +1288,7 @@ export function Jobs() {
     isJobCandidateDispatchable(c.agent_stage, c.sent_at, c.responded_at)
   ).length;
 
-  // 피커에 띄울 인재풀 — 이미 이 공고 후보인 사람·부적합·이탈 제외 + 검색어 매칭
+  // 피커에 띄울 인력풀 — 이미 이 공고 후보인 사람·부적합·이탈 제외 + 검색어 매칭
   const existingCandIds = new Set(candidates.map((c) => c.applicant_id));
   const pq = pickerQuery.trim();
   const pickablePool = pool.filter((p) => {
@@ -1774,6 +1769,8 @@ export function Jobs() {
     newJobAiFactsValueRef.current = "";
     setNewJobExposure(EMPTY_EXPOSURE);
     setNewJobExtraOpen(false);
+    setNewJobOptionsOpen(false);
+    setNewJobInitialSettingsOpen(false);
     setNewJobSosId(null);
     setNewJobSosRegion(null);
     setNewJobSosVehicle(null);
@@ -2034,6 +2031,7 @@ export function Jobs() {
     }) : null;
 
     jobCreateAttemptRef.current = draft.createAttempt;
+    setNewJobInitialSettingsOpen(true);
     setAiPrompt(draft.prompt);
     setPostingTitle(draft.postingTitle);
     setChannelDrafts(draft.channelDrafts ? normalizeJobCreateChannelDrafts(draft.channelDrafts) : null);
@@ -2586,7 +2584,7 @@ export function Jobs() {
     setEditBaseline(null);
     setEditValidationIssue(null);
     setEditForm({ id, title: "", body: "", clientId: "", branchId: "", siteManagerId: "", capacity: 1, vehicleRequired: true, payInfo: "", policyNotes: "", payType: "", payAmount: "", aiFacts: "", recruitMode: DEFAULT_RECRUIT_MODE, workPeriod: "", closesAt: "", slot: "", slotKeys: [], startDate: "", pickupAddress: "", dropoffAddress: "", distanceBasis: DEFAULT_DISTANCE_BASIS, exposureDraft: EMPTY_EXPOSURE, exposureBaseline: EMPTY_EXPOSURE });
-    setEditOpenSections({ basic: true, exposure: false, work: false, content: false });
+    setEditOpenSections({ basic: true, work: false, content: false });
     setEditLoading(true);
     try {
       const res = await fetch(`/api/admin/jobs/${id}`);
@@ -2753,7 +2751,7 @@ export function Jobs() {
         const ok = await confirm({
           title: "지금 저장된 노출 설정을 확인할 수 없어요",
           description:
-            "이 창의 노출 값으로 덮어쓰면, 그 사이 다른 화면(인재풀 '이 명단에게만 노출')에서 바꾼 전환·규칙이 사라질 수 있어요.\n확실하지 않으면 취소하고 창을 닫았다 다시 열어 주세요.",
+            "이 창의 노출 값으로 덮어쓰면, 그 사이 다른 화면(인력풀 '이 명단에게만 노출')에서 바꾼 전환·규칙이 사라질 수 있어요.\n확실하지 않으면 취소하고 창을 닫았다 다시 열어 주세요.",
           confirmText: "그래도 덮어쓰기",
           destructive: true,
         });
@@ -3267,7 +3265,7 @@ export function Jobs() {
 
             <div className="flex items-center gap-2">
               <Button
-                variant="secondary"
+                variant="ghost"
                 onClick={openApplicantPreview}
                 isLoading={previewLoading}
                 title="테스트 지원자의 맞춤 공고 링크를 새 탭에 열어 지원자에게 보이는 화면을 그대로 확인해요"
@@ -3276,7 +3274,7 @@ export function Jobs() {
               </Button>
               {jobs.length > 0 && (
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   onClick={() => void duplicateJob(jobs[0].id)}
                   isLoading={duplicatingId === jobs[0].id}
                   title={`가장 최근 공고 '${jobs[0].title}'의 조건과 본문을 불러옵니다`}
@@ -3882,7 +3880,7 @@ export function Jobs() {
                       {isGenerating ? 'JD 생성 중...' : 'AI 초안 생성'}
                     </Button>
                   </div>
-                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">아래 공고 정보에 미리 적어 둔 값도 생성에 함께 반영합니다.</p>
+                  <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">미리 정할 조건이 있으면 아래에서 열어 입력할 수 있어요.</p>
                 </div>
 
               ) : (
@@ -3903,8 +3901,32 @@ export function Jobs() {
                 </div>
               )}
 
+              {(routingMetadataLoading || routingMetadataError) && (
+                <div className="xl:col-span-2">
+                  <RoutingMetadataNotice
+                    loading={routingMetadataLoading}
+                    error={routingMetadataError}
+                    onRetry={retryRoutingMetadata}
+                  />
+                </div>
+              )}
+
+              {!channelDrafts && !isGenerating && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setNewJobInitialSettingsOpen((open) => !open)}
+                  aria-expanded={newJobInitialSettingsOpen}
+                  aria-controls="new-job-context-section new-job-settings-section"
+                  className="min-h-11 w-full justify-between xl:col-span-2"
+                >
+                  미리 정할 조건 (선택)
+                  <ChevronRight size={18} aria-hidden="true" className={`shrink-0 transition-transform ${newJobInitialSettingsOpen ? "rotate-90" : ""}`} />
+                </Button>
+              )}
+
               {/* AI가 메모에서 찾은 값을 확인하고, 찾지 못한 값만 보완한다. */}
-              <section aria-labelledby="new-job-context-title" className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm xl:col-span-2">
+              {newJobSettingsVisible && (
+              <section id="new-job-context-section" aria-labelledby="new-job-context-title" className="bg-card border border-border-strong rounded-2xl p-5 shadow-sm xl:col-span-2">
                 <div className="flex items-start gap-3">
                   <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[12px] font-extrabold text-white">2</span>
                   <div>
@@ -3912,16 +3934,6 @@ export function Jobs() {
                     <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">AI가 메모에서 찾은 위치를 채웁니다. 화주사·지점과 실제 근무 위치만 확인해 주세요.</p>
                   </div>
                 </div>
-
-                {(routingMetadataLoading || routingMetadataError) && (
-                  <div className="mt-4">
-                    <RoutingMetadataNotice
-                      loading={routingMetadataLoading}
-                      error={routingMetadataError}
-                      onRetry={retryRoutingMetadata}
-                    />
-                  </div>
-                )}
 
                 <div className="mt-4">
                   <RecruitModeField
@@ -4030,6 +4042,7 @@ export function Jobs() {
                   </div>
                 </section>
               </section>
+              )}
 
               {channelDrafts && newJobFollowupFields.length > 0 && (
                 <section aria-labelledby="new-job-followup-title" className="rounded-2xl border border-warning/35 bg-warning-soft p-4 xl:col-start-1">
@@ -4248,24 +4261,9 @@ export function Jobs() {
 
               {/* E16 · 공고 설정 — 예전엔 라벨 없는 푸터 컨트롤 벽(정원 스피너·화주사 누락 빈발)이었다. 라벨 붙은 본문 섹션으로 승격(푸터엔 닫기/등록만).
                   모집방식을 최상단에 둬, 이 값에 의존하는 근무시간 형태·노출 대상 섹션의 역순 배치를 바로잡는다(옵션 A). 화주사·지점은 AI 입력 앞 공고 맥락에서 먼저 고른다. */}
-              <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+              {newJobSettingsVisible && (
+              <div id="new-job-settings-section" className="bg-card border border-border-strong rounded-2xl shadow-sm p-5 flex flex-col gap-4">
                 <div className="text-[13px] font-bold text-foreground">공고 설정</div>
-
-                {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="new-job-site-manager" className="block text-[13px] font-bold text-gray-700 mb-1.5">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
-                    <select
-                      id="new-job-site-manager"
-                      value={newJobSiteManagerId}
-                      onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-md text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option value="">미지정</option>
-                      {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                  </div>
-                </div>
 
                 {/* 정원 · 기간 · 마감시각 */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -4354,8 +4352,33 @@ export function Jobs() {
                     error={newJobValidationIssue?.field === "payInfo" ? newJobValidationIssue.message : undefined}
                     inputClassName="min-h-[84px] resize-none"
                   />
+                </section>
 
-                  <div className="border-t border-border pt-4">
+                <EditSection
+                  title="추가 설정"
+                  summary={[
+                    newJobSiteManagerId ? `담당 ${siteManagers.find((manager) => manager.id === newJobSiteManagerId)?.name ?? "지정됨"}` : "담당자 미지정",
+                    newJobPayType ? `대표 단가 ${newJobPayType}${newJobPayType !== "협의" && newJobPayAmount !== "" ? ` ${Number(newJobPayAmount).toLocaleString()}원` : ""}` : "대표 단가 미지정",
+                  ].join(" · ")}
+                  open={newJobOptionsOpen}
+                  onToggle={() => setNewJobOptionsOpen((open) => !open)}
+                >
+                  {/* 현장매니저 — 만남장소·첫날 안내 발송 담당(선택). 목록 관리는 설정 › 팀·권한. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="new-job-site-manager" className="block text-[13px] font-bold text-gray-700 mb-1.5">현장매니저 <span className="text-muted-foreground font-semibold">(선택)</span></label>
+                      <select
+                        id="new-job-site-manager"
+                        value={newJobSiteManagerId}
+                        onChange={(e) => setNewJobSiteManagerId(e.target.value === "" ? "" : Number(e.target.value))}
+                        className="pr-8 w-full px-3.5 py-2.5 border border-border-strong rounded-md text-[14px] bg-input-background focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <option value="">미지정</option>
+                        {siteManagers.filter((m) => m.active || m.id === newJobSiteManagerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
                     <div className="mb-3 text-[12px] font-bold text-muted-foreground">목록 요약용 정보 <span className="font-semibold">(선택)</span></div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <SelectField
@@ -4380,11 +4403,12 @@ export function Jobs() {
                       )}
                     </div>
                   </div>
-                </section>
+                </EditSection>
 
                 {/* 긴급 건(SOS)에서 파생된 공고 추적용 — 화면 비표시(향후 공고↔긴급건 연결) */}
                 {newJobSosId && <input type="hidden" name="sos_id" value={newJobSosId} readOnly />}
               </div>
+              )}
 
               {/* 선택 근무 상세 + AI 응대 근거 — 공고별 필수 위치와 급여는 위에서 상시 노출하고,
                   근무시간·시작일·정책 참고정보만 필요할 때 펼친다. */}
@@ -4443,8 +4467,8 @@ export function Jobs() {
               {/* J 타겟 노출 — 접이식 밖 독립 섹션(D9): 등록 시에도 항상 보이게. internal/both만(external은 pull 미노출). */}
               {channelDrafts && newJobMode !== "external" && (
                 <div className="bg-card border border-border-strong rounded-2xl shadow-sm p-5">
-                  <div className="text-[13px] font-bold text-foreground mb-0.5">노출 대상 — 이 공고를 누구에게 보여줄까요</div>
-                  <div className="text-[12px] text-muted-foreground mb-3">맞춤 공고 링크에서 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
+                  <div className="text-[13px] font-bold text-foreground mb-0.5">노출 대상</div>
+                  <div className="text-[12px] text-muted-foreground mb-3">맞춤 공고 링크에서 전체 인력풀에게 보일지, 지정 대상에게만 보일지 정합니다.</div>
                   <ExposureEditor
                     value={newJobExposure}
                     onChange={setNewJobExposure}
@@ -4677,26 +4701,18 @@ export function Jobs() {
                     </>
                 </EditSection>
 
-                {/* 노출 대상 [접이식] — internal/both일 때만(맞춤 공고 링크 노출 채널). external은 게시 링크 유통이라 섹션 자체 비노출. */}
+                {/* 노출 요약·경고는 항상 보이고, 조건 편집만 ExposureEditor 안에서 접는다. */}
                 {editForm.recruitMode !== "external" && (
-                  <EditSection
-                    title="노출 대상"
-                    summary={exposureSummary(editForm)}
-                    open={editOpenSections.exposure}
-                    onToggle={() => setEditOpenSections((s) => ({ ...s, exposure: !s.exposure }))}
-                  >
-                    <>
-                      {/* 등록 모달과 같은 설명 한 줄 — 수정에만 없어서 같은 섹션이 다르게 읽혔다. */}
-                      <p className="text-[12px] text-muted-foreground -mt-1">맞춤 공고 링크에서 전체 인재풀에게 보일지, 지정 대상에게만 보일지 정합니다.</p>
-                      <ExposureEditor
-                        value={editForm.exposureDraft}
-                        onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
-                        jobId={Number(editForm.id)}
-                        /* 방금 고른 거리 기준으로 미리보기 계산 — 저장된 기준으로 재면 같은 모달에서 296명을 보고 190명을 저장하게 된다 */
-                        distanceBasis={editForm.distanceBasis}
-                      />
-                    </>
-                  </EditSection>
+                  <div className="bg-card border border-border-strong rounded-2xl p-5">
+                    <div className="text-[13px] font-bold text-foreground mb-3">노출 대상</div>
+                    <ExposureEditor
+                      value={editForm.exposureDraft}
+                      onChange={(next) => setEditForm({ ...editForm, exposureDraft: next })}
+                      jobId={Number(editForm.id)}
+                      /* 방금 고른 거리 기준으로 미리보기 계산 — 저장된 기준과 편집 중 기준을 섞지 않는다. */
+                      distanceBasis={editForm.distanceBasis}
+                    />
+                  </div>
                 )}
 
                 {/* 근무 상세 · AI 응대 근거 (선택) [접이식] — 섹션명·구성을 등록 모달의 같은 섹션과 맞춘다(맞춤 공고 링크 카드 표시 + AI 응대 근거). */}
@@ -4877,7 +4893,7 @@ export function Jobs() {
         </Modal>
       )}
 
-      {/* 등록 완료 후속 단계 — 연속 등록 또는 인재풀 추천 명단 확인으로 바로 이어 준다. */}
+      {/* 등록 완료 후속 단계 — 연속 등록 또는 인력풀 추천 명단 확인으로 바로 이어 준다. */}
       {registrationFollowup && (
         <Modal
           open={Boolean(registrationFollowup)}
@@ -5107,7 +5123,7 @@ export function Jobs() {
                 <div className="mt-3 px-3 py-2 rounded-lg bg-yellow-50 border border-warning/35 text-[12px] text-warning-strong leading-relaxed">
                   이 공고는 <b>지정 노출</b>이라 노출 명단 밖 <b>{announceModal.dropped?.total}명</b>이 대상에서 빠졌어요
                   {(announceModal.dropped?.promised ?? 0) > 0 && <> — 그중 <b>{announceModal.dropped?.promised}명</b>은 충원 안내 이력 보유자·선탑 완료자예요</>}.
-                  이분들께도 알리려면 노출 명단을 넓히거나 인재풀에서 직접 문자를 보내세요.
+                  이분들께도 알리려면 노출 명단을 넓히거나 인력풀에서 직접 문자를 보내세요.
                 </div>
               )}
               {/* 야간(KST 21~08)엔 발송하지 않는다 — engage와 동일 원칙(isNightKst). */}
@@ -5173,7 +5189,7 @@ export function Jobs() {
                   </div>
                 )}
                 {boardPolicy.allowCandidateMutation && candState !== "error" && (
-                  <Button variant="secondary" onClick={openPicker} className="mt-3 w-full"><UserPlus size={15} /> 인재풀에서 후보 추가</Button>
+                  <Button variant="secondary" onClick={openPicker} className="mt-3 w-full"><UserPlus size={15} /> 인력풀에서 후보 추가</Button>
                 )}
                 {boardPolicy.allowDispatch && candState !== "error" && unsentCount > 0 && (
                   <>
@@ -5195,7 +5211,7 @@ export function Jobs() {
                     <Button variant="primary" onClick={dispatchUnsent} isLoading={dispatching} disabled={globalAgentMode.state !== "ready"} aria-describedby={boardAgentModeCopy.kind !== "auto" ? "job-dispatch-agent-mode-status" : undefined} className="mt-3 w-full">
                         {!dispatching && <Sparkles size={15} />} 스크리닝 문자 발송 ({unsentCount}명)
                       </Button>
-                    <p className="mt-1.5 text-[12px] text-muted-foreground">이 공고의 첫 안내 기록 없음 {unsentCount}명 · 인재풀에서 보낸 안내는 별도 확인</p>
+                    <p className="mt-1.5 text-[12px] text-muted-foreground">이 공고의 첫 안내 기록 없음 {unsentCount}명 · 인력풀에서 보낸 안내는 별도 확인</p>
                   </>
                 )}
               </div>
@@ -5466,17 +5482,17 @@ export function Jobs() {
         )}
       </AnimatePresence>
 
-      {/* 인재풀에서 후보 추가 — 피커 모달 */}
+      {/* 인력풀에서 후보 추가 — 피커 모달 */}
       {pickerOpen && (
         <Modal bare open={pickerOpen} onClose={() => setPickerOpen(false)} size="md"
                title="대상 추가"
                className="">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-strong">
               <div>
-                <h2 className="text-[16px] font-extrabold text-foreground flex items-center gap-2"><UserPlus size={18} className="text-copilot" /> 인재풀에서 후보 추가</h2>
+                <h2 className="text-[16px] font-extrabold text-foreground flex items-center gap-2"><UserPlus size={18} className="text-copilot" /> 인력풀에서 후보 추가</h2>
                 <p className="text-[12px] text-muted-foreground mt-0.5">선택한 분들을 <b>미발송 후보</b>로 추가합니다. 컨택(문자 발송)은 이후 매니저가 진행해요.</p>
               </div>
-              <Button variant="ghost" size="icon" aria-label="인재풀 선택 창 닫기" onClick={() => setPickerOpen(false)}><X size={22} /></Button>
+              <Button variant="ghost" size="icon" aria-label="인력풀 선택 창 닫기" onClick={() => setPickerOpen(false)}><X size={22} /></Button>
             </div>
             <div className="px-6 py-3 border-b border-muted">
               <div className="relative">
@@ -5485,7 +5501,7 @@ export function Jobs() {
                   type="text"
                   value={pickerQuery}
                   onChange={(e) => setPickerQuery(e.target.value)}
-                  aria-label="인재풀 후보 검색"
+                  aria-label="인력풀 후보 검색"
                   placeholder="이름, 연락처, 지점 검색"
                   className="bg-input-background/90 font-medium shadow-inset hover:border-foreground/25 min-h-11 w-full pl-9 pr-3 py-2.5 border border-border-strong rounded-2xl text-sm focus:outline-none focus-visible:border-foreground/35 focus-visible:ring-2 focus-visible:ring-ring"
                 />
@@ -5496,13 +5512,13 @@ export function Jobs() {
               {!poolLoading && poolError && (
                 <div className="mx-1 rounded-2xl border border-error/30 bg-error-soft p-4 text-center" role="alert">
                   <div className="text-[13px] font-bold text-error-strong">{poolError}</div>
-                  <div className="mt-1 text-[12px] text-error-strong">빈 인재풀이 아닙니다. 다시 불러온 뒤 후보를 선택해 주세요.</div>
+                  <div className="mt-1 text-[12px] text-error-strong">빈 인력풀이 아닙니다. 다시 불러온 뒤 후보를 선택해 주세요.</div>
                   <Button variant="secondary" size="chip" className="mt-3 border-error/30 text-error-strong hover:bg-error-soft" onClick={() => void loadPool()}>
                     <RefreshCw size={14} /> 다시 시도
                   </Button>
                 </div>
               )}
-              {!poolLoading && !poolError && pickablePool.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-10">추가할 수 있는 인재풀 후보가 없어요</div>}
+              {!poolLoading && !poolError && pickablePool.length === 0 && <div className="text-[13px] text-muted-foreground text-center py-10">추가할 수 있는 인력풀 후보가 없어요</div>}
               {!poolLoading && !poolError && pickablePool.map((p) => {
                 const sel = picked.has(p.id);
                 const conflict = p.current_job_id != null && p.current_job_id !== candPanel?.jobId;

@@ -124,6 +124,8 @@ test("공고 등록 모달의 메모 우선 입력과 차량 토글이 정상 �
   await memo.fill("성수 물류센터에서 강남권 배송, 오전 7시 시작, 3명 모집");
   await expect(generateButton).toBeEnabled();
 
+  await expect(dialog.getByRole("heading", { name: "이번 공고의 근무 위치" })).not.toBeVisible();
+  await dialog.getByRole("button", { name: "미리 정할 조건 (선택)" }).click();
   await expect(dialog.getByRole("heading", { name: "이번 공고의 근무 위치" })).toBeVisible();
 
   const vehicleSwitch = dialog.getByRole("switch", { name: "차량(이륜/사륜) 필요" });
@@ -256,6 +258,7 @@ test("추천 노출 조건을 한 번에 적용하고 관리자가 바로 수정
   await expect(dialog).toContainText("추천 적용 시 맞춤 링크 16명 · 현재 문자 안내 가능 12명");
   await applySuggestion.click();
 
+  await dialog.getByRole("button", { name: "조건 직접 수정" }).click();
   await expect(dialog.getByRole("button", { name: /지정 노출/ })).toHaveAttribute("aria-pressed", "true");
   for (const label of ["평일 오전 8", "미확인 2", "있음", "10km"]) {
     await expect(dialog.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");

@@ -3,7 +3,7 @@ import test from "node:test";
 
 const adminNav = await import(new URL("./nav.ts", import.meta.url).href) as typeof import("./nav");
 
-const { NAV_ITEMS, resolveHeader } = adminNav;
+const { NAV_ITEMS, MANAGEMENT_NAV_ITEMS, resolveHeader } = adminNav;
 
 test("manager navigation exposes one applicant-operations entry", () => {
   const operationsItems = NAV_ITEMS.filter((item) =>
@@ -12,14 +12,14 @@ test("manager navigation exposes one applicant-operations entry", () => {
 
   assert.deepEqual(
     operationsItems.map(({ label, path }) => ({ label, path })),
-    [{ label: "지원자 운영", path: "/live" }],
+    [{ label: "지원자 대화", path: "/live" }],
   );
 });
 
 test("live workspace uses task-oriented header copy", () => {
   assert.deepEqual(resolveHeader("/live"), {
-    pageTitle: "지원자 운영",
-    crumb: "채용 운영 > 지원자 운영",
+    pageTitle: "지원자 대화",
+    crumb: "채용 운영 > 지원자 대화",
   });
 });
 
@@ -29,17 +29,17 @@ test("navigation separates the people pool from job-centered recruiting", () => 
   assert.deepEqual(
     roleItems.map(({ label, path }) => ({ label, path })),
     [
-      { label: "인재풀", path: "/pipeline" },
-      { label: "채용공고", path: "/jobs" },
+      { label: "모집", path: "/jobs" },
+      { label: "인력풀", path: "/pipeline" },
     ],
   );
   assert.deepEqual(resolveHeader("/pipeline"), {
-    pageTitle: "인재풀",
-    crumb: "인재 관리 > 인재풀",
+    pageTitle: "인력풀",
+    crumb: "인재 관리 > 인력풀",
   });
   assert.deepEqual(resolveHeader("/jobs"), {
-    pageTitle: "채용공고",
-    crumb: "채용 운영 > 채용공고",
+    pageTitle: "모집",
+    crumb: "채용 운영 > 모집",
   });
 });
 
@@ -145,4 +145,16 @@ test("queue refresh preserves a valid or externally opened selection", () => {
 
 test("queue completion clears the selection when no work remains", () => {
   assert.equal(nextQueueApplicantId!([11], [], 11), null);
+});
+
+// 주요 업무가 설정에 묻히지 않고 기존 관리 화면도 모두 접근 가능해야 한다.
+test("four daily destinations are shared in journey order", () => {
+  assert.deepEqual(NAV_ITEMS.map(({ path }) => path), ["/", "/jobs", "/live", "/pipeline"]);
+  assert.ok(NAV_ITEMS.every(({ shortLabel }) => Boolean(shortLabel)));
+});
+
+test("management destinations remain available outside the daily navigation", () => {
+  assert.deepEqual(MANAGEMENT_NAV_ITEMS.map(({ path }) => path), ["/brain", "/reengagement", "/shippers", "/settings"]);
+  assert.deepEqual(resolveHeader("/inbox"), resolveHeader("/live"));
+  assert.equal(resolveHeader("/jobs/123").pageTitle, "모집");
 });
