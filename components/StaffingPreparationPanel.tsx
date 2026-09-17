@@ -57,7 +57,7 @@ function PreparationDetails({ preparation }: { preparation: StaffingPreparation 
   </div>;
 }
 
-export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "follow_up", allowEmptyInitialRecord = false, allowNewConfirmation = true, recordOnly = false, onRecordClose, onRecordSaved, onRecordDirtyChange }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: StaffingRecordMode; allowEmptyInitialRecord?: boolean; allowNewConfirmation?: boolean; recordOnly?: boolean; onRecordClose?: () => void; onRecordSaved?: () => void; onRecordDirtyChange?: (dirty: boolean) => void }) {
+export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialDate = "", initialOpen = false, initialApplicantId, initialEditorMode = "note", allowEmptyInitialRecord = false, allowNewConfirmation = true, recordOnly = false, onRecordClose, onRecordSaved, onRecordDirtyChange }: { jobId: number; jobTitle?: string; candidates: Candidate[]; initialDate?: string; initialOpen?: boolean; initialApplicantId?: number; initialEditorMode?: StaffingRecordMode | "note"; allowEmptyInitialRecord?: boolean; allowNewConfirmation?: boolean; recordOnly?: boolean; onRecordClose?: () => void; onRecordSaved?: () => void; onRecordDirtyChange?: (dirty: boolean) => void }) {
   const confirm = useConfirm();
   const { mutate } = useSWRConfig();
   const [open, setOpen] = useState(initialOpen || recordOnly);
@@ -73,7 +73,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
   const [date, setDate] = useState(initialDate);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Candidate | null>(null);
-  const [editorMode, setEditorMode] = useState<EditorMode>("follow_up");
+  const [editorMode, setEditorMode] = useState<EditorMode>("note");
   const [followUpFilter, setFollowUpFilter] = useState("all");
   const [ownerQuery, setOwnerQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(5);
@@ -122,7 +122,7 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [open, jobId, retry]);
-  const startEditing = (candidate: Candidate, mode: EditorMode = "follow_up") => {
+  const startEditing = (candidate: Candidate, mode: EditorMode = "note") => {
     const snapshot = snapshots.find((item) => item.applicant_id === candidate.applicant_id);
     const saved = parseStaffingPreparation(snapshot?.preparation) ?? emptyPreparation();
     setBaseEventId(snapshot?.event_id ?? null); setConflict(null); setPreservedDraft(null);
@@ -239,6 +239,15 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
     } catch (error) { setSaveError(`${error instanceof Error ? error.message : "저장 실패"}. 입력 내용은 유지됩니다. 다시 저장해주세요.`); }
     finally { setSaving(false); }
   };
+  const saveNoteOnly = async () => {
+    if (!editing || saving || conflict || noteDraft.busy || !noteDraft.note.trim()) return;
+    if (JSON.stringify(draft) !== initial && !await confirm({
+      title: "직접 입력한 변경을 제외할까요?",
+      description: "메모 원문만 추가하고 기존 진행 기록은 유지합니다. 직접 입력에서 바꾼 내용은 저장되지 않습니다.",
+      confirmText: "변경 제외하고 메모 저장", destructive: true,
+    })) return;
+    await save(parseStaffingPreparation(JSON.parse(initial)) ?? emptyPreparation());
+  };
   const dates = [...new Set([...snapshots.flatMap((item) => item.preparation?.dates.map((day) => day.date) ?? []),
     ...suggestions.flatMap((item) => item.date ? [item.date] : [])])].sort();
   const conflictsFor = (applicantId: number, preparation: StaffingPreparation | null | undefined) => otherPrimaries.filter((other) => other.applicant_id === applicantId
@@ -340,10 +349,13 @@ export function StaffingPreparationPanel({ jobId, jobTitle, candidates, initialD
       {jobTitle && <p className="mb-3 break-words font-medium text-muted-foreground">{jobTitle}</p>}
       {loadError || targetError ? <p role="alert" className="text-error-strong">{loadError || targetError}</p> : <p role="status">진행 기록을 불러오는 중…</p>}
     </Modal>}
-    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "메모를 그대로 남기거나, AI가 정리한 내용도 함께 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <div className="flex w-full flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!!conflict || !noteDraft.note.trim() || saving || noteDraft.busy} onClick={() => void save(parseStaffingPreparation(JSON.parse(initial)) ?? emptyPreparation())}>메모만 저장</Button><Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !!noteDraft.selected.length && !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button></div> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
+    <Modal open={!!editing && !contactCandidate} onClose={() => void closeEditor()} closeOnOutside={false} busy={saving || noteDraft.busy} title={`${editing?.applicants?.name ?? "후보"} 진행 기록`} description={editorMode === "note" ? "메모를 그대로 남기거나, AI가 정리한 내용도 함께 저장하세요." : "기록할 내용을 골라 입력하세요. 저장하면 팀에 공유됩니다."} footer={editorMode === "note" ? <div className="flex w-full flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!!conflict || !noteDraft.note.trim() || saving || noteDraft.busy} onClick={() => void saveNoteOnly()}>메모만 저장</Button><Button type="submit" form="staffing-note-form" disabled={!!conflict || (noteDraft.proposal ? !!noteDraft.selected.length && !noteDraft.prepared : !noteDraft.note.trim())} isLoading={saving || noteDraft.busy}>{noteDraft.proposal ? "확인하고 저장" : "AI로 정리"}</Button></div> : <Button onClick={() => void save()} disabled={!!conflict} isLoading={saving}>진행 기록 저장</Button>}>
       <div className="space-y-4 text-sm">
         {jobTitle && <p className="break-words font-medium text-muted-foreground">{jobTitle}</p>}
-        <div className="flex gap-2"><Button variant={editorMode === "note" ? "primary" : "ghost"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("note")}>메모로 기록</Button><Button variant={editorMode === "note" ? "ghost" : "secondary"} disabled={saving || noteDraft.busy} onClick={() => selectEditorMode("follow_up")}>직접 입력</Button></div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-semibold">{editorMode === "note" ? "메모로 기록" : "직접 입력"}</p>
+          <Button variant="ghost" disabled={saving || noteDraft.busy} onClick={() => selectEditorMode(editorMode === "note" ? "follow_up" : "note")}>{editorMode === "note" ? "직접 입력" : "메모로 기록"}</Button>
+        </div>
         {editorMode !== "note" && <div role="group" aria-label="기록할 내용" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Object.entries(editorModeLabels).map(([mode, label]) => <button key={mode} type="button" aria-pressed={editorMode === mode} disabled={saving} onClick={() => selectEditorMode(mode as EditorMode)} className={`min-h-11 rounded-lg border px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${editorMode === mode ? "border-primary bg-primary text-primary-foreground" : "border-border-strong bg-background"}`}>{label}</button>)}
         </div>}

@@ -64,10 +64,20 @@ function previousValue(current: StaffingPreparation, change: StaffingNoteChange)
 export function StaffingNoteDraft({ state, current, disabled, onGenerate, onSave }: {
   state: ReturnType<typeof useStaffingNoteDraft>; current: StaffingPreparation; disabled: boolean; onGenerate: () => void; onSave: (draft: StaffingPreparation) => void;
 }) {
+  const [dateOpen, setDateOpen] = useState(false);
+  const today = staffingToday();
+  const isToday = state.referenceDate === today;
+  const showDateInput = dateOpen || !isToday;
   return <form id="staffing-note-form" className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (disabled || state.busy) return; if (state.proposal && (!state.selected.length || state.prepared)) onSave(state.prepared ?? current); else if (!state.proposal) onGenerate(); }}>
-    <label className="block space-y-2"><span className="font-semibold">통화·진행 메모</span><textarea aria-label="통화·진행 메모" value={state.note} onChange={(event) => state.changeNote(event.target.value)} disabled={disabled || state.busy} maxLength={1000} rows={4} className={`${fieldClass} py-3`} placeholder="예: 오늘 통화함. 9/16 오전 선탑 희망. 내일 첫 상차지 확인 후 다시 전화하기." /></label>
-    <p className="text-sm text-muted-foreground">원문은 팀 이력에 보존됩니다. 메모만 저장하면 직접 입력·AI 제안은 반영하지 않습니다.</p>
-    <div className="flex flex-wrap items-center gap-3"><label htmlFor="staffing-note-date" className="text-muted-foreground">메모 기준일</label><input id="staffing-note-date" type="date" value={state.referenceDate} max={staffingToday()} onChange={(event) => state.changeDate(event.target.value)} disabled={disabled || state.busy} className={`${fieldClass} w-auto max-w-full`} /></div>
+    <label className="block space-y-2"><span className="font-semibold">통화·진행 메모</span><textarea aria-label="통화·진행 메모" aria-describedby="staffing-note-help" value={state.note} onChange={(event) => state.changeNote(event.target.value)} disabled={disabled || state.busy} maxLength={1000} rows={5} className={`${fieldClass} py-3`} placeholder="예: 오늘 통화함. 다음 주 오전 선탑 희망. 내일 상차지 확인 후 다시 전화하기." /></label>
+    <p id="staffing-note-help" className="text-sm text-muted-foreground">원문은 팀 이력에 남습니다. 메모만 저장하면 직접 입력·AI 제안은 반영하지 않습니다.</p>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className={isToday ? "text-sm text-muted-foreground" : "text-sm font-medium"}>{isToday ? `오늘 기준 · ${today}` : `메모 기준일 · ${state.referenceDate || "날짜를 선택해주세요"}`}</p>
+        {isToday && <Button type="button" variant="ghost" aria-expanded={showDateInput} aria-controls="staffing-note-date-fields" disabled={disabled || state.busy} onClick={() => setDateOpen((value) => !value)}>{dateOpen ? "기준일 접기" : "기준일 변경"}</Button>}
+      </div>
+      {showDateInput && <div id="staffing-note-date-fields" className="flex flex-wrap items-center gap-3"><label htmlFor="staffing-note-date" className="text-sm text-muted-foreground">메모 기준일</label><input id="staffing-note-date" type="date" value={state.referenceDate} max={today} onChange={(event) => state.changeDate(event.target.value)} disabled={disabled || state.busy} className={`${fieldClass} w-auto max-w-full`} /></div>}
+    </div>
     {state.busy && <p role="status" className="text-muted-foreground">메모에서 기록할 내용을 정리하고 있어요…</p>}
     {state.error && <p role="alert" className="text-error-strong">{state.error}</p>}
     {state.proposal && <section aria-label="AI 기록 초안" className="space-y-3">
