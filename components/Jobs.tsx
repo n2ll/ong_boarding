@@ -11,6 +11,7 @@ import { staffingDateBoardDates } from "@/lib/admin/staffing-date-board";
 import { StaffingDateBoard } from "./StaffingDateBoard";
 import { JobPostingBodyEditor } from "./JobPostingBodyEditor";
 import { staffingToday } from "@/lib/admin/staffing-preparation";
+import { parseStaffingRecordEntry, type StaffingRecordMode } from "@/lib/admin/staffing-record-entry";
 import { ApplicantDetailPanel } from "./ApplicantDetailPanel";
 import { useConfirm } from "./ConfirmDialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem } from "./ui/dropdown-menu";
@@ -969,13 +970,14 @@ export function Jobs() {
   const [announcing, setAnnouncing] = useState(false);
   const [announceBusyId, setAnnounceBusyId] = useState<string | null>(null);
   // 공고별 지원자 보드
-  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number; followUpMode?: "follow_up" | "participation" } | null>(null);
+  const [candPanel, setCandPanel] = useState<{ jobId: number; title: string; usesSlots: boolean; staffingDate?: string; followUpApplicantId?: number; followUpMode?: StaffingRecordMode; allowEmptyInitialRecord?: boolean } | null>(null);
   const [requestedStaffingStart, setRequestedStaffingStart] = useState<{ date: string } | undefined>();
   const [verifiedStaffingLink, setVerifiedStaffingLink] = useState<string | null>(null);
   const openedStaffingLink = useRef<string | null>(null);
   const refreshedStaffingLink = useRef<string | null>(null);
   const openedFollowUpLink = useRef<string | null>(null);
   const refreshedFollowUpLink = useRef<string | null>(null);
+  const [verifiedFollowUpLink, setVerifiedFollowUpLink] = useState<string | null>(null);
   const candidateBoardRef = useRef<HTMLDivElement>(null);
   const candidateBoardReturnFocusRef = useRef<HTMLElement | null>(null);
   const candidateBoardWasOpenRef = useRef(false);
@@ -1219,8 +1221,8 @@ export function Jobs() {
     }
   };
 
-  const openCandidates = (job: JobRow, staffingDate?: string, followUpApplicantId?: number, followUpMode?: "follow_up" | "participation") => {
-    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate, followUpApplicantId, followUpMode });
+  const openCandidates = (job: JobRow, staffingDate?: string, followUpApplicantId?: number, followUpMode?: StaffingRecordMode, allowEmptyInitialRecord = false) => {
+    setCandPanel({ jobId: Number(job.id), title: job.title, usesSlots: job.usesSlots, staffingDate, followUpApplicantId, followUpMode, allowEmptyInitialRecord });
     setCandidates([]);
     setCandLoaded(false);
     setCandError(null);
@@ -1411,28 +1413,36 @@ export function Jobs() {
   );
   const loadJobs = useCallback(() => { void mutateJobs(); }, [mutateJobs]);
   useEffect(() => {
-    const jobParam = searchParams.get("followup_job");
-    const applicantParam = searchParams.get("followup_applicant");
-    if (!jobParam && !applicantParam) { openedFollowUpLink.current = null; refreshedFollowUpLink.current = null; return; }
-    const mode = searchParams.get("followup_mode") === "participation" ? "participation" : "follow_up";
-    const key = `${jobParam}:${applicantParam}:${mode}`;
+    const isRecordEntry = ["record_job", "record_applicant", "record_mode"].some((key) => searchParams.has(key));
+    const entry = isRecordEntry ? parseStaffingRecordEntry(searchParams) : null;
+    const jobParam = isRecordEntry ? searchParams.get("record_job") : searchParams.get("followup_job");
+    const applicantParam = isRecordEntry ? searchParams.get("record_applicant") : searchParams.get("followup_applicant");
+    if (!isRecordEntry && !jobParam && !applicantParam) { openedFollowUpLink.current = null; refreshedFollowUpLink.current = null; setVerifiedFollowUpLink(null); return; }
+    // The navigation guard already handled discarded edits. A same-page link must
+    // also unmount the old detail form, even if the destination lookup fails.
+    if (isRecordEntry && selectedApplicantId !== null) { setSelectedApplicantId(null); setConfirmSignal(null); }
+    const mode = isRecordEntry ? entry?.mode ?? "follow_up" : searchParams.get("followup_mode") === "participation" ? "participation" : "follow_up";
+    const key = `${isRecordEntry}:${jobParam}:${applicantParam}:${mode}`;
     if (openedFollowUpLink.current === key || !jobsApi || jobsError) return;
     const validId = (value: string | null) => !!value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
-    const validLink = validId(jobParam) && validId(applicantParam);
+    const validLink = isRecordEntry ? entry !== null : validId(jobParam) && validId(applicantParam);
     const job = validLink ? jobs.find((item) => Number(item.id) === Number(jobParam)) : undefined;
-    // A fresh follow-up queue can refer to a job absent from the shared SWR cache.
-    // Force one fresh lookup even when SWR's deduplication window suppresses a mount fetch.
-    if (validLink && !job && refreshedFollowUpLink.current !== key) {
-      refreshedFollowUpLink.current = key;
-      void mutateJobs().catch(() => { /* The normal job-list error UI offers retry. */ });
+    // Conversation links verify cached jobs too; deleted jobs must not open an empty editor.
+    if (validLink && ((isRecordEntry && verifiedFollowUpLink !== key) || (!job && refreshedFollowUpLink.current !== key))) {
+      if (refreshedFollowUpLink.current !== key) {
+        refreshedFollowUpLink.current = key;
+        void mutateJobs().then(() => {
+          if (refreshedFollowUpLink.current === key) setVerifiedFollowUpLink(key);
+        }).catch(() => { refreshedFollowUpLink.current = null; });
+      }
       return;
     }
-    if (!job && jobsValidating) return;
+    if (jobsValidating) return;
     openedFollowUpLink.current = key;
-    if (job) openCandidates(job, undefined, Number(applicantParam), mode);
-    else toast.error("선택한 후속 연락의 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
+    if (job) openCandidates(job, undefined, Number(applicantParam), mode, isRecordEntry);
+    else toast.error("선택한 진행 기록의 공고를 찾을 수 없어요. 공고 목록을 확인해주세요.");
     router.replace("/jobs", { scroll: false });
-  }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs]);
+  }, [searchParams, jobsApi, jobsError, jobsValidating, jobs, router, mutateJobs, verifiedFollowUpLink, selectedApplicantId]);
 
   useEffect(() => {
     const jobParam = searchParams.get("staffing_job");
@@ -1441,7 +1451,7 @@ export function Jobs() {
     if (jobParam === null && dateParam === null && startParam === null) {
       openedStaffingLink.current = null; refreshedStaffingLink.current = null; setVerifiedStaffingLink(null); return;
     }
-    if (searchParams.has("followup_job") || searchParams.has("followup_applicant")) return;
+    if (["followup_job", "followup_applicant", "record_job", "record_applicant", "record_mode"].some((key) => searchParams.has(key))) return;
     const key = `${jobParam}:${dateParam}:${startParam}`;
     if (openedStaffingLink.current === key) return;
     const date = dateParam ?? startParam;
@@ -5208,7 +5218,7 @@ export function Jobs() {
                 )}
                 {candState === "empty" && <div className="text-[13px] text-muted-foreground text-center py-8">연결된 후보가 없어요</div>}
 
-              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}:${candPanel.followUpApplicantId ?? ""}:${candPanel.followUpMode ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialApplicantId={candPanel.followUpApplicantId} initialEditorMode={candPanel.followUpMode} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
+              {candLoaded && candidates.length > 0 && <StaffingPreparationPanel key={`${candPanel.jobId}:${candPanel.staffingDate ?? ""}:${candPanel.followUpApplicantId ?? ""}:${candPanel.followUpMode ?? ""}`} jobId={candPanel.jobId} jobTitle={candPanel.title} candidates={candidates} initialDate={candPanel.staffingDate} initialApplicantId={candPanel.followUpApplicantId} initialEditorMode={candPanel.followUpMode} allowEmptyInitialRecord={candPanel.allowEmptyInitialRecord} initialOpen allowNewConfirmation={boardPolicy.allowCandidateMutation} />}
 
                 {acquisitionView.state === "loading" && (
                   <div aria-busy="true" role="status" className="rounded-2xl border border-border-strong bg-card p-4">

@@ -15,6 +15,7 @@ import { isGeneralLineJob } from "@/lib/agent/general-line";
 import { isLiveLinkResolved, type LiveJobLink } from "@/lib/candidate-links";
 import type { ConversationJobContext } from "@/lib/conversation-thread-view";
 import { ConversationThread } from "./ConversationThread";
+import { StaffingRecordLinks } from "./StaffingRecordLinks";
 import { useConfirm } from "./ConfirmDialog";
 import { FollowupSendModal, type FollowupKind } from "./FollowupSendModal";
 import { applicantAttentionMeta, applicantConfirmationAction } from "@/lib/admin/applicant-detail";
@@ -1356,6 +1357,7 @@ export function ApplicantDetailContent({
 
       {/* 접이식 상세 — 기본 접힘. 헤더 클릭으로 필요한 것만 펼친다 */}
       <div className="flex-1 overflow-y-auto p-5 space-y-3 min-h-0">
+        {focusCand && focusGeneralLine && <StaffingRecordLinks jobId={focusCand.job_id} jobTitle={focusCand.job_title || `공고 #${focusCand.job_id}`} applicantId={a.id} />}
         {/* 지원 공고 — 후보 목록 + 진행 체크리스트 (진행 중 공고가 있으면 기본 펼침) */}
         {!isPurePool && (
           <CollapsibleSection
@@ -1628,7 +1630,7 @@ export function ApplicantDetailContent({
             {/* 선탑(동승) 이력 — 예정→완료 2단계 원장. 완료 기록 시 배지 + 새 공고 안내 S그룹(최우선). */}
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[12px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">선탑(동승) 이력</span>
+                <span className="text-[12px] font-bold text-muted-foreground" title="선탑 = 현장을 미리 경험한 프리보딩. 예정→완료→투입 단계로 남겨 전환율을 추적해요">인력풀 선탑(동승) 이력</span>
                 {!suntopFormOpen ? (
                   <div className="flex items-center gap-2">
                     <button onClick={() => openSuntopForm("scheduled")} disabled={busy} className="text-[12px] font-bold text-warning-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:opacity-40">+ 예정</button>
@@ -1638,6 +1640,7 @@ export function ApplicantDetailContent({
                   <button type="button" onClick={discardSuntopForm} disabled={busy} className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-[12px] font-bold text-muted-foreground hover:underline rounded disabled:opacity-40">입력 취소</button>
                 )}
               </div>
+              {focusGeneralLine && <p className="mt-2 text-xs text-muted-foreground">공고별 진행 기록과 별도인 인력풀 이력입니다. 현재 공고의 일정·참여 결과는 위 ‘이 공고의 진행 기록’에 남겨주세요.</p>}
               {/* 3단계 진행 표시 — 예정 → 완료 → 투입(status='확정인력') */}
               <div className="flex items-center gap-1 mt-1.5 text-[12px] font-bold">
                 {([["예정", !!detail.suntop?.scheduled], ["완료", !!detail.suntop?.done], ["투입", a.status === "확정인력"]] as [string, boolean][]).map(([label, on], i) => (
