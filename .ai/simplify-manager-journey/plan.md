@@ -3,4 +3,4 @@
 - [x] 홈의 업무 우선 배치 및 대화의 처리 완료 버튼 — remaining_essential_audit.
 - [x] 공고 선택 입력과 노출 상세의 점진적 공개 — posting_missing_conditions.
 - [x] 통합 빌드·영향 경로 검수·차이 리뷰 — root.
-- [ ] PR 생성 — root.
+- [x] PR 생성 — [#173](https://github.com/n2ll/ong_boarding/pull/173). 운영 반영은 리뷰 후 진행.
