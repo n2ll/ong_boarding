@@ -390,8 +390,10 @@ export function ApplicantDetailContent({
   autoOpenConfirm,
   onAutoOpenConfirmConsumed,
   onDirtyChange,
+  hideStaffingRecords = false,
 }: {
   applicantId: number;
+  hideStaffingRecords?: boolean;
   jobId?: number | null;
   /** 표시 기준 공고를 부모가 들고 있을 때(드로어) — 상세 탭과 대화 탭이 같은 공고를 보게 한다.
    *  주지 않으면(응대 화면) 이 컴포넌트가 내부 state로 관리한다. */
@@ -483,7 +485,8 @@ export function ApplicantDetailContent({
   const [suntopLine, setSuntopLine] = useState("");
   const [suntopSchedAt, setSuntopSchedAt] = useState("");
   const suntopDraftDirty = suntopFormOpen && Boolean(suntopClient || suntopLine || suntopSchedAt);
-  const dirty = managedFieldsDirty || suntopDraftDirty;
+  const [staffingRecordDirty, setStaffingRecordDirty] = useState(false);
+  const dirty = managedFieldsDirty || suntopDraftDirty || staffingRecordDirty;
   // 시간대 되돌리기 진행 플래그 — 쓰는 곳(clearAvailableSlots)은 아래쪽이지만 선언은 반드시 여기,
   // 상세 로딩·실패 조기 return보다 **위**에 둔다. 핸들러 옆에 두면 상세가 도착한 렌더에서만
   // 호출돼 훅 개수가 렌더마다 달라지고, React가 그 순간 화면을 통째로 날린다(#310).
@@ -496,6 +499,7 @@ export function ApplicantDetailContent({
     setSuntopClient("");
     setSuntopLine("");
     setSuntopSchedAt("");
+    setStaffingRecordDirty(false);
   }, [applicantId]);
 
   useEffect(() => {
@@ -1357,7 +1361,16 @@ export function ApplicantDetailContent({
 
       {/* 접이식 상세 — 기본 접힘. 헤더 클릭으로 필요한 것만 펼친다 */}
       <div className="flex-1 overflow-y-auto p-5 space-y-3 min-h-0">
-        {focusCand && focusGeneralLine && <StaffingRecordLinks jobId={focusCand.job_id} jobTitle={focusCand.job_title || `공고 #${focusCand.job_id}`} applicantId={a.id} />}
+        {!hideStaffingRecords && focusCand && focusGeneralLine && <StaffingRecordLinks
+          key={`${focusCand.job_id}:${a.id}`}
+          jobId={focusCand.job_id}
+          jobTitle={focusCand.job_title || `공고 #${focusCand.job_id}`}
+          candidate={{ applicant_id: a.id, agent_stage: focusCand.agent_stage, responded_at: null, applicants: a }}
+          allowNewConfirmation={!focusCand.job_effectively_closed}
+          disabled={busy || managedFieldsDirty || suntopDraftDirty}
+          onChanged={() => { reload(); onChanged?.(); }}
+          onDirtyChange={setStaffingRecordDirty}
+        />}
         {/* 지원 공고 — 후보 목록 + 진행 체크리스트 (진행 중 공고가 있으면 기본 펼침) */}
         {!isPurePool && (
           <CollapsibleSection
@@ -1524,7 +1537,7 @@ export function ApplicantDetailContent({
         {/* 온보딩·확정 관리 — 스크리닝 완료·확정인력이면 기본 펼침 */}
         <CollapsibleSection
           title="온보딩 · 확정 관리"
-          summary={dirty ? <span className="text-warning-strong">저장 안 된 변경</span> : undefined}
+          summary={managedFieldsDirty || suntopDraftDirty ? <span className="text-warning-strong">저장 안 된 변경</span> : undefined}
           open={manageOpen}
           onToggle={() => toggleSection("manage", manageOpen)}
         >
@@ -1954,8 +1967,10 @@ export function ApplicantDetailPanel({
   resolveReturnFocus,
   docked = false,
   dockedClassName = "right-4 top-[92px] bottom-4 w-[520px] z-40",
+  hideStaffingRecords = false,
 }: {
   isOpen: boolean;
+  hideStaffingRecords?: boolean;
   onClose: () => void;
   applicantId: number | null;
   jobId?: number | null;
@@ -1999,6 +2014,13 @@ export function ApplicantDetailPanel({
     reportDirty: reportPanelDirty,
     requestTransition: requestPanelTransition,
   } = useApplicantDetailUnsavedGuard(applicantId, onDirtyChange);
+  const { reportApplicantDirty } = useAdminUnsavedNavigation();
+  const reportChatRecordDirty = useCallback((dirty: boolean) => {
+    if (applicantId == null) return;
+    const state = { applicantId, applicantName: detail?.applicant.name, dirty };
+    reportPanelDirty(state);
+    reportApplicantDirty(state);
+  }, [applicantId, detail?.applicant.name, reportPanelDirty, reportApplicantDirty]);
   // 표시 기준 공고를 드로어가 들고 있는다 — 상세 탭에서 공고를 바꾼 뒤 '대화 내역'으로 넘어가면
   // 예전엔 부르는 화면이 준 jobId로 되돌아가, 매니저가 보고 있는 공고와 **다른 공고로 답장**이 적재됐다.
   const [focusJobId, setFocusJobId] = useState<number | null>(jobId);
@@ -2244,10 +2266,22 @@ export function ApplicantDetailPanel({
                 reload={() => { reload(); onChanged?.(); }}
                 onChanged={onChanged}
                 onDirtyChange={reportPanelDirty}
+                hideStaffingRecords={hideStaffingRecords}
                 autoOpenConfirm={autoOpenConfirm}
                 onAutoOpenConfirmConsumed={onAutoOpenConfirmConsumed}
               />
             ) : a ? (
+              <>
+              {!hideStaffingRecords && focusedConversationCandidate && isGeneralLineJob({ title: focusedConversationCandidate.job_title ?? "", client_type: focusedConversationCandidate.job_client_type }) && <StaffingRecordLinks
+                key={`${focusedConversationCandidate.job_id}:${a.id}`}
+                compact
+                jobId={focusedConversationCandidate.job_id}
+                jobTitle={focusedConversationCandidate.job_title || `공고 #${focusedConversationCandidate.job_id}`}
+                candidate={{ applicant_id: a.id, agent_stage: focusedConversationCandidate.agent_stage, responded_at: null, applicants: a }}
+                allowNewConfirmation={!focusedConversationCandidate.job_effectively_closed}
+                onChanged={() => { reload(); onChanged?.(); }}
+                onDirtyChange={reportChatRecordDirty}
+              />}
               <ConversationThread
                 key={`${applicantId}:${focusJobId ?? "all"}`}
                 applicantId={applicantId}
@@ -2262,6 +2296,7 @@ export function ApplicantDetailPanel({
                 onChanged={() => { reload(); onChanged?.(); }}
                 className="flex-1 min-h-0"
               />
+              </>
             ) : loading ? (
               <div className="p-6 text-[13px] text-muted-foreground text-center">불러오는 중…</div>
             ) : (
