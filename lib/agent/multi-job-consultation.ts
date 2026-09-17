@@ -1,3 +1,4 @@
+import { smsByteLength, SMS_MAX_BYTES } from "../sms-length.ts";
 import { buildTrainingFollowup, TRAINING_FOLLOWUP_GUIDANCE } from "./training-followup.ts";
 import { CROSS_JOB_FIELD_NAMES, splitJobFacts } from "./cross-job.ts";
 import { isCollectionOnlyQuestion } from "./delivery-collection.ts";
@@ -287,6 +288,16 @@ export function readConsultationResult(out: { consultation?: unknown }, ctx: Sta
       : `${targets} 중 어느 공고에 대한 말씀인가요? 여러 공고라면 각각 알려주셔도 돼요.`;
   } else {
     reply = [...lines].map(([id, items]) => `${labels(id)}\n${[...new Set(items)].join("\n")}`).join("\n\n");
+    if (smsByteLength(reply) > SMS_MAX_BYTES) {
+      // Long answers often repeat the same registered training terms for each job.
+      // Group only identical complete blocks; never summarize or drop a condition.
+      const groups = new Map<string, string[]>();
+      for (const [id, items] of lines) {
+        const body = [...new Set(items)].join("\n");
+        groups.set(body, [...(groups.get(body) ?? []), labels(id)]);
+      }
+      reply = [...groups].map(([body, titles]) => `${titles.join(" / ")}\n${body}`).join("\n\n");
+    }
     if (verified.length) reply += "\n\n말씀하신 내용으로 이해했어요. 근무 진행 여부는 매니저가 확인 후 안내해요.";
     if (handoff) reply += `${reply ? "\n\n" : ""}확인이 필요한 내용은 매니저에게 전달할게요.`;
   }

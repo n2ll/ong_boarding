@@ -329,3 +329,23 @@ test("provider reconciliation searches a bounded window around the original send
     assert.equal(params.get("endDate"), "2026-08-20T01:30:00.000Z");
   });
 });
+
+test("oversized Korean text is rejected before provider registration", async () => {
+  await withLiveSmsEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return new Response(JSON.stringify({ groupInfo: { groupId: "should-not-send" } }), { status: 200 });
+    };
+    try {
+      const result = await sendSms("01000000000", "가".repeat(1001));
+      assert.equal(requests, 0);
+      assert.equal(result.success, false);
+      if (!result.success) {
+        assert.equal(result.failureKind, "declared");
+        assert.match(result.error ?? "", /2002.*2000/);
+      }
+    } finally { globalThis.fetch = originalFetch; }
+  });
+});

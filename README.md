@@ -40,9 +40,12 @@ npm i          # 의존성 설치
 npm run dev    # 개발 서버
 npm run build  # 프로덕션 빌드
 npm run lint   # 린트
+npm run test:core # 핵심 결정론 회귀 (Node.js 22.13 이상)
 ```
 
 환경변수는 `.env.local`에만 둔다(gitignore 대상). 키 목록·용도는 [`docs/기능설명서.md`](./docs/기능설명서.md) §9 참고.
+
+`test:core`는 자동 응대 중단·발송 안전·공고별 상담, 관리자 답변 완료, 충원 기록 저장, 공고 후속 질문을 검사한다. 외부 통신은 차단하며 DB·모델 응답은 메모리 fixture를 사용한다. 실제 DB 통합 검사와 모델 평가는 포함하지 않는다. GitHub Actions는 PR과 `main` 변경마다 이 검사와 `npm run build`(타입·린트 포함)를 실행한다. 빌드에는 가짜 공개 Supabase 설정만 사용하고 운영 인증정보는 전달하지 않는다.
 
 ## 문서
 

@@ -724,3 +724,16 @@ test("안내 번호를 다시 확인하더라도 같은 문자의 검증된 지�
   assert.deepEqual(result.consultation.region_preferences[0].regions, ["인천"]);
   assert.match(result.reply_text, /어느 공고/);
 });
+
+test("identical long training terms across jobs are quoted once without losing scope or conditions", () => {
+  const text = "성수와 강남 선탑 교육 조건 알려주세요";
+  const context = forMessage(text);
+  const terms = `앱 사용과 업무 파악 목적의 유사 라인 동승교육입니다. ${"교육 중 안전 사항을 확인합니다. ".repeat(35)}약 2시간이며 백업을 수행한 경우에만 교육비 3만원을 익월 5일 합산 지급합니다.`;
+  for (const job of context.consultation!.jobs) job.ai_facts = `선탑·교육: ${terms}`;
+  const result = read({ mode: "answer", job_ids: [11, 22], answers: [{ job_id: 11, fields: ["선탑·교육"] }, { job_id: 22, fields: ["선탑·교육"] }] }, context, text);
+  assert.equal(result.transition.kind, "stay");
+  assert.equal(result.reply_text.split(terms).length - 1, 1);
+  assert.match(result.reply_text, /성수 오전 배송/);
+  assert.match(result.reply_text, /강남 오후 배송/);
+  assert.ok(result.reply_text.includes(terms));
+});
